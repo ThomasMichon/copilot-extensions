@@ -125,8 +125,19 @@ Environment files, arguments, stdio and application exit codes are retained.
 no-start/no-restart behavior. This qualification covers Linux native-service
 ingress. Explicit `engine-update` refreshes admission before restarting an
 existing unit; publication failure leaves the warm engine untouched. It does not cover
-Darwin's manual-supervisor launch, Windows launchers, later hosted
+Darwin's manual-supervisor launch, later hosted
 sibling dispatch or engine child launches.
+
+Generated Windows service and foreground-engine launchers likewise bind prepared
+UV and co-publish their native selection/capture helpers under each root's `bin`.
+The shared native resolver selects completed generations before any application
+Python runs; the independent pre-versioned engine retains its legacy binding.
+Missing helpers, UV or completed selections refuse with explicit installation
+guidance, never acquisition or ambient Python fallback. Read-only selection and
+`-B` keep the selected slot immutable. These launchers retain environment-file
+loading, optional scheduling/logon ownership and the primary CLI's detached
+broker; the engine entry remains foreground-only. Direct installer management,
+finite uninstall bootstrap and selected application children are separate paths.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.

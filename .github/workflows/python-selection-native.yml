@@ -51,6 +51,7 @@ on:
       - libs/payload-invocation/tests/test_index_bootstrap_source.py
       - libs/payload-invocation/tests/test_index_construction_source.py
       - libs/payload-invocation/tests/test_index_constructor_regressions_source.py
+      - libs/payload-invocation/tests/test_index_windows_service_source.py
       - tools/test_installer_bootstrap_selection.py
       - plugins/agent-index/tests/test_server_venv_provisioning.py
       - plugins/agent-index/tests/test_installer_publication_provisioning.py
@@ -148,6 +149,7 @@ on:
       - plugins/agent-dispatch/tests/source_publication_fixture.py
       - plugins/agent-index/scripts/runtime-gate.ps1
       - plugins/agent-index/scripts/install.ps1
+      - plugins/agent-index/scripts/service-runtime.ps1
       - plugins/agent-index/scripts/runtime-gate.sh
       - plugins/agent-index/scripts/resolve_effective_config.py
       - plugins/agent-index/scripts/config_yaml.py
@@ -155,6 +157,7 @@ on:
       - plugins/agent-index/tests/test_install_engine_adoption.py
       - plugins/agent-index/tests/test_managed_bootstrap_reader_ps1.py
       - plugins/agent-index/tests/test_managed_runtime_construction_ps1.py
+      - plugins/agent-index/tests/test_managed_service_ps1.py
       - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
       - plugins/agent-index/tests/test_bootstrap_yaml.py
       - plugins/agent-logger/tests/test_install_signed_python_probe.py
@@ -1169,3 +1172,30 @@ jobs:
         env:
           INDEX_BOOTSTRAP_HOST: powershell.exe
         run: *index-windows-bootstrap-verifier
+      - name: Qualify generated Index service and foreground engine ingress
+        shell: pwsh
+        run: |
+          $packets = @('raw-service or packaged-engine or legacy-engine or last-known-good',
+                       'incomplete or missing-uv or missing-capture')
+          foreach ($hostName in @('pwsh', 'powershell.exe')) {
+            for ($packet = 0; $packet -lt $packets.Count; $packet++) {
+              python tools/run-plugin-tests.py payload-invocation `
+                --test-file tests/test_index_windows_service_source.py --allow-explicit-tiers `
+                -k "( $($packets[$packet]) ) and $hostName" `
+                --junit-dir "qualification-evidence/index-windows-services/$hostName/$packet"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+      - name: Require all fourteen Index service controls and repeated ingress measurements
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==14 and len({c.attrib['name'] for c in cases})==14;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_windows_service_ingress'];
+          assert len(reports)==14 and {r['host'] for r in reports}=={'pwsh','powershell.exe'};
+          assert all(r['status']=='measured' and r['completed']==len(r['samples_seconds'])==2
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='disabled' for r in reports);
+          print(json.dumps({'index_windows_service_ingress':reports},sort_keys=True))"
