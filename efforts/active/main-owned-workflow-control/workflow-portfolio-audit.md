@@ -29,10 +29,34 @@ pass. Add only eight nodes, two bindings and the already-bound owner as target:
 10,375 nodes, 1,499 sources, 546 targets, 92 unchanged helper decisions and
 1,048,547 minified bytes. All prior ordered witnesses, source hashes and
 targets, the parser bound, 300-second deadline and proof checks remain.
-Normal review, required CI, merge and readback remain open.
+Source #14625 merges at `6e2637ccbb65bfc0e4295f52358142c571ade943`
+on November 25 at 21:56:32 UTC. Natural Linux CI `45707610614` passes all
+10,375 cases with 55 deselections in 195.74 pytest / 220.022 packet seconds.
+It selects fresh execution with `no-qualified-completed-packet` and finalizes
+artifact `15066186708` (4,225,901 bytes), not a reuse hit.
+Required aggregate `139535763823`, guards and metadata gates pass before
+ordinary managed merge. All five owned merged blobs equal the reviewed head.
+Supported pull-forward, all 1,499 bindings and 92 helper decisions, and all
+25 retained observed inputs verify without test replay.
 This is not native, every-release, whole-census, whole-flow timing or parent
 acceptance. The failed installed-inventory prospect below remains excluded
 without replay or a changed fixture/guard.
+
+The persisted manifest is 1,048,547 bytes, leaving 29 under the unchanged cap.
+An additional source binding requires at least 73 bytes even with the shortest
+possible Python path and no extra formatting. Each known storage-held function
+requires at least 51 or 68 bytes per case before parameter/group overhead.
+Neither it nor a new binding fits. The existing-v2 JSON is already fully
+minified, including the approved final LF.
+At that measurement, further census growth needs an explicit next storage/
+design direction. The operator subsequently selects the
+[reader-first successor and reviewed source migration](manifest-storage-successor.md#scope-approval).
+That source-only representation direction preserves caps, logical witnesses,
+guards and deadlines; it does not select a larger limit, case omission,
+eligibility/guard exception or operational effect. Its implementation plan
+must clear automated review before code, compatible reading precedes data
+migration, and no successor codec or active format switch is implemented yet.
+The parent remains active with its original acceptance gates unresolved.
 
 ## November 25 installed-inventory original refusal
 
