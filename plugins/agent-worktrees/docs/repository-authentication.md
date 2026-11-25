@@ -69,7 +69,11 @@ repository-scoped identity separately before publication.
 ### Credential-required GitHub commands
 
 `repos gh --require-account <owner/repository> -- <gh arguments>` is the
-additive strict form of the existing wrapper. The native credential owner
+additive strict form of the existing wrapper. It
+accepts a full `owner/repository` target, inferred from the active project when
+omitted. Owner-only targets and registered repository names remain available
+through the legacy form without `--require-account`.
+The native credential owner
 requires an explicitly configured repository, owner-map or default account,
 reads its named GitHub CLI store entry without ambient token/host overrides,
 and verifies `/user` before executing the requested operation. An unmapped

@@ -75,9 +75,10 @@ def _repos_usage() -> None:
     print("     [--json]                         registered repo (exit 1 if none resolved)")
     print("  copilot-account set <name> <login>  Set/unset a repo's explicit Copilot CLI")
     print("                unset <name>          identity override (see 'copilot-identity')")
-    print("  gh [--require-account] [owner|owner/name|name] [--] <args>")
+    print("  gh [owner|owner/name|name] [--] <args>")
     print("                                      Run gh under that repo's account (token-inject)")
-    print("                                      --require-account refuses ambient authentication")
+    print("  gh --require-account [owner/name] [--] <args>")
+    print("                                      Require a configured account; refuse ambient authentication")
     print(
         "  pin-credentials [name] [--all]      Backfill each repo's local git credential"
     )

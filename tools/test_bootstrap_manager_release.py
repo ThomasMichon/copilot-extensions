@@ -153,13 +153,26 @@ def test_scoped_github_reader_refuses_ambient_account_fallback(
 def test_scoped_binary_reader_does_not_decode_or_inspect_the_asset_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    asset = b"PK\x03\x04" + b"\0" * (128 << 10) + b"using ambient auth\xff"
+    for padding in (0, 128 << 10):
+        asset = b"PK\x03\x04" + b"\0" * padding + b"using ambient auth\xff"
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda command, **_options: subprocess.CompletedProcess(command, 0, asset, b""),
+        )
+        reader = release._github_runner(["scoped-engine", "repos", "gh", "example/repository", "--"])
+        assert reader(["api", "asset"], binary=True).stdout == asset
+
+
+def test_scoped_text_reader_preserves_successful_response_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = json.dumps({"description": "could not mint; using ambient auth"})
     monkeypatch.setattr(
         subprocess, "run",
-        lambda command, **_options: subprocess.CompletedProcess(command, 0, asset, b""),
+        lambda command, **_options: subprocess.CompletedProcess(command, 0, content, ""),
     )
     reader = release._github_runner(["scoped-engine", "repos", "gh", "example/repository", "--"])
-    assert reader(["api", "asset"], binary=True).stdout == asset
+    assert reader(["api", "metadata"]).stdout == content
 
 
 def test_release_discovery_and_attestation_share_scoped_client(

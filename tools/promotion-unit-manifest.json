@@ -12290,6 +12290,7 @@
 "test_scoped_github_reader_refuses_ambient_account_fallback[using ambient auth-stderr-False]",
 "test_scoped_github_reader_refuses_ambient_account_fallback[using ambient auth-stderr-True]",
 "test_scoped_binary_reader_does_not_decode_or_inspect_the_asset_body",
+"test_scoped_text_reader_preserves_successful_response_content",
 "test_release_discovery_and_attestation_share_scoped_client"
 ]
 ]
@@ -12474,7 +12475,7 @@
 "plugins/agent-worktrees/src/agent_worktrees/knowledge_overlay.py":"428766892064ad3c784dbc2dde1b759d28614302c9ba0c28313efdc4c24c4c15",
 "plugins/agent-worktrees/src/agent_worktrees/knowledge_plugin_committed.py":"1dda8c6d9586055840bbf6584ecf2db6cef19cd1f9a6022bb5d581b6b275962d",
 "plugins/harness-knowledge/skills/binding-knowledge/scripts/binding_yaml.py":"68a48c895b0cba6cfb51eb0ab83d7e428a805498a0c387d5a3d27beb9c1d46de",
-"tools/bootstrap_manager_release.py":"1d06b26636c1551c8b1299c1bd63a1ad4121a1e0b17ec9464e4290721e6a3ce8",
+"tools/bootstrap_manager_release.py":"d09497b8cd1c5692b872c229aff2dc3561dd2b84b887d251b624534986a46aef",
 "tools/runtime_marketplace_source.py":"cda39bab1ba40834e54baea41ef7b9a81f6d6de11b429452d2398c740ee473bb",
 "tools/runtime_source_authentication.py":"d24f6ebeffb00f4b1f5ac988d739c8abf9352eecb93e60bca6f1c891e3f10f30",
 "tools/promotion_unit_tests/test_simple_shortcut_cache_owner.py":"ec42a7fd5b7f4b3827dfd1f17b319ac3d091e182f869cf88b3356986e2c92369",
@@ -13727,8 +13728,8 @@
 "plugins/agent-vault/src/agent_vault/service_generation.py":"5c28d7e06c61cf900a037b8e0a22dacddda4262477304df6a5b4a411f4073a39",
 "tools/promotion_unit_tests/test_vault_generation_management.py":"1ba37ff5cc5098f47e06dbb7d0443cfae8c9c6826eddb971e764f9bafe9858e5",
 "tools/plugin_test_cleanup.py":"06c26d7fdcf3220c4dea46b06d983c8cd379433e070acb89576c769a9ffb385a",
-"tools/test_bootstrap_manager_release.py":"250c5836b132f2b3c058733d3feccdde11237c2d2da4332fb842f1a8d8b9c7c2",
-"tools/promotion_unit_tests/test_current_manager_release_units.py":"343f52d88db6590ce9e85aed0ede8bbfeb04bc70e59c514d9aca33171985e07a"
+"tools/test_bootstrap_manager_release.py":"1b757cd44eca7f24d15b1f77f30dea1b76dccabca2973f2f01cabaaffd5cad85",
+"tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",

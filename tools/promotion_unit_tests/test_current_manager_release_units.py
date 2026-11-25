@@ -20,6 +20,7 @@ _SELECTED = (
     "test_snapshot_entry_does_not_export_or_hide_verification_failure",
     "test_scoped_github_reader_refuses_ambient_account_fallback",
     "test_scoped_binary_reader_does_not_decode_or_inspect_the_asset_body",
+    "test_scoped_text_reader_preserves_successful_response_content",
     "test_release_discovery_and_attestation_share_scoped_client",
 )
 globals().update({name: getattr(_original, name) for name in _SELECTED})

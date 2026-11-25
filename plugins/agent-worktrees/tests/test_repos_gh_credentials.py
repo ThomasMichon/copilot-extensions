@@ -74,3 +74,30 @@ def test_strict_repos_gh_refuses_before_the_requested_operation(
     )
     assert len(reads) == {"selected": 2, "unmapped": 0, "unavailable": 1, "mismatch": 2}[outcome]
     assert os.environ["GH_TOKEN"] == "ambient-fixture"
+
+
+@pytest.mark.parametrize("target", ["example-owner", "registered-repository"])
+def test_strict_repos_gh_rejects_non_slug_targets_before_credential_reads(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "fixture-gh")
+    monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda _target: False)
+    selections: list[str] = []
+
+    def selection(value: str) -> AccountSelection:
+        selections.append(value)
+        return AccountSelection("account-x", True)
+
+    monkeypatch.setattr(repos_gh_credentials, "account_selection", selection)
+    monkeypatch.setattr(
+        observation, "run_caller_owned",
+        lambda *_args, **_options: pytest.fail("invalid strict target read credentials"),
+    )
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *_args, **_options: pytest.fail("invalid strict target executed gh"),
+    )
+    assert main.cmd_repos_dispatch(["gh", "--require-account", target, "--", "api", "user"]) == 1
+    output = capsys.readouterr()
+    assert "owner/repository target" in output.out + output.err
+    assert selections == []

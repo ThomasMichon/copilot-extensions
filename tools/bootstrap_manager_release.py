@@ -127,9 +127,10 @@ def _github_runner(command: list[str]) -> discovery.ReleaseRunner:
             env=environment, timeout=timeout,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        # Scoped engine warnings precede binary asset bytes.
-        stdout = result.stdout[:8192] if binary else result.stdout
-        for stream in (stdout, result.stderr):
+        diagnostics = [result.stderr]
+        if result.returncode:
+            diagnostics.append(result.stdout[:8192] if binary else result.stdout)
+        for stream in diagnostics:
             messages = ("could not mint", "using ambient auth")
             refused = (
                 any(message.encode("ascii") in stream.lower() for message in messages)
