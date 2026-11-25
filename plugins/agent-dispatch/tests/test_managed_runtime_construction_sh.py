@@ -118,7 +118,7 @@ def test_posix_runtime_construction_uses_managed_python_and_preserves_receipt(
         assert receipt.read_text(encoding="utf-8") == '{"owner":"existing-construction"}\n'
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
-            assert result.stdout.splitlines()[-1] == "[3, 10]"
+            assert result.stdout.splitlines()[-1] == "[3, 11]"
             assert (runtime / "pyvenv.cfg").is_file()
         else:
             expected_code = 19 if scenario == "uv-failure" else 2

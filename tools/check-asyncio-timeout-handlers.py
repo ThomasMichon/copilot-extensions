@@ -3,7 +3,7 @@
 
 Why this exists
 ---------------
-The agent-bridge runtime venv is created with ``uv venv --python 3.11`` (see
+The agent-bridge runtime venv is created with ``uv venv --python 3.10`` (see
 ``plugins/agent-bridge/scripts/install.sh``), so the daemon commonly runs on
 **Python 3.10**. On Python <=3.10 ``asyncio.wait_for`` raises
 **``asyncio.TimeoutError``** -- a ``concurrent.futures.TimeoutError`` -- which is

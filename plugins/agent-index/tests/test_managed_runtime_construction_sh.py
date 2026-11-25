@@ -114,7 +114,7 @@ def test_managed_construction_preserves_receipt_and_independent_runtime(
         assert receipt.read_text(encoding="utf-8") == '{"owner":"retained-construction"}\n'
         if successful:
             assert result.returncode == 0, result.stdout + result.stderr
-            assert result.stdout.splitlines()[-1] == "[3, 10]"
+            assert result.stdout.splitlines()[-1] == "[3, 11]"
         else:
             assert result.returncode != 0
             diagnostic = (

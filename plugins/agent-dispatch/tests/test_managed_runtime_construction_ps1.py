@@ -136,7 +136,7 @@ def test_powershell_construction_uses_managed_default_without_ambient_python(
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
             identity = json.loads(result.stdout.strip())
-            assert identity["version"] == [3, 10]
+            assert identity["version"] == [3, 11]
             assert Path(identity["base"]).resolve().is_relative_to(managed_root)
             if scenario == "explicit":
                 installation = base.parent if os.name == "nt" else base.parent.parent
