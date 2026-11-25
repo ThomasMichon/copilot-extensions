@@ -166,11 +166,14 @@ on:
       - plugins/agent-index/tests/test_managed_engine_launch.py
       - plugins/agent-index/tests/test_managed_server_handoff.py
       - plugins/agent-index/tests/test_managed_passive_launch.py
+      - plugins/agent-index/tests/test_managed_ondemand_launch.py
+      - plugins/agent-index/tests/test_ondemand_runtime_admission.py
       - plugins/agent-index/tests/test_passive_runtime_admission.py
       - plugins/agent-index/tests/test_server_runtime_admission.py
       - plugins/agent-index/tests/test_worker_runtime_admission.py
       - plugins/agent-index/src/agent_index/__main__.py
       - plugins/agent-index/src/agent_index/engine/daemon.py
+      - plugins/agent-index/src/agent_index/engine/lifecycle.py
       - plugins/agent-index/src/agent_index/indexing/runner.py
       - libs/agent-procutil/src/agent_procutil/managed_python.py
       - plugins/agent-index/tests/test_native_runtime_uninstall.py
@@ -700,7 +703,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-child').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==25 and len({c.attrib['name'] for c in cases})==25;
+          assert len(cases)==27 and len({c.attrib['name'] for c in cases})==27;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_managed_engine_launch'];
@@ -731,7 +734,14 @@ jobs:
           assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-bound-uv' else 2)
           and r['bound_uv_on_path'] is False and r['network']=='disabled'
           and r['service_started'] is False and r['lifetime']=='leased-test'
-          and len(r['samples_seconds'])==2 for r in passive)"
+          and len(r['samples_seconds'])==2 for r in passive);
+          ondemand=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_managed_ondemand_launch'];
+          assert len(ondemand)==2 and {r['scenario'] for r in ondemand}=={'prepared','missing-bound-uv'};
+          assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-bound-uv' else 2)
+          and r['bound_uv_on_path'] is False and r['network']=='disabled'
+          and r['model_started'] is False and r['lifetime']=='leased-test'
+          and len(r['samples_seconds'])==2 for r in ondemand)"
 
       - name: Qualify private and wheel UV engine management without a model
         if: runner.os == 'Windows'

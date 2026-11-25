@@ -9,6 +9,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from agent_procutil.owned_process import OwnedCleanupError
+
 from .indexing.change_hints import ChangeHints
 from .indexing.change_hints_contract import require_execution_v1, selected_engine, validate_scope
 
@@ -51,5 +53,7 @@ def run_index_command(
             result = run_reindex(**kwargs)
         emit(result)
         return 1 if result.get("sources_failed") else 0
+    except OwnedCleanupError:
+        raise
     except Exception as exc:
         return emit_error(exc)

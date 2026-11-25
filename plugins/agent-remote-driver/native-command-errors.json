@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "consumer": "agent-remote-driver",
+  "outputDir": "scripts/command-errors",
+  "causes": [
+    {"code": "driver-invalid-arguments", "message": "The standalone control command rejected its arguments"},
+    {"code": "driver-descriptor-invalid", "message": "The remote control discovery descriptor is invalid"},
+    {"code": "driver-input-unavailable", "message": "A required local control input could not be accessed"},
+    {"code": "driver-input-invalid", "message": "A local control descriptor or claim state is invalid"},
+    {"code": "driver-state-locked", "message": "The private claim state is locked by another operation"},
+    {"code": "driver-state-pending", "message": "The retained claim state requires deliberate reconciliation"},
+    {"code": "driver-ownership-changed", "message": "Remote control ownership changed before command admission"},
+    {"code": "driver-ownership-revoked", "message": "Remote control was revoked while handling the command"},
+    {"code": "driver-credential-missing", "message": "The descriptor has no administrative re-hook credential"},
+    {"code": "driver-target-changed", "message": "The selected remote control target changed"},
+    {"code": "driver-transport-unknown", "message": "The remote response is unavailable and the operation outcome is unknown"},
+    {"code": "driver-grant-unknown", "message": "The remote grant outcome requires reconciliation before retry"},
+    {"code": "driver-native-outcome-unknown", "message": "The native control operation failed with an uncertain outcome"},
+    {"code": "driver-request-refused", "message": "The remote control request was refused"},
+    {"code": "driver-registry-unavailable", "message": "The session discovery registry could not be read"},
+    {"code": "driver-command-failed", "message": "The standalone command failed without a producer-safe cause classification"}
+  ]
+}

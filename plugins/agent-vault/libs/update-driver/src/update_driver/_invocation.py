@@ -138,13 +138,15 @@ def retained_runtime_command(
     application = prefix.name == ".venv" and prefix.parent.parent.name == "versions"
     slot = prefix.parent if application else prefix
     bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    if bootstrap.parent.is_symlink():
+        raise core.StateError("retained runtime bootstrap is linked or unsafe")
     installed = (
-        (slot / ".install-complete.json").exists()
-        or (slot / ".install-complete.json").is_symlink()
-        or bootstrap.parent.exists() or bootstrap.parent.is_symlink()
+        (slot / ".install-complete.json").is_symlink()
+        or (slot / ".install-complete.json").exists()
+        or bootstrap.parent.exists()
         or not application and slot.parent.name == "versions"
     )
-    if bootstrap.exists() or bootstrap.is_symlink():
+    if bootstrap.is_symlink() or bootstrap.exists():
         info = bootstrap.lstat()
         if (
             not stat.S_ISREG(info.st_mode) or bootstrap.is_symlink()

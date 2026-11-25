@@ -64,6 +64,16 @@ fixture-owned leases, not a production service or a durable-lifetime claim.
 `test_passive_runtime_admission.py` checks admission before root/log/daemon
 creation and exercises the real cutover lock and retained started witness for
 settled lookup errors and unconfirmed process/Job/resource cleanup.
+`test_managed_ondemand_launch.py` adds two leased, inert on-demand engine
+controls to the same jobs and deadlines: prepared selection and a missing
+bound UV refusal. Two offline cycles preserve the exact runtime, isolated
+imports, immutable bytes, model argv, relative-config anchoring, data/log
+root, normal startup priority and caller-owned lifetime. No model loads.
+`test_ondemand_runtime_admission.py` checks refusal before root/log/child
+creation and passes unconfirmed native custody through the actual embedding
+pipeline, direct CLI and durable worker boundary. Such cleanup errors remain
+the original exception rather than per-source text or JSON; workers record
+failure before propagating it. These controls do not qualify installed health.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,
