@@ -1,5 +1,5 @@
 {
-  "comment": "Combined fleet dispatch E2E fixes: plugin-resolve marketplace case and shared native cache, Windows venv os error 448 exact-patch retry, fleet SSH alias key, cold-host remote-create deadline, ssh -n seed, placement decision audit and probe budget, dtssh devtunnel copy and healthy-host adoption, and POSIX_FD_STATE drop.",
+  "comment": "Combined fleet dispatch E2E fixes: plugin-resolve marketplace case and shared native cache, Windows venv os error 448 exact-patch retry, fleet SSH alias key, cold-host remote-create deadline, ssh -n seed, nonblocking placement decision audit and probe budget, dtssh devtunnel copy and healthy-host adoption kept across companion generation cutover, and POSIX_FD_STATE drop.",
   "changes": [
     {
       "plugin": "agent-bridge",
