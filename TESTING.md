@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+MCP's Linux guidance packet retains the existing nine PowerShell controls and
+adds eight actual Bash prepared/missing-support controls, three missing-custody
+refusals before selection, plus held-input,
+slow-selector and blocked-writer deadline controls. The latter require the
+quiet result within the unchanged forty-five-second hook and no live recorded
+selector/writer descendants at return. The existing five-minute Linux hook job
+requires all twenty-three cases, two repeated managed-selection reports and three
+deadline reports without skips. These isolated fixtures qualify the declared
+helper and existing native handoff/capture owners, not installed-host adoption,
+Darwin, Bash cache invalidation or full enabled-plugin dispatch latency.
+
 Run suites with `tools/run-tests <plugin> [args]` and other Python test
 commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
 CPython of the version pinned in `.python-version` and fail with exit code 1

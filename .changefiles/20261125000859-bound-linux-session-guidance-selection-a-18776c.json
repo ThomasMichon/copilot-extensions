@@ -1,0 +1,9 @@
+{
+  "comment": "Bound Linux session-guidance selection and writer execution through existing native child custody and managed bootstrap capture.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

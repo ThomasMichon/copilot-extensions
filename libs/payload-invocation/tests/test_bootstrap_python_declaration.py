@@ -132,7 +132,10 @@ def test_planning_and_refusal_do_not_write_bytecode(
 ) -> None:
     tooling = tmp_path / "tooling/libs/payload-invocation"
     tooling.mkdir(parents=True)
-    for name in ("generate.py", "runtime_admission.py", "bootstrap_python.py", "template_rendering.py"):
+    for name in (
+        "generate.py", "runtime_admission.py", "bootstrap_python.py",
+        "template_rendering.py", "command_evidence.py",
+    ):
         shutil.copyfile(Path(__file__).resolve().parents[1] / name, tooling / name)
     spec = importlib.util.spec_from_file_location("_private_bootstrap_generator", tooling / "generate.py")
     assert spec and spec.loader
@@ -242,3 +245,36 @@ def test_guidance_generation_and_check_preserve_nonadopters(tmp_path: Path) -> N
     wrapper.write_text("# drift\n")
     assert generator.process_manifest(manifest, check=True)
     assert wrapper.read_text() == "# drift\n"
+
+
+@pytest.mark.parametrize("value,launcher,writer", [
+    ("true", "uv", True), (True, "direct", True), (True, "uv", False),
+])
+def test_incomplete_posix_guidance_refuses_before_writes(
+    tmp_path: Path, value: object, launcher: str, writer: bool,
+) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data.update(posixGuidance=value, bootstrapLauncher=launcher)
+    manifest.write_text(json.dumps(data))
+    if writer:
+        (manifest.parent / "scripts/write_session_guidance.py").write_text("print('{}')\n")
+    before = {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="posixGuidance"):
+        generator.process_manifest(manifest, check=False)
+    assert before == {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+
+
+def test_posix_guidance_packages_existing_process_owners(tmp_path: Path) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data.update(posixGuidance=True, bootstrapLauncher="uv")
+    manifest.write_text(json.dumps(data))
+    (manifest.parent / "scripts/write_session_guidance.py").write_text("print('{}')\n")
+    assert generator.process_manifest(manifest, check=False) == []
+    support = manifest.parent / "scripts/_bootstrap_python"
+    (support / "native_owned.sh").unlink()
+    assert generator.process_manifest(manifest, check=True)
+    assert not (support / "native_owned.sh").exists()
+    assert generator.process_manifest(manifest, check=False) == []
+    assert generator.process_manifest(manifest, check=True) == []

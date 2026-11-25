@@ -17,7 +17,7 @@ from .managed_hook_fixture import packaged_hooks as packaged_hooks
 from .managed_hook_fixture import prepared_helper as prepared_helper
 
 
-@pytest.mark.parametrize("entry", ["powershell", "pwsh", "windows_bash"])
+@pytest.mark.parametrize("entry", ["powershell", "pwsh", "windows_bash", "bash"])
 @pytest.mark.parametrize("scenario", [
     "packaged", "missing-uv", "unprepared", "missing-provider",
     "missing-request", "different-request", "unmaterialized", "incomplete-with-source",
@@ -86,7 +86,8 @@ def test_actual_managed_wrapper(
     if scenario != "missing-uv":
         shutil.copy2(uv, commands / uv.name)
     if os.name != "nt":
-        for name in ("dirname", "wc", "cat"):
+        for name in ("bash", "dirname", "wc", "cat", "uname", "readlink", "mkfifo",
+                     "setsid", "mktemp", "rm", "rmdir", "sleep"):
             utility = shutil.which(name)
             assert utility, name
             (commands / name).symlink_to(utility)

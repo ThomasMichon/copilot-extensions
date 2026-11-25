@@ -211,12 +211,25 @@ input pipe cannot consume the host's whole timeout before the fallback.
 Selection retains its thirty-second budget; captured writer execution uses
 the remainder of the forty-second execution budget inside the existing
 forty-five-second hook. POSIX PowerShell uses the existing bounded capture
-adapter; Bash guidance migration remains separate. This does not claim the
+adapter. This does not claim the
 two-second composed-hook latency target is met.
 The wrapper supplies its remaining performance-counter deadline to SSH's
 existing contributor owner with outer and inner cleanup reserved. Contributors
 clip their ordinary ten-second limit to that deadline, including process
 startup; missing deadline metadata retains the prior direct/Bash behavior.
+
+`posixGuidance: true` packages the existing native Linux child handoff,
+stdlib process-owner capsule and bounded bootstrap capture beside the declared
+UV selector. It requires the exact bootstrap declaration and a guidance writer;
+it does not generate another process owner or acquire an interpreter. MCP's
+Bash wrapper uses that support on Linux: its original native parent retains the
+selector child until exec into the selected managed Python, which adopts and
+settles that same child before reading bounded input or launching the writer.
+Selection has a ten-second guardian; input and writer execution share the
+remaining forty-second aggregate budget with cleanup reserved. Missing or
+failed support keeps the hook's quiet unavailable result, not fresh guidance.
+This does not extend PowerShell's generated-cache invalidation contract to Bash,
+qualify Darwin supervision, or prove the composed latency target.
 
 `pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
 the default remains `direct` for consumers not yet migrated. Adoption requires

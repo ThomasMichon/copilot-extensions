@@ -16,6 +16,15 @@ def expected_files(
         raise ValueError(f"{manifest}: powershellGuidance requires bootstrapLauncher uv")
     if guidance and not (manifest.parent / "scripts/write_session_guidance.py").is_file():
         raise ValueError(f"{manifest}: powershellGuidance requires its session guidance writer")
+    posix_guidance = data.get("posixGuidance", False)
+    if not isinstance(posix_guidance, bool):
+        raise ValueError(f"{manifest}: posixGuidance must be a boolean")
+    if posix_guidance and (
+        data.get("bootstrapLauncher") != "uv"
+        or "bootstrapPython" not in data
+        or not (manifest.parent / "scripts/write_session_guidance.py").is_file()
+    ):
+        raise ValueError(f"{manifest}: posixGuidance requires its uv launcher and guidance writer")
     destination = manifest.parent / "scripts/bootstrap-python-version.txt"
     regular = destination.is_file()
     occupied = regular or destination.is_symlink()
@@ -62,6 +71,13 @@ def expected_files(
         ).read_bytes()
         outputs[output / "select.ps1"] = (templates / "bootstrap-python-powershell.tmpl").read_text(encoding="utf-8")
         outputs[output / "select.sh"] = (templates / "bootstrap-python-posix.tmpl").read_text(encoding="utf-8")
+        if posix_guidance:
+            process = root / "libs/agent-procutil/src/agent_procutil"
+            for name in ("native_owned.sh", "daemon_instance_runtime.pyz"):
+                outputs[output / name] = (process / name).read_bytes()
+            outputs[output / "bootstrap_uv_capture.py"] = (
+                provider / "bootstrap_uv_capture.py"
+            ).read_bytes()
         if guidance:
             outputs[manifest.parent / "scripts/write-session-guidance.ps1"] = (
                 f"$guidancePlugin = '{data['plugin']}'\n"
