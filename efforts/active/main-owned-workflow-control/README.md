@@ -90,6 +90,17 @@ observability/performance repair within the same PR. Its
 [scope approval](installed-manager-lifecycle.md#november-17-bounded-http-52-capture-repair-approval)
 preserves every probe, the original 240-second aggregate and all prior holds.
 
+The November 25 storage amendment selects
+`reader-first-successor-and-reviewed-source-migration`: implement a successor
+manifest representation reader-first, then migrate through normal review,
+preserving caps, logical witnesses, guards and deadlines. This is source-only
+representation work, not a native run, operational writer/controller change,
+runtime update, rollout, cleanup or guard exception.
+The [successor phase](manifest-storage-successor.md#scope-approval) retains
+the exact question, selected answer and limits separately from the
+agent-recommended realization. The root consolidation goal and all other
+acceptance and custody requirements remain.
+
 **Acceptance:** the Plan and Validation Plan below establish fewer redundant
 executions while preserving validation assurance and contribution gates.
 Installed-suite qualification must prove the real Manager Create/Open/Resume
@@ -464,6 +475,16 @@ The concrete new-file split and shared-interface coordination below are
 **agent-recommended**. The existing Main adoption remains with its owner;
 its completion is not a prerequisite for independent Dev qualification work.
 
+### November 25 reader-first storage direction
+
+The operator selects `reader-first-successor-and-reviewed-source-migration`
+at the verified 29-byte frontier. The exact public-safe question, selected
+option and source-only exclusions are preserved in the
+[scope approval](manifest-storage-successor.md#scope-approval).
+This supersedes only the prior representation hold needed for that source
+successor and reviewed migration; it does not waive limits, witnesses,
+eligibility, guards, failed-attempt holds or existing operational ownership.
+
 ## Plan
 
 - [x] Qualify the two complete original core-profile early-refusal functions:
@@ -679,7 +700,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   The manifest remains at 10,367 nodes and 1,047,467 bytes with 1,109 free.
   This resolves only the prospect's eligibility disposition, not any parent
   or retained native/owner/coverage requirement.
-- [ ] Qualify the complete eight-row original logical-environment tuple
+- [x] Qualify the complete eight-row original logical-environment tuple
   function without admitting a partial parameter table.
   The original module and pure string-decomposition owner are inspected;
   package import closure is already bound. Metadata-only original collection
@@ -702,7 +723,33 @@ its completion is not a prerequisite for independent Dev qualification work.
   and Ruff pass. Add only eight identities, two bindings and one already-bound
   owner as target: 10,375 nodes, 1,499 sources, 546 targets,
   92 unchanged helper decisions and 1,048,547 minified bytes, leaving 29.
-  Review, required CI, merge and readback remain open.
+  Source #14625 merges at `6e2637ccbb65bfc0e4295f52358142c571ade943`
+  on November 25 at 21:56:32 UTC. Natural Linux CI passes all 10,375 cases;
+  required aggregate `139535763823` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all 25 retained observed inputs verify without
+  test replay. The actual Goal, own leaf and full Validation Plan are reread
+  before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [x] Resolve the next storage direction before further census admission in
+  this campaign. The fully minified existing-v2 manifest is 1,048,547 bytes
+  under the unchanged 1,048,576-byte cap, leaving 29.
+  Even a shortest possible new source binding requires 73 bytes.
+  The two known storage-held functions require at least 51 or 68 bytes per
+  case before parameters or a new group; neither fits.
+  No further whitespace removal is available under the approved format.
+  Preserve every current witness, binding, target, helper decision, proof,
+  eligibility rule, parser bound, deadline and operational hold.
+  The operator now selects the reader-first successor and reviewed source
+  migration recorded in the [scope approval](manifest-storage-successor.md#scope-approval).
+  No larger cap, test omission, eligibility/guard exception or operational
+  authority follows. The original-census, every-release and parent gates stay open.
+- [ ] Deliver the [reader-first manifest successor](manifest-storage-successor.md)
+  through reviewed intent, actual consumer/bootstrap closure, compatible reader
+  delivery and a separately reviewed source-data migration. Complete that
+  phase's Plan and Validation before resuming further original-unit admission.
+  Preserve the parent completion gate and all retained owners and holds.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 
@@ -5141,6 +5188,12 @@ regressions, retained-owner seams and the completion gate.
 
 ## Validation Plan
 
+- [ ] Manifest successor satisfies the
+  [phase validation](manifest-storage-successor.md#validation): existing-format
+  compatibility, exact ordered logical equivalence, unchanged bounds and
+  eligibility, actual consumer readiness before migration, focused fresh
+  execution and the complete admitted packet. No representation-only milestone
+  establishes the historical census, every-release or parent acceptance.
 - [ ] Installed-Manager acceptance satisfies every positive, falsifying,
   isolation, identity and actual promotion-admission case in the
   [lifecycle matrix](installed-manager-lifecycle.md#validation-plan).
