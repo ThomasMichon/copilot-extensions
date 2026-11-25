@@ -291,8 +291,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         ))
 
     def _decide(kind: str, payload: dict[str, Any], deadline: float) -> dict[str, Any] | None:
-        if kind in {"preToolUse", "postToolUse", "nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation", "sessionStart", "sessionEnd"} and not getattr(hook_client, "_managed_session_admitted", lambda _: False)(payload):
-            return None if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"} else {}
+        # Membership must precede lifecycle priority and shared policy-lock admission.
+        if kind in {
+            "preToolUse", "postToolUse", "nativeToolMutation", "nativeToolBatchMutation",
+            "shellToolMutation", "mixedToolBatchMutation", "sessionStart", "sessionEnd",
+        }:
+            if not getattr(hook_client, "_managed_session_admitted", lambda _: False)(payload):
+                return None if kind in {
+                    "nativeToolMutation", "nativeToolBatchMutation",
+                    "shellToolMutation", "mixedToolBatchMutation",
+                } else {}
         if admission_closed and core.git_ops._windows_observation():
             if kind == "snapshot":
                 return {"segment": segment_cache.pending_segment_for_path(core._hook_payload_cwd(payload))}
@@ -398,6 +406,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     ),
                     read_demand_lock=state_lock,
                     native_mutation_decide=_decide,
+                    native_mutation_admitted=lambda payload: getattr(
+                        hook_client, "_managed_session_admitted", lambda _: False,
+                    )(payload),
                     worktree_changed=resident_push.notify,
                 )
                 hook_server.start()
