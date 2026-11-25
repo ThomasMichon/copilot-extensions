@@ -18,10 +18,12 @@ SPEC.loader.exec_module(WITNESS)
 
 
 @pytest.mark.parametrize("returncode", [0, 2])
-def test_managed_host_mcp_witness_requires_missing_extra_refusal(monkeypatch, returncode):
-    calls = []
+def test_managed_host_mcp_witness_requires_missing_extra_refusal(
+    monkeypatch: pytest.MonkeyPatch, returncode: int
+) -> None:
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return subprocess.CompletedProcess(
             argv, 0 if len(calls) == 1 else returncode,
@@ -57,7 +59,7 @@ def test_version_is_exact_and_only_normalizes_dev_spelling() -> None:
         assert not WITNESS.reports_version(text, "0.10.15-dev1")
 
 
-def test_interpreter_action_returns_only_owned_runtime(tmp_path: Path, capsys) -> None:
+def test_interpreter_action_returns_only_owned_runtime(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     slot = tmp_path / "versions/test"
     venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -101,7 +103,7 @@ def test_interpreter_rejects_escaping_directory_identity(tmp_path: Path, fault: 
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX venv final executable link")
-def test_interpreter_accepts_real_venv_final_python_link(tmp_path: Path, capsys) -> None:
+def test_interpreter_accepts_real_venv_final_python_link(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     slot = tmp_path / "versions/test"
     venv.EnvBuilder(with_pip=False, symlinks=True).create(slot)
     python = slot / "bin/python"
@@ -178,8 +180,8 @@ def test_manifest_and_execution_keep_release_and_safety_contract() -> None:
     assert "|| true" not in source
 
 
-def test_candidate_witness_uses_trusted_whole_tree_receipt(tmp_path: Path, capsys) -> None:
-    from materialized_provenance import content_manifest, RECEIPT, SCHEMA
+def test_candidate_witness_uses_trusted_whole_tree_receipt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from materialized_provenance import content_manifest, RECEIPT, SCHEMA  # type: ignore[import-not-found]
 
     head = "a" * 40
     (tmp_path / "plugin.json").write_text('{"version":"test"}')
