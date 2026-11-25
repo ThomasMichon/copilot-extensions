@@ -1508,9 +1508,17 @@ Uncertain return observations retain the actual exit code independently.
 Ordinary no-seed native setup uses its retained setup record for this same
 backend path when the selected provider advertises support; custom no-seed
 commands retain their original direct invocation.
-Each native setup/seed/execution phase allows ten seconds for the current
-runtime call, then kills its child tree and retains unconfirmed state without
-retry. This does not change the separate pane lifecycle or mux-query deadlines.
+Native setup, direct preparation and callbacks allow ten seconds for the current
+runtime call. Windows JSON preparation in `headed-live-owner-v1` mode allows
+thirty seconds: it builds a copied coordinator and includes that coordinator's
+separately bounded fifteen-second support probe. Only preparation options before
+the native argv delimiter select this budget. POSIX retains ten-second finite
+preparation because its headed construction belongs to foreground exec.
+Expiration still kills the finite provider's child tree and retains unconfirmed
+state without retry. Windows records the fixed timeout reason in the caller's
+diagnostics and existing setup log before returning no reply. This does not
+change the separate pane lifecycle or mux-query deadlines, nor qualify native
+startup latency.
 Finite receipt and seed direct fallbacks import their canonical registered
 writer, retaining the shared authority checks rather than loading unrelated
 mutation owners. Monitor-path compatibility uses an already-loaded CLI module,
