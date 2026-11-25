@@ -4323,9 +4323,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and parent readback remain required. This is unchanged-test admission,
   not production behavior, workflow, runtime, native or rollout qualification.
   #14588 merges at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
-  on November 25 at 17:26:00 UTC. Exact-head approval `6061970165`
-  covers `a4ab797e2991d968962ff2295d5bd3b8373cb513`; the complete review
-  reports zero active issues and both full comment paginations are empty.
+  on November 25 at 17:26:00 UTC, from source
+  `a4ab797e2991d968962ff2295d5bd3b8373cb513`.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records the review evidence.
   Initial CI `45663437907` passes all 10,222 cases with 55 deselections
   in 156.81 pytest / 177.134 packet seconds, finalizes qualified artifact
   `15044884497` and passes guards and required aggregate `139381504137`.
@@ -4364,12 +4365,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   combined observed inputs for this cohort and the prior batch remain exact
   without replay. Fresh hosted execution, review and delivery remain required.
   #14591 merges at `2d89c0c2a5755920eedc2cb90239b65b3b2d0b89`
-  on November 25 at 17:51:52 UTC. Review `6062241060` identifies one valid
-  low-severity omission in the description: Documentation impact. Add that
-  assessment and links while preserving source head `d10704af078cf98a8d6c236df422122c903cef1a`
-  and attribution; reply `4698656946` and resolve thread
-  `PRRT_kwDOSovzAM68B0SY`. One ordinary re-request yields exact-head approval
-  `6062347501`, with zero active issues and the sole thread confirmed resolved.
+  on November 25 at 17:51:52 UTC, from source
+  `d10704af078cf98a8d6c236df422122c903cef1a`.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records the description assessment, review and thread resolution.
   Initial CI `45666696644` passes all 10,236 cases in 127.41 pytest /
   146.792 packet seconds and finalizes qualified artifact `15047112689`.
   The necessary body-only correction triggers CI `45667737365`, which passes
@@ -5019,6 +5018,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-25 UTC - Original unit delivery and documentation assessment](journal/2026/11.25-original-unit-delivery.md)
 - [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
 - [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)
 - [2026-11-19 UTC - Cold CLI bootstrap restoration](journal/2026/11.19-bootstrap-restoration.md)

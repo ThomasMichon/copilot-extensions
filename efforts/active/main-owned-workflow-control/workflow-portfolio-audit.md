@@ -8806,9 +8806,10 @@ unchanged. Carry the prior merged-source journal in this same functional batch,
 not a separate documentation-only publication.
 
 The batch merges as #14588 at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
-on November 25 at 17:26:00 UTC. Exact-head Copilot approval `6061970165`
-covers `a4ab797e2991d968962ff2295d5bd3b8373cb513`; its full body reports
-zero active issues and complete review/discussion comment pagination is empty.
+on November 25 at 17:26:00 UTC, from source
+`a4ab797e2991d968962ff2295d5bd3b8373cb513`.
+[Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+retains the review evidence.
 Initial CI `45663437907` passes every one of 10,222 cases with 55
 deselections in 156.81 pytest / 177.134 packet seconds. Guards and required
 aggregate `139381504137` also pass. Lookup completes in 595 ms; the existing
@@ -8898,15 +8899,10 @@ substitute for the new head's actual hosted CI, review and ordinary merge.
 
 The source cohort merges as #14591 at
 `2d89c0c2a5755920eedc2cb90239b65b3b2d0b89` on November 25 at 17:51:52 UTC.
-The first review `6062241060` correctly identifies a low-severity description
-omission: the required Documentation impact statement. The description-only
-correction links both effort documents and explains why operational/user
-documentation remains accurate; source head `d10704af078cf98a8d6c236df422122c903cef1a`
-and source attribution are unchanged. Reply `4698656946` accompanies resolution
-of `PRRT_kwDOSovzAM68B0SY`. Its implicit empty owner-comment review
-`6062275902` is not treated as Copilot acceptance. One normal re-request
-yields actual Copilot approval `6062347501` at 17:48:43 UTC; the complete
-review confirms zero active issues and the sole thread is resolved.
+Source head `d10704af078cf98a8d6c236df422122c903cef1a` and source attribution
+are unchanged by its documentation-impact description correction.
+[Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+retains the assessment, review and thread resolution.
 
 Initial CI `45666696644` executes all 10,236 cases with 55 deselections
 in 127.41 pytest / 146.792 packet seconds and finalizes qualified artifact
