@@ -45,7 +45,11 @@ event). Read it before you add or change a hook.
    daemon. The hook starts it detached (no inherited stdout/stderr, no wait
    on its exit or output, hidden window on Windows), through the installed
    binstub, and returns at once. The hook never blocks on Python, never reads
-   its output, and never retries in a loop.
+   its output, and never retries in a loop. The started daemon takes its
+   single-instance lease as usual, so a duplicate start exits at once; the
+   hook never supervises it and never becomes the daemon itself. The only
+   exception to this rule is a listed `binstub-runtime` entry (see
+   [Allowed exceptions](#allowed-exceptions)).
 5. **Missing or stale data degrades fast.** If the binstub, the published
    file or the daemon is not ready, the hook emits nothing (or `{}` where a
    JSON object is required), or the last known published value with its
@@ -125,9 +129,20 @@ inline `hooks.json` entry), the reason and its status:
   starts Python without an entry.
 - `binstub-runtime` — a hook that must reach the Python runtime because the
   work cannot be precomputed (for example a policy decision that depends on
-  the exact tool input). It calls the installed CLI binstub, fails soft and
-  fast when the binstub or Python is not ready, and the reason explains why a
-  published file cannot serve it.
+  the exact tool input). This status is the one explicit override of rule 4:
+  the hook may wait for the result of one call. It is bounded as follows:
+  - The hook calls the installed CLI binstub once, synchronously, with a hard
+    timeout that the hook itself enforces (2 s for `preToolUse` /
+    `postToolUse`, 5 s for `sessionStart` / `sessionEnd`). The time budget
+    above does not apply to that one call; it applies to the rest of the hook.
+  - The binstub returns the decision as the complete hook JSON response on
+    stdout. The hook passes it through unchanged and does not parse it.
+  - On a missing binstub, a not-ready runtime, a timeout, a non-zero exit or
+    empty output, the hook fails soft: it emits the hook's documented
+    no-decision response (`{}` for a policy hook) and exits 0. It never
+    retries, installs or computes the decision itself.
+  - The reason in the allowlist explains why a published file cannot serve
+    the decision.
 
 Reading an installed venv's or slot's interpreter path to check that a
 runtime is provisioned (`Test-Path ...\Scripts\python.exe`) is a file check,
@@ -137,8 +152,13 @@ not a Python start, and is allowed.
 
 `tools/check-hook-architecture.py` reads every `plugins/*/hooks.json`, each
 inline `bash` and `powershell` command, and each plugin script that an entry
-names directly. In non-comment lines it reports a Python start when it finds
-a `python`/`python3`/`py` command lookup or call, a call through an
+names directly (resolved against the plugin root, so `hooks/start.sh`,
+`scripts/nested/start.sh` and `$r/scripts/start.sh` are all found). In code,
+after whole-line and trailing comments are removed (a `#` inside quotes is
+kept), it reports a Python start when it finds
+a `python`/`python3`/`py` command lookup, or one of those names in command
+position (line start, after `;`, `|`, `&`, `(`, `{` or a keyword such as
+`then`), a call through an
 interpreter variable (`& $python`, `-FilePath $py`, `"$py" -I`), `uv run` or
 `uvx`, a Python selector helper (`hook-uv-python`, `bootstrap-python`,
 `*_python` shell functions), or an inline Python heredoc. A `.py` file name

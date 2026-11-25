@@ -36,6 +36,11 @@ guard = _load()
         ("uv run --python 3.11 x.py", False),
         ("exec hook-uv-python run", False),
         ("python3 - <<'PY'\nprint(1)\nPY", False),
+        ("python3 hook.py", False),
+        ("py script.py", True),
+        ("python3 --version", False),
+        ("if true; then python hook.py; fi", False),
+        ("& python.exe hook.py", True),
     ],
 )
 def test_reports_python_starts(text: str, powershell: bool) -> None:
@@ -51,18 +56,47 @@ def test_reports_python_starts(text: str, powershell: bool) -> None:
         ("<#\npython3 hook.py\n#>", True),
         ('cat "$HOME/.agent/published/guidance.md"', False),
         ("& $binstub hook session-start", True),
+        ('printf "{}" # python3 -I hook.py', False),
+        ("Write-Output '{}' # python3 -I hook.py", True),
+        ("echo python3 is not required", False),
+        ('Write-Host "install python 3.11 first"', True),
     ],
 )
 def test_ignores_native_lines(text: str, powershell: bool) -> None:
     assert guard.python_starts(text, powershell) == []
 
 
-def _write_plugin(repo: Path, script_body: str) -> None:
+def test_hash_inside_quotes_is_not_a_comment() -> None:
+    assert guard.python_starts('echo "a # b"; python3 x.py', False)
+
+
+def _write_plugin(repo: Path, script_body: str, reference: str = "scripts/start.sh") -> None:
     plugin = repo / "plugins" / "demo"
-    (plugin / "scripts").mkdir(parents=True)
-    (plugin / "scripts" / "start.sh").write_text(script_body, encoding="utf-8")
-    hooks = {"hooks": {"sessionStart": [{"bash": "sh scripts/start.sh", "powershell": "Write-Output ok"}]}}
+    script = plugin / reference
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(script_body, encoding="utf-8")
+    hooks = {"hooks": {"sessionStart": [{"bash": f"sh {reference}", "powershell": "Write-Output ok"}]}}
     (plugin / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+
+
+@pytest.mark.parametrize("reference", ["hooks/start.sh", "scripts/nested/start.sh", "start.sh"])
+def test_scripts_outside_scripts_dir_are_scanned(tmp_path: Path, reference: str) -> None:
+    _write_plugin(tmp_path, "python3 -I x.py\n", reference)
+    allowlist = tmp_path / "allow.json"
+    _write_allowlist(allowlist, [])
+    assert guard.find_problems(tmp_path, allowlist) == [
+        f"plugins/demo/{reference} starts Python (python command) and is not in allow.json"
+    ]
+
+
+def test_variable_prefixed_reference_is_resolved(tmp_path: Path) -> None:
+    plugin = tmp_path / "plugins" / "demo"
+    _write_plugin(tmp_path, "python3 -I x.py\n")
+    hooks = {"hooks": {"sessionStart": [{"bash": 'r="$PWD"; sh "$r/scripts/start.sh"'}]}}
+    (plugin / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+    allowlist = tmp_path / "allow.json"
+    _write_allowlist(allowlist, ["plugins/demo/scripts/start.sh"])
+    assert guard.find_problems(tmp_path, allowlist) == []
 
 
 def _write_allowlist(path: Path, keys: list[str]) -> None:

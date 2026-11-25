@@ -18,11 +18,17 @@ REPO = Path(__file__).resolve().parent.parent
 ALLOWLIST = REPO / "tools" / "hook-architecture-allowlist.json"
 STATUSES = frozenset({"pending-conversion", "binstub-runtime"})
 SHELL_KEYS = ("bash", "powershell")
-SCRIPT_REF = re.compile(r"[A-Za-z0-9_.-]+\.(?:sh|ps1|cmd)\b")
+SCRIPT_REF = re.compile(r"[A-Za-z0-9_./\\-]+\.(?:sh|ps1|cmd)\b")
+# A command name sits at the start of a line, after a separator or call
+# operator, or after a keyword that runs its argument as a command.
+_COMMAND_POSITION = (
+    r"(?:^|[;|&(`{]|\b(?:then|do|else|exec|nohup|time|command|env|sudo)\s)\s*"
+)
 SIGNALS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("python command", re.compile(
-        r"(?i)(?:command\s+-v|Get-Command|\bwhich)\s+(?:[^;|&\n]*?\s)?(?:python3?|py)\b"
-        r"|(?:^|[\s;|&(`{])(?:&\s*)?(?:python3?|py)(?:\.exe)?\s+(?:-[A-Za-z0-9](?:\s|$)|['\"$])"
+        r"(?im)(?:command\s+-v|Get-Command|\bwhich)\s+(?:[^;|&\n]*?\s)?(?:python3?|py)\b"
+        + r"|" + _COMMAND_POSITION
+        + r"(?:&\s*)?['\"]?(?:python3?|py)(?:\.exe)?['\"]?(?=\s|$)"
     )),
     ("interpreter variable call", re.compile(
         r"(?i)(?:(?:^|[\s;|({])&|-FilePath)\s+['\"]?\$\{?\w*py\w*\}?"
@@ -45,7 +51,28 @@ class Finding:
     reason: str
 
 
-def _code_lines(text: str, powershell: bool) -> list[str]:
+def _strip_inline_comment(line: str, powershell: bool) -> str:
+    """Drop a trailing ``#`` comment, keeping ``#`` inside quotes or words."""
+    escape = "`" if powershell else "\\"
+    quote = ""
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if char == escape and quote != "'":
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1].isspace() or line[index - 1] == ";"):
+            return line[:index]
+        index += 1
+    return line
+
+
+def _code_lines(text: str, powershell: bool, cmd: bool = False) -> list[str]:
     lines: list[str] = []
     in_block = False
     for line in text.splitlines():
@@ -58,16 +85,40 @@ def _code_lines(text: str, powershell: bool) -> list[str]:
             if stripped.startswith("<#"):
                 in_block = "#>" not in stripped[2:]
                 continue
-        if stripped.startswith("#") or stripped.startswith("::") or stripped.lower().startswith("rem "):
+        if cmd:
+            if stripped.startswith("::") or stripped.lower().startswith("rem ") or stripped.lower() == "rem":
+                continue
+            lines.append(line)
             continue
-        lines.append(line)
+        if stripped.startswith("#"):
+            continue
+        lines.append(_strip_inline_comment(line, powershell))
     return lines
 
 
-def python_starts(text: str, powershell: bool) -> list[str]:
+def python_starts(text: str, powershell: bool, cmd: bool = False) -> list[str]:
     """Return the signal names that show the text starts Python."""
-    code = "\n".join(_code_lines(text, powershell))
+    code = "\n".join(_code_lines(text, powershell, cmd))
     return [name for name, pattern in SIGNALS if pattern.search(code)]
+
+
+def _resolve_script(plugin: Path, reference: str) -> Path | None:
+    """Resolve a script named in a hook command to a file in the plugin."""
+    relative = reference.replace("\\", "/").lstrip("./")
+    parts = [part for part in relative.split("/") if part and part != "."]
+    if not parts:
+        return None
+    # The reference may carry a variable tail (``$r/scripts/x.sh`` yields
+    # ``r/scripts/x.sh``), so try each shorter suffix of the path as well.
+    candidates = [plugin.joinpath(*parts[start:]) for start in range(len(parts))]
+    if len(parts) == 1:
+        candidates.insert(0, plugin / "scripts" / parts[0])
+    root = plugin.resolve()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file() and (resolved == root or root in resolved.parents):
+            return candidate
+    return None
 
 
 def _relative(path: Path, repo: Path) -> str:
@@ -96,8 +147,8 @@ def scan(repo: Path) -> list[Finding]:
                     if signals:
                         findings[key] = Finding(key, ", ".join(signals))
                     for name in sorted(set(SCRIPT_REF.findall(command))):
-                        script = plugin / "scripts" / name
-                        if not script.is_file():
+                        script = _resolve_script(plugin, name)
+                        if script is None:
                             continue
                         script_key = _relative(script, repo)
                         if script_key in findings:
@@ -105,6 +156,7 @@ def scan(repo: Path) -> list[Finding]:
                         signals = python_starts(
                             script.read_text(encoding="utf-8", errors="replace"),
                             script.suffix == ".ps1",
+                            script.suffix == ".cmd",
                         )
                         if signals:
                             findings[script_key] = Finding(script_key, ", ".join(signals))

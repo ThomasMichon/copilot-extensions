@@ -578,5 +578,5 @@ drifted as the suite grew):
 | Per-plugin tests | `plugins/<p>/tests/` |
 | Per-plugin skills | `plugins/<p>/skills/` |
 | Per-plugin installers | `plugins/<p>/scripts/` (`init.*` and/or `install.*`; payload-only plugins may have none) |
-| Session-start hooks | `plugins/<p>/hooks.json` (e.g. `agent-worktrees`); rules in [`docs/patterns/hook-architecture.md`](docs/patterns/hook-architecture.md) |
+| Session-start hooks | `plugins/<p>/hooks.json` (e.g. `agent-worktrees`); rules in `docs/patterns/hook-architecture.md` |
 | Shared libs (vendored into venvs) | `libs/<lib>/` |
