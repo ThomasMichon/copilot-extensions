@@ -626,7 +626,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   are reread before resolving only this source leaf.
   [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
   records review and synchronization. Broader parent gates remain open.
-- [ ] Qualify the complete original byte-stream HTTP framing suite only if
+- [x] Qualify the complete original byte-stream HTTP framing suite only if
   exact metadata and its unchanged import closure fit the existing envelope.
   The original five functions use in-memory buffered bytes, not a daemon,
   socket, subprocess or resource mutation. The actual parser, ordinary error
@@ -648,6 +648,60 @@ its completion is not a prerequisite for independent Dev qualification work.
   and Ruff pass. Add only 27 nodes, eight bindings and one parser target:
   10,367 nodes, 1,497 sources, 545 targets, 92 unchanged helper decisions and
   1,047,467 minified bytes, leaving 1,109 under the same cap.
+  Source #14620 merges at `16ec3d7aece6db998f14384718d61f53859d9efe`
+  on November 25 at 21:21:14 UTC. Natural Linux CI passes all 10,367 cases;
+  required aggregate `139517963323` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all 21 retained observed inputs verify without
+  test replay. The actual Goal, own leaf and full Validation Plan are reread
+  before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [x] Disposition the complete original installed-inventory prospect under
+  unchanged metadata, storage and eligibility requirements.
+  Static inspection closes the original fixture and its actual readers:
+  supplied temporary JSON and `.git/config` text, not Git execution,
+  installed-user state, registration mutation or native locking.
+  Preserve the exact original `inventory` fixture object, test functions,
+  code/global origins, parameter values/types, marks, IDs and assertions.
+  The path-only conftest is inspected but not executed.
+  A write-free length-only storage projection fits all five with the adapter,
+  original and three newly bound production files in 1,048,513 bytes,
+  leaving 63 under the same cap; this is not collection or qualification.
+  Actual metadata confirms all five cases, exact original fixture/function
+  objects and the same 1,048,513-byte fit. The first unchanged guarded case
+  then refuses the original helper's fixture `.git/config` write as
+  `actual Git storage access`; it is not passing evidence or a Git subprocess.
+  Every whole function calls that same helper, so all five remain excluded;
+  the other four are not executed. Withdraw the unpublished adapter and
+  admit nothing. Preserve the metadata/candidate/refusal evidence without
+  replay, fixture relocation/substitution, preload or guard exception.
+  The manifest remains at 10,367 nodes and 1,047,467 bytes with 1,109 free.
+  This resolves only the prospect's eligibility disposition, not any parent
+  or retained native/owner/coverage requirement.
+- [ ] Qualify the complete eight-row original logical-environment tuple
+  function without admitting a partial parameter table.
+  The original module and pure string-decomposition owner are inspected;
+  package import closure is already bound. Metadata-only original collection
+  measures fifteen cases in three whole functions. The full addition would
+  be 1,049,014 bytes, 438 over the unchanged cap. The complete eight-row
+  `test_logical_and_tuple_forms` function fits at 1,048,547 bytes, leaving 29.
+  The other two complete functions/seven cases remain storage-held, not
+  technically refused or deleted.
+  Compare the exact adapter/original objects, code/global origins, fixtures,
+  parameter rows/types, marks and IDs before unchanged guarding.
+  Require per-case production call coverage, exact observed inputs, typing,
+  lint, ordinary review, required CI, merge and readback. Add no OS or
+  environment-variable substitution, native call, new admission policy,
+  source/profile/schema change, guard exception or limit increase.
+  Exact adapter/original comparison measures fifteen originals and eight
+  aliases, retaining every row of the selected function. The fresh unchanged
+  guarded trial passes all eight in 1.09 pytest / 11.422 observation seconds:
+  24 passing phase reports, zero prohibited effects, 25 bound source reads
+  and production call coverage for every case. Strict Linux/Windows typing
+  and Ruff pass. Add only eight identities, two bindings and one already-bound
+  owner as target: 10,375 nodes, 1,499 sources, 546 targets,
+  92 unchanged helper decisions and 1,048,547 minified bytes, leaving 29.
   Review, required CI, merge and readback remain open.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
