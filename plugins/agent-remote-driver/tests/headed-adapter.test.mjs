@@ -40,6 +40,24 @@ test("selected loadout failure holds headed input without a native send or fallb
   } finally { f.adapter.close(); }
 });
 
+test("selected context diagnostics do not forward arbitrary errors or reason fields", async () => {
+  for (const fields of [
+    {},
+    { selectedContextReason: "private-reason", selectedContextPlugin: "private-plugin" },
+    { selectedContextReason: "plugin-missing", selectedContextPlugin: "private-plugin" },
+  ]) {
+    const f = fixture({ validateSendContext: async () => {
+      throw Object.assign(new Error("private path and observer payload"), fields);
+    } });
+    try {
+      const { error } = await f.prompt();
+      assert.equal(error.message, "Selected native execution context is unavailable; no input was dispatched " +
+        `[${fields.selectedContextReason === "plugin-missing" ? "plugin-missing" : "context-validation-failed"}]`);
+      assert.equal(f.sent.length, 0);
+    } finally { f.adapter.close(); }
+  }
+});
+
 test("input takeover during asynchronous loadout validation prevents late native dispatch", async () => {
   let release;
   const validation = new Promise((resolve) => { release = resolve; });

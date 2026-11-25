@@ -66,6 +66,16 @@ standalone sessions and legacy headed launches keep their existing entrypoints.
 This optional source path does not qualify native plugin precedence, installed
 adoption or withdrawal of independently enabled extensions.
 
+Selected-context refusals retain JSON-RPC error `-32001` and append a bounded
+`[reason]` or `[reason:role]` diagnostic to the existing pre-dispatch message.
+Reasons distinguish unsupported observers, failed reads, changed session/CWD,
+and missing, duplicate, uninstalled or wrong-origin plugins; roles are only
+`bridge`, `driver` and `connector`. Unknown failures use
+`context-validation-failed`, never raw SDK exceptions, metadata or paths.
+The suffix is advisory text, not a new capability or retry permission. A failed
+observation still holds control without input, abort, fallback or replay.
+Older peers retain the same refusal without the diagnostic suffix.
+
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older
 providers.

@@ -250,7 +250,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
                     return False
                 conn.execute(
                     "DELETE FROM live_messages WHERE session_id=? AND disposition_json IS NULL "
-                    "AND runtime_custody_json IS NULL AND handoff_json IS NULL", (session_id,),
+                    "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                    "AND kind!='control:answer-question'", (session_id,),
                 )
                 conn.execute("DELETE FROM live_session_aliases WHERE alias_session_id=? "
                              "OR target_session_id=?", (session_id, session_id))
@@ -305,6 +306,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND kind!='control:answer-question' "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
                 "WHERE worktree_id=? AND status='taken-over')",
@@ -402,6 +404,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND kind!='control:answer-question' "
                 f"AND session_id IN ({_in(expire_from_live)})",
                 tuple(expire_from_live),
             )
@@ -428,6 +431,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND kind!='control:answer-question' "
                 f"AND session_id IN ({_in(expire_from_wedged)})",
                 tuple(expire_from_wedged),
             )
@@ -444,7 +448,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
             dead_ids = [r["session_id"] for r in dead]
             self.execute_write(
                 f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)}) AND disposition_json IS NULL "
-                "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND kind!='control:answer-question'",
                 tuple(dead_ids),
             )
             self.execute_write(  # its aliases go with it (live_sessions_drop_orphaned_aliases),
