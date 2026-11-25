@@ -2590,6 +2590,11 @@ Driver's `tests/test_session_host_core.py` checks reproducible current and
 compatibility archives after cache eviction.
 Its relocated native-handoff import also checks the Windows owned-output
 module required by the exported process owner, without checkout fallback.
+`libs/copilot-driver-core/tests/test_session_host_bundle_members.py` builds
+both actual ZIP variants and requires unique members, including exactly one
+Windows owned-output module. It isolates the independent policy archive's
+installed-metadata requirement; it does not qualify that policy payload or
+replace the complete installed/export controls.
 Provider process/SSH/forwards, the native mux, SDK and the
 POSIX-to-private-scratch carrier remain synthetic. Separate focused enrollment,
 readiness and producer controls preserve ordinary remote refusal, original
