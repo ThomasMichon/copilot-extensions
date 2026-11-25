@@ -145,6 +145,26 @@ class Observation:
         """Return independent public membership data without fabricating a revision."""
         return _decode(self.directory_json)
 
+    def validated(self, descriptor: object) -> Observation:
+        """Bind public data to the embedding's independently selected Gateway.
+
+        This validates bindings, not the authenticity of the supplying transport.
+        """
+        expected = _descriptor(descriptor)
+        observed = _descriptor(self.descriptor)
+        stable = set(expected) - {"peers"}
+        old_ports = {row["machine"]: row["relay_port"] for row in expected["peers"]}
+        new_ports = {row["machine"]: row["relay_port"] for row in observed["peers"]}
+        if (
+            any(observed[field] != expected[field] for field in stable)
+            or any(new_ports.get(name) != port for name, port in old_ports.items())
+        ):
+            raise PermissionError("Native Gateway descriptor differs from the selected bindings")
+        return Observation(
+            _encode(observed), _encode(_directory(self.directory, observed)),
+            self.admission_submitted,
+        )
+
 
 class NativeGateway:
     """Use only the documented native baseline over a caller-owned transport.
@@ -165,14 +185,7 @@ class NativeGateway:
         """Read the selected provider and its enabled public membership."""
         expected = self._expected
         descriptor = _descriptor(self._invoke(("export-client", "--machine", expected["machine"])))
-        stable = set(expected) - {"peers"}
-        old_ports = {row["machine"]: row["relay_port"] for row in expected["peers"]}
-        new_ports = {row["machine"]: row["relay_port"] for row in descriptor["peers"]}
-        if (
-            any(descriptor[field] != expected[field] for field in stable)
-            or any(new_ports.get(name) != port for name, port in old_ports.items())
-        ):
-            raise PermissionError("Native Gateway descriptor differs from the selected bindings")
+        Observation(_encode(descriptor), _encode({"peers": []})).validated(expected)
         directory = _directory(self._invoke(("export-directory",)), descriptor)
         status = self._invoke(("status",))
         if (

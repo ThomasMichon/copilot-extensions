@@ -129,7 +129,10 @@ def test_manual_selection_preserves_every_existing_route_and_default() -> None:
             "wheel-inputs-linux", "wheel-inputs-windows",
             "source-profiles-linux", "source-profiles-windows", "source-profiles-macos",
         },
-        "runtime_profiles": {"runtime-profile-policy-linux", "runtime-profile-policy-windows"},
+        "runtime_profiles": {
+            "runtime-profile-policy-linux", "runtime-profile-policy-windows",
+            "gateway-normal-preparation-linux", "gateway-normal-preparation-windows",
+        },
         "update_diagnostics": {"update-diagnostics-linux", "update-diagnostics-windows"},
         "native_launch": {
             "native-launch-windows", "native-seed-reply-linux", "native-seed-reply-macos",
@@ -166,6 +169,9 @@ def test_manual_selection_preserves_every_existing_route_and_default() -> None:
             assert selected({**defaults, selector: True, "immutable_runtime": True}) == (
                 expected | routes["immutable_runtime"]
             )
+    assert selected({**defaults, "runtime_profiles": True, "pr_artifacts": True}) == (
+        routes["pr_artifacts"] | routes["runtime_profiles"]
+    ) - {"gateway-normal-preparation-linux", "gateway-normal-preparation-windows"}
     assert set(WORKFLOW["jobs"]) == diagnostics | set().union(*routes.values())
 
 

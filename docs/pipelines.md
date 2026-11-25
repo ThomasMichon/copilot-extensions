@@ -68,6 +68,11 @@ in `unit-tests`, and `pr-gate`. Only PR events publish the fixed required name
 GitHub can retain the unevaluated name expression for an already skipped job;
 that check remains distinct from the protected PR context.
 The aggregate's PR admission and required guard/unit-evidence checks are unchanged.
+The unit job has a ten-minute outer deadline covering checkout, tooling,
+qualification and evidence upload. The admitted packet retains its separate
+300-second execution cap; the outer deadline does not extend that cap or any
+native test budget. The trusted workflow guard rejects both a shorter
+enclosing deadline and an unreviewed expansion.
 The unit job
 reads the actual PR base/head diff before installing test tooling or executing
 tests. Markdown-only changes have no executable coverage overlap and select
@@ -1509,7 +1514,13 @@ condition changes live admission.
 `main` is the install form, not a full copy of `dev`. The reviewed policy
 `tools/promotion-release-scope.json` lists the top-level `release_roots`
 that promotion copies to `main`, and the `excluded` paths that stay on `dev`
-only. Each exclusion carries a review reason. `build_promotion_tree` applies
+only. The separate reviewed `tools/promotion-release-scope-patterns.json`
+lists `excluded_patterns` for repeated dev-only shapes: each `*` matches
+exactly one path segment, and a match removes everything under that prefix.
+The patterns have their own file so the primary policy keeps its v1 shape. An
+installed Manager packages its own reader for local runtime promotion; a
+reader that predates patterns still composes newer source and only keeps those
+paths. Each exclusion and pattern carries a review reason. `build_promotion_tree` applies
 the policy to the composed index before control pinning, so the candidate,
 its signed `content_tree`, qualification and the complete-source proof all
 describe the same projected tree.
@@ -1521,10 +1532,14 @@ unclassified, or when a candidate unit source falls outside the scope. The
 policy refuses ambiguous entries, exclusion of the Main-owned `.github`
 control and nested `release_roots`.
 
-Excluded today: `.changefiles` and `efforts/`. No install, runtime,
-promotion or released test path reads them. The same guard rejects
+Excluded today: `.changefiles`, `efforts/` and the `tests/` folders inside
+vendored library copies (`<consumer>/libs/<lib>/tests` and
+`<group>/<consumer>/libs/<lib>/tests`). No install, runtime, promotion or
+released test path reads them: installs and the vendored-sync checks read only
+a copy's `src` and metadata, and test runners and workflows run only the
+canonical `libs/<lib>/tests`, which stay released. The same guard rejects
 adopter-page links into unreleased paths; link those through a Dev URL.
-Tests remain released because candidate-executed jobs, typecheck projects
+Other tests remain released because candidate-executed jobs, typecheck projects
 and Main-dispatched suites read them. For the same reason
 `plugins/agent-bridge/contract/` stays released: agent-bridge tests read its
 fixtures. Typecheck skips a project only when every include path is excluded.

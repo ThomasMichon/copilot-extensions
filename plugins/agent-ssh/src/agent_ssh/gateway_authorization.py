@@ -22,7 +22,7 @@ from typing import Any, cast
 from agent_procutil import no_window_kwargs
 from dropin_registry import atomic_write_text
 
-from . import gateway_profile, gateway_provider, ssh_profile
+from . import gateway_native, gateway_profile, gateway_provider, ssh_profile
 from .file_lock import exclusive_file_lock
 
 _MARKER = "# agent-ssh.gateway-authorization "
@@ -31,6 +31,7 @@ Document = dict[str, Any]
 SDK = Callable[[], tuple[Any, Any, Callable[[bytes], Document]]]
 _REPLACE_RETRY_SECONDS = 1.0
 _REPLACE_RETRY_INTERVAL = 0.025
+_NATIVE_RECEIPT = "gateway-native-membership.json"
 
 
 def projection(policy_path: Path, directory_path: Path, *, machine: str,
@@ -61,6 +62,33 @@ def projection_from_update(update: object, *, policy_path: Path, machine: str,
         policy, selected["directory"], machine=machine, environment=environment,
         public_key_file=public_key_file,
     )
+
+
+def projection_from_native(update: object, *, descriptor: object, machine: str,
+                           environment: str, public_key_file: Path) -> Document:
+    """Project an authenticated native observation without requiring Fleet."""
+    if not isinstance(update, gateway_native.Observation):
+        raise ValueError("An authenticated native Gateway observation is required")
+    selected = update.validated(descriptor)
+    native, directory = selected.descriptor, selected.directory
+    if native["machine"] != machine or environment not in ("windows", "linux", "wsl"):
+        raise PermissionError("Native membership differs from the selected local target")
+    with public_key_file.expanduser().open("rb") as stream:
+        public = stream.read(257)
+    if len(public) > 256:
+        raise ValueError("Gateway local public-key file exceeds its bound")
+    public_key = gateway_profile._public_key(public.decode("ascii").strip())
+    target = next((row for row in directory["peers"] if row["machine"] == machine), None)
+    if target is None or target["public_key"] != public_key:
+        raise PermissionError("Native Gateway has not admitted this local identity")
+    scope = {name: native[name] for name in ("gateway_user", "host_key", "server_port")}
+    controller = "native:" + hashlib.sha256(gateway_native._encode(scope)).hexdigest()
+    return {
+        "state": "configured", "target": {"machine": machine, "environment": environment},
+        "controller": controller, "user": target["user"], "host_key": target["host_key"],
+        "peers": directory["peers"],
+        "native_membership": {"descriptor": native, "directory": directory},
+    }
 
 
 def _projection(policy: Any, directory: object, *, machine: str,
@@ -255,7 +283,7 @@ def _root(path: Path, *, create: bool = True) -> Path:
         else:
             path.mkdir(mode=0o700)
     _private(path, directory=True)
-    allowed = re.compile(r"(?:owner\.json|authorization\.lock|authorized_keys\.gateway|gateway-provider-[0-9a-f]{64}\.json)")
+    allowed = re.compile(r"(?:owner\.json|authorization\.lock|authorized_keys\.gateway|gateway-native-membership\.json|gateway-provider-[0-9a-f]{64}\.json)")
     entries = tuple(path.iterdir())
     if any(not allowed.fullmatch(entry.name) for entry in entries):
         raise ValueError("Select a dedicated authorization directory, not an existing user/service directory")
@@ -305,6 +333,44 @@ def validate_state(path: Path, *, target: Document, controller: str) -> None:
     ):
         raise ValueError("Authorization state belongs to another target/controller or is invalid")
     _authorization_text(root, owner)
+    _native_state(root, owner)
+
+
+def _native_state(root: Path, owner: Document) -> Document | None:
+    path = root / _NATIVE_RECEIPT
+    if not os.path.lexists(path):
+        return None
+    value = json.loads(_read(path), object_pairs_hook=gateway_profile._object)
+    if (
+        not isinstance(value, dict) or set(value) != {*_BINDING, "descriptor", "directory"}
+        or any(value[name] != owner[name] for name in _BINDING)
+    ):
+        raise ValueError("Native membership receipt differs from its authorization owner")
+    selected = gateway_native.Observation(
+        gateway_native._encode(value["descriptor"]), gateway_native._encode(value["directory"]),
+    ).validated(value["descriptor"])
+    return {"descriptor": selected.descriptor, "directory": selected.directory}
+
+
+def _accept_native(value: Document, root: Path, owner: Document) -> None:
+    if any(root.glob("gateway-provider-*.json")):
+        raise ValueError("Versioned Fleet authorization cannot become unversioned native membership")
+    membership = value["native_membership"]
+    prior = _native_state(root, owner)
+    if prior is None and os.path.lexists(root / "authorized_keys.gateway"):
+        raise ValueError("Existing native authorization has no membership receipt; preserve it")
+    if prior is not None:
+        observed = gateway_native.Observation(
+            gateway_native._encode(membership["descriptor"]),
+            gateway_native._encode(membership["directory"]),
+        ).validated(prior["descriptor"])
+        current = {row["machine"]: row for row in observed.directory["peers"]}
+        if any(current.get(row["machine"]) != row for row in prior["directory"]["peers"]):
+            raise ValueError("Unversioned native membership cannot remove or replace accepted identities")
+    data = gateway_profile._json({**owner, **membership})
+    path = root / _NATIVE_RECEIPT
+    if not path.exists() or _read(path) != data:
+        atomic_write_text(path, data)
 
 
 def _publish_authorization(root: Path, owner: Document, previous: str | None, data: str) -> None:
@@ -354,7 +420,12 @@ def apply_projection(value: Document, state_dir: Path) -> tuple[Path, bool]:
             **owner, "body_sha256": hashlib.sha256(body.encode()).hexdigest(),
         }, sort_keys=True) + "\n" + body
         # Input acceptance survives an interrupted write; exact retries are safe.
-        gateway_provider.accept_directory(value, root)
+        if "native_membership" in value:
+            _accept_native(value, root, owner)
+        else:
+            if os.path.lexists(root / _NATIVE_RECEIPT):
+                raise ValueError("Native authorization cannot become a versioned Fleet directory")
+            gateway_provider.accept_directory(value, root)
         if previous == data:
             return target, False
         _publish_authorization(root, owner, previous, data)

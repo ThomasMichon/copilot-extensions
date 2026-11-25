@@ -4,6 +4,18 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`managed_python.resolve_runtime_python(expected_python, uv=...)` is the
+Python-language counterpart of the native prepared-runtime UV selectors.
+The application selects its completed generation first; one caller-owned,
+ten-second offline UV lookup must return that exact environment. Omit `uv`
+to discover UV on PATH, or supply an absolute executable without fallback.
+Interpreter/project overrides are isolated from the lookup, while configured
+UV storage is retained. Missing preparation, a failed lookup or a different
+environment refuses before the application starts; this helper never installs,
+downloads, activates or repairs anything. Timeout/cleanup errors retain the
+existing finite process owner's custody and are not retried. The caller still
+owns application argv, windowless mapping, stdio and lifetime.
+
 `command_pipe.CommandPipe` adds a continuous binary stdin owner for the optional
 consumer-telemetry command route. It reuses atomic Windows caller-owned Job
 creation or the Linux private-session guardian and parent-lifetime pipe.

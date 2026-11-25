@@ -6,13 +6,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import tracking
+from agent_worktrees import activity, tracking
 
 
-def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
+def _seed_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, machine: str = "m", project: str = "p",
+) -> Path:
+    # Record identity comes from the native reporter, not the legacy machine label.
+    monkeypatch.setattr(socket, "gethostname", lambda: "m")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
     monkeypatch.setattr(cfg, "tracking_dir",
                         lambda: tmp_path / f".{project}" / "worktrees")
@@ -23,7 +33,7 @@ def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
     return d
 
 
-def _owner(tdir, owner_id, resources):
+def _owner(tdir: Path, owner_id: str, resources: list[tracking.ResourceClaim]) -> None:
     rec = tracking.create_new_record(
         owner_id, f"worktree/{owner_id}", str(tdir.parent / owner_id), "p", "m",
         "windows", tdir)
@@ -32,19 +42,23 @@ def _owner(tdir, owner_id, resources):
     tracking.save_record(rec, tdir / f"{owner_id}.yaml")
 
 
-def _args(*, selectors=(), apply=False, json_=True):
+def _args(
+    *, selectors: Sequence[str] = (), apply: bool = False, json_: bool = True,
+) -> argparse.Namespace:
     return argparse.Namespace(
         target=["reconcile-at-rest", *selectors], apply=apply, json=json_)
 
 
-def test_apply_releases_at_rest_never_active(tmp_path, monkeypatch, capfd):
+def test_apply_releases_at_rest_never_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-owner", [
         tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest"),
         tracking.ResourceClaim(kind="worktree", ref="m/p/wt-c", state="active"),
     ])
-    logged = []
-    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    logged: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_args(apply=True))
     assert rc == 0
     reloaded = tracking.load_record(tdir / "wt-owner.yaml")
@@ -55,7 +69,9 @@ def test_apply_releases_at_rest_never_active(tmp_path, monkeypatch, capfd):
         "worktree_id": "wt-owner", "kind": "codespace", "ref": "cs-1"})]
 
 
-def test_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
+def test_apply_feeds_claim_history_for_pr_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """Attributed to the RECORD's own machine ("m" via `_owner`), never the
     ambient config's (seeded here as a different value) -- a renamed/
     migrated machine can differ."""
@@ -72,14 +88,16 @@ def test_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
     assert events[0]["machine"] == "m"
 
 
-def test_dry_run_reports_but_does_not_write(tmp_path, monkeypatch, capfd):
+def test_dry_run_reports_but_does_not_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-owner", [
         tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest"),
         tracking.ResourceClaim(kind="worktree", ref="m/p/wt-c", state="active"),
     ])
-    logged = []
-    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    logged: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    monkeypatch.setattr(activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_args(apply=False))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
@@ -92,7 +110,9 @@ def test_dry_run_reports_but_does_not_write(tmp_path, monkeypatch, capfd):
     assert logged == []
 
 
-def test_selector_narrows_to_named_worktrees(tmp_path, monkeypatch, capfd):
+def test_selector_narrows_to_named_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-a", [tracking.ResourceClaim(kind="codespace", ref="cs-a", state="at-rest")])
     _owner(tdir, "wt-b", [tracking.ResourceClaim(kind="codespace", ref="cs-b", state="at-rest")])
@@ -102,7 +122,26 @@ def test_selector_narrows_to_named_worktrees(tmp_path, monkeypatch, capfd):
     assert tracking.load_record(tdir / "wt-b.yaml").resources[0].state == "at-rest"
 
 
-def test_no_at_rest_claims_reports_empty(tmp_path, monkeypatch, capfd):
+def test_named_selector_does_not_release_other_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
+    tdir = _seed_project(tmp_path, monkeypatch)
+    for wid in ("wt-a", "wt-b"):
+        _owner(tdir, wid, [
+            tracking.ResourceClaim(kind="codespace", ref=f"resource-{wid}", state="at-rest"),
+        ])
+    args = m.build_parser().parse_args(
+        ["claims", "reconcile-at-rest", "--worktree-id", "wt-a", "--apply", "--json"])
+
+    assert m.cmd_claims(args) == 0
+    assert tracking.load_record(tdir / "wt-a.yaml").resources[0].state == "released"
+    assert tracking.load_record(tdir / "wt-b.yaml").resources[0].state == "at-rest"
+    assert [row["owner"] for row in json.loads(capfd.readouterr().out)["released"]] == ["wt-a"]
+
+
+def test_no_at_rest_claims_reports_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-owner", [
         tracking.ResourceClaim(kind="worktree", ref="m/p/wt-c", state="active"),
@@ -115,7 +154,9 @@ def test_no_at_rest_claims_reports_empty(tmp_path, monkeypatch, capfd):
     assert out["count"] == 0
 
 
-def test_human_readable_output_dry_run_and_apply(tmp_path, monkeypatch, capfd):
+def test_human_readable_output_dry_run_and_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-owner", [
         tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest"),

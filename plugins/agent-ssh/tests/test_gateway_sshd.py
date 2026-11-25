@@ -20,6 +20,7 @@ from agent_ssh import gateway_provider
 from agent_ssh import gateway_sshd as ingress
 from agent_ssh import _native_listener as listener
 from test_gateway_provider import fixture_files as _fixture_files, key as _key
+from test_gateway_native_authorization import admitted as native_admitted
 
 Document = dict[str, Any]
 fixture_files = _fixture_files
@@ -121,6 +122,55 @@ def test_native_inbound_update_catches_up_without_profiles_or_directory_staging(
     assert selected["directory"].read_bytes() == staged
     assert not (tmp_path / "ssh").exists()
     assert not (tmp_path / ".agent-ssh-sources").exists()
+
+
+def test_native_unversioned_ingress_uses_the_same_listener_and_authorization_owners(
+    tmp_path: Path, native_preparation: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, gateway, scope = native_admitted(tmp_path)
+    selected = config(tmp_path)
+    selected.pop("policy")
+    selected.pop("directory")
+    selected.update(version=2, machine="receiver", native_gateway=scope["descriptor"])
+    monkeypatch.setattr(ingress, "_environment", lambda: "linux")
+    monkeypatch.setattr(gateway_provider, "_sdk", Mock(side_effect=AssertionError("Fleet invoked")))
+    protected = tmp_path / "protected-config"
+    if os.name == "nt":
+        authorization._windows_create_directory(protected)
+    else:
+        protected.mkdir(mode=0o700)
+    path = protected / "ingress.json"
+    atomic_write_text(path, json.dumps(selected, default=str))
+    selected = ingress.load(path)
+    with pytest.raises(ValueError, match="current authenticated"):
+        ingress.prepare(selected)
+    assert not selected["state_dir"].exists()
+    native = ingress.prepare_update(selected, gateway.inspect())
+    authorized = selected["state_dir"] / "authorization" / "authorized_keys.gateway"
+    before = native.read_bytes(), native.stat().st_mtime_ns
+    provider.descriptor["peers"].append({"machine": "later-controller", "relay_port": 24003})
+    from test_gateway_native import peer
+
+    provider.peers.append(peer("later-controller", 3))
+    ingress.prepare_update(selected, gateway.inspect())
+    assert _key(3) in authorized.read_text(encoding="utf-8")
+    assert (native.read_bytes(), native.stat().st_mtime_ns) == before
+    assert "policy" not in selected and "directory" not in selected
+    assert not list(selected["state_dir"].rglob("gateway-provider-*.json"))
+    assert not (tmp_path / ".agent-ssh-sources").exists()
+
+
+def test_native_unversioned_ingress_rejects_another_target_before_native_effects(
+    tmp_path: Path, native_preparation: None,
+) -> None:
+    _, gateway, scope = native_admitted(tmp_path)
+    selected = config(tmp_path)
+    selected.update(version=2, machine="elsewhere", native_gateway=scope["descriptor"])
+    with pytest.raises(PermissionError, match="selected local target"):
+        ingress.prepare_update(selected, gateway.inspect())
+    assert isinstance(ingress._executable, Mock)
+    ingress._executable.assert_not_called()
+    assert not selected["state_dir"].exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows reader/atomic-replacement sharing")

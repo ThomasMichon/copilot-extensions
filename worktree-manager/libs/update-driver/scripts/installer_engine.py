@@ -184,6 +184,7 @@ def _source_input_files(
 
 def freeze_inputs(
     plugin: Path, destination: Path, *, deadline: float | None = None,
+    progress_deadline: Callable[[], float] | None = None,
     on_progress: Callable[[], None] | None = None,
     additional_plugins: tuple[Path, ...] = (),
     closed_wheel_source: bool = False,
@@ -195,8 +196,13 @@ def freeze_inputs(
     Numbered construction consumes these copies non-editably, never a live checkout.
     A complete operation may retain additional applications in the same closure.
     """
-    if deadline is not None:
-        _check_deadline(deadline)
+    def check_time() -> None:
+        if deadline is not None:
+            _check_deadline(deadline)
+        if progress_deadline is not None:
+            _check_deadline(progress_deadline())
+
+    check_time()
     if type(closed_wheel_source) is not bool:
         raise ValueError("Closed-wheel source selection must be a boolean")
     if not isinstance(additional_plugins, tuple):
@@ -224,8 +230,7 @@ def freeze_inputs(
             offsets: dict[Path, tuple[int, int]] = {}
 
             def retain_source(source: Path, data: bytes) -> None:
-                if deadline is not None:
-                    _check_deadline(deadline)
+                check_time()
                 offsets[source] = (buffer.tell(), len(data))
                 if buffer.tell() + len(data) > buffer_limit:
                     buffer.rollover()
@@ -236,8 +241,7 @@ def freeze_inputs(
             # Finish the full baseline before copying, preserving the mutation barrier.
             def retained_sources() -> Iterator[tuple[Path, bytes]]:
                 for source in files:
-                    if deadline is not None:
-                        _check_deadline(deadline)
+                    check_time()
                     offset, length = offsets[source]
                     buffer.seek(offset)
                     data = buffer.read(length)
@@ -247,8 +251,7 @@ def freeze_inputs(
 
             def write_source(item: tuple[Path, bytes]) -> None:
                 source, data = item
-                if deadline is not None:
-                    _check_deadline(deadline)
+                check_time()
                 target = destination / source.relative_to(common)
                 Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
@@ -256,8 +259,7 @@ def freeze_inputs(
                     _native_retained_path(source), _native_retained_path(target),
                     follow_symlinks=False,
                 )
-                if deadline is not None:
-                    _check_deadline(deadline)
+                check_time()
 
             _bounded_content_map(
                 write_source, retained_sources(),
@@ -287,8 +289,7 @@ def freeze_inputs(
         ), **progress)
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
-        if deadline is not None:
-            _check_deadline(deadline)
+        check_time()
         return FrozenInputs(
             frozen_plugin, frozen_roots, frozen_hash,
             closed_wheel_source=closed_wheel_source,
@@ -856,12 +857,11 @@ def _candidate(
                         # not the selected source payload copied by preparation.
                         temporary = retained.enter_context(_temporary_inputs(None))
                         with _source_phase("payload-snapshot", child_timeout, {}) as source_progress:
-                            deadline = _source_deadline(source_progress)
-                            if inputs.wheel_inputs is not None:
-                                deadline = min(deadline, inputs.wheel_inputs.deadline)
                             frozen = freeze_inputs(
                                 inputs.plugin, _private_retained_root(Path(temporary)) / "source",
-                                deadline=deadline, on_progress=source_progress.renew,
+                                deadline=inputs.wheel_inputs.deadline if inputs.wheel_inputs is not None else None,
+                                progress_deadline=lambda: source_progress.deadline,
+                                on_progress=selected,
                                 closed_wheel_source=inputs.closed_wheel_source,
                             )
                         payload = replace(inputs, plugin=frozen.plugin, packages=frozen.packages)

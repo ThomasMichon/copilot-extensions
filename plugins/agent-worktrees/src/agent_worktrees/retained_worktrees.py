@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from . import config as cfg, output, record_reporting, tracking, worktree_identity
+from . import claims_selectors, config as cfg, output, record_reporting, tracking, worktree_identity
 from .claims_transitive_cli import _is_safe_path_component
 from .legacy_wsl_record_locality import record_namespace_matches, resolve_legacy_wsl_owner_ref
 from .tracking_claims import format_claim_ref, parse_claim_ref
@@ -135,10 +135,11 @@ def inventory(
 
 def cmd_retained(args: argparse.Namespace, target: list[str]) -> int:
     """Render the retained view without querying providers or mutating records."""
-    if len(target) > 1:
-        return output._json_error("claims retained accepts at most one worktree id", 2)
+    try:
+        wid = claims_selectors.worktree_id(args, target, operation="retained")
+    except ValueError as exc:
+        return output._json_error(str(exc), 2)
     config = cfg.load_config()
-    wid = target[0] if target else None
     if wid is None:
         try:
             record = worktree_identity.tracked_invocation_record(
@@ -148,7 +149,7 @@ def cmd_retained(args: argparse.Namespace, target: list[str]) -> int:
             return output._json_error(f"tracked checkout unavailable: {type(exc).__name__}", 2)
         wid = record.worktree_id if record is not None else None
     if not wid:
-        return output._json_error("no existing tracked worktree; pass a tracked worktree id", 2)
+        return output._json_error("no existing tracked worktree; pass --worktree-id ID", 2)
     try:
         result = inventory(wid, config, max_depth=args.max_depth, max_nodes=args.max_nodes)
     except ValueError as exc:

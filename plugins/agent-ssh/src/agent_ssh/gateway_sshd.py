@@ -18,17 +18,18 @@ import socket
 import stat
 import subprocess
 import sys
-from typing import Any, cast
+from typing import Any
 
 from agent_procutil import JobHandle, no_window_kwargs, spawn_sync_in_kill_on_close_job
 from dropin_registry import atomic_write_text
 
 from . import gateway_authorization as authorization
-from . import gateway_profile, gateway_provider, ssh_profile
+from . import gateway_native, gateway_profile, gateway_provider, ssh_profile
 from .file_lock import exclusive_file_lock
 
 DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"
 FOREGROUND_CAPABILITY = "gateway-native-ingress-foreground-v1"
+NATIVE_MEMBERSHIP_CAPABILITY = "gateway-native-ingress-membership-v1"
 Document = dict[str, Any]
 
 _FIELDS = {
@@ -112,17 +113,22 @@ def _environment() -> str:
 def load(path: Path) -> Document:
     path = _absolute(str(path))
     authorization._private(path, directory=False)
-    _, _, decode = cast(authorization.SDK, gateway_provider._sdk)()
-    value = decode(gateway_provider._read(path))
+    value = gateway_native._decode(gateway_provider._read(path))
+    native = type(value.get("version")) is int and value["version"] == 2
+    fields = (_FIELDS - {"policy", "directory"}) | {"native_gateway"} if native else _FIELDS
     if (
-        not isinstance(value, dict) or set(value) != _FIELDS
+        set(value) != fields
         or value["schema"] != "agent-ssh.gateway-native-ingress"
-        or type(value["version"]) is not int or value["version"] != 1
+        or type(value["version"]) is not int or value["version"] not in (1, 2)
     ):
         raise ValueError("Invalid native Gateway ingress configuration")
     if type(value["port"]) is not int or not 1024 <= value["port"] <= 65535:
         raise ValueError("Select an explicit nonprivileged native loopback endpoint")
-    for field in _FIELDS - {"schema", "version", "machine", "environment", "port"}:
+    if native:
+        value["native_gateway"] = gateway_native._descriptor(value["native_gateway"])
+        if value["native_gateway"]["machine"] != value["machine"]:
+            raise ValueError("Native Gateway descriptor differs from the configured target")
+    for field in fields - {"schema", "version", "machine", "environment", "port", "native_gateway"}:
         value[field] = _absolute(value[field])
     if value["environment"] != _environment():
         raise ValueError("Native Gateway ingress environment differs from this host")
@@ -204,6 +210,8 @@ def _check_endpoint(config: Document) -> None:
 
 def prepare(config: Document) -> Path:
     """Verify native target bindings, then converge the dedicated ingress files."""
+    if config["version"] == 2:
+        raise ValueError("Native ingress requires a current authenticated Gateway observation")
     value = authorization.projection(
         config["policy"], config["directory"], machine=config["machine"],
         environment=config["environment"], public_key_file=config["public_key_file"],
@@ -213,10 +221,16 @@ def prepare(config: Document) -> Path:
 
 def prepare_update(config: Document, update: object) -> Path:
     """Converge authenticated inbound membership without staging outbound profiles."""
-    value = authorization.projection_from_update(
-        update, policy_path=config["policy"], machine=config["machine"],
-        environment=config["environment"], public_key_file=config["public_key_file"],
-    )
+    if config["version"] == 2:
+        value = authorization.projection_from_native(
+            update, descriptor=config["native_gateway"], machine=config["machine"],
+            environment=config["environment"], public_key_file=config["public_key_file"],
+        )
+    else:
+        value = authorization.projection_from_update(
+            update, policy_path=config["policy"], machine=config["machine"],
+            environment=config["environment"], public_key_file=config["public_key_file"],
+        )
     return _prepare(config, value)
 
 

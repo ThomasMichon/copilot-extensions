@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 import installer_engine_ref
+import promotion_release_scope
 from promotion_unit_contract import (
     BUILD_SOURCE_DATA, CANDIDATE_PROFILE, UnitEvidenceError, admit_manifest, manifest_digest,
     relative_file, source_sha, verify_sources,
@@ -87,6 +88,9 @@ def derive_manifest(
     development = _bytes(development_root, template["sources"])
     candidate = _bytes(candidate_root, template["sources"])
     origins = {name: name for name in candidate}
+    # The Main release scope drops some vendored copies (for example vendored
+    # library tests); the released candidate never contains them to execute.
+    scope = promotion_release_scope.load_scope(development_root)
     projects = list(candidate_root.glob("plugins/*/pyproject.toml"))
     projects += list(candidate_root.glob("*/pyproject.toml"))
     projects += list(candidate_root.glob("services/*/pyproject.toml"))
@@ -111,7 +115,7 @@ def derive_manifest(
             for name in development:
                 if name.startswith(prefix):
                     copy = (destination / name.removeprefix(prefix)).relative_to(candidate_root.resolve()).as_posix()
-                    if copy != name:
+                    if copy != name and (scope is None or scope.released(copy)):
                         candidate.update(_bytes(candidate_root, [copy]))
                         origins[copy] = name
     for copy in sorted(BUILD_SOURCE_DATA):

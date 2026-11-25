@@ -3,8 +3,10 @@
 import builtins
 import importlib.util
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -17,8 +19,8 @@ GUARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GUARD)
 
 
-def declarations():
-    routing = {
+def declarations() -> tuple[dict[str, Any], dict[str, Any]]:
+    routing: dict[str, Any] = {
         "name": "Trusted CI periodic routing", "on": {"workflow_dispatch": ""},
         "permissions": {}, "jobs": {"periodic-route": {
             "runs-on": "ubuntu-latest", "permissions": {}, "steps": [{
@@ -27,7 +29,7 @@ def declarations():
             }],
         }},
     }
-    ci = {
+    ci: dict[str, Any] = {
         "name": "CI",
         "on": {"pull_request": {
             "branches-ignore": ["main"],
@@ -45,7 +47,7 @@ def declarations():
             }]},
             "unit-tests": {
                 "if": GUARD.UNIT_JOB_CONDITION,
-                "runs-on": "ubuntu-latest", "timeout-minutes": 5,
+                "runs-on": "ubuntu-latest", "timeout-minutes": 10,
                 "permissions": {"contents": "read", "actions": "read"},
                 "outputs": {
                     "run": "${{ steps.impact.outputs.run }}",
@@ -113,16 +115,18 @@ def declarations():
     return routing, ci
 
 
-def validate(tmp_path, routing, ci):
+def validate(tmp_path: Path, routing: dict[str, Any], ci: dict[str, Any]) -> list[str]:
     path = tmp_path / "trusted-ci.yml"
     # JSON is a YAML subset; scalar and malformed-YAML controls remain below.
     path.write_text(json.dumps(routing), encoding="utf-8")
     (tmp_path / "ci.yml").write_text(json.dumps(ci), encoding="utf-8")
-    return GUARD.validate_workflow(path)
+    return cast(list[str], GUARD.validate_workflow(path))
 
 
 @pytest.mark.parametrize("fallback", [False, True], ids=["accelerated", "fallback"])
-def test_workflow_loader_preserves_scalar_strings_and_rejects_malformed_input(tmp_path, monkeypatch, fallback):
+def test_workflow_loader_preserves_scalar_strings_and_rejects_malformed_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fallback: bool,
+) -> None:
     if fallback:
         monkeypatch.delattr(yaml, "CBaseLoader", raising=False)
     path = tmp_path / "workflow.yml"
@@ -133,7 +137,7 @@ def test_workflow_loader_preserves_scalar_strings_and_rejects_malformed_input(tm
     assert value is None and errors and "cannot load" in errors[0]
 
 
-def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
+def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path: Path) -> None:
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
 
@@ -142,7 +146,7 @@ def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
     ("push", False), ("pull_request", True), ("workflow_dispatch", True),
     ("future-event", True), ("", True),
 ])
-def test_unit_job_preserves_nonclosed_event_allocation(tmp_path, event, allocated):
+def test_unit_job_preserves_nonclosed_event_allocation(tmp_path: Path, event: str, allocated: bool) -> None:
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
     condition = ci["jobs"]["unit-tests"]["if"]
@@ -159,11 +163,13 @@ def test_unit_job_preserves_nonclosed_event_allocation(tmp_path, event, allocate
     ("checks", None,
      "ci.yml checks job must retain reviewed event admission and remain dependency-free"),
     ("unit-tests", "github.event_name != 'push'",
-     "unit packet must have the reviewed independent hosted five-minute job"),
+     "unit packet must have the reviewed independent hosted ten-minute job"),
     ("pr-gate", "always()",
      "unit aggregate must require successful guards and the actual selected outcome"),
 ], ids=["checks-broad", "checks-missing", "units-missing-closed", "aggregate-broad"])
-def test_job_event_admission_cannot_be_removed_or_broadened(tmp_path, job, condition, error):
+def test_job_event_admission_cannot_be_removed_or_broadened(
+    tmp_path: Path, job: str, condition: str | None, error: str,
+) -> None:
     routing, ci = declarations()
     if condition is None:
         ci["jobs"][job].pop("if")
@@ -172,17 +178,19 @@ def test_job_event_admission_cannot_be_removed_or_broadened(tmp_path, job, condi
     assert error in validate(tmp_path, routing, ci)
 
 
-def test_push_only_allocation_exclusion_is_required(tmp_path):
+def test_push_only_allocation_exclusion_is_required(tmp_path: Path) -> None:
     routing, ci = declarations()
     del ci["jobs"]["unit-tests"]["if"]
-    assert "unit packet must have the reviewed independent hosted five-minute job" in validate(tmp_path, routing, ci)
+    assert "unit packet must have the reviewed independent hosted ten-minute job" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("change", [
     {"if": "false"}, {"continue-on-error": True}, {"timeout-minutes": 30},
     {"env": {}}, {"run": "echo run=false"},
 ])
-def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(tmp_path, change):
+def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "source-ast-impact").update(change)
     assert "source AST guards require conservative pinned-input admission" in validate(tmp_path, routing, ci)
@@ -192,7 +200,9 @@ def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(tmp_pat
     {"if": "false"}, {"continue-on-error": True}, {"run": "echo passed"},
 ])
 @pytest.mark.parametrize("index", [4, 5, 6])
-def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(tmp_path, change, index):
+def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(
+    tmp_path: Path, change: dict[str, Any], index: int,
+) -> None:
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
     scan = steps.pop(4)
@@ -203,7 +213,7 @@ def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(tmp_path, chan
     assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
 
 
-def test_source_ast_scans_cannot_precede_or_duplicate_admission(tmp_path):
+def test_source_ast_scans_cannot_precede_or_duplicate_admission(tmp_path: Path) -> None:
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
     steps[3], steps[4] = steps[4], steps[3]
@@ -217,7 +227,7 @@ def test_source_ast_scans_cannot_precede_or_duplicate_admission(tmp_path):
 
 
 @pytest.mark.parametrize("budget", [None, 5, 7])
-def test_source_ast_runner_requires_the_bounded_join_step(tmp_path, budget):
+def test_source_ast_runner_requires_the_bounded_join_step(tmp_path: Path, budget: int | None) -> None:
     routing, ci = declarations()
     scan = ci["jobs"]["checks"]["steps"][4]
     if budget is None:
@@ -227,7 +237,9 @@ def test_source_ast_runner_requires_the_bounded_join_step(tmp_path, budget):
     assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
 
 
-def execute_source_ast_selector(output, event, read_diff, *, script=None):
+def execute_source_ast_selector(
+    output: Path, event: str, read_diff: Callable[[list[str]], bytes], *, script: str | None = None,
+) -> None:
     routing, ci = declarations()
     assert validate(output.parent, routing, ci) == []
     modules = {
@@ -239,7 +251,7 @@ def execute_source_ast_selector(output, event, read_diff, *, script=None):
         "sys": SimpleNamespace(path=SimpleNamespace(insert=lambda *args: None)),
     }
 
-    def imports(name, *args, **kwargs):
+    def imports(name: str, *args: Any, **kwargs: Any) -> Any:
         return modules[name] if name in modules else builtins.__import__(name, *args, **kwargs)
 
     body = "\n".join((script or GUARD.SOURCE_AST_SCRIPT).splitlines()[1:-1])
@@ -252,7 +264,9 @@ def execute_source_ast_selector(output, event, read_diff, *, script=None):
     {"if": "false"}, {"continue-on-error": True}, {"run": "echo run=false"},
     {"timeout-minutes": 20}, {"env": {}},
 ])
-def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(tmp_path, change):
+def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "code-impact").update(change)
     assert "code guards require conservative pinned-input coverage admission" in validate(tmp_path, routing, ci)
@@ -266,7 +280,9 @@ def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(tmp_path, change
     ("pull_request", ["README.md", ".github/workflows/ci.yml"], True),
     ("pull_request", [], True), ("workflow_dispatch", [], True),
 ])
-def test_actual_code_impact_script_reports_markdown_no_overlap(tmp_path, event, paths, expected):
+def test_actual_code_impact_script_reports_markdown_no_overlap(
+    tmp_path: Path, event: str, paths: list[str], expected: bool,
+) -> None:
     output = tmp_path / "outputs"
     execute_source_ast_selector(
         output, event, lambda _: ("\0".join(paths) + "\0").encode(),
@@ -275,10 +291,10 @@ def test_actual_code_impact_script_reports_markdown_no_overlap(tmp_path, event, 
     assert output.read_text() == "run=" + str(expected).lower() + "\n"
 
 
-def test_unavailable_code_impact_diff_does_not_emit_no_overlap(tmp_path):
+def test_unavailable_code_impact_diff_does_not_emit_no_overlap(tmp_path: Path) -> None:
     output = tmp_path / "outputs"
 
-    def unavailable(_):
+    def unavailable(_: list[str]) -> bytes:
         raise RuntimeError("diff unavailable")
 
     with pytest.raises(RuntimeError, match="diff unavailable"):
@@ -292,7 +308,7 @@ def test_unavailable_code_impact_diff_does_not_emit_no_overlap(tmp_path):
     "python tools/check-agent-bridge-contracts.py --base " + "a" * 40,
     "python tools/check-install-contract.py",
 ])
-def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path, command):
+def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path: Path, command: str) -> None:
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
     scan = {"run": command, "if": GUARD.CODE_CONDITION}
@@ -310,7 +326,9 @@ def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path, command)
     GUARD.CODE_CONDITION, "false",
     GUARD.CODE_CONDITION + " && " + GUARD.CHANGEFILE_CONDITION,
 ])
-def test_markdown_plugin_release_lint_is_not_conditioned_on_test_coverage(tmp_path, condition):
+def test_markdown_plugin_release_lint_is_not_conditioned_on_test_coverage(
+    tmp_path: Path, condition: str,
+) -> None:
     routing, ci = declarations()
     step = ci["jobs"]["checks"]["steps"][-1]
     assert validate(tmp_path, routing, ci) == []
@@ -318,7 +336,7 @@ def test_markdown_plugin_release_lint_is_not_conditioned_on_test_coverage(tmp_pa
     assert "release changefile lint must remain independent of executable coverage" in validate(tmp_path, routing, ci)
 
 
-def test_markdown_plugin_release_lint_cannot_disappear(tmp_path):
+def test_markdown_plugin_release_lint_cannot_disappear(tmp_path: Path) -> None:
     routing, ci = declarations()
     ci["jobs"]["checks"]["steps"].pop()
     assert "release changefile lint must remain independent of executable coverage" in validate(tmp_path, routing, ci)
@@ -329,7 +347,9 @@ def test_markdown_plugin_release_lint_cannot_disappear(tmp_path):
      "report-only inventory must remain on non-PR CI without becoming a strict PR gate"),
     ("ast", "source AST guards must follow validated admission without weakening scans"),
 ])
-def test_every_code_impact_consumer_requires_prior_selector(tmp_path, consumer, error):
+def test_every_code_impact_consumer_requires_prior_selector(
+    tmp_path: Path, consumer: str, error: str,
+) -> None:
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
     assert validate(tmp_path, routing, ci) == []
@@ -356,12 +376,12 @@ def test_every_code_impact_consumer_requires_prior_selector(tmp_path, consumer, 
     ("future-event", [], True),
 ])
 def test_actual_source_ast_selector_preserves_non_narrative_and_non_pr_execution(
-    tmp_path, event, paths, expected,
-):
+    tmp_path: Path, event: str, paths: list[str], expected: bool,
+) -> None:
     output = tmp_path / "outputs"
-    calls = []
+    calls: list[list[str]] = []
 
-    def read_diff(argv):
+    def read_diff(argv: list[str]) -> bytes:
         calls.append(argv)
         return ("\0".join(paths) + "\0").encode()
 
@@ -399,7 +419,9 @@ def test_actual_source_ast_selector_preserves_non_narrative_and_non_pr_execution
     "daemon-policy", "scanner-source", "selector-source", "workflow-source",
     "source-to-packet-rename", "push-full", "manual-full",
 ])
-def test_source_ast_selector_omits_only_closed_packet_inputs(tmp_path, event, paths, expected):
+def test_source_ast_selector_omits_only_closed_packet_inputs(
+    tmp_path: Path, event: str, paths: list[str], expected: bool,
+) -> None:
     from promotion_unit_contract import ci_requires_units
 
     output = tmp_path / "outputs"
@@ -421,7 +443,7 @@ def test_source_ast_selector_omits_only_closed_packet_inputs(tmp_path, event, pa
     "tools/clean-room/scenarios/example/fixtures/worker.py",
     "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1",
 ])
-def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(tmp_path, path):
+def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(tmp_path: Path, path: str) -> None:
     from promotion_unit_contract import ci_requires_code_checks, ci_requires_source_ast_guards
 
     raw = (path + "\0").encode()
@@ -433,7 +455,7 @@ def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(tmp_path
     assert output.read_text() == "run=true\n"
 
 
-def test_daemon_checker_is_in_the_existing_required_source_guard_step():
+def test_daemon_checker_is_in_the_existing_required_source_guard_step() -> None:
     root = Path(__file__).resolve().parents[2]
     workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     scans = [
@@ -448,10 +470,10 @@ def test_daemon_checker_is_in_the_existing_required_source_guard_step():
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "encoding", "path"])
-def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path, failure):
+def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path: Path, failure: str) -> None:
     output = tmp_path / "outputs"
 
-    def read_diff(argv):
+    def read_diff(argv: list[str]) -> bytes:
         if failure == "unavailable":
             raise RuntimeError("pinned diff unavailable")
         return b"\xff\0" if failure == "encoding" else b"../outside\0"
@@ -461,7 +483,7 @@ def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path, failure
     assert not output.exists()
 
 
-def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(tmp_path):
+def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(tmp_path: Path) -> None:
     routing, ci = declarations()
     routing["on"] = {"pull_request_target": {"types": ["opened"]}}
     assert "unit-only CI must retire the self-hosted PR integration route" in validate(tmp_path, routing, ci)
@@ -473,7 +495,7 @@ def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(tmp_pa
     "python tools/run-plugin-tests.py example",
     "python tools/run-standalone-tests.py example",
 ])
-def test_generic_test_runners_cannot_hide_inside_an_operational_guard(tmp_path, command):
+def test_generic_test_runners_cannot_hide_inside_an_operational_guard(tmp_path: Path, command: str) -> None:
     routing, ci = declarations()
     ci["jobs"]["checks"]["steps"].append({"run": command})
     assert "unit-only CI must not invoke a generic or integration test runner" in validate(tmp_path, routing, ci)
@@ -484,13 +506,13 @@ def test_generic_test_runners_cannot_hide_inside_an_operational_guard(tmp_path, 
     {"if": "github.event_name == 'pull_request'"},
     {"if": "github.event_name != 'pull_request'"},
 ])
-def test_unit_selection_budget_and_outcome_cannot_be_weakened(tmp_path, change):
+def test_unit_selection_budget_and_outcome_cannot_be_weakened(tmp_path: Path, change: dict[str, Any]) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"].update(change)
-    assert "unit packet must have the reviewed independent hosted five-minute job" in validate(tmp_path, routing, ci)
+    assert "unit packet must have the reviewed independent hosted ten-minute job" in validate(tmp_path, routing, ci)
 
 
-def test_extra_jobs_and_conditioned_unit_execution_are_refused(tmp_path):
+def test_extra_jobs_and_conditioned_unit_execution_are_refused(tmp_path: Path) -> None:
     routing, ci = declarations()
     ci["jobs"]["full"] = {"runs-on": "ubuntu-latest", "steps": []}
     ci["jobs"]["unit-tests"]["steps"][1]["if"] = "false"
@@ -499,7 +521,7 @@ def test_extra_jobs_and_conditioned_unit_execution_are_refused(tmp_path):
     assert "unit-only CI must execute the exact admitted packet once" in errors
 
 
-def test_ungated_policy_guard_remains_mandatory(tmp_path):
+def test_ungated_policy_guard_remains_mandatory(tmp_path: Path) -> None:
     routing, ci = declarations()
     ci["jobs"]["checks"]["steps"][0]["continue-on-error"] = True
     assert "ci.yml must invoke the ungated trusted CI guard" in validate(tmp_path, routing, ci)
@@ -510,7 +532,9 @@ def test_ungated_policy_guard_remains_mandatory(tmp_path):
     {"run": "python tools/check-marketplace-isolation.py --strict"},
     {"continue-on-error": True},
 ])
-def test_report_only_inventory_remains_available_without_repeating_in_pr_ci(tmp_path, change):
+def test_report_only_inventory_remains_available_without_repeating_in_pr_ci(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     next(step for step in ci["jobs"]["checks"]["steps"] if step.get("name") == "Marketplace isolation inventory (report-only)").update(change)
     assert "report-only inventory must remain on non-PR CI without becoming a strict PR gate" in validate(tmp_path, routing, ci)
@@ -520,22 +544,26 @@ def test_report_only_inventory_remains_available_without_repeating_in_pr_ci(tmp_
     {"needs": "checks"},
     {"outputs": {"run": "false", "result": "success"}},
 ])
-def test_combined_units_cannot_serialize_behind_guards_or_fabricate_outcomes(tmp_path, change):
+def test_combined_units_cannot_serialize_behind_guards_or_fabricate_outcomes(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"].update(change)
-    assert "unit packet must have the reviewed independent hosted five-minute job" in validate(tmp_path, routing, ci)
+    assert "unit packet must have the reviewed independent hosted ten-minute job" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("change", [
     {"if": "false"}, {"continue-on-error": True}, {"run": "print('skip')"},
 ])
-def test_combined_impact_admission_cannot_be_skipped_or_ignored(tmp_path, change):
+def test_combined_impact_admission_cannot_be_skipped_or_ignored(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"]["steps"][0].update(change)
     assert "combined units must resolve impact before conditional execution" in validate(tmp_path, routing, ci)
 
 
-def test_combined_units_require_impact_before_execution(tmp_path):
+def test_combined_units_require_impact_before_execution(tmp_path: Path) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"]["steps"].reverse()
     assert "unit-only CI must execute the exact admitted packet once" in validate(tmp_path, routing, ci)
@@ -546,27 +574,31 @@ def test_combined_units_require_impact_before_execution(tmp_path):
     {"continue-on-error": True},
     {"steps": [{"run": "echo success"}]},
 ])
-def test_required_aggregate_cannot_omit_guards_or_accept_unverified_success(tmp_path, change):
+def test_required_aggregate_cannot_omit_guards_or_accept_unverified_success(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["pr-gate"].update(change)
     assert "unit aggregate must require successful guards and the actual selected outcome" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("name", ["PR gate (required check)", "Non-PR CI summary"])
-def test_required_context_cannot_be_published_for_nonpr_events_or_removed_from_prs(tmp_path, name):
+def test_required_context_cannot_be_published_for_nonpr_events_or_removed_from_prs(
+    tmp_path: Path, name: str,
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["pr-gate"]["name"] = name
     assert "only PR events may publish the required PR check context" in validate(tmp_path, routing, ci)
 
 
-def execute_gate(tmp_path, results, *, attempt="1"):
+def execute_gate(tmp_path: Path, results: dict[str, Any], *, attempt: str = "1") -> None:
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
     fake_os = SimpleNamespace(environ={
         "RESULTS": json.dumps(results), "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": attempt,
     })
 
-    def imports(name, *args, **kwargs):
+    def imports(name: str, *args: Any, **kwargs: Any) -> Any:
         return fake_os if name == "os" else builtins.__import__(name, *args, **kwargs)
 
     body = "\n".join(GUARD.UNIT_GATE_SCRIPT.splitlines()[1:-1])
@@ -576,7 +608,9 @@ def execute_gate(tmp_path, results, *, attempt="1"):
 
 
 @pytest.mark.parametrize("selected,outcome", [("true", "success"), ("false", "skipped")])
-def test_actual_aggregate_accepts_only_selected_success_or_explicit_skip(tmp_path, selected, outcome):
+def test_actual_aggregate_accepts_only_selected_success_or_explicit_skip(
+    tmp_path: Path, selected: str, outcome: str,
+) -> None:
     outputs = {"run": selected, "result": outcome}
     if selected == "true":
         outputs.update(mode="executed", origin_run="100", origin_attempt="1", packet_sha256="a" * 64)
@@ -586,7 +620,7 @@ def test_actual_aggregate_accepts_only_selected_success_or_explicit_skip(tmp_pat
     })
 
 
-def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_execution(tmp_path):
+def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_execution(tmp_path: Path) -> None:
     execute_gate(tmp_path, {
         "checks": {"result": "success"},
         "unit-tests": {"result": "success", "outputs": {
@@ -596,7 +630,7 @@ def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_exec
     })
 
 
-def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns(tmp_path):
+def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns(tmp_path: Path) -> None:
     execute_gate(tmp_path, {
         "checks": {"result": "success"},
         "unit-tests": {"result": "success", "outputs": {
@@ -613,7 +647,9 @@ def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reru
     {"origin_attempt": "01"}, {"origin_run": "-1"}, {"origin_run": True},
     {"result": "skipped"},
 ])
-def test_actual_aggregate_refuses_unverified_or_mislabelled_reuse(tmp_path, change):
+def test_actual_aggregate_refuses_unverified_or_mislabelled_reuse(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     outputs = {
         "run": "true", "result": "success", "mode": "executed",
         "origin_run": "100", "origin_attempt": "1", "packet_sha256": "a" * 64,
@@ -631,7 +667,9 @@ def test_actual_aggregate_refuses_unverified_or_mislabelled_reuse(tmp_path, chan
     {"continue-on-error": True}, {"uses": "actions/upload-artifact@v3"},
     {"with": {"name": "invented", "path": "/unverified"}},
 ])
-def test_verified_reuse_cannot_be_reuploaded_as_fresh_execution(tmp_path, change):
+def test_verified_reuse_cannot_be_reuploaded_as_fresh_execution(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"]["steps"][2].update(change)
     assert "only freshly executed units may publish exact-input reuse evidence" in validate(tmp_path, routing, ci)
@@ -642,7 +680,9 @@ def test_verified_reuse_cannot_be_reuploaded_as_fresh_execution(tmp_path, change
     {"run": "false", "result": "success"}, {"run": "true", "result": "skipped"},
     {"run": "true", "result": "failure"}, {"run": "true", "result": "cancelled"},
 ])
-def test_actual_aggregate_rejects_missing_invalid_or_mismatched_unit_outcomes(tmp_path, outputs):
+def test_actual_aggregate_rejects_missing_invalid_or_mismatched_unit_outcomes(
+    tmp_path: Path, outputs: dict[str, Any],
+) -> None:
     with pytest.raises(RuntimeError):
         execute_gate(tmp_path, {
             "checks": {"result": "success"},
@@ -652,8 +692,10 @@ def test_actual_aggregate_rejects_missing_invalid_or_mismatched_unit_outcomes(tm
 
 @pytest.mark.parametrize("job", ["checks", "unit-tests"])
 @pytest.mark.parametrize("outcome", ["failure", "cancelled", "skipped"])
-def test_actual_aggregate_rejects_unsuccessful_upstream_jobs(tmp_path, job, outcome):
-    results = {
+def test_actual_aggregate_rejects_unsuccessful_upstream_jobs(
+    tmp_path: Path, job: str, outcome: str,
+) -> None:
+    results: dict[str, Any] = {
         "checks": {"result": "success"},
         "unit-tests": {"result": "success", "outputs": {"run": "true", "result": "success"}},
     }

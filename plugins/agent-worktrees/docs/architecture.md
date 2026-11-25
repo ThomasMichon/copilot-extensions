@@ -1007,6 +1007,17 @@ Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
 
+Seed preparation and invocation refusals also append a best-effort
+`launch_seed_failed` activity event with a fixed reason code, known exit code,
+available attempt/operation correlation and exception type or OS error numbers.
+Prompt text, argv, environment values and exception messages are not retained
+in these diagnostics. This survives a closing pane without changing the
+execution-receipt schema or granting retry authority. A headed-core preparation
+error after a seed claim records `unknown` on the original execution and leaves
+the handoff retained; it never restores or resubmits that prompt.
+Failed callbacks retain validated caller-supplied correlation even when no
+execution can be reconstructed; invalid operation identities are omitted.
+
 The provider also advertises `backend_process_receipts` with `direct-v1` and
 `headed-native-child-v1`. The additive headed spawn callback accepts
 `--headed-state-file` and `--headed-session-id`, with the original private
@@ -2041,7 +2052,7 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   `claims sweep`; finalize never auto-reclaims creator ownership. A
   `finalize --abandon --handoff-to <recipient-or-flow>` re-homes
   still-unsettled obligations to a durable **orphanage** (not dropped);
-  selective `claims cleanup <ref-or-source-worktree>` accepts/reclaims them.
+  selective `claims cleanup --worktree-id <source-worktree>` or `claims cleanup --claim-ref <ref>` accepts/reclaims them.
   Cleanup qualifies the actual receiving project/source record and its unique
   released claim before a destructive callback; the source must be finalized or archived,
   locally proven and free of a pending claim handoff. This also covers a retained
