@@ -24,6 +24,9 @@ do not establish lower wall/CPU cost. Watchdog limits are not latency budgets.
 Required decisions remain conservative when evidence is unavailable;
 dropping optional diagnostics never changes an admission result.
 
+Plugin hooks have fixed budgets and structural rules in
+[hook architecture](hook-architecture.md).
+
 ## Measurement boundaries
 
 Keep the existing Picker budgets: first interactive frame under two seconds,
