@@ -883,10 +883,10 @@ _create_runtime_venv() (
     _dispatch_uv_venv() {
         invoke_uv_bootstrap_environment "$UV_CMD" "$@"
     }
-    # Runtime 3.10 is independent of the installer's prepared 3.11 helper.
+    # Runtime 3.11 is selected independently of the installer's prepared helper.
     # The versioned construction owner, not new_signed_venv, owns slot cleanup.
     invoke_uv_venv_resilient _dispatch_uv_venv "$VENV_DIR" \
-        --python 3.10 --managed-python --no-project --allow-existing
+        --python 3.11 --managed-python --no-project --allow-existing
 )
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
@@ -1131,7 +1131,7 @@ _ensure_runtime() {
     _versioned_slot_clean || return 1
     if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
     if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
-        _step 'Creating venv via uv-managed Python 3.10...'
+        _step 'Creating venv via uv-managed Python 3.11...'
         _versioned_slot_clean || return 1
         _create_runtime_venv || return $?
         [[ -x "$VENV_PYTHON" && -f "$VENV_DIR/pyvenv.cfg" ]] || { _fail "Venv creation failed -- missing Python or pyvenv.cfg at $VENV_DIR"; exit 1; }

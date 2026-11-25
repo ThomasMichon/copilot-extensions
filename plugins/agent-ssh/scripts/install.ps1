@@ -1232,7 +1232,7 @@ if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     Invoke-VersionedSlotClean
     if ($uvPath) {
-        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
+        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.11' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
             Write-Step 'uv/signed-Python venv creation failed -- falling back to system python -m venv'
             $fallback = Invoke-NativeCapture { & $pythonCmd -m venv $VenvDir }
             if ($fallback.ExitCode -ne 0) {

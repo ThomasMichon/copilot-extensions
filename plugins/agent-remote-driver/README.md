@@ -585,8 +585,12 @@ directory this process can create and write to.
   invokes the supplied join once, then publishes discovery and forwards events
   under the hot-potato discipline. The join operation can return Core's already
   joined registration/delivery connector instead of resuming the SDK again.
-  Existing launches still use their independent Driver and Bridge entrypoints;
-  this composition seam does not select or retire an extension.
+  Existing launches still use their independent Driver and Bridge entrypoints.
+  An explicitly selected portable `driver-native-v1` launch instead uses the
+  Core's staged connector and common headed adapter; this floor facade validates
+  its original support root and remains passive without creating another SDK
+  client, listener or service ensure. The optional portable preference defaults
+  off and does not retire installed extensions.
 - [`extensions/agent-remote-driver/driver-server.mjs`](extensions/agent-remote-driver/driver-server.mjs) --
   the dependency-free HTTP server (health/events/send/steer/abort, with a
   bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly

@@ -14,7 +14,7 @@ version = "0.1.2-dev1"
 description = "By-convention YAML config schema versioning + scripted migration for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

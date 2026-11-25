@@ -2005,7 +2005,7 @@ function New-DispatchRuntimeVenv {
     }
     $signedBase = $BasePython
     if (-not $signedBase) {
-        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.10'
+        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.11'
     }
     if ($signedBase) {
         $diagnostic = ''
@@ -2021,9 +2021,9 @@ function New-DispatchRuntimeVenv {
     }
     # The versioned construction owner retains partial-slot cleanup and receipts.
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
-        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+        -Arguments @('--python', '3.11', '--managed-python', '--no-project', '--allow-existing')
     if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-        throw "Managed Python 3.10 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
+        throw "Managed Python 3.11 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
     }
 }
 
@@ -2110,7 +2110,7 @@ function Install-Runtime {
         throw 'uv is required for Dispatch runtime construction and dependency installation'
     }
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-        Write-Step 'Creating venv with the selected base or uv-managed Python 3.10...'
+        Write-Step 'Creating venv with the selected base or uv-managed Python 3.11...'
         New-DispatchRuntimeVenv -UvCommand $UvCommand -BasePython $selectedBasePython
         if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
             Write-Fail "Venv creation failed validation at $VenvDir"

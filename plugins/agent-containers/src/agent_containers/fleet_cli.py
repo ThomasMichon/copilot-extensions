@@ -34,7 +34,7 @@ def _print_sizing(config: ContainersConfig, containers: list[DockerContainerInfo
 
 def cmd_fleet(args: argparse.Namespace, config: ContainersConfig) -> int:
     """List fleet members and leases (``fleet [--json]``)."""
-    from . import picker
+    from . import picker, runtime_drivers
     from .lease import deploy_hold_status, get_lease
     from .lifecycle import inspect_container, list_containers, restricted_policy_errors
     from .rescue import latest_rescue_status
@@ -89,6 +89,15 @@ def cmd_fleet(args: argparse.Namespace, config: ContainersConfig) -> int:
                 )
             if actual_profile == RESTRICTED_PROFILE:
                 forward, relay = False, False
+            runtime_identity = None
+            if c.driver:
+                try:
+                    identity = runtime_drivers.runtime_identity(runtime_drivers.route_handle(c))
+                    if identity.startswith("driver:"):
+                        runtime_identity = identity
+                except RuntimeError:
+                    # Ambiguous routes must not supply a staging selector.
+                    pass
             out.append({
                 "name": c.name,
                 "container_id": c.container_id,
@@ -98,6 +107,7 @@ def cmd_fleet(args: argparse.Namespace, config: ContainersConfig) -> int:
                 "fleet": c.fleet,
                 "fleet_source": config.fleet_source(c.fleet),
                 "driver": c.driver,
+                "runtime_identity": runtime_identity,
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
                 "lifecycle_hold": hold_status,

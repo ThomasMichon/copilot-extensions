@@ -8,7 +8,7 @@ version = "0.1.8-dev1"
 description = "Optional bounded diagnostic emission through existing callable sinks"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = ["agent-configuration-layers"]
 
 [project.optional-dependencies]

@@ -93,8 +93,11 @@ def test_selected_extensions_and_canonical_pane_shell_survive_materialization(
             if name.startswith("plugins/agent-remote-driver/"):
                 relative = name.removeprefix("plugins/agent-remote-driver/")
                 original = (
-                    root / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs"
-                    if relative == "extensions/agent-remote-driver/sdk-compat.mjs" else standalone / relative
+                    root / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension" / Path(relative).name
+                    if relative in {
+                        "extensions/agent-remote-driver/sdk-compat.mjs",
+                        "extensions/agent-remote-driver/native-connector.mjs",
+                    } else standalone / relative
                 )
                 assert archive.read(name) == original.read_bytes()
         metadata = json.loads(archive.read("plugins/agent-bridge/plugin.json"))

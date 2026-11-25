@@ -12,6 +12,7 @@ import subprocess
 import sys
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any
 
 sys.dont_write_bytecode = True
 PAYLOAD = Path(__file__).resolve().parent.parent
@@ -34,37 +35,41 @@ MUTATIONS = {
 }
 
 
-def foundation():
-    path = PAYLOAD / "src" / "agent_pull_requests" / "_installation_context.py"
-    spec = importlib.util.spec_from_file_location("apr_installer_context", path)
+def _load(name: str, path: Path, *, register: bool) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Installer module is unavailable: {path}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
+    if register:
+        sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def process_helpers():
+def foundation() -> Any:
+    path = PAYLOAD / "src" / "agent_pull_requests" / "_installation_context.py"
+    return _load("apr_installer_context", path, register=True)
+
+
+def process_helpers() -> Any:
     library = PAYLOAD / "libs" / "agent-procutil"
     if not library.is_dir():
         library = PAYLOAD.parent.parent / "libs" / "agent-procutil"
     path = library / "src" / "agent_procutil" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("apr_installer_procutil", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return _load("apr_installer_procutil", path, register=True)
 
 
-def prepare_snapshot(api, common, version):
-    spec = importlib.util.spec_from_file_location(
-        "apr_snapshot_producer", PAYLOAD / "scripts" / "cell_snapshot.py",
+def prepare_snapshot(api: Any, common: dict[str, Any], version: str) -> Any:
+    producer = _load(
+        "apr_snapshot_producer", PAYLOAD / "scripts" / "cell_snapshot.py", register=False,
     )
-    producer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(producer)
     return producer.prepare(payload=PAYLOAD, version=version, api=api, common=common)
 
 
-def run(command, *, environment=None, cwd=None):
+def run(
+    command: list[str], *, environment: dict[str, str] | None = None,
+    cwd: str | Path | None = None,
+) -> str:
     helpers = process_helpers()
     process, job = helpers.spawn_sync_in_kill_on_close_job(
         command, require_job=os.name == "nt", env=environment, cwd=cwd,
@@ -77,7 +82,7 @@ def run(command, *, environment=None, cwd=None):
     except subprocess.TimeoutExpired:
         if job is not None:
             job.terminate_and_wait(5)
-        elif process.poll() is None:
+        elif sys.platform != "win32" and process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.communicate(timeout=5)
         raise
@@ -94,10 +99,10 @@ def run(command, *, environment=None, cwd=None):
         )
     if output:
         print(output.rstrip(), file=sys.stderr)
-    return output
+    return str(output)
 
 
-def validate_build_snapshot(snapshot: Path):
+def validate_build_snapshot(snapshot: Path) -> Path:
     for library in LIBRARIES:
         if not (snapshot / "libs" / library / "pyproject.toml").is_file():
             raise ValueError(
@@ -114,7 +119,7 @@ def validate_build_snapshot(snapshot: Path):
     return engine
 
 
-def build(slot: Path, snapshot: Path, payload_version: str):
+def build(slot: Path, snapshot: Path, payload_version: str) -> None:
     """Build a disposable copy, never run a backend against immutable snapshot bytes."""
     engine = validate_build_snapshot(snapshot)
 
@@ -183,7 +188,7 @@ _fail() { _step "$@"; }
 . "$APR_CELL_ENGINE"
 uv="$(ensure_uv "$APR_CELL_SLOT" tool 0)" ||
     { _fail 'Cell provisioning requires an existing working uv'; exit 1; }
-new_signed_venv "$uv" "$APR_CELL_SLOT" 3.10
+new_signed_venv "$uv" "$APR_CELL_SLOT" 3.11
 packages=()
 for name in agent-procutil single-instance-lease work-coalescing-singleton zdd update-driver pr-filters; do
     packages+=("$APR_CELL_SOURCE/libs/$name")
@@ -209,7 +214,7 @@ invoke_uv_pip_install_resilient "$uv" --python "$APR_CELL_SLOT/bin/python" \
             child.unlink()
 
 
-def activate(command):
+def activate(command: list[str]) -> dict[str, Any]:
     # This controller owns its bounded, journaled cutover and graceful child
     # custody. A construction Job would kill its committed successor in
     # contained tests. Keep the caller's outer containment, not a second Job.
@@ -230,7 +235,7 @@ def activate(command):
     return result
 
 
-def parse(argv=None):
+def parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=(
         *METADATA, "snapshot-prepare", "install", "update", "provision", "status", "broker-remove",
@@ -257,7 +262,7 @@ def parse(argv=None):
     return args
 
 
-def management_version():
+def management_version() -> str:
     version_match = re.search(
         r'(?m)^version\s*=\s*"([^"]+)"', (PAYLOAD / "pyproject.toml").read_text("utf-8"),
     )
@@ -269,7 +274,7 @@ def management_version():
     return version
 
 
-def bind_admission(args, api):
+def bind_admission(args: argparse.Namespace, api: Any) -> Any:
     validated = api.validate_context_receipt(
         args.context, args.durable_home or Path(args.context).parents[4],
         expected_marketplace_id=args.expected_marketplace_id, expected_plugin_id=PLUGIN,
@@ -287,7 +292,7 @@ def bind_admission(args, api):
     return validated
 
 
-def driver_entry(args, api):
+def driver_entry(args: argparse.Namespace, api: Any) -> tuple[bool, int]:
     """Join the existing execution owner before any cell mutation/publication."""
     validated = bind_admission(args, api)
     path = PAYLOAD / "scripts" / "installer_driver.py"
@@ -319,7 +324,7 @@ def driver_entry(args, api):
     return participant, code
 
 
-def runtime_helpers(snapshot):
+def runtime_helpers(snapshot: Path) -> Any:
     validate_build_snapshot(snapshot)
     path = snapshot / "scripts" / "versioned_runtime.py"
     spec = importlib.util.spec_from_file_location("apr_cell_runtime", path)
@@ -333,7 +338,7 @@ def runtime_helpers(snapshot):
     return runtime
 
 
-def remove_legacy_broker(installation_root):
+def remove_legacy_broker(installation_root: Path) -> None:
     if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
         raise ValueError("Native cell broker removal is unavailable")
     from update_driver.windows_broker import remove
@@ -341,7 +346,7 @@ def remove_legacy_broker(installation_root):
     remove(installation_root)
 
 
-def execute(args, api):
+def execute(args: argparse.Namespace, api: Any) -> Any:
     version = management_version()
     common = {
         "context": args.context,
@@ -450,7 +455,7 @@ def execute(args, api):
         ])
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     args = parse(argv)
     os.chdir(Path.home())
     try:

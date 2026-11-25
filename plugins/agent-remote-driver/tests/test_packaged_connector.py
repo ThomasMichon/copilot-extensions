@@ -33,15 +33,13 @@ def test_sdist_builds_complete_connector_wheel_without_checkout(tmp_path: Path) 
     canonical = project.parents[1] / "libs/versioned-runtime/standalone_build.py"
     canonical.parent.mkdir(parents=True)
     shutil.copyfile(helper, canonical)
-    compatibility = (
-        project.parents[1]
-        / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs"
-    )
-    compatibility.parent.mkdir(parents=True)
-    shutil.copyfile(
-        ROOT / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs",
-        compatibility,
-    )
+    compatibility = project.parents[1] / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension"
+    compatibility.mkdir(parents=True)
+    for name in ("sdk-compat.mjs", "native-connector.mjs"):
+        shutil.copyfile(
+            ROOT / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension" / name,
+            compatibility / name,
+        )
     output = tmp_path / "artifacts"
     output.mkdir()
     deadline = time.monotonic() + 60

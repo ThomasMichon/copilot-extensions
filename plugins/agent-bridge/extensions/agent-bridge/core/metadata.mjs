@@ -141,12 +141,19 @@ export async function readSessionBinding(sessionId, { env = process.env } = {}) 
 // absent/partial value and self-corrects on the next heartbeat.
 export async function resolveMetadataAsync({
   cwd = process.cwd(), env = process.env, sessionId = null, timeoutMs = METADATA_CLI_TIMEOUT_MS,
-  machineResolver = resolveMachineAsync, extensionPluginRoot,
+  machineResolver = resolveMachineAsync, extensionPluginRoot, nativeConnector,
 } = {}) {
   if (env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT) {
     const root = env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
+    const executingRoot = nativeConnector?.connectorPluginRoot ?? root;
     if (!isAbsolute(root) || typeof extensionPluginRoot !== "string"
-        || !isAbsolute(extensionPluginRoot) || realpathSync(root) !== realpathSync(extensionPluginRoot)
+        || !isAbsolute(extensionPluginRoot) || typeof executingRoot !== "string"
+        || !isAbsolute(executingRoot) || realpathSync(executingRoot) !== realpathSync(extensionPluginRoot)
+        || nativeConnector !== undefined && (
+          nativeConnector.bridgePluginRoot !== root || nativeConnector.cwd !== cwd
+          || nativeConnector.sessionId !== env.AGENT_BRIDGE_NATIVE_SESSION_ID
+          || nativeConnector.scopeId !== env.AGENT_BRIDGE_SCOPE_ID
+        )
         || !env.AGENT_BRIDGE_SCOPE_ID
         || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(env.AGENT_BRIDGE_NATIVE_SESSION_ID || "")) {
       throw new Error("Portable receiving metadata differs from its selected launch");

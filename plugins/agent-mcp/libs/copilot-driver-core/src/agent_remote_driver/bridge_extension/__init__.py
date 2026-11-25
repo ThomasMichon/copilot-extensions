@@ -10,6 +10,7 @@ ASSET_NAMES = (
     "extension.mjs",
     "machine-context.mjs",
     "metadata.mjs",
+    "native-connector.mjs",
     "plugin-readiness.mjs",
     "questions.mjs",
     "remote-driver.mjs",

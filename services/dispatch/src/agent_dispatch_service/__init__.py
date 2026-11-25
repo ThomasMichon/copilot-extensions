@@ -9,4 +9,4 @@ lives in the `agent_dispatch` package itself; nothing is reimplemented here.
 
 from __future__ import annotations
 
-__version__ = "0.1.8-dev1"
+__version__ = "0.1.9-dev1"

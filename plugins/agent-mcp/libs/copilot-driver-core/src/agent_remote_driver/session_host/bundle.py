@@ -32,6 +32,8 @@ _DRIVER_MODULES = (
     "headed/recovery.py",
     "headed/recovery_codec.py",
     "headed/extension.mjs",
+    "headed/connection.mjs",
+    "headed/connector-extension.mjs",
     "headed/acp-adapter.mjs",
     "headed/host-client.mjs",
     "session_host/__init__.py",
