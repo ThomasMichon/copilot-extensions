@@ -728,7 +728,7 @@ _ensure_runtime() {
 
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _versioned_slot_clean || return 1
-        if ! new_signed_venv "$uv_cmd" "$VENV_DIR" "3.10"; then
+        if ! new_signed_venv "$uv_cmd" "$VENV_DIR" "3.11"; then
             _fail "Failed to create venv at $VENV_DIR"
             exit 1
         fi

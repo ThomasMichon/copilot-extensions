@@ -1319,7 +1319,7 @@ install_package() {
 
   if [[ ! -x "${VENV}/bin/python" || ! -f "${VENV}/pyvenv.cfg" ]]; then
     _versioned_slot_clean || return 1
-    if ! new_signed_venv "${UV_CMD}" "${VENV}" "3.10"; then
+    if ! new_signed_venv "${UV_CMD}" "${VENV}" "3.11"; then
       printf 'ERROR: Failed to create venv at %s\n' "${VENV}" >&2
       exit 1
     fi

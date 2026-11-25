@@ -183,7 +183,7 @@ _fail() { _step "$@"; }
 . "$APR_CELL_ENGINE"
 uv="$(ensure_uv "$APR_CELL_SLOT" tool 0)" ||
     { _fail 'Cell provisioning requires an existing working uv'; exit 1; }
-new_signed_venv "$uv" "$APR_CELL_SLOT" 3.10
+new_signed_venv "$uv" "$APR_CELL_SLOT" 3.11
 packages=()
 for name in agent-procutil single-instance-lease work-coalescing-singleton zdd update-driver pr-filters; do
     packages+=("$APR_CELL_SOURCE/libs/$name")
