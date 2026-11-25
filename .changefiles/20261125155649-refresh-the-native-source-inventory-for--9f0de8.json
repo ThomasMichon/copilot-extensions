@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the native source inventory for shared process-launch regression coverage",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}
