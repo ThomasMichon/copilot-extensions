@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
-from ..container_fleet_context import container_fleet_context
+from ..container_fleet_context import container_fleet_context, retain_fleet_context
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -642,6 +642,7 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request) ->
                     activate=req.worktree_writer is None and req.dispatch_origin is None,
                     **({"allow_elevation": False} if req.dispatch_origin is not None else {}),
                 )
+                target = retain_fleet_context(agent_name, target)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:

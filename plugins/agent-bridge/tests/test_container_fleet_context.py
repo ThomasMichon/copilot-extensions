@@ -2,13 +2,16 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 
 from agent_bridge import __main__ as cli
 from agent_bridge import session_lifecycle_cli
 from agent_bridge.agent_registry_namespace import CliNamespaceResolver
-from agent_bridge.container_fleet_context import container_fleet_context
+from agent_bridge.container_fleet_context import container_fleet_context, provider_arguments, retain_fleet_context
+from agent_bridge.session_manager import ProviderTargetRefreshError, Session, SessionManager
+from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY, SpawnTarget
 from agent_bridge.session_start_models import StartSessionRequest
 from agent_bridge.session_start_cli import _prepare_sender_preference
 
@@ -63,3 +66,45 @@ async def test_container_provider_gets_adopted_checkout_and_refuses_rollback(
     executable.write_text("import json,sys; print(json.dumps(sys.argv[1:]))")
     result = await provider._run(command)
     assert result and json.loads(result[1]) == command
+
+
+@pytest.mark.asyncio
+async def test_cold_refresh_keeps_checkout_but_replaces_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_manager: SessionManager,
+) -> None:
+    checkout = tmp_path / "controller"
+    (checkout / ".git").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    agent = "container:one"
+    request = StartSessionRequest(agent=agent, sender_repo="controller")
+    target = SpawnTarget(type="command", cwd="/guest/workspace", spawn_command=["historical"],
+                         venue={"kind": "container", REQUEST_OVERRIDES_KEY: {"env": {}, "copilot_args": []}})
+    monkeypatch.setattr(session_lifecycle_cli, "_agent_worktrees_launch_prefix", lambda: ["owner"])
+    with patch("agent_bridge.provider_process.run_captured", return_value=SimpleNamespace(
+        returncode=0, stdout=str(checkout),
+    )):
+        async with container_fleet_context(agent, request):
+            target = retain_fleet_context(agent, target)
+    session = Session("cold-fleet", "example", SpawnTarget.from_json(target.to_json()), agent)
+    calls = []
+
+    async def resolve(name: str) -> SpawnTarget:
+        assert name == agent
+        args = await provider_arguments(["current"], "container", ["namespace-resolve", "one"])
+        calls.append(args)
+        return SpawnTarget(type="command", spawn_command=["current", *args], venue={"kind": "container"})
+
+    resolver = Mock()
+    resolver.resolve_async = resolve
+    session_manager.set_resolver(resolver)
+    with patch("agent_bridge.provider_process.run_captured", return_value=SimpleNamespace(
+        returncode=0, stdout="  --fleet-repository PATH",
+    )):
+        await session_manager._refresh_provider_target(session)
+    assert calls == [["--fleet-repository", str(checkout), "namespace-resolve", "one"]]
+    assert session.target.spawn_command == ["current", *calls[0]]
+    assert session.target.cwd == "/guest/workspace" and Path.cwd() == tmp_path
+    (checkout / ".git").rmdir()
+    with pytest.raises(ProviderTargetRefreshError):
+        await session_manager._refresh_provider_target(session)
+    assert len(calls) == 1

@@ -2,17 +2,20 @@
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from pathlib import Path
 from subprocess import SubprocessError
 
 from .session_start_models import StartSessionRequest
+from .spawn_target import REQUEST_OVERRIDES_KEY, SpawnTarget
 
 
 _repository: ContextVar[str | None] = ContextVar("container_fleet_repository", default=None)
 _qualified: ContextVar[tuple[str, ...] | None] = ContextVar("container_fleet_command", default=None)
+_FLEET_ROOT = "container_fleet_repository"
 
 
 def is_container_target(agent: str) -> bool:
@@ -48,6 +51,28 @@ def check_provider_arguments(arguments: list[str], returncode: int, stderr: str)
         raise RuntimeError(stderr.strip() or "Containers exited with status 2")
 
 
+def retain_fleet_context(agent: str, target: SpawnTarget) -> SpawnTarget:
+    if not is_container_target(agent):
+        return target
+    venue = target.venue or {}
+    return replace(target, venue={**venue, REQUEST_OVERRIDES_KEY: {
+        **venue.get(REQUEST_OVERRIDES_KEY, {}), _FLEET_ROOT: _repository.get(),
+    }})
+
+
+@contextmanager
+def restore_fleet_context(agent: str, target: SpawnTarget) -> Iterator[None]:
+    overrides = (target.venue or {}).get(REQUEST_OVERRIDES_KEY, {})
+    root = overrides.get(_FLEET_ROOT) if is_container_target(agent) else None
+    if root is not None:
+        if not isinstance(root, str) or not Path(root).is_absolute() or not (Path(root) / ".git").exists():
+            raise RuntimeError("Retained container fleet checkout is unavailable")
+    elif is_container_target(agent) and "--fleet-repository" in (target.spawn_command or []):
+        raise RuntimeError("Scoped container target lacks its retained fleet checkout; recreate the session")
+    with _fleet_scope(root):
+        yield
+
+
 @asynccontextmanager
 async def container_fleet_context(agent: str, request: StartSessionRequest) -> AsyncIterator[None]:
     root = None
@@ -78,6 +103,12 @@ async def container_fleet_context(agent: str, request: StartSessionRequest) -> A
                 if result.returncode or not path.is_absolute() or not (path / ".git").exists():
                     raise RuntimeError("Cannot establish the container fleet repository")
                 root = str(path)
+    with _fleet_scope(root):
+        yield
+
+
+@contextmanager
+def _fleet_scope(root: str | None) -> Iterator[None]:
     token = _repository.set(root)
     qualified = _qualified.set(None)
     try:
