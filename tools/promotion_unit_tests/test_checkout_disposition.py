@@ -21,6 +21,7 @@ class Observation:
     agenda: bool = False
     empty: bool = False
     qualified: bool = True
+    disposable: bool = False
     result: subprocess.CompletedProcess[str] | Exception = field(
         default_factory=lambda: subprocess.CompletedProcess(["git"], 0, "", ""),
     )
@@ -72,6 +73,8 @@ def api(monkeypatch: pytest.MonkeyPatch, source_code: CodeType) -> tuple[ModuleT
     package.__path__ = []
     identity = ModuleType(package.__name__ + ".git_repository_environment")
     vars(identity)["repository_identity_env"] = lambda: {"selected-repository": "fixture"}
+    reclaim = ModuleType(package.__name__ + ".venv_reclaim")
+    vars(reclaim)["only_disposable_content"] = lambda _root: state.disposable
     process_package = ModuleType("agent_procutil")
     process_package.__path__ = []
     process = ModuleType("agent_procutil.owned_process")
@@ -83,23 +86,24 @@ def api(monkeypatch: pytest.MonkeyPatch, source_code: CodeType) -> tuple[ModuleT
     module = ModuleType(package.__name__ + ".checkout_data")
     module.__package__ = package.__name__
     module.__file__ = str(SOURCE)
-    for imported in (package, identity, process_package, process, resolver_package, resolver, module):
+    for imported in (package, identity, reclaim, process_package, process, resolver_package, resolver, module):
         monkeypatch.setitem(sys.modules, imported.__name__, imported)
     exec(source_code, module.__dict__)
     monkeypatch.setattr(module, "Path", View)
     return module, state
 
 
-@pytest.mark.parametrize("kind", ["agenda", "empty", "unqualified"])
+@pytest.mark.parametrize("kind", ["agenda", "empty", "unqualified", "disposable"])
 def test_known_history_or_unqualified_source_never_queries(
     api: tuple[ModuleType, Observation], kind: str,
 ) -> None:
     module, state = api
     state.agenda = kind == "agenda"
     state.empty = kind == "empty"
-    state.qualified = kind != "unqualified"
+    state.qualified = kind not in {"unqualified", "disposable"}
+    state.disposable = kind == "disposable"
     reason = module.preservation_reason("checkout")
-    assert (reason is None) is (kind == "empty")
+    assert (reason is None) is (kind in {"empty", "disposable"})
     assert state.calls == []
 
 

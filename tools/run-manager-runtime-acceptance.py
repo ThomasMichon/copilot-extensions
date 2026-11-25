@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any
 
 from _admission_protocol import acquire
 from plugin_test_containment import (
@@ -55,7 +56,7 @@ def _runtime_group(python: Path, sandbox: Path) -> int:
         "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
     ]
     selection = " or ".join(RUNTIME_INPUT_CONTROLS)
-    streams = {"stdin": subprocess.DEVNULL, "stdout": sys.stdout, "stderr": sys.stderr}
+    streams: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": sys.stdout, "stderr": sys.stderr}
     print("Manager runtime: starting independent input controls and cold construction", flush=True)
     prepare = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
     children = []
@@ -91,7 +92,7 @@ def _runtime_group(python: Path, sandbox: Path) -> int:
             child.wait(timeout=5)
 
 
-def _installed_tty_complete(report: Path, expected: dict) -> bool:
+def _installed_tty_complete(report: Path, expected: dict[str, Any]) -> bool:
     """Admission is semantic, identity-bound and independent of process exit."""
     try:
         if (
@@ -102,8 +103,8 @@ def _installed_tty_complete(report: Path, expected: dict) -> bool:
             or getattr(report.stat(), "st_file_attributes", 0) & 0x400
         ):
             return False
-        def unique(pairs):
-            result = {}
+        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
             for key, value in pairs:
                 if key in result:
                     raise ValueError("duplicate receipt field")
@@ -175,12 +176,12 @@ def _installed_tty_complete(report: Path, expected: dict) -> bool:
         return False
 
 
-def _installed_tty_acceptance(root: Path, output: Path, identity: dict) -> int:
+def _installed_tty_acceptance(root: Path, output: Path, identity: dict[str, Any]) -> int:
     from agent_procutil.owned_budget import OwnedExecutionBudget
 
     started = time.monotonic()
     budget = OwnedExecutionBudget.from_timeout(720, cleanup_reserve=30)
-    evidence = {
+    evidence: dict[str, Any] = {
         "schema": INSTALLED_TTY_SCHEMA, "version": 1, "identity": identity,
         "platform": sys.platform, "complete": False, "errors": [],
         "whole_run_seconds": 720, "cleanup_reserve_seconds": 30,
@@ -328,8 +329,9 @@ def _application_adapter_acceptance(root: Path, venv_root: Path) -> int:
         evidence["error"] = f"{type(error).__name__}: {error}"
         result = 1
     finally:
-        evidence["elapsed_seconds"] = time.monotonic() - started
-        if evidence["elapsed_seconds"] > 300:
+        elapsed = time.monotonic() - started
+        evidence["elapsed_seconds"] = elapsed
+        if elapsed > 300:
             result, evidence["complete"] = 124, False
         evidence["returncode"] = result
         (root / "application-adapter-result.json").write_text(
@@ -345,7 +347,7 @@ def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) 
     runner.__globals__["VENV_ROOT"] = venv_root
     install = runner.__globals__["run_uv_install"]
 
-    def diagnostics(*args, **kwargs):
+    def diagnostics(*args: Any, **kwargs: Any) -> Any:
         try:
             return install(*args, **kwargs)
         except subprocess.CalledProcessError as error:
@@ -356,7 +358,7 @@ def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) 
     runner.__globals__["run_uv_install"] = diagnostics
     result = runner(["agent-worktrees", "--prepare-only"])
     if result:
-        return result
+        return int(result)
     python = venv_root / "agent-worktrees" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
@@ -397,12 +399,13 @@ def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) 
                 "UPDATE_DRIVER_TEST_PREPARED_RUNTIME": str(prepared),
             }.items():
                 previous = os.environ.get(key)
-                restored.callback(
-                    lambda key=key, previous=previous: (
-                        os.environ.pop(key, None) if previous is None
-                        else os.environ.__setitem__(key, previous)
-                    ),
-                )
+                def restore(key: str = key, previous: str | None = previous) -> None:
+                    if previous is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = previous
+
+                restored.callback(restore)
                 os.environ[key] = value
             result = runner([
                 "agent-worktrees", "--test-file", "tests/test_update_driver.py",
@@ -414,7 +417,7 @@ def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) 
             "worker_timeout": 20, "watchdog_timeout": 60,
             "cold_first_touch_proved": False,
         }, indent=2), encoding="utf-8")
-        return result
+        return int(result)
 
 
 def _provider_acceptance(root: Path) -> int:

@@ -20,8 +20,9 @@ import secrets
 import stat
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 TEST_VENV_ROOT_NAMES = (".test-venvs", ".test-runs")
 
@@ -219,7 +220,7 @@ def remove_tree(path: str | Path, *, deadline: float | None = None) -> bool:
     return True
 
 
-def clear_readonly_and_retry(func, path, _exc) -> None:
+def clear_readonly_and_retry(func: Callable[[str], object], path: str, _exc: object) -> None:
     """``shutil.rmtree`` error handler: clear the read-only bit and retry once."""
     try:
         os.chmod(path, stat.S_IWRITE)
@@ -248,7 +249,7 @@ def _under(path: str | Path, root: str | Path) -> bool:
     return child == parent or child.startswith(parent.rstrip(os.sep) + os.sep)
 
 
-def _holders(root: Path) -> tuple[list[dict], str | None]:
+def _holders(root: Path) -> tuple[list[dict[str, Any]], str | None]:
     """Processes running a venv interpreter under *root*, or a cwd-wide blocker."""
     from . import procs
 
@@ -291,7 +292,7 @@ def clean_test_venvs(
     min_age_secs: float = 0.0,
     deadline: float | None = None,
     roots: Iterable[Path] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Remove recognized test venvs in *checkout* that no live process uses.
 
     Returns a JSON-ready report. Unrecognized roots are reported and left in
@@ -299,7 +300,7 @@ def clean_test_venvs(
     left for a later pass.
     """
     base = Path(checkout)
-    report: dict = {"checkout": str(base), "dry_run": dry_run, "venvs": [], "roots": []}
+    report: dict[str, Any] = {"checkout": str(base), "dry_run": dry_run, "venvs": [], "roots": []}
     candidates = list(roots) if roots is not None else [base / name for name in TEST_VENV_ROOT_NAMES]
     for root in candidates:
         if not _is_real_dir(root):
@@ -365,7 +366,7 @@ def clean_test_venvs(
     return report
 
 
-def blocker(report: dict) -> str | None:
+def blocker(report: dict[str, Any]) -> str | None:
     """Summarize why recognized test venvs still remain, if any."""
     held = [v for v in report.get("venvs", []) if v.get("status") == "in_use"]
     held += [r for r in report.get("roots", []) if r.get("status") == "in_use"]

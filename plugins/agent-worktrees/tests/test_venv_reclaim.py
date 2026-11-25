@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import cleanup_gc_cli, output, venv_reclaim
+from agent_worktrees import cleanup_gc_cli, gc, output, venv_reclaim
 
 
 def _venv(path: Path) -> Path:
@@ -118,3 +118,20 @@ def test_clean_test_venvs_command_reports_json(
     data = payload.get("data", payload)
     assert data["removed"] == 1
     assert not (tmp_path / ".test-venvs").exists()
+
+def test_gc_orphan_holding_only_test_venvs_is_removable(tmp_path: Path) -> None:
+    d = tmp_path / "venvonly"
+    site = d / ".test-venvs" / "windows" / "agent-worktrees" / "Lib" / "site-packages"
+    site.mkdir(parents=True)
+    (site.parents[1] / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    (site / "pkg.py").write_text("x = 1\n", encoding="utf-8")
+    assert gc.classify_orphan(d, min_settle_secs=0).action == "remove"
+
+
+def test_gc_orphan_test_venv_root_with_reports_is_skipped(tmp_path: Path) -> None:
+    root = tmp_path / "venvreports" / ".test-venvs"
+    (root / "env").mkdir(parents=True)
+    (root / "env" / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    (root / "reports").mkdir()
+    (root / "reports" / "junit.xml").write_text("<testsuite/>", encoding="utf-8")
+    assert gc.classify_orphan(tmp_path / "venvreports", min_settle_secs=0).action == "skip"
