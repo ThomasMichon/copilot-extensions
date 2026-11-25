@@ -38,7 +38,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.5.405-dev2",
+      "version": "0.5.406-dev1",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.21.49-dev2",
+      "version": "0.21.50-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -110,7 +110,7 @@
     {
       "name": "copilot-extensions-maintainer",
       "description": "Opt-in contribution, review, release-triage and clean-room procedures for explicitly assigned copilot-extensions source work. Availability does not expand the operator's charter.",
-      "version": "0.1.2-dev1",
+      "version": "0.1.3-dev1",
       "source": "plugins/copilot-extensions-maintainer",
       "defaultEnabled": false
     },
