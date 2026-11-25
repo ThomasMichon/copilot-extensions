@@ -1,9 +1,0 @@
-{
-  "comment": "Reconnect an existing repository enrollment through Fleet without creating or replacing its identity.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

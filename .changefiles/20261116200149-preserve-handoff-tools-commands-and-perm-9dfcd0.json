@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve handoff tools commands and permission callbacks across SDK versions",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "patch"
-    }
-  ]
-}

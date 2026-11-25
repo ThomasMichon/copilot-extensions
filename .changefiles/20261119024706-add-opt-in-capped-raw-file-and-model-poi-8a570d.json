@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in capped raw file and model point observations without enabling component application",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

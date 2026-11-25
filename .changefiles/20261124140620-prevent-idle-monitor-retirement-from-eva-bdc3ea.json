@@ -1,9 +1,0 @@
-{
-  "comment": "Prevent idle monitor retirement from evaluating a type-only lease annotation at runtime.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

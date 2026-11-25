@@ -1,9 +1,0 @@
-{
-  "comment": "Add a bounded current-driver lookup for retained assignments, waiters and pre-start placements.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

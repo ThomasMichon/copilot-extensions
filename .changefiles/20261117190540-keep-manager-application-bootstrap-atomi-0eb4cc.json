@@ -1,9 +1,0 @@
-{
-  "comment": "Keep Manager application bootstrap atomic writes within ordinary destination path headroom.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

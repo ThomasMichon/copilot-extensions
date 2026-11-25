@@ -1,9 +1,0 @@
-{
-  "comment": "Add guarded internal Windows historical-state sealing and topology-based recovery without activating migration.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

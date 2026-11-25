@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh embedded caller lifetime sources for output-aware execution",
-  "changes": [
-    {
-      "plugin": "libs/installation-context",
-      "type": "patch"
-    }
-  ]
-}

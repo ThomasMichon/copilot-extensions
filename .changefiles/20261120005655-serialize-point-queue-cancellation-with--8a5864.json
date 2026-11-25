@@ -1,9 +1,0 @@
-{
-  "comment": "Serialize point queue cancellation with active native source ownership",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

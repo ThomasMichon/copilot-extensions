@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify independently packaged providers through contained native closed-wheel construction and discovery",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

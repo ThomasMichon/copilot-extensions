@@ -1,9 +1,0 @@
-{
-  "comment": "Trace bounded reviewer cache reads through the existing foreground stderr sink",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

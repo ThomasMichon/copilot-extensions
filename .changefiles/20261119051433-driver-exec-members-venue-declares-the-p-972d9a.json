@@ -1,9 +1,0 @@
-{
-  "comment": "Driver-exec members' venue declares the portable receiving policy and provider command, and the exec wrapper admits them through the portable receiver when agent-bridge supplies its receiving context, so the member needs no agent-worktrees.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

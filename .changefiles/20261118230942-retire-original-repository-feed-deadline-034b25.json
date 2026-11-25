@@ -1,9 +1,0 @@
-{
-  "comment": "Retire original repository-feed deadlines with one atomic native wake",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

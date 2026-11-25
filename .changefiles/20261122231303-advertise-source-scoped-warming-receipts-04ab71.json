@@ -1,9 +1,0 @@
-{
-  "comment": "Advertise source-scoped warming receipts for named ordinary mutation actions before migrating callers",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Enforce opt-in request-bound point-service admission and join accepted queue work through lifecycle closure.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

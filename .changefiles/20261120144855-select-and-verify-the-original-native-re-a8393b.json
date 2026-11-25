@@ -1,9 +1,0 @@
-{
-  "comment": "Select and verify the original-native retained terminal reader through the existing explicit adoption CLI.",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Restore payload timing attribution after engine authentication",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Exclude one-operation configuration reports from resident monitor launch context while preserving installation-cell selection.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Admit six original pure durable-state mount controls to the unit packet",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

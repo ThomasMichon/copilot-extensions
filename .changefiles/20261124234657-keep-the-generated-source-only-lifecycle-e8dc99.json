@@ -1,9 +1,0 @@
-{
-  "comment": "Keep the generated source-only lifecycle capsule complete with the shared managed-runtime selector.",
-  "changes": [
-    {
-      "plugin": "wsl-setup",
-      "type": "patch"
-    }
-  ]
-}

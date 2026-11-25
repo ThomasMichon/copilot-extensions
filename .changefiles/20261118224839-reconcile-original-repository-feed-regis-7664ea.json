@@ -1,9 +1,0 @@
-{
-  "comment": "Reconcile original repository-feed registration receipts without replaying creation",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

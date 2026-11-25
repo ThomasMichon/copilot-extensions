@@ -1,9 +1,0 @@
-{
-  "comment": "Allow explicit synchronous point-worker selection without legacy process registration; verify durable whole-claim completion",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

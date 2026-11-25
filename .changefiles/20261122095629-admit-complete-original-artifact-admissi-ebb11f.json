@@ -1,9 +1,0 @@
-{
-  "comment": "Admit complete original artifact-admission integrity controls under unchanged unit containment",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

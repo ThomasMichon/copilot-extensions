@@ -1,9 +1,0 @@
-{
-  "comment": "Retain receiving-module command errors through the existing same-interpreter archive.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

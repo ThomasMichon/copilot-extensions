@@ -1,9 +1,0 @@
-{
-  "comment": "Reconcile sealed native component publication suffixes without replaying uncertain effects",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

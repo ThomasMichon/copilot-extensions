@@ -1,9 +1,0 @@
-{
-  "comment": "Admit three complete original deferred-promotion recovery and no-repeat unit controls without changing source policy or runtime behavior.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

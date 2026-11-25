@@ -1,9 +1,0 @@
-{
-  "comment": "List separate consumer and optional maintainer guidance packages",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

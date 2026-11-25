@@ -1,9 +1,0 @@
-{
-  "comment": "Retain the shared native capture source in installer snapshots.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "dev"
-    }
-  ]
-}

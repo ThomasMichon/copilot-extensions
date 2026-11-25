@@ -1,9 +1,0 @@
-{
-  "comment": "Forward the real finite mux observation request through the synthetic native Resume owner without weakening pane startup checks.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

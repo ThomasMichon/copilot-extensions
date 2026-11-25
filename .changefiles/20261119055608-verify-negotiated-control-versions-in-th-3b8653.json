@@ -1,9 +1,0 @@
-{
-  "comment": "Verify negotiated control versions in the typed pool placement fixture.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "dev"
-    }
-  ]
-}

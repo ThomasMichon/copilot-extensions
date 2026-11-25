@@ -1,9 +1,0 @@
-{
-  "comment": "Allow operators to select one exact managed pool instance for automatic allocation.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

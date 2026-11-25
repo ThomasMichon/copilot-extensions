@@ -1,9 +1,0 @@
-{
-  "comment": "Admit portable engine launchers through prepared UV without stale Python.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

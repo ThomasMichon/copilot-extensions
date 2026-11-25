@@ -1,9 +1,0 @@
-{
-  "comment": "Restore existing harness knowledge companions without New intent and require pair-scoped inactive cleanup",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

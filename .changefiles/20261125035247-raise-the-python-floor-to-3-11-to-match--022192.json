@@ -1,9 +1,0 @@
-{
-  "comment": "Raise the Python floor to 3.11 to match the .python-version pin.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

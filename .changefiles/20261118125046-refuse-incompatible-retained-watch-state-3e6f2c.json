@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse incompatible retained watch-state contracts at read and atomic replacement boundaries without enabling versioned writes.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Initialize empty host inventory for first project creation in a new host directory, without recreating a lost index on restart.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

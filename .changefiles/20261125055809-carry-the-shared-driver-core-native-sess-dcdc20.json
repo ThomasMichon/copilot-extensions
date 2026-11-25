@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the shared Driver Core native-session activation composition seam.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

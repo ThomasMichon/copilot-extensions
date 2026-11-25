@@ -1,9 +1,0 @@
-{
-  "comment": "Factor pinned portable OpenSSH preparation from dtssh activation for native receiver consumers.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

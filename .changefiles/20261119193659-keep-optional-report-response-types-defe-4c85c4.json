@@ -1,9 +1,0 @@
-{
-  "comment": "Keep optional report response types deferred during actual Gateway dispatch",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

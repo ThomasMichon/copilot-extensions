@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit terminal-reader bootstrap for eligible retained workspace owners, preserving original readers by refusing populated or incompatible state.",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

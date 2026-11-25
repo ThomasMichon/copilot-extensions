@@ -1,9 +1,0 @@
-{
-  "comment": "Compose explicit Azure DevOps named-point acquisition with fresh eligibility and retained worker completion",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

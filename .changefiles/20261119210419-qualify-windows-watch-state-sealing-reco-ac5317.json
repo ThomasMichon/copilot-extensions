@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify Windows watch-state sealing recovery after abrupt controller exit at six native boundaries.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

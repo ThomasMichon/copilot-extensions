@@ -1,9 +1,0 @@
-{
-  "comment": "Recover isolated proposed-task intake and steer acknowledgments from independent records.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

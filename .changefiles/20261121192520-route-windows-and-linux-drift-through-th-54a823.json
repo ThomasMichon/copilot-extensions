@@ -1,9 +1,0 @@
-{
-  "comment": "Route Windows and Linux drift through the typed installation owner and inspect readiness with prepared uv-managed Python",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

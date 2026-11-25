@@ -1,9 +1,0 @@
-{
-  "comment": "Construct Windows CLI, server and engine environments with independently selected uv-managed Python, preserving signed and closed-wheel policies.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

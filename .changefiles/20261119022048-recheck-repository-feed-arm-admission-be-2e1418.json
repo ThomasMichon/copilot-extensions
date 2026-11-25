@@ -1,9 +1,0 @@
-{
-  "comment": "Recheck repository-feed arm admission before commit and reject nonfinite clocks",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

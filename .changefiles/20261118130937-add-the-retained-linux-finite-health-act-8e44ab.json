@@ -1,9 +1,0 @@
-{
-  "comment": "Add the retained Linux finite health action foundation; native Linux enrollment remains unavailable.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

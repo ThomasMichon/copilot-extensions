@@ -1,9 +1,0 @@
-{
-  "comment": "Use the prepared managed bootstrap for external uninstall while retaining runtime-prefix removal safety.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

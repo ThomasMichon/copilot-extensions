@@ -1,9 +1,0 @@
-{
-  "comment": "Recover repository subscriptions by original request and enforce immutable acceptance cutoffs",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

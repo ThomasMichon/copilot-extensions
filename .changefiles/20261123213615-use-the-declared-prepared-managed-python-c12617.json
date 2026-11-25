@@ -1,9 +1,0 @@
-{
-  "comment": "Use the declared prepared managed Python selector for quiet session guidance hooks",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

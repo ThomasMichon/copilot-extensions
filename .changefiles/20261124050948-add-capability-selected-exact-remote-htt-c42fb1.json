@@ -1,9 +1,0 @@
-{
-  "comment": "Add capability-selected exact remote HTTP native prompt admission without replay",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit finite repository-feed preparation through native task admission",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

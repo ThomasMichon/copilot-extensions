@@ -1,9 +1,0 @@
-{
-  "comment": "Progress recovered v2 watch preparations through the existing guarded Windows sealing owner",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

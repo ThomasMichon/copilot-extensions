@@ -1,9 +1,0 @@
-{
-  "comment": "Read POSIX package-index policy through the prepared managed interpreter and shared installer provider instead of ambient pip.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

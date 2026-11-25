@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the additive native deployment-string reader through the shared update library.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

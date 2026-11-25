@@ -1,9 +1,0 @@
-{
-  "comment": "Allow proven local session registration for repositories without committed configuration",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

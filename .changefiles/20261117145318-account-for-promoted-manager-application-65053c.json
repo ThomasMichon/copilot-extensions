@@ -1,9 +1,0 @@
-{
-  "comment": "Account for promoted Manager application sources in the typecheck inventory",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

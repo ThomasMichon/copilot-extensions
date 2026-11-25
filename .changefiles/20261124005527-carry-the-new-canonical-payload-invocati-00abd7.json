@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the new canonical Payload Invocation guidance template in the embedded build resources",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

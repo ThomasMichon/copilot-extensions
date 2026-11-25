@@ -1,9 +1,0 @@
-{
-  "comment": "Add copy/cp: copy an entry to a destination group or full entry path, staging the copy; an existing destination is refused",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

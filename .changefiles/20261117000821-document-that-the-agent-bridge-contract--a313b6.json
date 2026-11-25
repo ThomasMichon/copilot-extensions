@@ -1,9 +1,0 @@
-{
-  "comment": "Document that the agent-bridge contract registry is an optional checker, not a CI gate.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

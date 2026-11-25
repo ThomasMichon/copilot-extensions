@@ -1,9 +1,0 @@
-{
-  "comment": "Accept compact source-unit manifest storage in shared admission helpers while retaining v1 output.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

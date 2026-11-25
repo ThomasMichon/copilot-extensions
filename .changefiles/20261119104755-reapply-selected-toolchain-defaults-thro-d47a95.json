@@ -1,9 +1,0 @@
-{
-  "comment": "Reapply selected toolchain defaults through configuration-only installed setup",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

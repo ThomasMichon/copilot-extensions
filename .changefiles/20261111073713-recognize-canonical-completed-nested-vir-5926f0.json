@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize canonical completed nested virtual environments in selected-runtime bootstrap readiness without weakening generation or source checks.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

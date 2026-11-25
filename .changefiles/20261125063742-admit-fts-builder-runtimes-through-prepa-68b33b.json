@@ -1,9 +1,0 @@
-{
-  "comment": "Admit FTS builder runtimes through prepared UV before source handoff and preserve unresolved lookup cleanup.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Admit the hash-bound bundled dependency fixture in the packaged source-unit contract.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

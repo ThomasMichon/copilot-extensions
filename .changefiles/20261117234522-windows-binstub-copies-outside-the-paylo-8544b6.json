@@ -1,9 +1,0 @@
-{
-  "comment": "Windows binstub copies outside the payload now find the selected payload's terminal launch host via the deploy manifest, so Picker Python no longer stays resident over mux attaches; report when the host is missing.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

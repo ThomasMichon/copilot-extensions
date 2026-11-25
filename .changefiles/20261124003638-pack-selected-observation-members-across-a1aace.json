@@ -1,9 +1,0 @@
-{
-  "comment": "Pack selected observation members across scalar reconciliation without changing fair selection",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}
