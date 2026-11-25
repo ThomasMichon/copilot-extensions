@@ -870,6 +870,15 @@ def _check_program(
                 lease.release()
 
 
+def release_excluded(root: Path, project: Project) -> bool:
+    """Whether Main's release scope omits every include path (Dev still checks them)."""
+    path = root / "tools" / "promotion-release-scope.json"
+    if not path.is_file():
+        return False
+    excluded = _object(_object(json.loads(path.read_text(encoding="utf-8")))["excluded"])
+    return all(any(i == p or i.startswith(p + "/") for p in excluded) for i in project.include)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Provide the same explicit scope and policy selection locally and in CI."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -959,6 +968,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             if args.all and project.level == "pending" and not files:
                 print(f"{project.name}: pending, no physical Python files in this checkout; not checked.")
+                continue
+            if not files and new_files is None and release_excluded(ROOT, project):
+                print(f"{project.name}: outside the promoted release scope; checked on Dev only.")
                 continue
             if args.prepare:
                 prepare(ROOT, project)

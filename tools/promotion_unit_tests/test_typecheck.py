@@ -496,3 +496,13 @@ def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(t
         fragment.write_bytes(invalid)
         with pytest.raises(views.SourceViewError):
             views.installation_view(tmp_path, paths, view.output)
+
+
+def test_checker_skips_only_projects_wholly_outside_release_scope(tmp_path: Path) -> None:
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools/promotion-release-scope.json").write_text(json.dumps({"release_roots": ["tools"], "excluded": {"efforts": "planning"}}), encoding="utf-8")
+    project = checker.Project("effort-helpers", ("efforts",), (), "strict", "3.11", ("linux",), "r.txt")
+    assert checker.release_excluded(tmp_path, project)
+    mixed = checker.Project("mixed", ("efforts", "tools"), (), "strict", "3.11", ("linux",), "r.txt")
+    assert not checker.release_excluded(tmp_path, mixed)
+    assert not checker.release_excluded(tmp_path / "absent", project)
