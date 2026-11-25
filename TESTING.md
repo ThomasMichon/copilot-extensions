@@ -78,17 +78,20 @@ Python, engine policy, partial-slot receipts and repeated health-only reuse.
 The signed-base controls use non-ASCII managed storage under a non-UTF-8
 console code page and retain explicit UTF-8 capture at the real process boundary.
 Unavailable offline Python, failed UV and a missing selected UV binding refuse
-without helper/ambient fallback. The mixed-Python job prepares runtime 3.10.20
-beside helper 3.11.18 and requires every control and report in serial batches
+without helper/ambient fallback. The lifecycle job's prepared runtime 3.10.20
+and helper 3.11.18 qualify every control and report in serial batches
 of at most four copied fixtures, without adding a worker or changing its
 eight-minute limit or prior packets. The lightweight payload-invocation source
 adapter exports the original tests. Reports distinguish synthetic signature
 policy from actual managed interpreter execution; they do not qualify full
 package installation, child CPU, latency tails or installed-host adoption.
-The existing lifecycle job separately retains ten original call-boundary,
+The same lifecycle job separately retains ten original call-boundary,
 signed-selection and rejected-UV CLI/server/engine regressions through
 `tests/test_index_constructor_regressions_source.py`. Its independent count and
 no-skip verifier does not replace the eighteen real-construction controls.
+The eighteen-control packet moved intact from mixed-Python after that job
+exhausted its eight-minute limit. No process, assertion, report or original
+packet was removed, pooled or given a larger limit.
 
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
