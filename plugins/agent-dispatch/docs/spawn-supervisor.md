@@ -1383,14 +1383,37 @@ order. Pool `[W1, CDE, W2]` with `ordered: [W2, W1]` tries `[W2, CDE, W1]`.
 - **Hard pins.** A pin to an unmanaged host never calls the provider. A pin to a
   managed host uses this cycle's single result: it starts only when the host is
   in `ordered` and live; otherwise it defers and never moves to another host.
-- **Audit.** Every reserved placement appends one task event whose note starts
+- **Audit.** A reserved placement can append one task event whose note starts
   with `fleet placement: ` followed by JSON: `decision_id`, `reservation`,
   `candidates_sent`, `provider_ordered` (and `provider_scores` /
   `provider_error`), `task_candidates`, `merged_order`, liveness `probes`,
   `selected`, `selected_provider_rank`, `spawn_ok` and `skipped` (each
   higher-ranked host passed over, with `excluded_by_task`, `not_live` or
-  `not_reached`). Read it with `agent-dispatch events <task-id>`. Recording is
-  best-effort: an older coordinator without the route only logs a warning.
+  `not_reached`). Read it with `agent-dispatch events <task-id>`.
+- **Audit delivery is best-effort diagnostics.** After the reservation's
+  bookkeeping settles, the supervisor submits the decision to a bounded
+  (32 records), single-writer, nonblocking outbox. One background thread posts
+  it to the coordinator with a 2-second request timeout, so the sink never
+  delays the cycle or spawn settlement. A decision can be missing from the task
+  events, and is not retried, when:
+  - the outbox is full: the new record is dropped;
+  - a transport error occurs (unreachable coordinator, timeout): the writer
+    backs off for 60 seconds, and records submitted or dequeued during the
+    backoff are dropped;
+  - the coordinator does not support the route (404 `Not Found` or 405): the
+    outbox is disabled for the rest of the supervisor process, and every later
+    record is dropped;
+  - the coordinator refuses one record for another reason (for example 422, or
+    404 for an unknown reservation): only that record is lost;
+  - the supervisor shuts down: shutdown does not wait for the writer, so
+    records still queued can be lost.
+
+  Records omitted by the queue (full, disabled or in backoff) are counted
+  in-process in `dropped` (with `submitted` and `delivered`) and logged at
+  debug level; a failed delivery attempt is logged as a warning. These counts
+  are not exported as metrics. A missing `fleet placement:` event therefore
+  does not mean that the placement did not happen: the reservation's own
+  bookkeeping stays authoritative.
 - A lane without `placement_provider` never calls a provider and behaves as
   before. The legacy environment-variable lane path does not support it.
 
