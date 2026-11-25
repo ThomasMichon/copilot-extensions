@@ -71,9 +71,10 @@ publishes current question snapshots on its existing two-second timer.
 Submission requires `generation`, `request_id`, `family`, `sender`, `action`
 and `content`; `wait_timeout` defaults to 30 seconds (0 returns after admission).
 The unique native-session/generation/family/request key admits only one answer.
-Retries and conflicting answers are refused, not replayed. A timed-out unclaimed
-control is withdrawn; a claimed control with no outcome remains `in_flight`.
-Each control also carries a finite application deadline. Terminal-first
+Retries and conflicting answers are refused, not replayed. A caller's wait
+timeout returns the original `answer_id` with `in_flight`; it does not withdraw
+an accepted answer. Each control carries the independent 130-second control
+application deadline. Terminal-first
 completion, supersession, expired or changed native identity, and unsupported
 SDK operations refuse before an answer can apply or return native rejection.
 
@@ -81,7 +82,11 @@ The same durable control store records sender, exact original session,
 generation/request binding, response, claim time and outcome. Generic message,
 mode and readiness consumers cannot claim or acknowledge question controls.
 Question polling is independent of prompt-delivery custody, including a retained
-inbox; it cannot deliver prompts, switch mode or approve permissions. Audit
+inbox. Enrolling, replacing or temporarily losing the prompt consumer does not
+block a validated answer's queue write. The answer remains in the durable store
+across Bridge restarts, deregistration, lease reaping and takeover; registration
+cleanup does not silently erase either pending answers or their outcomes.
+Question polling cannot deliver prompts, switch mode or approve permissions. Audit
 reads and delayed acknowledgments stay pinned to the original native ID even
 after rollover or registration loss.
 Lost acknowledgments retry only that original audit scope, never the native
@@ -111,8 +116,10 @@ rollback to a provider without this capability refuses the optional operation.
 
 `tests/questions.test.mjs` exercises the ordinary RPC selection, stale identity,
 terminal/remote races, duplicate controls, unsupported SDKs and lost-ACK recovery.
-`tests/test_live_questions.py` covers authenticated HTTP admission and durable
-outcomes; representation tests cover native lifecycle correlation separately.
+`tests/test_live_questions.py` covers authenticated HTTP admission, wait-only
+timeouts and durable outcomes across registration cleanup. The enrolled-consumer
+roundtrip in `tests/test_live_inbox_producer.py` covers both retained receiving
+backends; representation tests cover native lifecycle correlation separately.
 Two actor-free validator controls are admitted in the required promotion unit
 packet; native and process-bearing integration remain opt-in.
 

@@ -145,7 +145,7 @@ async def answer_question(
         raise HTTPException(422, str(exc)) from exc
     payload = {
         **body.model_dump(exclude={"wait_timeout"}),
-        "session_id": session_id, "expires_at": time.time() + (body.wait_timeout or 30.0),
+        "session_id": session_id, "expires_at": time.time() + CONTROL_MAX_AGE_SECONDS,
     }
     control_id, reason = db.enqueue_live_message_if_fresh(
         session_id, sender=body.sender, body=json.dumps(payload), now=time.time(),
@@ -163,10 +163,6 @@ async def answer_question(
         if result["state"] != "in_flight":
             return result
         if time.monotonic() >= deadline:
-            if body.wait_timeout > 0 and db.withdraw_live_control(
-                session_id, control_id, time.time(),
-            ):
-                return _outcome(_control(request, session_id, control_id), session_id, control_id)
             return result
         await asyncio.sleep(POLL_SECONDS)
 

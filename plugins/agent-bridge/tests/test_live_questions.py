@@ -217,14 +217,47 @@ def test_native_rejection_and_uncertainty_are_not_acceptance(api, state, accepte
     assert result["state"] == state and result["accepted"] is accepted
 
 
-def test_unclaimed_timeout_withdraws_and_missing_required_field_refuses(api):
+def test_wait_timeout_keeps_answer_queued_and_missing_required_field_refuses(api):
     snapshot = observation()
     snapshot["requests"][0]["requested_schema"]["required"] = ["color"]
     api.client.post(BASE + "/poll", json=snapshot)
     assert api.client.post(BASE + "/answers", json={**answer(), "content": {}}).status_code == 422
     result = api.client.post(BASE + "/answers", json={**answer(), "wait_timeout": 0.001}).json()
-    assert result["state"] == "withdrawn" and result["accepted"] is False
-    assert api.client.post(BASE + "/poll", json=snapshot).json()["controls"] == []
+    assert result["state"] == "in_flight" and result["accepted"] is None
+    controls = api.client.post(BASE + "/poll", json=snapshot).json()["controls"]
+    assert [control["id"] for control in controls] == [result["answer_id"]]
+
+
+@pytest.mark.parametrize("cleanup", ["deregister", "expired", "wedged", "takeover"])
+def test_accepted_answer_survives_registration_cleanup_and_database_reopen(api, cleanup):
+    from agent_bridge.db import Database
+
+    api.client.post(BASE + "/poll", json=observation())
+    admitted = api.client.post(BASE + "/answers", json=answer()).json()
+    answer_id = admitted["answer_id"]
+    original = dict(api.db.execute_read("SELECT * FROM live_messages")[0])
+    if cleanup == "deregister":
+        assert api.db.deregister_live_session("native-1")
+    elif cleanup == "takeover":
+        api.db.execute_write("UPDATE live_sessions SET worktree_id='synthetic-worktree'")
+        assert api.db.expire_live_sessions_for_worktree("synthetic-worktree", now=time.time()) == 1
+    else:
+        if cleanup == "wedged":
+            api.db.execute_write("UPDATE live_sessions SET status='wedged'")
+        api.db.reap_stale_live_sessions(
+            now=time.time() + 1000, stale_seconds=1, purge_seconds=1,
+            pid_alive=lambda _: False,
+        )
+    reopened = Database(api.db.db_path)
+    api.state.db = reopened
+    api.state.live_questions = LiveQuestions()
+    try:
+        assert dict(reopened.execute_read("SELECT * FROM live_messages")[0]) == original
+        outcome = api.client.get(BASE + f"/answers/{answer_id}").json()
+        assert outcome["answer_id"] == answer_id and outcome["state"] == "in_flight"
+    finally:
+        api.state.db = api.db
+        reopened.close()
 
 
 def test_old_provider_refuses_before_mutation_and_new_provider_gets_pinned_shape():
