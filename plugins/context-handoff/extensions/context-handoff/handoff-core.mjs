@@ -20,7 +20,7 @@ import {
   openSync, closeSync, statSync, readdirSync, linkSync, ftruncateSync, writeSync,
 } from "node:fs";
 import { join, basename, dirname, resolve, posix, win32 } from "node:path";
-import { execFileSync, execFile } from "node:child_process";
+import { execFileSync, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -1041,7 +1041,33 @@ async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout)
 // window where a file could become dirty between the check and the
 // locked sync actually running.
 async function worktreeIsDirty(cwd) {
-  return gitStatusHasOutput(cwd, sanitizedGitEnv());
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
+      {
+        cwd, timeout: 5000, env: sanitizedGitEnv(), windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let dirty = false;
+    let stderr = "";
+    child.stdout.on("data", chunk => {
+      // Only presence matters; ignored dependency trees can exceed execFile's buffer.
+      if (chunk.length) dirty = true;
+    });
+    child.stderr.setEncoding("utf-8");
+    child.stderr.on("data", chunk => {
+      stderr += chunk.slice(0, Math.max(0, 4096 - stderr.length));
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) resolve(dirty);
+      else reject(new Error(
+        signal ? `git status terminated (${signal})`
+          : `git status exited ${code}${stderr.trim() ? `: ${stderr.trim()}` : ""}`,
+      ));
+    });
+  });
 }
 
 // Fully async (execFile, not execFileSync/runCli) end to end: this is invoked
@@ -1228,7 +1254,7 @@ async function attemptWorktreeSyncLocked(cwd) {
     return {
       attempted: false,
       synced: false,
-      reason: `could not inspect worktree status: ${describeSyncError(error)}`,
+      reason: `could not inspect worktree status; automatic sync was skipped: ${describeSyncError(error)}`,
     };
   }
   if (dirty) {

@@ -1,0 +1,9 @@
+{
+  "comment": "Stream worktree status during handoff sync to avoid stdout buffer overflow and report inspection failures accurately.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
