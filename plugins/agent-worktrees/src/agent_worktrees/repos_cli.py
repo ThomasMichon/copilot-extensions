@@ -823,7 +823,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
 
         entry = repos.find_repo(repo)
-        g = allow_edits.grant(repo, reason.strip(), float(minutes) if minutes is not None else None)
+        try:
+            requested_minutes = float(minutes) if minutes is not None else None
+        except ValueError:
+            requested_minutes = None
+        g = allow_edits.grant(repo, reason.strip(), requested_minutes)
         note = (
             ""
             if entry
