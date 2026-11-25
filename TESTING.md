@@ -1,19 +1,25 @@
 # Testing copilot-extensions
 
 MCP's Linux guidance packet retains the existing nine PowerShell controls and
-adds eight actual Bash prepared/missing-support controls, three missing-custody
-refusals before selection, plus held-input,
-slow-selector, failed/unusable-selector, failed-adoption and blocked-writer deadline controls.
+adds eight actual Bash prepared/missing-support controls, one missing-custody
+refusal before selection, plus held-input,
+slow-selector, failed/unusable-selector, failed-interpreter-startup and blocked-writer deadline controls.
 Failed selectors retain a TERM-ignoring descendant to exercise native settlement
 without a selected interpreter. These require the
 quiet result within the unchanged forty-five-second hook and no live recorded
 selector/writer descendants at return. The existing five-minute Linux hook job
-requires all twenty-seven cases, two repeated managed-selection reports, six
-deadline reports and one multiline-process-name settlement report without skips.
+requires all twenty-six cases, two repeated managed-selection reports, six
+deadline reports, one multiline-process-name settlement report and one
+disappearing-process settlement report without skips.
 The settlement control uses a real unrelated process with a newline in its Linux
 name and verifies that the complete proc record is read without signalling it.
+The disappearing-process control opens a real proc record, reaps its owned
+control child at a barrier and reproduces a successful empty read; the observer
+must finish rather than abandon settlement. The startup control reaches an
+executable that fails before Python runs and still requires the retained
+TERM-ignoring descendant dead at hook return.
 These isolated fixtures qualify the declared
-helper and existing native handoff/capture owners, not installed-host adoption,
+helper and existing native group owner, not installed-host adoption,
 Darwin, Bash cache invalidation or full enabled-plugin dispatch latency.
 
 Run suites with `tools/run-tests <plugin> [args]` and other Python test

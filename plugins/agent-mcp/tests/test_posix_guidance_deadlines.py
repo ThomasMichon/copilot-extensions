@@ -9,6 +9,7 @@ import shutil
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 
@@ -83,9 +84,76 @@ def test_bash_settlement_handles_unrelated_multiline_process_name(
     }))
 
 
-@pytest.mark.parametrize("missing", [
-    "native_owned.sh", "daemon_instance_runtime.pyz", "bootstrap_uv_capture.py",
-])
+def test_bash_settlement_tolerates_successful_empty_read_of_exited_process(
+    tmp_path: Path, packaged_hooks: Path, multiline_control: subprocess.Popen[bytes],
+    record_property: Callable[[str, object], None],
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    process_entry = Path("/proc") / str(multiline_control.pid) / "stat"
+    marker, released, proof = (tmp_path / name for name in ("opened", "released", "raced"))
+    helper = tmp_path / "native_owned.sh"
+    original = (packaged_hooks / "scripts/_bootstrap_python/native_owned.sh").read_text()
+    needle = 'record="$(< "$entry")";'
+    assert original.count(needle) == 1
+    # Hold a real proc FD over reaping, then reproduce Bash's successful-empty
+    # read outcome deterministically rather than depending on scheduler timing.
+    replacement = '''record="$(
+        if [[ "$entry" == "$MCP_RACE_ENTRY" && ! -e "$MCP_RACE_MARKER" ]]; then
+            exec {race_fd}<"$entry" || exit 1
+            printf opened > "$MCP_RACE_MARKER"
+            for (( attempt=0; attempt<300; attempt++ )); do
+                [[ ! -e "$MCP_RACE_RELEASED" ]] || break
+                sleep .01
+            done
+            [[ -e "$MCP_RACE_RELEASED" && ! -e "$entry" ]] || exit 1
+            printf raced > "$MCP_RACE_PROOF"
+        else
+            cat "$entry"
+        fi
+    )";'''
+    helper.write_text(original.replace(needle, replacement), encoding="utf-8")
+    failures: list[Exception] = []
+    done = threading.Event()
+
+    def reap_control() -> None:
+        try:
+            deadline = time.monotonic() + 5
+            while not marker.exists():
+                if time.monotonic() >= deadline or done.wait(.01):
+                    raise TimeoutError("Observer did not reach the proc read barrier")
+            multiline_control.kill()
+            multiline_control.wait(timeout=5)
+            assert not process_entry.exists()
+            released.write_text("reaped", encoding="ascii")
+        except Exception as error:
+            failures.append(error)
+
+    controller = threading.Thread(target=reap_control)
+    controller.start()
+    try:
+        result = run_caller_owned(
+            [bash, str(helper), "--wait-group-settlement", str(multiline_control.pid), "5"],
+            cwd=tmp_path, env={
+                **os.environ, "MCP_RACE_ENTRY": str(process_entry),
+                "MCP_RACE_MARKER": str(marker), "MCP_RACE_RELEASED": str(released),
+                "MCP_RACE_PROOF": str(proof),
+            },
+            timeout=8, max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
+    finally:
+        done.set()
+        controller.join(timeout=6)
+    assert not controller.is_alive() and not failures, failures
+    assert proof.read_text() == "raced" and not process_entry.exists()
+    assert result.returncode == 0 and not result.stdout and not result.stderr, result
+    record_property("mcp_native_disappearing_process_execution", json.dumps({
+        "opened_before_exit": marker.exists(), "reaped_before_empty_read": True,
+        "observer_succeeded": True,
+    }))
+
+
+@pytest.mark.parametrize("missing", ["native_owned.sh"])
 def test_bash_missing_custody_refuses_before_selection(
     tmp_path: Path, packaged_hooks: Path, missing: str,
 ) -> None:
@@ -113,7 +181,7 @@ def test_bash_missing_custody_refuses_before_selection(
 
 @pytest.mark.parametrize("scenario", [
     "held-input", "slow-selection", "failed-selection", "unusable-selection",
-    "failed-adoption", "blocked-writer",
+    "failed-startup", "blocked-writer",
 ])
 def test_bash_guidance_deadlines(
     tmp_path: Path, scenario: str, packaged_hooks: Path,
@@ -148,7 +216,15 @@ def test_bash_guidance_deadlines(
             "wait\n",
             encoding="utf-8",
         )
-    elif scenario in {"failed-selection", "unusable-selection", "failed-adoption"}:
+    elif scenario in {"failed-selection", "unusable-selection", "failed-startup"}:
+        startup = tmp_path / "unusable-python"
+        if scenario == "failed-startup":
+            startup.write_text(
+                f"#!{bash}\n"
+                'printf reached > "$MCP_DEADLINE_PROOFS/startup"\nexit 17\n',
+                encoding="utf-8",
+            )
+            startup.chmod(0o700)
         selector = scripts / "_bootstrap_python/select.sh"
         selector.write_text(
             "#!/usr/bin/env bash\ntrap '' TERM\n"
@@ -156,24 +232,11 @@ def test_bash_guidance_deadlines(
             "sleep 300 &\nprintf '%s' \"$!\" > \"$MCP_DEADLINE_PROOFS/descendant\"\n"
             + ("exit 17\n" if scenario == "failed-selection" else
                "printf '%s\\n' " + (
-                   shlex.quote(str(selected)) if scenario == "failed-adoption"
+                   shlex.quote(str(startup)) if scenario == "failed-startup"
                    else "/unavailable/python"
                ) + "\n"),
             encoding="utf-8",
         )
-        if scenario == "failed-adoption":
-            wrapper = scripts / "write-session-guidance.sh"
-            original = wrapper.read_text(encoding="utf-8")
-            needle = "from agent_procutil.native_child import NativeChildCustody"
-            assert original.count(needle) == 1
-            wrapper.write_text(
-                original.replace(
-                    needle,
-                    'open(os.path.join(os.environ["MCP_DEADLINE_PROOFS"], "adoption"), "w").write("refused"); '
-                    'raise RuntimeError("fixture custody unavailable")',
-                ),
-                encoding="utf-8",
-            )
     elif scenario == "blocked-writer":
         (scripts / "write_session_guidance.py").write_text(
             "import os,subprocess,sys,time\nfrom pathlib import Path\n"
@@ -213,9 +276,9 @@ def test_bash_guidance_deadlines(
         assert not list(proofs.iterdir())
     else:
         assert result.stdout == "{}"
-        if scenario == "failed-adoption":
-            assert (proofs / "adoption").read_text() == "refused"
-        pids = [int(path.read_text()) for path in proofs.iterdir() if path.name != "adoption"]
+        if scenario == "failed-startup":
+            assert (proofs / "startup").read_text() == "reached"
+        pids = [int(path.read_text()) for path in proofs.iterdir() if path.name != "startup"]
         assert len(pids) == 2
         assert not [pid for pid in pids if _alive(pid)]
     assert elapsed < 45, elapsed

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Keep a native session child alive until its parent execs a custody-aware owner.
+# Retain a native session child until group settlement or deliberate custody handoff.
 
 __native_owned_source="$(readlink -e -- "${BASH_SOURCE[0]}")"
 
@@ -54,7 +54,7 @@ wait_native_owned_process() {
 
 wait_native_owned_group() {
     local group="$1" timeout="$2" uptime ignored deadline entry record state parent observed
-    local active seen_self empty=0
+    local active seen_self uncertain empty=0
     [[ "$(uname -s)" == Linux && "$group" =~ ^[1-9][0-9]*$ &&
         "$timeout" =~ ^[1-9][0-9]*$ ]] || return 1
     [[ -r "/proc/$BASHPID/stat" ]] || return 1
@@ -63,25 +63,34 @@ wait_native_owned_group() {
     while (( empty < 2 )); do
         active=0
         seen_self=0
+        uncertain=0
         for entry in /proc/[0-9]*/stat; do
             read -r uptime ignored < /proc/uptime || return 1
             (( ${uptime%%.*} < deadline )) || return 1
             # Linux comm may contain newlines; keep the following group fields.
             if ! { record="$(< "$entry")"; } 2>/dev/null; then
                 [[ ! -e "$entry" ]] && continue
-                return 1
+                uncertain=1
+                continue
             fi
-            [[ "$record" == *") "* ]] || return 1
+            if [[ "$record" != *") "* ]]; then
+                [[ ! -e "$entry" ]] && continue
+                uncertain=1
+                continue
+            fi
             [[ "$entry" != "/proc/$BASHPID/stat" ]] || seen_self=1
             read -r state parent observed ignored <<<"${record##*) }"
-            [[ "$observed" =~ ^[0-9]+$ ]] || return 1
+            if [[ ! "$observed" =~ ^[0-9]+$ ]]; then
+                [[ ! -e "$entry" ]] && continue
+                uncertain=1
+                continue
+            fi
             if [[ "$observed" == "$group" && "$state" != Z && "$state" != X ]]; then
                 active=1
                 break
             fi
         done
-        (( active || seen_self )) || return 1
-        if (( active )); then empty=0; else (( empty += 1 )); fi
+        if (( active || uncertain || ! seen_self )); then empty=0; else (( empty += 1 )); fi
         (( empty == 2 )) || sleep .02 || return 1
     done
 }

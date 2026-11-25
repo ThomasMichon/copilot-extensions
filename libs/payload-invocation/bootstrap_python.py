@@ -73,11 +73,7 @@ def expected_files(
         outputs[output / "select.sh"] = (templates / "bootstrap-python-posix.tmpl").read_text(encoding="utf-8")
         if posix_guidance:
             process = root / "libs/agent-procutil/src/agent_procutil"
-            for name in ("native_owned.sh", "daemon_instance_runtime.pyz"):
-                outputs[output / name] = (process / name).read_bytes()
-            outputs[output / "bootstrap_uv_capture.py"] = (
-                provider / "bootstrap_uv_capture.py"
-            ).read_bytes()
+            outputs[output / "native_owned.sh"] = (process / "native_owned.sh").read_bytes()
         if guidance:
             outputs[manifest.parent / "scripts/write-session-guidance.ps1"] = (
                 f"$guidancePlugin = '{data['plugin']}'\n"

@@ -218,15 +218,16 @@ existing contributor owner with outer and inner cleanup reserved. Contributors
 clip their ordinary ten-second limit to that deadline, including process
 startup; missing deadline metadata retains the prior direct/Bash behavior.
 
-`posixGuidance: true` packages the existing native Linux child handoff,
-stdlib process-owner capsule and bounded bootstrap capture beside the declared
+`posixGuidance: true` packages the existing native Linux group owner beside the declared
 UV selector. It requires the exact bootstrap declaration and a guidance writer;
 it does not generate another process owner or acquire an interpreter. MCP's
 Bash wrapper uses that support on Linux: its original native parent retains the
-selector child until exec into the selected managed Python, which adopts and
-settles that same child before reading bounded input or launching the writer.
-Selection has a ten-second guardian; input and writer execution share the
-remaining forty-second aggregate budget with cleanup reserved. Missing or
+whole selection, interpreter-startup and writer group without execing away its
+cleanup trap. Selection, bounded input and writer execution share one
+forty-second aggregate deadline under the existing guardian; three seconds
+remain for group settlement within the forty-five-second hook.
+It needs no selected-Python custody handoff or bootstrap capture dependency.
+Missing or
 failed support keeps the hook's quiet unavailable result, not fresh guidance.
 This does not extend PowerShell's generated-cache invalidation contract to Bash,
 qualify Darwin supervision, or prove the composed latency target.

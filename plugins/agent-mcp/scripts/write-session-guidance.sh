@@ -17,12 +17,11 @@ case "${OSTYPE:-}" in
 esac
 script="$root/scripts/write_session_guidance.py"
 if [[ "${OSTYPE:-}" == linux* ]]; then
-    guidance_parent=$BASHPID
     linux_guidance() (
-        local support="$root/scripts/_bootstrap_python" elapsed ignored deadline directory owner
-        local result_fd log_fd python
+        local support="$root/scripts/_bootstrap_python" elapsed ignored deadline directory owner remaining
+        local result_fd log_fd input_fd
         local __native_owned_pid=''
-        for required in select.sh native_owned.sh daemon_instance_runtime.pyz bootstrap_uv_capture.py; do
+        for required in select.sh native_owned.sh; do
             [[ -f "$support/$required" ]] || return 1
         done
         [[ -f "$script" ]] || return 1
@@ -47,45 +46,39 @@ if [[ "${OSTYPE:-}" == linux* ]]; then
             unlink_guidance
         }
         trap cleanup_guidance EXIT
-        exec {result_fd}<>"$directory/python" {log_fd}<>"$directory/selector.log"
-        start_native_owned_process "$directory" "$directory/selector.log" 10 \
-            "$BASH" -c 'ulimit -f 64 || exit; "$BASH" "$1" Inspect > "$2"' \
-            guidance-selector "$support/select.sh" "/proc/self/fd/$result_fd" || return 1
-        unlink_guidance || return 1
-        wait_native_owned_process 15 || return 1
-        [[ "$__native_owned_code" == 0 ]] || return 1
-        python="$(cat <&"$result_fd")"
-        exec {result_fd}>&- {log_fd}>&-
-        [[ "$python" == /* && "$python" != *$'\n'* && "$python" != *$'\r'* &&
-            -f "$python" && -x "$python" ]] || return 1
-        unset PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV
-        exec "$python" -I -B -X utf8 -c '
+        exec {input_fd}<&0 {result_fd}<>"$directory/python" {log_fd}<>"$directory/selector.log"
+        read -r elapsed ignored < /proc/uptime || return 1
+        remaining=$(( deadline - ${elapsed%%.*} ))
+        (( remaining > 0 )) || return 1
+        start_native_owned_process "$directory" "$directory/selector.log" "$remaining" \
+            "$BASH" -c '
+ulimit -f 64 || exit
+"$BASH" "$1" Inspect > "$2" || exit
+python="$(cat "$2")"
+[[ "$python" == /* && "$python" != *"$6"* && "$python" != *"$7"* &&
+    -f "$python" && -x "$python" ]] || exit 1
+unset PYTHONHOME PYTHONPATH PYTHONEXECUTABLE VIRTUAL_ENV
+exec "$python" -I -B -X utf8 -c "
 import os
 import runpy
 import sys
 import time
 
-support, child, deadline, writer, parent, bash = sys.argv[1:]
-with open("/proc/uptime", encoding="ascii") as clock:
+deadline, writer = sys.argv[1:]
+with open(\"/proc/uptime\", encoding=\"ascii\") as clock:
     remaining = float(deadline) - float(clock.read(64).split()[0])
-deadline = str(time.monotonic() + remaining)
-sys.path.insert(0, support + "/daemon_instance_runtime.pyz")
-try:
-    from agent_procutil.native_child import NativeChildCustody
-    NativeChildCustody(int(child)).retire()
-except Exception:
-    os.close(8)
-    os.execv(bash, [bash, support + "/native_owned.sh", "--wait-group-settlement", child, "3"])
-else:
-    os.close(8)
-os.environ["COPILOT_EXTENSIONS_GUIDANCE_DEADLINE"] = str(float(deadline) - 4)
-sys.argv = [
-    support + "/bootstrap_uv_capture.py", "--deadline", deadline,
-    "--cleanup-reserve", "3", "--input-stdin", "--parent-pid", parent,
-    "--", sys.executable, "-I", "-B", "-X", "utf8", writer,
-]
-runpy.run_path(sys.argv[0], run_name="__main__")
-' "$support" "$__native_owned_pid" "$deadline" "$script" "$guidance_parent" "$BASH"
+os.environ[\"COPILOT_EXTENSIONS_GUIDANCE_DEADLINE\"] = str(time.monotonic() + remaining - 3)
+sys.argv = [writer]
+runpy.run_path(writer, run_name=\"__main__\")
+" "$4" "$5" <&"$3"
+' guidance-operation "$support/select.sh" "/proc/self/fd/$result_fd" \
+            "$input_fd" "$deadline" "$script" $'\n' $'\r' || return 1
+        unlink_guidance || return 1
+        read -r elapsed ignored < /proc/uptime || return 1
+        remaining=$(( deadline - ${elapsed%%.*} ))
+        (( remaining > 0 )) || return 1
+        wait_native_owned_process "$remaining" || return 1
+        [[ "$__native_owned_code" == 0 ]]
     )
     linux_guidance >/dev/null 2>&1 || true
     printf '{}'

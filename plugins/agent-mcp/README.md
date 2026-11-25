@@ -1651,13 +1651,16 @@ result when preparation or generated support is unavailable. Raw PowerShell
 source must first receive its normal payload materialization; an incomplete
 payload cannot borrow a neighboring checkout's helper. Git Bash enters the
 native Windows wrapper. Linux Bash uses the declared exact managed selector
-under Procutil's existing native child guardian. Its original parent execs the
-selected interpreter, adopts and settles the selector group, then delegates
-bounded input and writer execution to the shared bootstrap capture owner.
+under Procutil's existing native child guardian. Its original native parent
+retains the whole selection, interpreter-startup and writer group until
+settlement, including when the selected executable fails before Python starts.
+It never replaces that owner with the selected interpreter.
 The forty-second aggregate budget includes selection; missing generated
-support refuses before UV or writer execution. Selection never downloads Python.
+support refuses before UV or writer execution. Input is bounded to 64 KiB;
+three seconds remain for group settlement within the forty-five-second hook.
+Selection never downloads Python.
 Darwin retains its previous helper behavior and is not qualified by this Linux
-handoff. Bash cache invalidation and full enabled-plugin dispatch latency remain
+ownership path. Bash cache invalidation and full enabled-plugin dispatch latency remain
 separate from this execution boundary.
 
 The Windows installer supports Windows PowerShell 5.1 and PowerShell 7. Native

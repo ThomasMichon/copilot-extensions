@@ -1288,12 +1288,15 @@ The leader stays alive after its command exits so Bash cannot reap it before
 the group; the command's frame alone does not certify settlement. These
 helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
 
-On a post-start failure before exec, `settle_native_owned_process <seconds>`
+Without an exec handoff, `settle_native_owned_process <seconds>`
 closes the native lifetime writer, then waits for two empty Linux group
 observations within its deadline before reaping the original child. The
 existing guardian still performs all signalling from inside its own live
 group. The observer never signals a numeric group after Bash may have reaped
-the leader; unreadable process state or a nonempty deadline refuses settlement.
+the leader. Disappeared proc records, including successful empty reads after
+exit, are skipped; still-live unreadable or malformed records keep observation
+uncertain until the same deadline. Two complete empty observations with self
+visibility are required. Uncertainty or a nonempty deadline refuses settlement.
 `native_owned.sh --wait-group-settlement <group> <seconds>` exposes that same
 read-only observation for an exec successor whose Python custody admission
 failed. Neither observer is a replacement process owner or authority to adopt

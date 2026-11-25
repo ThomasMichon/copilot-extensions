@@ -12,6 +12,7 @@ on:
       - plugins/agent-mcp/tests/test_posix_guidance_deadlines.py
       - plugins/agent-mcp/tests/test_write_session_guidance.py
       - plugins/agent-mcp/tests/managed_hook_fixture.py
+      - libs/agent-procutil/src/agent_procutil/native_owned.sh
       - libs/payload-invocation/bootstrap_python.py
       - libs/payload-invocation/generate.py
       - libs/payload-invocation/templates/bootstrap-guidance-powershell.tmpl
@@ -38,6 +39,7 @@ jobs:
       MCP_COMPOSED_REPORTS: "2"
       MCP_DEADLINE_REPORTS: "0"
       MCP_SETTLEMENT_REPORTS: "0"
+      MCP_DISAPPEARING_REPORTS: "0"
       GUIDANCE_CASES: "22"
       GUIDANCE_REPORTS: "2"
     steps: &mcp-hook-steps
@@ -107,6 +109,11 @@ jobs:
           for p in c.findall('properties/property') if p.attrib['name']=='mcp_native_settlement_execution'];
           assert len(settlement)==int(os.environ['MCP_SETTLEMENT_REPORTS']);
           assert all(r['multiline_unrelated_name'] and r['unrelated_control_alive'] for r in settlement);
+          disappearing=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_native_disappearing_process_execution'];
+          assert len(disappearing)==int(os.environ['MCP_DISAPPEARING_REPORTS']);
+          assert all(r['opened_before_exit'] and r['reaped_before_empty_read'] and r['observer_succeeded']
+          for r in disappearing);
           composed=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='mcp_composed_hook_performance'];
           assert len(composed)==int(os.environ['MCP_COMPOSED_REPORTS']);
@@ -125,11 +132,12 @@ jobs:
     timeout-minutes: 5
     env:
       MCP_SELECTOR: pwsh or (bash and not windows_bash)
-      MCP_CASES: "27"
+      MCP_CASES: "26"
       MCP_REPORTS: "2"
       MCP_COMPOSED_REPORTS: "1"
       MCP_DEADLINE_REPORTS: "6"
       MCP_SETTLEMENT_REPORTS: "1"
+      MCP_DISAPPEARING_REPORTS: "1"
       GUIDANCE_CASES: "11"
       GUIDANCE_REPORTS: "1"
     steps: *mcp-hook-steps
