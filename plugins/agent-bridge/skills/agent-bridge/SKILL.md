@@ -304,12 +304,16 @@ Legacy send selectors and specialized modes remain available without `--bridge`.
 See the [send contract](../../docs/target-inventory.md#exact-local-ordinary-prompt-submission)
 for owner-specific receipts, refusal and rollback.
 
-Add `--host HOST` for an exact managed conversation on one configured host.
-This requires `remote_native_prompt: 1`; registered-only remote inboxes refuse.
-JSON and `--no-wait` return admission. Default text waits for the exact turn's
-bounded completed result, not an event stream; feed expansion is unavailable.
-Retain the reported invocation key after any uncertain result. See the
-[explicit-host send contract](../../docs/target-inventory.md#exact-explicit-host-managed-prompt-submission).
+Add `--host HOST` for one configured host. Managed sends require
+`remote_native_prompt: 1`: JSON and `--no-wait` return admission, while default
+text waits for the exact turn's bounded completed result, not an event stream.
+Exact registered inboxes require `remote_exact_live_prompt: 1` and always return
+admission only, including default text. They support `--sender`, not
+`--reply-to`; no reply address is inferred. Their `accepted` outcome and message
+ID do not prove consumption or completion. Feed expansion remains unavailable.
+Retain the reported host, session, sender and invocation key after uncertainty;
+inspect the original message and do not resend. See the
+[explicit-host send contract](../../docs/target-inventory.md#exact-explicit-host-prompt-submission).
 
 Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->

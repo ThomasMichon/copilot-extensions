@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt exact explicit-host registered-inbox admission for opt-in ordinary sends",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
