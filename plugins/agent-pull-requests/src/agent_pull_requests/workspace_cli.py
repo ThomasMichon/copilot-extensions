@@ -7,15 +7,29 @@ import asyncio
 import json
 from pathlib import Path
 import sys
+from collections.abc import Callable, Sequence
+from typing import Any, Protocol, cast
 
 from .review_workspace import MAX_GENERATION_BYTES
 from .watch_replay_store import json_object
 from .workspace_tools import COMMANDS, WorkspaceTools, WorkspaceToolUnavailable
 
 
-def add_parser(commands):
+class _ToolView(Protocol):
+    def for_one_shot(self) -> _ToolView: ...
+
+    async def capabilities(self, *, operation: Any = None) -> dict[str, Any]: ...
+
+    async def invoke(self, command: str, request: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def add_parser(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
     workspace = commands.add_parser("workspace", allow_abbrev=False,
                                     help="Workspace source tools; an actual owner binding is required.")
+    workspace.add_argument("--client-profile", metavar="NAME",
+                           help="Already adopted read-only service-client profile; not a path or authority grant.")
     subcommands = workspace.add_subparsers(dest="workspace_command", required=True)
     for command in COMMANDS:
         parser = subcommands.add_parser(command, allow_abbrev=False)
@@ -24,7 +38,10 @@ def add_parser(commands):
     return workspace
 
 
-def run(args, host=None):
+def run(args: argparse.Namespace, host: object | None = None) -> int:
+    if getattr(args, "client_profile", None) is not None:
+        from .workspace_observer import run as observe
+        return observe(args, host=host)
     try:
         request = {}
         if args.workspace_command != "capabilities":
@@ -36,10 +53,12 @@ def run(args, host=None):
             if len(data) > MAX_GENERATION_BYTES:
                 raise ValueError("workspace request limit")
             request = json_object(data)
-        host = WorkspaceTools() if host is None else host
+        create_tools: Callable[[], WorkspaceTools] = WorkspaceTools
+        host = create_tools() if host is None else host
         if not isinstance(host, WorkspaceTools):
             raise WorkspaceToolUnavailable("workspace_owner_unavailable")
-        result = asyncio.run(host.for_one_shot().invoke(args.workspace_command, request))
+        view = cast(_ToolView, host).for_one_shot()
+        result = asyncio.run(view.invoke(args.workspace_command, request))
         print(json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False))
         return 0
     except PermissionError:
@@ -53,7 +72,7 @@ def run(args, host=None):
         return 1
 
 
-def main(argv=None, *, host=None):
+def main(argv: Sequence[str] | None = None, *, host: object | None = None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
     add_parser(commands)
@@ -61,4 +80,5 @@ def main(argv=None, *, host=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from ._process_entry import run as _process_entry
+    raise SystemExit(_process_entry(main))

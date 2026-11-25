@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import copy
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TypedDict
 
 from fleet_manager.gateway_service_channel import BODY_BYTES, CONTROL_RATE, TransportError
 
@@ -25,9 +24,20 @@ from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL, supports as 
 from . import workspace_terminal_mapping as terminal_mapping
 from . import workspace_retained_review as retained_review
 from .review_workspace import MAX_GENERATION_BYTES
+from . import workspace_bulk
 
 Document = dict[str, Any]
 Checkpoint = Callable[[], None]
+
+
+class _WireOptions(TypedDict, total=False):
+    checkpoint: Checkpoint
+    bulk: bool
+
+
+class _ReadOptions(TypedDict, total=False):
+    checkpoint: Checkpoint
+    _bulk: bool
 
 
 class WorkspaceClientError(ReplayClientError):
@@ -63,6 +73,7 @@ class WorkspaceClient:
 
     async def _exchange(
         self, operation: str, payload: Document, *, checkpoint: Checkpoint | None = None,
+        bulk: bool = False,
     ) -> Document:
         terminal = self._capabilities is not None and self._capabilities["protocol"] == TERMINAL_PROTOCOL
         selection = (
@@ -77,6 +88,12 @@ class WorkspaceClient:
             retained_review.RESPONSE_BYTES
             if operation == "inspect" and selection == retained_review.SELECTION else BODY_BYTES
         )
+        headers: tuple[tuple[str, str], ...] = (("Content-Type", "application/json"),)
+        if operation == "capabilities" or bulk:
+            headers += (("Accept", workspace_bulk.MEDIA_TYPE),)
+        if bulk:
+            assert self._capabilities is not None
+            response_limit = self._capabilities[workspace_bulk.FIELD]["response_bytes"]
         data = encoded({
             "binding": self._binding.document(), "request": payload,
             **({"workspace_contract": selection}
@@ -94,7 +111,7 @@ class WorkspaceClient:
             args = (submit,) if callable(submit) else ()
             response = await request(
                 *args, "POST", self._path + "/" + operation,
-                request_headers=(("Content-Type", "application/json"),),
+                request_headers=headers,
                 body=data, response_limit=response_limit,
             )
         except TransportError as error:
@@ -129,8 +146,10 @@ class WorkspaceClient:
         self._discovery_epoch += 1
         epoch = self._discovery_epoch
         self._capabilities = None
-        value = await self._exchange("capabilities", {}, **(
-            {"checkpoint": checkpoint} if checkpoint is not None else {}))
+        options: _WireOptions = {}
+        if checkpoint is not None:
+            options["checkpoint"] = checkpoint
+        value = await self._exchange("capabilities", {}, **options)
         terminal = value.get("protocol") == TERMINAL_PROTOCOL
         if (
             value.get("generation_versions") != [1]
@@ -141,6 +160,15 @@ class WorkspaceClient:
             or any(not isinstance(name, str) for name in value["operations"])
         ):
             raise WorkspaceClientError("unsupported_workspace_contract")
+        if workspace_bulk.FIELD in value and not workspace_bulk.supports(
+            value[workspace_bulk.FIELD],
+        ):
+            value.pop(workspace_bulk.FIELD)
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "bulk_materialization": "unsupported_workspace_bulk_contract",
+            }
         if "events" in value["operations"] and not terminal:
             from .conversation_journal import PROTOCOL as CONVERSATION_PROTOCOL
             if value.get("conversation_contract") != {
@@ -148,7 +176,11 @@ class WorkspaceClient:
                 "ingest": "trusted_owner_only", "bodies": False, "acknowledges": False,
             }:
                 value["operations"] = [name for name in value["operations"] if name != "events"]
-                value["unavailable_operations"] = {"events": "unsupported_conversation_contract"}
+                unavailable = value.get("unavailable_operations")
+                value["unavailable_operations"] = {
+                    **(unavailable if isinstance(unavailable, dict) else {}),
+                    "events": "unsupported_conversation_contract",
+                }
         if "receipt" in value["operations"] and not supports_prepared_review(value.get("prepared_review_contract")):
             value["operations"] = [name for name in value["operations"] if name != "receipt"]
             unavailable = value.get("unavailable_operations")
@@ -202,7 +234,13 @@ class WorkspaceClient:
 
     async def exchange(
         self, operation: str, payload: Document, *, checkpoint: Checkpoint | None = None,
+        _bulk: bool = False,
     ) -> Document:
+        if _bulk and (
+            operation != "chunk" or self._capabilities is None
+            or not workspace_bulk.supports(self._capabilities.get(workspace_bulk.FIELD))
+        ):
+            raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
         if operation == "capabilities":
             if payload != {}:
                 raise WorkspaceClientError("invalid_workspace_capability_request")
@@ -232,8 +270,12 @@ class WorkspaceClient:
             self._capabilities.get("owned_edit_selection_contract"),
         ):
             raise WorkspaceClientError("owned_edit_selection_contract_required", outcome_unknown=False)
-        value = await self._exchange(operation, payload, **(
-            {"checkpoint": checkpoint} if checkpoint is not None else {}))
+        options: _WireOptions = {}
+        if checkpoint is not None:
+            options["checkpoint"] = checkpoint
+        if _bulk:
+            options["bulk"] = True
+        value = await self._exchange(operation, payload, **options)
         if (
             value.get("scope") != {**self._scope, "number": payload.get("number")}
             or not isinstance(value.get("result"), dict)
@@ -304,7 +346,9 @@ class WorkspaceClient:
             if callable(submit) and not WorkspaceClient._source_supported(self):
                 raise WorkspaceClientError("workspace_native_completion_unavailable", outcome_unknown=False)
         source_binding()
-        options = {"checkpoint": checkpoint} if checkpoint is not None else {}
+        options: _ReadOptions = {}
+        if checkpoint is not None:
+            options["checkpoint"] = checkpoint
         lookup = await self.exchange("lookup", {"number": number, "generation_id": generation_id}, **options)
         source_binding()
         descriptor = lookup["result"].get("descriptor")
@@ -323,7 +367,8 @@ class WorkspaceClient:
         except ValueError:
             raise WorkspaceClientError("invalid_workspace_descriptor") from None
         chunks = {}
-        for offset in range(0, descriptor["bytes"], CHUNK_BYTES):
+        offset = 0
+        while offset < descriptor["bytes"]:
             source_binding()
             if checkpoint is not None:
                 checkpoint()
@@ -334,24 +379,29 @@ class WorkspaceClient:
             else:
                 await self._read_admission()
             source_binding()
+            read_options = options.copy()
+            if (
+                self._capabilities is not None
+                and workspace_bulk.supports(self._capabilities.get(workspace_bulk.FIELD))
+            ):
+                read_options["_bulk"] = True
             value = await self.exchange("chunk", {
                 "number": number, "generation_id": generation_id, "offset": offset,
-            }, **options)
-            chunks[offset] = value["result"]
-            # Reject corruption immediately rather than retain another full
-            # invalid generation while waiting for later pages.
-            result = chunks[offset]
+            }, **read_options)
             if (
-                result.get("descriptor") != descriptor or type(result.get("offset")) is not int
-                or result["offset"] != offset or not isinstance(result.get("data"), str)
+                workspace_bulk.FIELD in value["result"] or "chunks" in value["result"]
+            ) and not (
+                self._capabilities is not None
+                and workspace_bulk.supports(self._capabilities.get(workspace_bulk.FIELD))
             ):
-                raise WorkspaceClientError("workspace_chunk_changed")
+                raise WorkspaceClientError("workspace_bulk_not_negotiated")
             try:
-                block = base64.b64decode(result["data"], validate=True)
-            except ValueError:
-                raise WorkspaceClientError("workspace_chunk_invalid") from None
-            if len(block) != min(CHUNK_BYTES, descriptor["bytes"] - offset):
-                raise WorkspaceClientError("workspace_chunk_incomplete")
+                frames = workspace_bulk.checked_frames(value["result"], descriptor, offset)
+            except ValueError as error:
+                raise WorkspaceClientError(str(error)) from None
+            for frame in frames:
+                chunks[offset] = frame
+                offset += min(CHUNK_BYTES, descriptor["bytes"] - offset)
         def assemble() -> Document:
             try:
                 return materialize(descriptor, chunks.__getitem__)

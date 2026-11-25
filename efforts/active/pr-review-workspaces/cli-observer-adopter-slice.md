@@ -1,8 +1,8 @@
 # CLI-first workspace observer adopter
 
-Parent: [PR Review Workspaces](README.md). This is an **agent-recommended,
-planning-only source proposal**. Review it before implementation. Neither this
-document nor its source publication authorizes configuration adoption,
+Parent: [PR Review Workspaces](README.md). This **agent-recommended source
+contract** cleared review in #10819; its bounded source implementation was
+separately admitted. Neither this document nor its source publication authorizes configuration adoption,
 credentials, installation, serving changes, live PR effects or rollout.
 
 ## Intent and existing owners
@@ -137,37 +137,38 @@ hot-reload or background credential owner.
 
 ## Negotiated bulk-read amendment
 
-**Agent-recommended plan; source scope approved, plan review pending.**
+**Agent-recommended source plan; independently reviewed and merged in #14578.**
 The `bulk-source-only` / `REVIEW+ADD` continuation retains the finite
 60-second observer lifetime. Existing per-8-KiB-chunk pacing and fresh challenge
 exchanges cannot materialize the supported 16-MiB generation within that
 lifetime. Removing pacing or increasing limits is not the selected fix.
 
-- [ ] Clear independent review and merge of this amendment before bulk code.
-- [ ] Extend the executing service's existing workspace discovery with optional,
+- [x] Clear independent review and merge before bulk code: #14578, exact-head
+  Copilot approval `6060722124`, merge `5ed58a02a26b8b545fb39f0652d8787b1854dece`.
+- [x] Extend the executing service's existing workspace discovery with optional,
   explicitly negotiated bounded bulk materialization. Preserve the existing
   contract and single-frame operation. Discovery must remain compatible with
   supported strict legacy readers; preserve their baseline discovery shape
   where required. Do not infer support from package versions or try an
   unsupported new operation and blindly replay an older form.
-- [ ] Reuse the current authenticated operation, immutable generation lookup
+- [x] Reuse the current authenticated operation, immutable generation lookup
   and scoped read owner to return a bounded group of existing frames per
   request. Validate every member's scope, offsets and limits under that owner.
   Bound encoded JSON, including escaping, before returning a response; split
   groups rather than truncate evidence. Add no cache, journal, transport,
   credential owner or caller-supplied admission hook.
-- [ ] Let the existing client select bulk reads only after actual discovery.
+- [x] Let the existing client select bulk reads only after actual discovery.
   Preserve frame/order/completeness checks and one absolute invocation deadline.
   Older peers retain supported single-frame operations and honest timeout or
   unsupported results; missing optional bulk support must not disable those
   operations or select another host, identity or backend.
-- [ ] On a capable new/new path, qualify a complete 16-MiB generation within
+- [x] On a capable new/new path, qualify a complete 16-MiB generation within
   the same 60-second invocation, legitimate JSON expansion, partial/failing
   groups, dishonest discovery, interruption and retained immutable scope.
   Use contained fixtures through
   the real fresh-challenge HTTP `ServiceCaller` boundary, not a local journal or
   no-op admission substitute.
-- [ ] Cover old caller/new provider, new caller/old provider, new/new selection
+- [x] Cover old caller/new provider, new caller/old provider, new/new selection
   and supported provider rollback through the real serialization boundary.
   Incomplete or interrupted groups must not appear as complete materialization;
   retain existing cache/journal reconciliation and physical lifetime ownership.
@@ -184,21 +185,21 @@ direction rather than extending standing intent. Apply the existing
 expand providers first, migrate clients conditionally, and retain the baseline
 through its supported upgrade/rollback window. No operation is retired here.
 
-This is a plan, not implemented or qualified bulk support. Source review,
-required CI and exact-head acceptance remain gates. Release and separately
+The contained source implementation and qualification are recorded below.
+Source review, required CI and exact-head acceptance remain gates. Release and separately
 authorized adoption remain with their existing owners; no configuration,
 runtime, service or live-provider action is introduced.
 
 ## Implementation plan after source admission
 
-- [ ] Review the profile ownership, fixed read-only exposure and finite
+- [x] Review the profile ownership, fixed read-only exposure and finite
   invocation contract before changing the CLI or its source dependencies.
-- [ ] Add the strict optional selector and namespace-safe profile reader under
+- [x] Add the strict optional selector and namespace-safe profile reader under
   the existing PR client/configuration owner; no profile writer or adoption
   command is part of this slice.
-- [ ] Construct only the existing authenticated client/facade chain and retain
+- [x] Construct only the existing authenticated client/facade chain and retain
   current request parsing, capability validation and one-shot source refusal.
-- [ ] Wire finite execution and response/error handling through the current
+- [x] Wire finite execution and response/error handling through the current
   process/transport owners without a new lifetime or retry engine.
 - [ ] Qualify actual CLI invocation and installed dependency composition in
   contained fixtures, then run the normal source/review/typing/CI gates.
@@ -207,25 +208,92 @@ runtime, service or live-provider action is introduced.
 
 ## Validation plan
 
-- [ ] Current unbound commands and Python embeddings remain compatible;
+- [x] Current unbound commands and Python embeddings remain compatible;
   missing/foreign profiles and unknown request/configuration fields refuse
   before credential or provider access.
-- [ ] A real CLI process uses the existing authenticated Gateway/PR host and
+- [x] A real CLI process uses the existing authenticated Gateway/PR host and
   native read-owner seam with synthetic credentials/provider output. Fresh CLI
   invocations share the service's generation/cache, not another local store.
-- [ ] Load, no-change sync, dialogue-only change, target/head movement, partial
+- [x] Load, no-change sync, dialogue-only change, target/head movement, partial
   pages and scoped materialization preserve actual IDs, intervals and gaps.
-- [ ] Wrong caller/target/account, revocation and unsupported contracts refuse
+- [x] Wrong caller/target/account, revocation and unsupported contracts refuse
   without endpoint/account fallback or credential export.
-- [ ] Optional events preserve epoch/sequence, bounded pages and unavailable
+- [x] Optional events preserve epoch/sequence, bounded pages and unavailable
   states; reading them never acknowledges or handles a review.
-- [ ] Cancellation/deadline and failed physical cleanup do not report drained,
+- [x] Cancellation/deadline and failed physical cleanup do not report drained,
   release shared owners or hide an uncertain cache/journal commit.
-- [ ] No observation-profile request can reach submission, source fetch,
+- [x] No observation-profile request can reach submission, source fetch,
   mutation, deployment, a new service or an owner/module loader.
-- [ ] First-use/source packaging controls qualify the actual command and its
+- [x] First-use/source packaging controls qualify the actual command and its
   dependencies without treating fixture configuration as live adoption.
 
 The finite source exit is an assessed review, required green CI and honest
 compatibility evidence for this optional observer client. The parent effort's
 real adopter, source, submission, concurrency and operational gates remain open.
+
+## Local source qualification
+
+The reviewed bulk amendment now uses an opt-in HTTP representation of the
+existing capability and chunk operations. Default strict discovery and
+single-frame replies are unchanged; actual receiver support and the existing
+qualified binding determine availability and the response bound. Each member
+reuses the current scope, immutable cache and terminal-retention read owners.
+
+Twenty-one real TLS/HTTP/WebSocket controls pass through the existing fresh-challenge
+ServiceCaller and finite CLI. The full stored 16-MiB generation materialized in
+35.437 seconds using 32 authenticated chunk requests; its compact wire form is
+16,777,007 bytes. The 4-MiB regression completed in 11.297 seconds using eight
+requests. Fixture cache publication is setup through the existing cache owner,
+not part of the materialization command or a live-provider acquisition claim.
+Other controls cover typed discovery, escaped-envelope splitting, retained
+immutable selection, strict legacy wire callers/providers, supported rollback,
+corrupt/incomplete/interrupted groups and terminal retirement between members.
+These are wire-compatibility fixtures, not installed-old-binary qualification.
+
+Fourteen actor-free codec/entry-scope units cover bounded encoding, frame/schema
+refusal and preservation of wrapper-owned state. All 40 observer controls and fresh first-party wheel composition also
+pass. The changed Python files pass whole-file strict checks for Linux
+and Windows. Required exact-head CI and independent source review remain open;
+none of this proves release, profile adoption or live-provider qualification.
+
+Review corrections retain single-frame results for public chunk exchange after
+discovery; only the bulk-aware materializer selects groups. Invalid conversation
+and bulk declarations retain both unavailable diagnostics. Importable Python
+frontdoors refuse caller-owned buffered/text wrappers without reading or flushing;
+the dedicated process-entry adapter alone selects raw borrowed handles. Actual
+in-process tests preserve partially consumed input and pending output, while the
+installed console command remains covered by the fresh-wheel control.
+
+The optional selector now uses the existing application configuration owner and
+the current legacy/cell admission APIs. It composes ServiceCaller,
+WorkspaceClient and one-shot WorkspaceTools without adopting a backend.
+Borrowed request/output streams remain inside the canonical finite process
+owner; the single 60-second observer deadline includes physical input and
+output. Cleanup failures retain the original retryable owner exception.
+
+The 30 current observer unit controls and six native scenarios are covered
+across the recorded focused packets. Native cases run the actual CLI against
+the existing TLS Gateway and native read-owner seam with synthetic credentials
+and finite provider output. Compatibility, scope/refusal, immutable cache,
+partial observations and events retain their original contracts. Fresh
+first-party wheel composition exercises the installed console command without
+editable source finders; it reuses prepared external dependencies and does not
+qualify fresh third-party acquisition or a real host installer.
+
+The refreshed source also isolates the nested worker's Python imports.
+Installed-wheel controls reject checkout and `PYTHONPATH` shadowing while
+retaining structured profile refusal. The 36 observer controls, one packaging
+control and 13 selected borrowed-stream/logfile controls pass under their
+existing item, group and aggregate bounds. Headless ConPTY success and blocked
+input cover actual console-handle forwarding and finite cleanup. Desktop
+window/focus diagnostics were not observed; this is not a zero-window claim.
+Current unattended-validation policy treats those diagnostics as supplemental,
+not an operator-attendance prerequisite for source publication.
+
+Earlier baseline checks covered the enforced Linux/Windows type projects,
+dependency-age, install-contract, documentation and touched Python lint checks
+successfully. The PR plugin and Procutil remain in their existing pending type
+inventory, not newly certified strict projects. These are local source and
+contained-consumer results, not review acceptance, required CI, release,
+profile adoption or live-provider qualification. The two remaining Plan items
+and the parent's eight Plan/eleven Validation gates remain open.

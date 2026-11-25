@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import math
 import os
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Callable, Protocol, TypedDict, cast
 
 from agent_procutil import SyncProcessLaunchError
 from agent_procutil.owned_process import (
@@ -28,6 +29,9 @@ from agent_procutil.owned_process import (
 )
 from agent_procutil._linux_pidfd import open_pidfd
 from agent_procutil.owned_budget import OwnedExecutionBudget
+
+if TYPE_CHECKING:
+    from agent_procutil._native_types import DescriptorStream, FcntlAPI
 
 _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
@@ -57,6 +61,8 @@ class _Request(_RequiredRequest, total=False):
     binary: bool
     input_bytes: str
     budget: _BudgetFrame
+    stdin_fd: int
+    stdout_fd: int
 
 
 class _NestedBudget(Protocol):
@@ -311,7 +317,9 @@ def _finish_posix_process(
 
 
 def _validate(request: object) -> _Request:
-    if not isinstance(request, dict) or set(request) - {"binary", "budget", "input_bytes"} != {
+    if not isinstance(request, dict) or set(request) - {
+        "binary", "budget", "input_bytes", "stdin_fd", "stdout_fd",
+    } != {
         "argv", "timeout", "input_text", "capture", "limits",
     }:
         raise ValueError("invalid caller-owned request")
@@ -339,6 +347,16 @@ def _validate(request: object) -> _Request:
         if not isinstance(request["input_bytes"], str):
             raise ValueError("invalid native byte stdin")
         base64.b64decode(request["input_bytes"], validate=True)
+    if "stdin_fd" in request and (
+        type(request["stdin_fd"]) is not int or request["stdin_fd"] < 0
+        or request["input_text"] is not None or "input_bytes" in request
+    ):
+        raise ValueError("inherited stdin requires one descriptor and no supplied input")
+    if "stdout_fd" in request and (
+        type(request["stdout_fd"]) is not int or request["stdout_fd"] < 0
+        or request["capture"] is not False
+    ):
+        raise ValueError("inherited stdout requires one descriptor and uncaptured execution")
     if "budget" in request:
         value = request["budget"]
         if not isinstance(value, dict) or set(value) != {"deadline", "cleanup_reserve"}:
@@ -422,6 +440,8 @@ def run(
     argv: list[str], *, timeout: float | None, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
     input_bytes: bytes | None = None,
+    stdin_stream: DescriptorStream | None = None,
+    stdout_stream: DescriptorStream | None = None,
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike[str] | None = None,
     env: dict[str, str] | None = None,
@@ -433,9 +453,33 @@ def run(
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
     execution_budget = budget
+    stdio_descriptors: set[int] = set()
     try:
         if input_bytes is not None and not isinstance(input_bytes, bytes):
             raise TypeError("native byte stdin must be bytes")
+        if any(isinstance(stream, (io.BufferedIOBase, io.TextIOBase)) for stream in (
+            stdin_stream, stdout_stream,
+        )):
+            raise ValueError("inherited stdio requires unbuffered binary streams")
+        stdin_fd = None if stdin_stream is None else stdin_stream.fileno()
+        stdout_fd = None if stdout_stream is None else stdout_stream.fileno()
+        for descriptor in (stdin_fd, stdout_fd):
+            if descriptor is not None:
+                if type(descriptor) is not int or descriptor < 0:
+                    raise ValueError("inherited stdio requires a native descriptor")
+                os.fstat(descriptor)
+        if os.name != "nt" and not borrow_parent_scope and (
+            stdin_fd is not None or stdout_fd is not None
+        ):
+            import fcntl
+            native_fcntl = cast("FcntlAPI", fcntl)
+            # The guardian reserves descriptors 0/1 for its own framing.
+            if stdin_fd is not None:
+                stdin_fd = native_fcntl.fcntl(stdin_fd, native_fcntl.F_DUPFD_CLOEXEC, 3)
+                stdio_descriptors.add(stdin_fd)
+            if stdout_fd is not None:
+                stdout_fd = native_fcntl.fcntl(stdout_fd, native_fcntl.F_DUPFD_CLOEXEC, 3)
+                stdio_descriptors.add(stdout_fd)
         if input_bytes is not None and 4 * ((len(input_bytes) + 2) // 3) > _MAX_REQUEST:
             raise ValueError("caller-owned request exceeds its frame limit")
         if type(borrow_parent_scope) is not bool:
@@ -451,6 +495,8 @@ def run(
         request = _validate({
             "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
             "limits": [max_stdout_bytes, max_stderr_bytes],
+            **({"stdin_fd": stdin_fd} if stdin_fd is not None else {}),
+            **({"stdout_fd": stdout_fd} if stdout_fd is not None else {}),
             **({"input_bytes": base64.b64encode(input_bytes).decode("ascii")}
                if input_bytes is not None else {}),
             **({"binary": binary} if binary is not False else {}),
@@ -471,6 +517,18 @@ def run(
         if os.name != "nt":
             _require_posix_support()
     except BaseException:
+        failed_stdio: list[tuple[str, object]] = []
+        cause = None
+        for descriptor in tuple(stdio_descriptors):
+            try:
+                os.close(descriptor)
+            except BaseException as error:
+                failed_stdio.append(("descriptor", descriptor))
+                cause = error
+        if failed_stdio:
+            raise OwnedCleanupError(
+                None, cleanup_resources=failed_stdio, on_settled=on_settled,
+            ) from cause
         # No native launch has been attempted at this preparation boundary.
         if on_settled is not None:
             on_settled()
@@ -483,6 +541,7 @@ def run(
                 on_settled=on_settled,
                 allow_daemon_breakaway=allow_daemon_breakaway,
                 binary=binary,
+                stdin_stream=stdin_stream, stdout_stream=stdout_stream,
                 budget=execution_budget, cwd=cwd, env=env,
             )
         except _PreparationTimeout as error:
@@ -495,6 +554,7 @@ def run(
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             inherit_process_group=True, borrow_parent_scope=True, budget=budget,
             binary=binary, cwd=cwd, env=env,
+            stdin_stream=stdin_stream, stdout_stream=stdout_stream,
         )
     reader = writer = None
     launch_attempted = False
@@ -516,7 +576,9 @@ def run(
                 ],
                 timeout=(timeout + (budget.cleanup_reserve / 2 if budget else 0)
                          if timeout is not None else None),
-                input_text=frame, capture=True, pass_fds=(reader,),
+                input_text=frame, capture=True, pass_fds=tuple(dict.fromkeys(
+                    fd for fd in (reader, stdin_fd, stdout_fd) if fd is not None
+                )),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
                 on_settled=lambda: native_settled.append(True),
@@ -539,7 +601,10 @@ def run(
         pending = sys.exc_info()[1]
         failed = []
         cause = None
-        for descriptor, owned in ((reader, _lifetime_readers), (writer, _lifetime_writers)):
+        for descriptor, owned in (
+            (reader, _lifetime_readers), (writer, _lifetime_writers),
+            *((fd, stdio_descriptors) for fd in tuple(stdio_descriptors)),
+        ):
             if descriptor is None:
                 continue
             try:
@@ -619,6 +684,14 @@ def _main() -> None:
             raise ValueError("caller-owned request frame is invalid")
         request = _validate(json.loads(frame))
         budget = OwnedExecutionBudget(**request["budget"]) if "budget" in request else None
+        stdin_stream = (
+            os.fdopen(os.dup(request["stdin_fd"]), "rb", buffering=0)
+            if "stdin_fd" in request else None
+        )
+        stdout_stream = (
+            os.fdopen(os.dup(request["stdout_fd"]), "wb", buffering=0)
+            if "stdout_fd" in request else None
+        )
         try:
             result = _run_owned(
                 request["argv"], timeout=request["timeout"],
@@ -627,6 +700,7 @@ def _main() -> None:
                 inherit_process_group=True, completion_supervisor=True,
                 capture_limits=(request["limits"][0], request["limits"][1]),
                 binary=request.get("binary", False),
+                stdin_stream=stdin_stream, stdout_stream=stdout_stream,
                 budget=budget,
             )
             if request.get("binary", False) and request["capture"]:
@@ -655,6 +729,11 @@ def _main() -> None:
                 response["kind"] = "execution"
         except Exception:
             response["kind"] = "execution"
+        finally:
+            if stdin_stream is not None:
+                stdin_stream.close()
+            if stdout_stream is not None:
+                stdout_stream.close()
         sys.stdout.write(json.dumps(response, ensure_ascii=True, allow_nan=False) + "\n")
         sys.stdout.flush()
     finally:

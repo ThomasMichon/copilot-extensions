@@ -515,7 +515,8 @@
       "name": "agent-pull-requests",
       "import_roots": [
         "plugins/ai-attribution/scripts",
-        "fleet-manager/tests"
+        "fleet-manager/tests",
+        "tools"
       ],
       "include": [
         "plugins/agent-pull-requests"

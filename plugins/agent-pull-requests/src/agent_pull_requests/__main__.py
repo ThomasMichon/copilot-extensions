@@ -28,9 +28,9 @@ from .watch_contract import PRSnapshot
 if TYPE_CHECKING:
     from .watch_invocation import WatchInvocation
 
-    daemon_entrypoint = cast(
-        Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], daemon_entrypoint,
-    )
+_typed_daemon_entrypoint = cast(
+    Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], daemon_entrypoint,
+)
 _render_status = cast(Callable[[dict[str, Any]], str], _untyped_render_status)
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
@@ -629,7 +629,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return cast(Callable[[argparse.Namespace], int], _serve_legacy)(args)
 
 
-@daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
+@_typed_daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
 def _serve_legacy(args: argparse.Namespace) -> int:
     """Admit only the actual legacy foreground owner, not its controller."""
     from single_instance_lease import AlreadyRunningError, SingleInstance
@@ -976,14 +976,14 @@ def main(
     global _WATCH_INVOCATION
     args = build_parser().parse_args(argv)
     if args.command == "workspace":
-        from .workspace_cli import run
-        return cast(Callable[..., int], run)(args, workspace_host)
+        from .workspace_cli import run as run_workspace
+        return cast(Callable[..., int], run_workspace)(args, workspace_host)
     if args.command == "attention":
-        from .attention_cli import run
-        return cast(Callable[..., int], run)(args, attention_host)
+        from .attention_cli import run as run_attention
+        return cast(Callable[..., int], run_attention)(args, attention_host)
     if args.command == "report":
-        from .report_cli import run
-        return cast(Callable[..., int], run)(args, report_host)
+        from .report_cli import run as run_report
+        return cast(Callable[..., int], run_report)(args, report_host)
     from .watch_invocation import WatchInvocation
     previous = _WATCH_INVOCATION
     _WATCH_INVOCATION = WatchInvocation.capture(
@@ -996,4 +996,5 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from ._process_entry import run as _process_entry
+    raise SystemExit(_process_entry(main))

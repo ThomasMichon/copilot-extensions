@@ -363,7 +363,21 @@ class WatchGateway:
 
         try:
             from .workspace_terminal_read import serve
+            from . import workspace_bulk
             attention = request.target.startswith("/v1/attention/")
+            bulk = (
+                not attention and dict(request.headers).get("accept") == workspace_bulk.MEDIA_TYPE
+                and workspace_bulk.available(request.response_limit)
+            )
+            if bulk and operation == "chunk":
+                data = await asyncio.to_thread(
+                    workspace_bulk.grouped_response, workspace, payload,
+                    binding=expected.document(), selection=selection,
+                    expires_at=request.context.expires_at, checkpoint=checkpoint,
+                    response_limit=request.response_limit,
+                )
+                checkpoint()
+                return workspace_bulk.response(data)
             execute = cast(Callable[..., dict[str, Any]], workspace.execute if attention else serve)
             value = await asyncio.to_thread(
                 execute,
@@ -373,6 +387,8 @@ class WatchGateway:
                 **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()
+            if bulk and operation == "capabilities":
+                value[workspace_bulk.FIELD] = workspace_bulk.contract(request.response_limit)
             from .workspace_retained_review import FIELD, RESPONSE_BYTES, SELECTION
             if not attention and operation == "capabilities" and request.response_limit < RESPONSE_BYTES:
                 value.pop(FIELD, None)

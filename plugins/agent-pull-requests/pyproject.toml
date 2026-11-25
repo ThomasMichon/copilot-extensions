@@ -47,10 +47,11 @@ dev = [
     "pytest>=9.1.1",
     "agent-pull-requests[fleet]",
     "pyyaml>=6.0.3",
+    "setuptools>=83.0.0",
 ]
 
 [project.scripts]
-agent-pull-requests = "agent_pull_requests.__main__:main"
+agent-pull-requests = "agent_pull_requests._process_entry:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
