@@ -628,6 +628,35 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
     assert not (home / ".agent-vault").exists()
 
 
+@pytest.mark.parametrize("kind", ["module", "registered"])
+@pytest.mark.parametrize("known_repo", [False, True])
+def test_vault_incomplete_discovery_cannot_skip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, known_repo: bool,
+) -> None:
+    from agent_worktrees import update_runtime_plan
+
+    def unreadable(_repo: Path) -> list[str]:
+        raise OSError("unreadable repository")
+
+    monkeypatch.setattr(core, "_invocation_update_context", lambda: None)
+    monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(repos={
+        "other": SimpleNamespace(anchor=str(tmp_path / "other")),
+    }))
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", unreadable)
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: ["agent-vault"] if known_repo else [])
+    monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: ["agent-vault"])
+    targets = update_runtime._registered_plugin_targets()
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda _: tmp_path)
+    if kind == "module":
+        (tmp_path / "modules.json").write_text('{"modules":[{"name":"agent-vault"}]}')
+    _, modules, registered = update_runtime_plan.plan_portfolio(
+        tmp_path, "linux", None, force=True, targets=targets, force_runtimes=(),
+        selected_plugins=("agent-vault",),
+    )
+    step, = modules if kind == "module" else registered
+    assert step.blocked and "discovery incomplete" in step.status and not step.argv
+
+
 def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio: Portfolio, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import update_runtime_plan, update_runtime_target
 

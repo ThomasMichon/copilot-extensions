@@ -320,12 +320,14 @@ sys.exit(0 if ready else 1)
 def plan_registered(
     name: str, platform_name: str, *, force: bool, gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
-    repository_contexts: tuple[Path, ...] = (),
+    repository_contexts: tuple[Path, ...] | None = (),
     check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
 
     pdir = reconcile.core_installed_payload_dir(name)
     step = RuntimeUpdateStep(name, "runtime_reconcile", pdir or Path())
+    if repository_contexts is None:
+        return dataclasses.replace(step, status="Vault repository discovery incomplete")
     if pdir is None:
         return dataclasses.replace(step, status="payload not installed")
     scope = reconcile.manifest_runtime_scope(pdir) or "none"
@@ -424,11 +426,13 @@ def plan_module(
     name: str, pdir: Path, platform_name: str, *, force: bool,
     gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
-    repository_contexts: tuple[Path, ...] = (),
+    repository_contexts: tuple[Path, ...] | None = (),
     check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
 
     step = RuntimeUpdateStep(name, "module_update", pdir)
+    if repository_contexts is None:
+        return dataclasses.replace(step, status="Vault repository discovery incomplete")
     if not pdir.is_dir():
         return dataclasses.replace(step, status="source dir not found")
     scope = reconcile.manifest_runtime_scope(pdir)
@@ -537,9 +541,7 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
-                repository_contexts=(
-                    target.repository_contexts if target and name in {"agent-index", "agent-vault"} else ()
-                ),
+                repository_contexts=target.planning_contexts(name) if target else (),
                 source=sources.get(name) if sources is not None else None,
             )
         steps.append(step)
@@ -576,7 +578,7 @@ def plan_portfolio(
         plan_registered(
             name, platform_name, force=force or name in force_runtimes,
             gate_context=target.context,
-            repository_contexts=target.repository_contexts if name in {"agent-index", "agent-vault"} else (),
+            repository_contexts=target.planning_contexts(name),
             source=sources.get(name) if sources is not None else None,
         )
         for name, target in sorted(targets.items())
