@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -204,3 +206,71 @@ def test_workflow_binds_both_checks_and_merge_to_the_verified_listing() -> None:
     watch = run.index('gh pr checks "$pr_number" --watch --required')
     merge = run.index('--match-head-commit "$final_head"')
     assert definition < run.index("git push") < first < watch < final < merge
+
+
+REQUIRED_CHECKS = ("workflow-lockdown-guard", "source-attribution", "PR gate (required check)")
+
+
+def required_check_wait(deadline_seconds: int) -> str:
+    run = run_script()
+    start = run.index("deadline=$(( $(date +%s) + 1200 ))")
+    end = run.index("\ndone\n", run.index('for required_check in "workflow-')) + 6
+    return run[start:end].replace("+ 1200 ))", f"+ {deadline_seconds} ))")
+
+
+def run_required_check_wait(tmp_path: Path, deadline_seconds: int, stages: list[str]) -> Any:
+    bash = shutil.which("bash")
+    if bash is None or (os.name == "nt" and "system32" in bash.lower()):
+        pytest.skip("POSIX bash is required to execute the workflow wait loop")
+    calls = tmp_path / "calls"
+    script = (
+        'pr_number=7\n'
+        'gh() { n=$(cat "$CALLS" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$CALLS";\n'
+        '  i=$((n > ${#STAGES[@]} ? ${#STAGES[@]} : n)); printf "%b" "${STAGES[$((i - 1))]}"; }\n'
+        "sleep() { :; }\n"
+        + required_check_wait(deadline_seconds)
+        + "\necho waited\n"
+    )
+    stage_values = " ".join("'" + stage.replace("'", "'\\''") + "'" for stage in stages)
+    program = f"STAGES=({stage_values})\n{script}"
+    result = subprocess.run(
+        [bash, "-c", program], env={**os.environ, "CALLS": calls.as_posix()},
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    return result, int(calls.read_text().strip() or 0)
+
+
+def test_merge_waits_until_every_required_check_appears(tmp_path: Path) -> None:
+    stages = [
+        "workflow-lockdown-guard\\n",
+        "workflow-lockdown-guard\\nsource-attribution\\n",
+        "workflow-lockdown-guard\\nsource-attribution\\nguards + lint\\n",
+        "workflow-lockdown-guard\\nsource-attribution\\nPR gate (required check)\\n",
+    ]
+    result, calls = run_required_check_wait(tmp_path, 1200, stages)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "waited"
+    assert calls >= len(stages)
+
+
+def test_a_required_check_that_never_appears_refuses_merge(tmp_path: Path) -> None:
+    result, _ = run_required_check_wait(
+        tmp_path, 0, ["workflow-lockdown-guard\\nsource-attribution\\nguards + lint\\n"],
+    )
+    assert result.returncode == 1
+    assert "PR gate (required check) never appeared" in result.stderr
+    assert "waited" not in result.stdout
+
+
+def test_waited_check_names_match_their_producing_workflows() -> None:
+    run = run_script()
+    loop = 'for required_check in ' + " ".join(f'"{name}"' for name in REQUIRED_CHECKS) + "; do"
+    assert loop in run
+    assert run.index(loop) < run.index('gh pr checks "$pr_number" --watch --required')
+    pr_gate = source_workflow(ROOT, "ci.yml")["jobs"]["pr-gate"]["name"]
+    assert "github.event_name == 'pull_request' && 'PR gate (required check)'" in pr_gate
+    guard = source_workflow(ROOT, "workflow-lockdown-guard.yml")["jobs"]
+    assert {"workflow-lockdown-guard", "source-attribution"} <= set(guard)
+    assert source_workflow(ROOT, "purge-consumed-changefiles.yml")["jobs"]["purge"][
+        "timeout-minutes"
+    ] == 30

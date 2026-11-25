@@ -43,7 +43,7 @@ jobs:
   purge:
     name: Purge changefiles already consumed by a completed promotion
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     environment: main-promotion
     env:
       GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
@@ -301,24 +301,26 @@ jobs:
           if ! verify_cleanup_paths "$pr_number" >/dev/null; then
             exit 1
           fi
-          # `dev`'s separate "workflow/CODEOWNERS lockdown" ruleset
-          # (workflow-lockdown-guard.yml) enforces its
-          # required_status_checks rule with NO bypass actors at all, by
-          # design -- `--admin` cannot skip a required check that simply
-          # hasn't reported yet; it has to actually complete. That guard
-          # triggers async on PR creation and can take a few seconds to
-          # tens of seconds to report, so merging immediately after `gh pr
-          # create` above would race it. Wait for it to physically report
-          # rather than skip waiting; bounded to 6 minutes total (the
-          # guard's own job timeout is 5) so a genuinely broken/hung check
-          # fails this step instead of hanging the job.
-          deadline=$(( $(date +%s) + 360 ))
-          until gh pr checks "$pr_number" --json name --jq '.[] | select(.name == "workflow-lockdown-guard")' 2>/dev/null | grep -q .; do
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::workflow-lockdown-guard never appeared as a check run on PR #$pr_number within the wait window -- leaving for manual review." >&2
-              exit 1
-            fi
-            sleep 5
+          # `dev`'s "workflow/CODEOWNERS lockdown" ruleset requires
+          # workflow-lockdown-guard and source-attribution with NO bypass
+          # actors, and its classic branch protection requires CI's
+          # "PR gate (required check)" with enforce_admins -- `--admin`
+          # cannot skip a required check that has not reported yet. Each
+          # starts asynchronously, and the PR gate job is created only after
+          # CI's other jobs finish, so `gh pr checks --watch --required`
+          # cannot wait for a check that does not exist yet. Wait until every
+          # required check physically appears, then watch them; bounded to
+          # 20 minutes total so a broken or hung check fails this step
+          # instead of hanging the job.
+          deadline=$(( $(date +%s) + 1200 ))
+          for required_check in "workflow-lockdown-guard" "source-attribution" "PR gate (required check)"; do
+            until gh pr checks "$pr_number" --json name --jq '.[].name' 2>/dev/null | grep -Fxq "$required_check"; do
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "::error::$required_check never appeared as a check run on PR #$pr_number within the wait window -- leaving for manual review." >&2
+                exit 1
+              fi
+              sleep 10
+            done
           done
           remaining=$(( deadline - $(date +%s) ))
           if [ "$remaining" -lt 1 ]; then
@@ -329,7 +331,7 @@ jobs:
             exit 1
           fi
           # The path-scope check above and this merge are separated by up
-          # to six minutes of waiting -- a write collaborator could push a
+          # to twenty minutes of waiting -- a write collaborator could push a
           # follow-up commit onto this owner-authored branch in that gap
           # (workflow-lockdown-guard keys off the PR's author, not its
           # latest commit, so such a push would not itself be blocked).
