@@ -4230,6 +4230,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Normal current-Dev typing selects exactly both new adapters and passes
   whole-file strict checks on Linux and Windows; Ruff and whitespace checks
   pass. These source results do not replace fresh combined-head hosted CI.
+  Publication is blocked on November 25: the managed flow pushes
+  `688debd1ee4141878e69b3645cbbeeba7a8499e3`, but initial GraphQL creation
+  and one absence-checked retry fail with server errors. Attributed REST
+  creation also returns HTTP 502; a subsequent exact-head REST listing is
+  empty. Stop creation attempts and retain the pushed branch, local evidence
+  and both unchecked leaves. All observed inputs, 1,465 bindings and 92 helper
+  decisions still verify. No PR, hosted result or completion is inferred.
 - [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
   boundary. The initial three-function candidate reports three pytest passes
   but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.

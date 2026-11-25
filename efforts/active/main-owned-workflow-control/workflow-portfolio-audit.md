@@ -8659,6 +8659,20 @@ physical adapters and passes Linux and Windows. Ruff and whitespace checks
 pass. Both source-bound local cohorts remain settled; do not replay them
 merely to replace the separately required fresh hosted combined-head packet.
 
+Publication reaches pushed head `688debd1ee4141878e69b3645cbbeeba7a8499e3`
+on November 25, but GitHub PR creation fails: the initial GraphQL request
+returns a server error, and one exact-branch-absence-checked managed retry
+returns HTTP 502. The documented provider recovery route prepares the actual
+source attribution and confirms absence through REST; REST creation also
+returns HTTP 502. A subsequent exact-head REST listing remains empty.
+Stop creation writes rather than repeat an ambiguous mutation indefinitely.
+No PR is recorded or inferred, no hosted run/review is claimed, and no
+runtime, credentials or provider gate is changed. All locally observed inputs,
+1,465 bindings and 92 helper decisions remain verified. Retain the pushed
+branch, complete prepared description, refused candidate and qualified cohorts
+for supported recovery after the provider boundary changes. Parent #6237 and
+both source leaves remain open; the earlier #14577 merge remains separate.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation
