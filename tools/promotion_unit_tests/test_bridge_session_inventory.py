@@ -968,6 +968,7 @@ def test_ordinary_parser_defaults_to_exact_selection_with_explicit_legacy_escape
     ("bridge_observation_cli", "tail", 0),
     ("bridge_observation_cli", "attention", ["input_required"]),
     ("bridge_observation_cli", "no_follow", True),
+    ("bridge_send_cli", "target", "live:host-b:worker-project:workspace-a"),
 ])
 def test_specialized_parser_mode_keeps_its_owner_without_scope_fallback(
     monkeypatch: pytest.MonkeyPatch, module: str, field: str, value: Any,

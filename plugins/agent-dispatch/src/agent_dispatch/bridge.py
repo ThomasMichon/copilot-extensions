@@ -231,21 +231,19 @@ def _spawn_worker_via_worktree(
             json_output=json_output, timeout=timeout,
         )
 
-    resume_cmd = [*exe, "resume", ensured_worktree_id, "--require-agent-hosting"]
-    resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        resume_cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
+    from . import bridge_reclaim
+
+    resumed, session_id = bridge_reclaim._resume(
+        ensured_worktree_id, exe=exe, force=False, timeout=timeout,
     )
     if resumed.returncode != 0:
         return resumed
+    if session_id is None:
+        return bridge_reclaim._no_session_id_failure(resumed)
 
     send_cmd = [
         *exe, *continuation_arguments(
-            ensured_worktree_id, wait=wait, communication=30.0 if timeout is None else timeout,
+            session_id, wait=wait, communication=30.0 if timeout is None else timeout,
             caller=f"agent-dispatch:{worker_id}",
         ),
     ]
@@ -261,45 +259,12 @@ def _spawn_worker_via_worktree(
     if sent.returncode != 0 or not json_output:
         return sent
 
-    resolved = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        [
-            *exe,
-            "--json",
-            "live-sessions",
-            "resolve",
-            "--handle",
-            ensured_worktree_id,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
-    )
-    if resolved.returncode == 0:
-        try:
-            live = json.loads((resolved.stdout or "").strip() or "{}")
-        except (ValueError, TypeError):
-            live = {}
-        if isinstance(live, dict):
-            session_id = live.get("session_id")
-            if session_id:
-                return subprocess.CompletedProcess(
-                    args=sent.args,
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "session_id": session_id,
-                            "worktree": ensured_worktree_id,
-                            "reused": False,
-                        }
-                    ),
-                    stderr=sent.stderr,
-                )
     return subprocess.CompletedProcess(
         args=sent.args,
         returncode=0,
-        stdout=json.dumps({"worktree": ensured_worktree_id}),
+        stdout=json.dumps({
+            "session_id": session_id, "worktree": ensured_worktree_id, "reused": False,
+        }),
         stderr=sent.stderr,
     )
 

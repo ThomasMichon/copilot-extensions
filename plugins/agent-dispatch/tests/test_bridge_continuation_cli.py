@@ -57,7 +57,8 @@ def test_fleet_continuation_startup_producers_keep_existing_owner_contract(
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, "accepted", "")
+        output = json.dumps({"session_id": "session-a"}) if "resume" in argv else "accepted"
+        return subprocess.CompletedProcess(argv, 0, output, "")
 
     monkeypatch.setattr(subprocess, "run", run)
     if producer == "worktree":
@@ -66,7 +67,9 @@ def test_fleet_continuation_startup_producers_keep_existing_owner_contract(
             prompt="original\nprompt", route="", project="worker-project", target_dir=None,
             worktree_id="worker-a", reclaim=False, wait=wait, json_output=False, timeout=20.0,
         )
-        assert calls[0][0] == ["bridge", "resume", "worker-a", "--require-agent-hosting"]
+        assert calls[0][0] == [
+            "bridge", "--json", "resume", "worker-a", "--require-agent-hosting",
+        ]
         assert len(calls) == 2
     else:
         result = bridge_reclaim._send(
@@ -77,7 +80,8 @@ def test_fleet_continuation_startup_producers_keep_existing_owner_contract(
     assert result.returncode == 0
     argv, options = calls[-1]
     assert argv[:8] == [
-        "bridge", "send", "worker-a", "--require-agent-hosting", "--prompt-file", "-",
+        "bridge", "send", "session-a" if producer == "worktree" else "worker-a",
+        "--require-agent-hosting", "--prompt-file", "-",
         "--caller", "agent-dispatch:controller-a",
     ]
     assert ("--no-wait" in argv) is not wait
@@ -86,6 +90,28 @@ def test_fleet_continuation_startup_producers_keep_existing_owner_contract(
     ]
     assert "--legacy-selector" not in argv
     assert options["input"] == "original\nprompt" and options["timeout"] == 20.0
+
+
+@pytest.mark.parametrize("response", [
+    "legacy success", "", "[]", "null", "{}", '{"session_id":7}', '{"session_id":"  "}',
+])
+def test_fleet_continuation_worktree_startup_without_resumed_identity_never_sends(
+    monkeypatch: pytest.MonkeyPatch, response: str,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, response, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = bridge._spawn_worker_via_worktree(
+        exe=["bridge"], task_id="task-a", agent="worker", worker_id="controller-a",
+        prompt="original prompt", route="", project="worker-project", target_dir=None,
+        worktree_id="workspace-a", reclaim=False, wait=False, json_output=True, timeout=20.0,
+    )
+    assert calls == [["bridge", "--json", "resume", "workspace-a", "--require-agent-hosting"]]
+    assert result.returncode == 1 and "no session_id" in result.stderr
 
 
 @pytest.mark.parametrize("producer", ["ordinary", "acquisition"])

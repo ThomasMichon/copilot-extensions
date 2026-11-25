@@ -126,10 +126,11 @@ def _resume(
     if resumed.returncode != 0:
         return resumed, None
     try:
-        session_id = json.loads(resumed.stdout or "{}").get("session_id")
+        payload = json.loads(resumed.stdout or "{}")
     except json.JSONDecodeError:
-        session_id = None
-    return resumed, (session_id or None)
+        payload = None
+    session_id = payload.get("session_id") if isinstance(payload, dict) else None
+    return resumed, session_id if isinstance(session_id, str) and session_id.strip() else None
 
 
 def _resume_refusal(resumed: subprocess.CompletedProcess[str]) -> tuple[str | None, str | None]:

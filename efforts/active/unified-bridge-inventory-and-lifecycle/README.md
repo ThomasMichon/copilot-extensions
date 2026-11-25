@@ -106,11 +106,15 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   specialized delivery/history/receipt operations. The root project guard and
   Dispatch continuation/startup/observation producers preserve their intended
   owners across project boundaries. Profile and implicit-startup examples use
-  explicit legacy selection. The current source passes 118 actor-free controls,
-  201 contained Bridge cases and the focused 52-case Dispatch rerun; the
-  preceding 117-case Dispatch packet also qualified the unchanged caller.
-  Whole-file strict checks pass all 11 current-delta Python files on both
-  target platforms; unchanged initial files retain their prior qualification.
+  explicit legacy selection. Qualified peer replies retain their existing
+  host owner; worktree startup pins the session ID returned by JSON resume.
+  The current source passes 119 actor-free controls, 55 focused Bridge
+  parser/peer controls and the final 83-case Dispatch rerun. The preceding
+  201-case Bridge and 117-case Dispatch packets retain qualification for
+  unchanged neighboring behavior. Whole-file strict checks pass all seven
+  files in the latest delta on both target platforms through the repository's
+  selected-file checker; the canonical local inventory stalled before checking.
+  Unchanged files retain their earlier whole-file qualification.
   Install-contract, documentation, module-size and whitespace checks pass.
   Fresh published-head review, required CI, native qualification, merge and
   normal release remain open. Effectful lifecycle selectors and potential

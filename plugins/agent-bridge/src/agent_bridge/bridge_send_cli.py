@@ -10,7 +10,8 @@ from typing import Any, NoReturn
 
 def _specialized(args: argparse.Namespace) -> bool:
     return (
-        any(getattr(args, name, None) for name in (
+        str(getattr(args, "target", "")).startswith("live:")
+        or any(getattr(args, name, None) for name in (
             "new", "force", "queue", "full_history", "wait_reply", "wait_delivery",
             "notify", "status_check", "interrupt", "plugin_context_stdin",
             "live_exact_notify", "live_receipt_only", "live_exact", "receipt_only",

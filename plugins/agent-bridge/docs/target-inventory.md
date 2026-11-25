@@ -158,6 +158,14 @@ continuation operation, including stopped-session resume, rather than ordinary
 exact send. The producer emits no new selector flag to prior CLIs and adds no
 capability probe or second SSH command.
 
+Qualified `live:<machine>:<project>:<worktree>` reply addresses also retain the
+existing peer operation, including exact registered-ID lookup precedence and
+host-qualified delivery. An explicit `--bridge` with that address refuses the
+mixed mode rather than changing owners. Worktree startup requests the existing
+JSON resume response and sends to its returned session ID, not the worktree
+handle. Missing or invalid identity refuses before send. The JSON startup
+result retains that same ID without a second, possibly newer head lookup.
+
 For existing automated observation callers, invocation-scoped
 `AGENT_BRIDGE_LEGACY_OBSERVATION=1` retains the prior read/wait owner when no
 selector flag is supplied. Explicit `--bridge` still wins. Dispatch sets this
