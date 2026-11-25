@@ -460,7 +460,7 @@ def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch: pytest.
 
 
 @pytest.mark.parametrize("action", ["start", "run"])
-@pytest.mark.parametrize("failure", ["timeout", "output", "decode", "cleanup"])
+@pytest.mark.parametrize("failure", ["timeout", "output", "decode", "decode-subclass", "cleanup"])
 def test_cli_engine_reports_bounded_uv_failure_without_launch_or_retry(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
     capsys: pytest.CaptureFixture[str], action: str, failure: str,
@@ -472,7 +472,8 @@ def test_cli_engine_reports_bounded_uv_failure_without_launch_or_retry(
     errors = {
         "timeout": subprocess.TimeoutExpired(["uv", "python", "find"], 10),
         "output": OutputLimitExceeded("stdout", 65536),
-        "decode": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+        "decode": UnicodeError("native output is not valid UTF-8"),
+        "decode-subclass": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
         "cleanup": OwnedCleanupError(custodian),
     }
     original = errors[failure]

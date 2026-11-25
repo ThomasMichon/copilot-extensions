@@ -254,7 +254,7 @@ def _engine_command(py: Path, home: Path | None) -> list[str]:
     host, port = engine_endpoint()
     try:
         resolve_runtime_python(py, uv=os.environ.get("AGENT_INDEX_UV"))
-    except (subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeDecodeError, OwnedCleanupError) as error:
+    except (subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeError, OwnedCleanupError) as error:
         raise EngineRuntimeAdmissionError(error) from error
     return [
         windowless_python(str(py)),
