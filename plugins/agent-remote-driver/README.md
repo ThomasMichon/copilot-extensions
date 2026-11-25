@@ -578,10 +578,15 @@ directory this process can create and write to.
 ## What's in this plugin
 
 - [`extensions/agent-remote-driver/extension.mjs`](extensions/agent-remote-driver/extension.mjs) --
-  the SDK-coupled glue: joins the session, writes/removes/refreshes the
-  discovery descriptor, sweeps fleet-wide stale descriptors at startup, and
-  forwards events to the driver server under the hot-potato discipline (no
-  blocking work on the CLI's own event loop).
+  the SDK namespace adapter, supplying one `joinSession` operation to the
+  activation owner without requesting tools or a permission handler.
+- [`extensions/agent-remote-driver/driver-extension.mjs`](extensions/agent-remote-driver/driver-extension.mjs) --
+  the activation owner: ensures the selected service, sweeps stale descriptors,
+  invokes the supplied join once, then publishes discovery and forwards events
+  under the hot-potato discipline. The join operation can return Core's already
+  joined registration/delivery connector instead of resuming the SDK again.
+  Existing launches still use their independent Driver and Bridge entrypoints;
+  this composition seam does not select or retire an extension.
 - [`extensions/agent-remote-driver/driver-server.mjs`](extensions/agent-remote-driver/driver-server.mjs) --
   the dependency-free HTTP server (health/events/send/steer/abort, with a
   bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly

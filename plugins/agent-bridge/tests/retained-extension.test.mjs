@@ -8,6 +8,7 @@ import * as retained from "../../../libs/copilot-driver-core/src/agent_remote_dr
 import * as questions from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/questions.mjs";
 import * as deliveryState from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery-state.mjs";
 import { isRemoteDriverSource, selectedLoadout } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
+import { createSessionDriver } from "../../agent-remote-driver/extensions/agent-remote-driver/session-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 async function consumeLegacy(f) {
@@ -21,6 +22,9 @@ async function consumeLegacy(f) {
   await settle();
 }
 const source = readFileSync(new URL("../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs", import.meta.url), "utf8");
+const driverSource = readFileSync(new URL(
+  "../../agent-remote-driver/extensions/agent-remote-driver/driver-extension.mjs", import.meta.url,
+), "utf8");
 
 async function load(selected, version = 50, {
   exact = false, nativeId = "native-a", driver = false, headed = false, headedRefused = false,
@@ -29,7 +33,8 @@ async function load(selected, version = 50, {
   historyResponse = { replay_accepted: true, ingested: 1 },
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
   tokenInitiallyMissing = false,
-  retainedReceipts, legacyAck, legacyPoll, legacyControls = [], modeSet,
+  retainedReceipts, legacyAck, legacyPoll, legacyControls = [], modeSet, composeDriver = false,
+  joinFailure, activationEffects = [],
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const deferred = [];
@@ -40,6 +45,9 @@ async function load(selected, version = 50, {
   let closed = 0;
   let consumer;
   let joined;
+  let joins = 0;
+  let driverOptions;
+  const driverDescriptors = [], driverEvents = [];
   let eventPosts = 0;
   let bridgeReady = !tokenInitiallyMissing;
   let compatibleReady = compatible;
@@ -52,6 +60,7 @@ async function load(selected, version = 50, {
     log: async (message) => logs.push(message),
     send: async (options) => { sends.push(options); return send ? send(options) : "sdk-message-a"; },
     getEvents: async () => [],
+    abort: async () => {},
     close() { assert.fail("Closing the Bridge client must not close native"); },
     rpc: { mode: { set: modeSet || (async () => ({ modeApplied: true })) },
       metadata: { snapshot: snapshot || (async () => ({
@@ -143,8 +152,11 @@ async function load(selected, version = 50, {
           AGENT_BRIDGE_DRIVER_OWNER: "synthetic-launch",
         } : {}) },
       cwd: () => process.cwd(),
+      pid: 102,
       ppid: 101,
-      stderr: { write: (line) => logs.push(line) }, once: (name, callback) => shutdowns.set(name, callback),
+      stderr: { write: (line) => logs.push(line) },
+      once: (name, callback) => shutdowns.set(name, callback),
+      on: (name, callback) => shutdowns.set(name, callback),
     },
     fetch: () => { throw new Error("real network forbidden"); },
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return { unref() {} }; },
@@ -165,6 +177,8 @@ async function load(selected, version = 50, {
     "node:fs": {
       existsSync: (file) => file.endsWith("auth.yaml"),
       readFileSync: () => "token: synthetic-secret",
+      mkdirSync: () => {},
+      unlinkSync: () => {},
     },
     "node:fs/promises": { open: async () => {
       if (!historyReplay) throw new Error("real transcript reads forbidden");
@@ -180,7 +194,53 @@ async function load(selected, version = 50, {
     "node:path": path,
     "node:os": { homedir: () => "/synthetic-home" },
     "@microsoft/copilot-sdk": { approveAll: () => {} },
-    "@microsoft/copilot-sdk/extension": { joinSession: async (config) => { joined = config; return session; } },
+    "@microsoft/copilot-sdk/extension": {
+      joinSession: async (config) => {
+        activationEffects.push("join");
+        joins++;
+        if (joinFailure) throw joinFailure;
+        joined = config;
+        return session;
+      },
+    },
+    "./driver-server.mjs": {
+      MAX_SSE_CLIENTS: 16,
+      createDriverServer: (options) => {
+        activationEffects.push("driver-server");
+        driverOptions = options;
+        return {
+          control: {
+            snapshot: () => ({ controlProtocol: 2, instanceId: "synthetic-instance" }),
+            markReady() {},
+            observe: (event) => driverEvents.push(event),
+            suspend: () => assert.fail("composed native observation must remain available"),
+          },
+          listen: async () => 43123,
+        };
+      },
+    },
+    "./session-driver.mjs": { createSessionDriver },
+    "./discovery.mjs": {
+      discoveryDir: () => "/synthetic-driver",
+      descriptorPath: (sid) => `/synthetic-driver/${sid}.json`,
+      generateToken: () => "synthetic-driver-token",
+      buildDescriptor: (options) => options,
+      writeDescriptorAtomic: (_file, descriptor) => driverDescriptors.push(descriptor),
+    },
+    "./registry.mjs": {
+      sweepStale: () => { activationEffects.push("sweep"); return { removed: [] }; },
+    },
+    "./lifecycle.mjs": {
+      boundedRetry: (operation) => operation(),
+      installSignalCleanup() {},
+      createIntervalTimer: (fn, ms) => ({ start: () => timers.push({ fn, ms }) }),
+    },
+    "./service-startup.mjs": {
+      ensureInstalledService: async () => {
+        activationEffects.push("ensure");
+        return { state: "ready" };
+      },
+    },
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
     "./questions.mjs": questions,
@@ -227,7 +287,9 @@ async function load(selected, version = 50, {
   context.__dependencies = dependencies;
   // Stable VM scripts avoid the Node 22 experimental-module SIGSEGV. Only
   // the extension's explicit named imports are linked; its body is unchanged.
-  const linked = source.replace("export async function activateBridgeExtension", "async function activateBridgeExtension").replace(
+  const linked = (source + (composeDriver ? "\n" + driverSource : "")).replace(
+    /export async function (activateBridgeExtension|activateDriverExtension)/g, "async function $1",
+  ).replace(
     /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm,
     (_statement, names, name) => {
       const exports = dependencies[name];
@@ -240,10 +302,13 @@ async function load(selected, version = 50, {
     },
   );
   assert.doesNotMatch(linked, /^import\s/m, "unsupported extension import syntax");
-  await new vm.Script(`(async () => {\n${linked}\nawait activateBridgeExtension({
+  await new vm.Script(`(async () => {\n${linked}\nconst joinConnector = async () => (
+    globalThis.joinedConnector = await activateBridgeExtension({
     joinSession: __dependencies["@microsoft/copilot-sdk/extension"].joinSession,
     pluginRoot: process.cwd(),
-  });\n})()`).runInContext(context);
+  }));
+  ${composeDriver ? "await activateDriverExtension({ joinSession: joinConnector });" : "await joinConnector();"}
+  \n})()`).runInContext(context);
   await settle();
   const poll = timers.find((timer) => timer.ms === 2_000);
   assert.ok(poll);
@@ -261,13 +326,57 @@ async function load(selected, version = 50, {
   };
   return {
     calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
-    nativeSession: session,
+    nativeSession: session, joinedConnector: context.joinedConnector,
+    joins, driverOptions, driverDescriptors, driverEvents,
     closed: () => closed, runDeferred, registeredSessions,
     publishBridge: () => { bridgeReady = true; },
     publishRetained: () => { compatibleReady = true; now += 60_000; },
     rename: (sid) => { session.sessionId = sid; nativeId = sid; },
   };
 }
+
+for (const selected of [undefined, "1"]) {
+  test(`one joined native session composes Driver control with ${selected ? "retained" : "legacy"} Bridge delivery`, async () => {
+    const f = await load(selected, 51, { autoPoll: false, composeDriver: true });
+    assert.equal(f.joins, 1);
+    assert.equal(f.joinedConnector, f.nativeSession);
+    assert.equal(f.handlers.length, 2);
+    assert.deepEqual(Array.from(f.joined.commands, (command) => command.name), ["peer"]);
+    assert.equal(f.driverDescriptors.length, 1);
+    assert.equal(f.driverDescriptors[0].controlProtocol, 2);
+    await f.runDeferred();
+    assert.equal(f.sends.length, 1);
+    assert.equal(f.sends[0].source, "agent-bridge");
+    const events = [];
+    const unsubscribe = f.driverOptions.subscribe((event) => events.push(event));
+    const event = { id: "shared-input", type: "user.message", data: { source: "user" } };
+    for (const handler of f.handlers) handler(event);
+    f.timers.find((timer) => timer.ms === 250).fn();
+    assert.deepEqual(events, [event]);
+    assert.deepEqual(f.driverEvents, [event]);
+    await f.joined.commands[0].handler({});
+    f.poll.fn();
+    await settle();
+    assert.equal(f.sends.length, 1, "peer mute applies without a second command registration");
+    await f.driverOptions.send({
+      content: "direct Driver input", mode: "enqueue", source: "agent-remote-driver-synthetic",
+    });
+    assert.equal(f.sends.length, 2);
+    assert.deepEqual(f.sends[1], {
+      prompt: "direct Driver input", mode: "enqueue", source: "agent-remote-driver-synthetic",
+    });
+    unsubscribe();
+  });
+}
+
+test("a failed composed join preserves its error without publishing a Driver or retrying", async () => {
+  const failure = new Error("selected native join refused");
+  const effects = [];
+  await assert.rejects(load("1", 51, {
+    composeDriver: true, joinFailure: failure, activationEffects: effects,
+  }), (error) => error === failure);
+  assert.deepEqual(effects, ["ensure", "sweep", "join"]);
+});
 
 for (const selected of [undefined, "1"]) {
   test(`${selected ? "retained" : "legacy"} registration drains the actual joined session without a poll tick`, async () => {
