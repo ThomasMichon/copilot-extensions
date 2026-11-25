@@ -4995,9 +4995,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   complete 15:04:09 PST census is 815 whole open, 293 original-cohort and 522
   inflow, 86 above fixed 729; eleven verified departures are offset by two
   metadata-only arrivals. All incumbent parent/global gates remain unchanged.
-  The [nine-case extension proposal](source-reuse-occurrences.md#proposed-nine-case-extension)
-  preserves the accepted intake before any addition; distinct #8446 remains
-  OPEN as an unfulfilled remote-candidate guard, not an inherited completion.
+  The [accepted nine-case extension](source-reuse-occurrences.md#nine-case-extension)
+  preserves the entire incumbent intake and all twenty technical cases OPEN
+  after nine further audited tracking retirements; distinct #8446 remains OPEN
+  as an unfulfilled remote-candidate guard. The complete 15:35:22 PST census is
+  806 whole open, 293 original-cohort and 513 inflow, net 652 and 77 above fixed
+  729, with exactly those nine departures and no arrivals. Only four new local
+  tracker gates resolve; all parent/global states remain unchanged.
   The [auth/typing/cache outcome and changed-evidence follow-through](journal/2026/11.14-auth-typing-and-cache-intake.md#reviewed-delivery-and-separate-tracking-judgments)
   records actual #12635 merge, complete current receiving bindings and three
   independently audited NOT_PLANNED tracking retirements. All nine technical

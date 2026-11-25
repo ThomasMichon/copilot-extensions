@@ -93,7 +93,7 @@ audited `NOT_PLANNED` tracking retirements and their post-transition routes.
 These four local tracker gates are resolved; all eleven technical cases remain
 OPEN in #7872. No incumbent parent Plan/global Validation state is resolved.
 
-## Proposed nine-case extension
+## Nine-case extension
 
 The initial eleven-row intake and ten tracking retirements above are settled;
 do not repeat their effects or alter their four resolved local gates.
@@ -104,7 +104,7 @@ whole excerpt again contains exit one and cleanup rather than a causal
 diagnostic. These are nine distinct unknown technical cases, not nine fixes
 or an inference from #8369 or a later green release.
 
-| Original | Exact lookup marker | Reported Dev source | Failed run / job | Proposed technical state |
+| Original | Exact lookup marker | Reported Dev source | Failed run / job | Technical state |
 |---|---|---|---|---|
 | #8429 | Signature: a28338a4f891 | `942b9fd81633eed7b3429a1f704cdec9dbf64ad5` | [40055780341 / 120759467763](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40055780341/job/120759467763) | OPEN |
 | #8432 | Signature: 3a57fc342c26 | `e6a46c4cea20be26af226bc85fd60ea501c2571d` | [40056564167 / 120761651789](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40056564167/job/120761651789) | OPEN |
@@ -116,11 +116,11 @@ or an inference from #8369 or a later green release.
 | #8452 | Signature: 22d9c8e2f42e | `107f1900fee0ed0c7030d3d9815d8d6df89fbdc9` | [40059529617 / 120770899776](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40059529617/job/120770899776) | OPEN |
 | #8453 | Signature: bcb97a8fcad6 | `93f4546a0d65a3b2ead03de8872886fcfdd9429c` | [40059839115 / 120772004151](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40059839115/job/120772004151) | OPEN |
 
-After review, propose adding these nine rows and their complete obligations
-to the whole actual #7872 receiver. Preserve its incumbent original, all eleven
-accepted rows, discussion, metadata, custodians and one disclosure. Only
-verified whole intake could make twenty technical cases OPEN there; the
-current eleven-row intake is not advance acceptance of this addition.
+After reviewed #14644, the whole actual #7872 receiving body independently
+retained these nine rows and their complete obligations, its incumbent
+original, all eleven accepted rows, discussion, metadata, custodians and one
+disclosure. All twenty technical cases remain OPEN. The earlier eleven-row
+intake was not treated as advance acceptance of this addition.
 
 Apply the existing source-specific routing, current eligibility/custody,
 acknowledgment, independent audit and `NOT_PLANNED` tracking gates separately
@@ -132,10 +132,15 @@ this proposed receiving or a source-reuse completion.
 
 ### Extension Validation Plan
 
-- [ ] The nine-case extension passes normal review and required CI and merges.
-- [ ] Whole actual receiving preserves all incumbent content and acceptance
+- [x] The nine-case extension passes normal review and required CI and merges.
+- [x] Whole actual receiving preserves all incumbent content and acceptance
   and independently retains all twenty technical cases OPEN.
-- [ ] Each of the nine new sources passes current qualification, exact routing,
+- [x] Each of the nine new sources passes current qualification, exact routing,
   disclosed acknowledgment and independent proper-reason/original audits.
-- [ ] A new complete census records actual new effects and inflow without
+- [x] A new complete census records actual new effects and inflow without
   replaying the settled eleven-disposition checkpoint or changing parent gates.
+
+The [actual extension outcome](journal/2026/11.25-source-reuse-and-verifier-keepers.md#actual-nine-case-extension-and-source-dispositions)
+records all nine independent audits, including two sources kept OPEN during
+unsuitable initial routing. Only these four extension tracker gates are newly
+resolved; neither the original four gates nor any parent gate was reset.
