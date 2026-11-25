@@ -5,6 +5,55 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 25 original logical-environment tuple units
+
+The original module has fifteen cases in three complete functions.
+Only the entire eight-row `test_logical_and_tuple_forms` function is selected:
+all original objects, code/global origins, fixtures, parameter values/types,
+marks, IDs and assertions remain. Its owner decomposes supplied strings and
+returns logical identities; no OS observation, environment-variable change
+or native execution is involved.
+
+Metadata-only original collection and write-free projection show that all
+fifteen cases would occupy 1,049,014 bytes, 438 over the unchanged cap.
+The complete eight-row function fits at 1,048,547 bytes, leaving 29.
+The other two whole functions/seven cases remain storage-held, not technically
+refused, executed, deleted or represented as a complete-module admission.
+The selected parameter table is never split.
+
+Exact adapter/original metadata comparison precedes the fresh unchanged trial.
+All eight pass in 1.09 pytest / 11.422 observation seconds, with 24 passing
+phase reports, zero prohibited effects, 25 bound source reads and actual
+production call coverage for every case. Strict Linux/Windows typing and Ruff
+pass. Add only eight nodes, two bindings and the already-bound owner as target:
+10,375 nodes, 1,499 sources, 546 targets, 92 unchanged helper decisions and
+1,048,547 minified bytes. All prior ordered witnesses, source hashes and
+targets, the parser bound, 300-second deadline and proof checks remain.
+Normal review, required CI, merge and readback remain open.
+This is not native, every-release, whole-census, whole-flow timing or parent
+acceptance. The failed installed-inventory prospect below remains excluded
+without replay or a changed fixture/guard.
+
+## November 25 installed-inventory original refusal
+
+The five-function installed-inventory original and its fixture/helper closure
+are inspected. Metadata-only comparison measures five originals and aliases
+with unchanged fixture/function objects, code/global origins, parameter
+values/types, marks and IDs. A complete existing-v2 minified projection and
+actual metadata candidate both fit at 1,048,513 bytes, leaving 63.
+Storage fit is not eligibility.
+
+The first unchanged guarded case refuses when the original `_catalog` helper
+writes fixture `.git/config`, reported as `actual Git storage access`.
+No Git process is invoked, but that does not waive the existing guard.
+Every complete original function calls the same helper. All five remain
+excluded, the other four are not executed and no passing observation or
+manifest admission is produced. Withdraw the unpublished adapter, preserving
+the original tests and bounded evidence. Do not replay the refusal, relocate
+or substitute its fixture, preload production or add a guard exception.
+The existing manifest remains 10,367 nodes, 1,497 bindings, 545 targets,
+92 helper decisions and 1,047,467 bytes, with 1,109 free.
+
 ## November 25 original in-memory HTTP framing units
 
 The complete original byte-stream framing module has five functions and
@@ -29,7 +78,15 @@ modules), and the actual parser target: 10,367 nodes, 1,497 sources,
 545 targets, 92 unchanged helper decisions and 1,047,467 minified bytes,
 leaving 1,109 under the same cap. Preserve all prior ordered witnesses,
 bindings and targets, the parser bound, 300-second deadline and proof checks.
-Normal review, current required CI, merge and readback remain open.
+Source #14620 merges at `16ec3d7aece6db998f14384718d61f53859d9efe`
+on November 25 at 21:21:14 UTC. Natural Linux CI `45702389702` passes all
+10,367 cases with 55 deselections in 192.75 pytest / 216.439 packet seconds.
+It selects fresh execution with `no-qualified-completed-packet` and finalizes
+artifact `15063857946` (4,224,489 bytes), not a reuse hit.
+Required aggregate `139517963323`, guards and metadata gates pass before
+ordinary managed merge. All five owned merged blobs equal the reviewed head.
+Supported pull-forward, all 1,497 bindings and 92 helper decisions, and all
+21 retained observed inputs verify without test replay.
 This is not a daemon, transport, resource identity, deletion/closeout, native,
 every-release, whole-flow timing or parent-acceptance witness.
 
