@@ -48,6 +48,7 @@ on:
       - libs/payload-invocation/tests/test_vault_service_source.py
       - libs/payload-invocation/tests/test_codespaces_owner_source.py
       - libs/payload-invocation/tests/test_budget_index_source.py
+      - libs/payload-invocation/tests/test_index_bootstrap_source.py
       - plugins/agent-codespaces/scripts/install.sh
       - plugins/agent-codespaces/scripts/install.ps1
       - plugins/agent-codespaces/scripts/windows-scheduled-task.ps1
@@ -141,11 +142,14 @@ on:
       - plugins/agent-dispatch/tests/test_source_runtime_install.py
       - plugins/agent-dispatch/tests/source_publication_fixture.py
       - plugins/agent-index/scripts/runtime-gate.ps1
+      - plugins/agent-index/scripts/install.ps1
       - plugins/agent-index/scripts/runtime-gate.sh
       - plugins/agent-index/scripts/resolve_effective_config.py
       - plugins/agent-index/scripts/config_yaml.py
       - plugins/agent-index/tests/test_runtime_gate.py
       - plugins/agent-index/tests/test_install_engine_adoption.py
+      - plugins/agent-index/tests/test_managed_bootstrap_reader_ps1.py
+      - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
       - plugins/agent-index/tests/test_bootstrap_yaml.py
       - plugins/agent-logger/tests/test_install_signed_python_probe.py
       - plugins/budget-guidance/payload-invocation.json
@@ -578,6 +582,25 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==11;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Preserve Dispatch source policy and constructed publication fixtures
+        if: runner.os == 'Windows'
+        env:
+          UV_PYTHON: "3.12"
+          QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "runtime_install_attributes_its_snapshot_not_the_calling_helper or (runtime_publication_gates_preference and constructed)"
+          --junit-dir qualification-evidence/dispatch-construction-fixtures
+      - name: Require actual missing-uv, snapshot and publication controls
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/dispatch-construction-fixtures').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==8;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
@@ -683,21 +706,6 @@ jobs:
           and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
           and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
           and r['tail_qualification']=='insufficient samples' for r in reports)"
-      - name: Preserve Dispatch source policy and constructed publication fixtures
-        env:
-          QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "runtime_install_attributes_its_snapshot_not_the_calling_helper or (runtime_publication_gates_preference and constructed)"
-          --junit-dir qualification-evidence/dispatch-construction-fixtures
-      - name: Require actual missing-uv, snapshot and publication controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/dispatch-construction-fixtures').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==8;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
 
   budget-uv-lifecycle:
     runs-on: windows-latest
@@ -832,22 +840,20 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify managed Windows services and owner ingress
+      - name: Qualify managed Windows services
         env:
           PYTEST_ADDOPTS: "-x -vv --durations=12"
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          --test-file tests/test_codespaces_windows_owner_source.py
-          -k "test_codespaces_windows_owner_source.py or
-          managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or powershell_cold_readers or raw_powershell_cold_reader or (powershell_construction and not pwsh)"
+          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or powershell_cold_readers or raw_powershell_cold_reader or (powershell_construction and not pwsh)"
           --junit-dir qualification-evidence/dispatch-managed-services
       - name: Require all forty-three service, wheel, snapshot, description, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
           all_cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(all_cases)==108;
+          assert len(all_cases)==75;
           dispatch=[c for c in all_cases if c.attrib['classname'].endswith('test_dispatch_construction_source')];
           assert len(dispatch)==75;
           cases=[c for c in dispatch if 'managed_service_query_tree' not in c.attrib['name']
@@ -888,21 +894,6 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
-      - name: Require all Windows owner controls and repeated offline selections
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')
-          if c.attrib['classname'].endswith('test_codespaces_windows_owner_source')];
-          assert len(cases)==33;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='codespaces_windows_owner_ingress'];
-          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
-          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
-          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
-          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
-          and r['tail_qualification']=='insufficient samples' for r in reports)"
       - name: Require all thirteen Core cold controls, refusals and measurements
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
@@ -1063,3 +1054,68 @@ jobs:
           for c in ET.parse(p).iter('testcase') if c.attrib['classname'].endswith('test_service_unit_source')];
           assert len(cases)==3;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Preserve Codespaces Windows owner ingress
+        env:
+          UV_PYTHON: "3.12"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_codespaces_windows_owner_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/codespaces-windows-owner
+      - name: Require all Windows owner controls and repeated offline selections
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/codespaces-windows-owner').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_codespaces_windows_owner_source')];
+          assert len(cases)==33;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='codespaces_windows_owner_ingress'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
+          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
+          and r['tail_qualification']=='insufficient samples' for r in reports)"
+      - name: Qualify Index PowerShell Core readers and actual ingress
+        shell: pwsh
+        env:
+          INDEX_BOOTSTRAP_HOST: pwsh
+        run: &index-windows-bootstrap-controls |
+          $packets = [ordered]@{
+            'raw' = 'raw and (bootstrap_readers or cell)'
+            'packaged' = 'packaged and (bootstrap_readers or cell)'
+            'driver' = '(actual_entry and driver) or explicit_closed'
+          }
+          foreach ($packet in $packets.GetEnumerator()) {
+            python tools/run-plugin-tests.py payload-invocation `
+              --test-file tests/test_index_bootstrap_source.py --allow-explicit-tiers `
+              -k "( $($packet.Value) ) and $env:INDEX_BOOTSTRAP_HOST" `
+              --junit-dir "qualification-evidence/index-windows-bootstrap/$($env:INDEX_BOOTSTRAP_HOST)/$($packet.Key)"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Require all nineteen Index controls and both repeated reader reports
+        env:
+          INDEX_BOOTSTRAP_HOST: pwsh
+        run: &index-windows-bootstrap-verifier >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-bootstrap',
+          os.environ['INDEX_BOOTSTRAP_HOST']).rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==19 and len({c.attrib['name'] for c in cases})==19;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_windows_bootstrap_performance'];
+          assert len(reports)==2 and {r['layout'] for r in reports}=={'raw','packaged'};
+          assert all(r['host']==os.environ['INDEX_BOOTSTRAP_HOST'] and r['status']=='measured'
+          and r['completed']==len(r['samples_seconds'])==2 and r['network']=='disabled'
+          and r['helper_python']=='3.11.18' and r['uv_calls_per_reader']==2 for r in reports);
+          print(json.dumps({'index_windows_bootstrap_performance':reports},sort_keys=True))"
+      - name: Qualify Index Windows PowerShell readers and actual ingress
+        shell: pwsh
+        env:
+          INDEX_BOOTSTRAP_HOST: powershell.exe
+        run: *index-windows-bootstrap-controls
+      - name: Require all nineteen Index controls and both repeated reader reports
+        env:
+          INDEX_BOOTSTRAP_HOST: powershell.exe
+        run: *index-windows-bootstrap-verifier
