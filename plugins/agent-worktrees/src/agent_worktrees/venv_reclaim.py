@@ -25,6 +25,10 @@ loose files or special files -- makes the whole root unrecognized.
 This module never decides that a venv is unused. Pre-removal runs only inside
 an existing disposal, after that disposal's own data and process gates, and
 removes nothing that the disposal would not remove next.
+
+Each inspection is bounded by :data:`MAX_INSPECTED_ENTRIES` and
+:data:`MAX_INSPECTION_SECS`. An inspection that exceeds either bound fails
+closed: the disposal is deferred and nothing is removed.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -48,6 +53,23 @@ _ENV_FILES = frozenset({
 _EVIDENCE_NAMES = frozenset({"reports", "evidence", "captures", "artifacts", "logs", "test-results"})
 _MAX_GROUP_DEPTH = 3
 _GIT_TIMEOUT_SECS = 30.0
+MAX_INSPECTED_ENTRIES = 500_000
+MAX_INSPECTION_SECS = 30.0
+
+
+class InspectionBudgetExceeded(Exception):
+    """A test-root inspection exceeded its entry or time bound."""
+
+
+class _Budget:
+    def __init__(self) -> None:
+        self.left = MAX_INSPECTED_ENTRIES
+        self.deadline = time.monotonic() + MAX_INSPECTION_SECS
+
+    def take(self, count: int) -> None:
+        self.left -= count
+        if self.left < 0 or time.monotonic() > self.deadline:
+            raise InspectionBudgetExceeded
 
 
 def native_path(path: str | Path) -> str:
@@ -83,16 +105,18 @@ def _has_marker(path: Path) -> bool:
     return marker is not None and not _is_link(marker) and stat.S_ISREG(marker.st_mode)
 
 
-def _scan(path: str) -> list[os.DirEntry[str]]:
+def _scan(path: str, budget: _Budget) -> list[os.DirEntry[str]]:
     with os.scandir(native_path(path)) as entries:
-        return list(entries)
+        listed = list(entries)
+    budget.take(len(listed) + 1)
+    return listed
 
 
-def _valid_layout(path: Path) -> bool:
+def _valid_layout(path: Path, budget: _Budget) -> bool:
     """The whole environment has the standard layout and no evidence."""
     pending: list[str] = []
     try:
-        for entry in _scan(str(path)):
+        for entry in _scan(str(path), budget):
             info = entry.stat(follow_symlinks=False)
             name = entry.name.lower()
             if name in _ENV_DIRS:
@@ -104,7 +128,7 @@ def _valid_layout(path: Path) -> bool:
             elif name not in _ENV_FILES or not (_is_link(info) or stat.S_ISREG(info.st_mode)):
                 return False
         while pending:
-            for entry in _scan(pending.pop()):
+            for entry in _scan(pending.pop(), budget):
                 info = entry.stat(follow_symlinks=False)
                 if _is_link(info):
                     continue
@@ -119,9 +143,9 @@ def _valid_layout(path: Path) -> bool:
     return True
 
 
-def _collect(path: Path, depth: int, venvs: list[Path]) -> bool:
+def _collect(path: Path, depth: int, venvs: list[Path], budget: _Budget) -> bool:
     try:
-        listed = _scan(str(path))
+        listed = _scan(str(path), budget)
     except OSError:
         return False
     for entry in sorted(listed, key=lambda item: item.name):
@@ -136,64 +160,79 @@ def _collect(path: Path, depth: int, venvs: list[Path]) -> bool:
         if not stat.S_ISDIR(info.st_mode) or entry.name.lower() in _EVIDENCE_NAMES:
             return False
         if _has_marker(child):
-            if not _valid_layout(child):
+            if not _valid_layout(child, budget):
                 return False
             venvs.append(child)
-        elif depth >= _MAX_GROUP_DEPTH or not _collect(child, depth + 1, venvs):
+        elif depth >= _MAX_GROUP_DEPTH or not _collect(child, depth + 1, venvs, budget):
             return False
     return True
 
 
-def disposable_venvs(root: str | Path) -> list[Path] | None:
+def disposable_venvs(root: str | Path, budget: _Budget | None = None) -> list[Path] | None:
     """Return the environments in a recognized root, or None if unrecognized.
 
     An empty list means the root holds only group directories and runner
-    metadata (for example after an interrupted removal).
+    metadata (for example after an interrupted removal). Raises
+    :class:`InspectionBudgetExceeded` when the walk exceeds its bound.
     """
     path = Path(root)
     if path.name not in TEST_VENV_ROOT_NAMES or not _is_real_dir(path):
         return None
     venvs: list[Path] = []
-    return venvs if _collect(path, 1, venvs) else None
+    return venvs if _collect(path, 1, venvs, budget or _Budget()) else None
 
 
 def recognized_roots(checkout: str | Path) -> list[Path]:
-    """Recognized test-venv roots at the top of *checkout*."""
-    base = Path(checkout)
-    return [base / name for name in TEST_VENV_ROOT_NAMES if disposable_venvs(base / name) is not None]
+    """Recognized test-venv roots at the top of *checkout* (raises on budget)."""
+    base, budget = Path(checkout), _Budget()
+    return [base / name for name in TEST_VENV_ROOT_NAMES if disposable_venvs(base / name, budget) is not None]
 
 
 def unrecognized_roots(checkout: str | Path) -> list[Path]:
-    """Test roots at the top of *checkout* that hold content other than test venvs."""
-    base = Path(checkout)
+    """Test roots at the top of *checkout* holding other content (raises on budget)."""
+    base, budget = Path(checkout), _Budget()
     return [base / name for name in TEST_VENV_ROOT_NAMES
-            if _is_real_dir(base / name) and disposable_venvs(base / name) is None]
+            if _is_real_dir(base / name) and disposable_venvs(base / name, budget) is None]
+
+
+def _preserved(roots: list[Path]) -> str:
+    return (
+        "preserved test-root content at " + ", ".join(str(root) for root in roots)
+        + " is not a recognized test venv; review it with tools/reclaim_legacy_test_dirs.py"
+    )
+
+
+def _over_budget(checkout: str | Path) -> str:
+    return (
+        f"test-root inspection in {checkout} exceeded its bound ({MAX_INSPECTED_ENTRIES} entries or "
+        f"{MAX_INSPECTION_SECS:g}s); disposal deferred and nothing removed. Review it with "
+        "tools/reclaim_legacy_test_dirs.py"
+    )
 
 
 def data_blocker(checkout: str | Path) -> str | None:
     """Test-root content other than test venvs holds whole-checkout disposal.
 
     Such content is often Git-ignored run output, so the checkout's own data
-    gate does not see it.
+    gate does not see it. Call it after the disposal's process gate: the walk
+    is bounded, and an exceeded bound holds the checkout.
     """
-    held = unrecognized_roots(checkout)
-    if not held:
-        return None
-    return (
-        "preserved test-root content at " + ", ".join(str(root) for root in held)
-        + " is not a recognized test venv; review it with tools/reclaim_legacy_test_dirs.py"
-    )
+    try:
+        held = unrecognized_roots(checkout)
+    except InspectionBudgetExceeded:
+        return _over_budget(checkout)
+    return _preserved(held) if held else None
 
 
 def untracked_and_ignored(checkout: str | Path, name: str) -> bool:
     """Git tracks nothing under *name* and ignores it (fails closed)."""
     try:
         listed = git_ops.git("ls-files", "-z", "--", f"{name}/", cwd=checkout, check=False,
-                             timeout=_GIT_TIMEOUT_SECS)
+                             timeout=_GIT_TIMEOUT_SECS, isolated_repository=True)
         if listed.returncode != 0 or listed.stdout:
             return False
         ignored = git_ops.git("check-ignore", "-q", f"{name}/", cwd=checkout, check=False,
-                              timeout=_GIT_TIMEOUT_SECS)
+                              timeout=_GIT_TIMEOUT_SECS, isolated_repository=True)
     except Exception:
         return False
     return ignored.returncode == 0
@@ -262,17 +301,28 @@ def predelete_blocker(checkout: str | Path) -> str | None:
     """Remove recognized test-venv roots while the checkout's Git root is intact.
 
     Call only inside a whole-checkout disposal, after its data and process
-    gates and immediately before ``git worktree remove``. Roots that are
-    unrecognized, tracked or not ignored are left to that disposal's normal
-    rules. Returns a blocker when a recognized root could not be removed, so
-    the caller defers disposal with the checkout still inspectable.
+    gates and immediately before ``git worktree remove``. Tracked or
+    not-ignored roots are left to that disposal's normal rules. Returns a
+    blocker, before anything is removed, when a root is no longer recognized
+    (content appeared after :func:`data_blocker`) or the walk exceeds its
+    bound; and when a recognized root could not be removed. The caller then
+    defers disposal with the checkout still inspectable.
     """
-    base = Path(checkout)
-    for name in TEST_VENV_ROOT_NAMES:
-        root = base / name
-        venvs = disposable_venvs(root)
-        if venvs is None or not untracked_and_ignored(base, name):
-            continue
+    base, budget = Path(checkout), _Budget()
+    plan: list[tuple[Path, list[Path]]] = []
+    try:
+        for name in TEST_VENV_ROOT_NAMES:
+            root = base / name
+            venvs = disposable_venvs(root, budget)
+            if venvs is None:
+                if _is_real_dir(root):
+                    return _preserved([root])
+                continue
+            if untracked_and_ignored(base, name):
+                plan.append((root, venvs))
+    except InspectionBudgetExceeded:
+        return _over_budget(checkout)
+    for root, venvs in plan:
         try:
             for venv in venvs:
                 remove_tree(venv)
@@ -304,7 +354,8 @@ def rmtree_best_effort(path: str | Path) -> None:
 
 
 __all__ = [
-    "TEST_VENV_ROOT_NAMES", "clear_readonly_and_retry", "data_blocker", "disposable_venvs",
+    "MAX_INSPECTED_ENTRIES", "MAX_INSPECTION_SECS", "TEST_VENV_ROOT_NAMES", "InspectionBudgetExceeded",
+    "clear_readonly_and_retry", "data_blocker", "disposable_venvs",
     "native_path", "predelete_blocker", "recognized_roots", "remove_tree", "rmtree_best_effort",
     "unrecognized_roots", "untracked_and_ignored",
 ]

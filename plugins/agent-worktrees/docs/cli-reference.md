@@ -1876,9 +1876,18 @@ evidence nested anywhere inside a venv make the whole root unrecognized.
 Whole-checkout disposal in `cleanup` and `finalize` treats these roots as
 follows. Nothing else changes, and no command removes test venvs on its own:
 
+- The test roots are inspected only after the existing data and checkout
+  process gates pass, so a checkout that a process still uses is never walked.
+  Each inspection is bounded (500,000 entries or 30 seconds). An inspection
+  that exceeds the bound fails closed: disposal is deferred and nothing is
+  removed.
 - A recognized root that Git does not track and does ignore is deleted as
-  part of the disposal, after the existing data and checkout process gates
-  and immediately before `git worktree remove`. Removal clears read-only bits,
+  part of the disposal, immediately before `git worktree remove`. The Git
+  probes ignore inherited `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, so
+  they use the checkout's own index and ignore rules. The roots are
+  inspected again first: if any root is no longer recognized (content
+  appeared after the first check), disposal stops before anything is
+  removed. Removal clears read-only bits,
   uses long paths on Windows, never follows links and removes each venv's
   `pyvenv.cfg` last. If a venv cannot be removed (for example a running
   interpreter holds a file), disposal is deferred while the checkout's Git

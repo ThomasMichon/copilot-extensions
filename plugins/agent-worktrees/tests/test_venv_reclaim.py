@@ -123,6 +123,21 @@ def test_untracked_and_ignored_requires_both(tmp_path: Path) -> None:
     assert not venv_reclaim.untracked_and_ignored(plain, ".test-venvs")
 
 
+@pytest.mark.parametrize("selector", ["GIT_INDEX_FILE", "GIT_DIR"])
+def test_untracked_and_ignored_ignores_inherited_git_selectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str,
+) -> None:
+    tracked = _repo(tmp_path / "tracked")
+    _venv(tracked / ".test-venvs" / "env")
+    _commit(tracked, ".test-venvs/env/pyvenv.cfg")
+    other = _repo(tmp_path / "other")
+    monkeypatch.setenv(selector, str(tmp_path / "empty.index") if selector == "GIT_INDEX_FILE" else str(other / ".git"))
+    # The inherited selector hides the tracked venv from an unisolated probe.
+    hidden = subprocess.run(["git", "ls-files", "--", ".test-venvs/"], cwd=tracked, capture_output=True, text=True)
+    assert hidden.stdout == ""
+    assert not venv_reclaim.untracked_and_ignored(tracked, ".test-venvs")
+
+
 def test_predelete_removes_only_recognized_ignored_untracked_roots(tmp_path: Path) -> None:
     repo = _repo(tmp_path / "repo")
     _venv(repo / ".test-venvs" / "env")
@@ -144,6 +159,31 @@ def test_predelete_reports_a_root_it_cannot_remove(tmp_path: Path, monkeypatch: 
     blocker = venv_reclaim.predelete_blocker(repo)
     assert blocker and "could not be removed" in blocker and "Git root intact" in blocker
     assert (env / "pyvenv.cfg").exists()
+
+
+def test_predelete_blocks_content_that_appeared_after_the_data_gate(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    env = _venv(repo / ".test-venvs" / "env")
+    assert venv_reclaim.data_blocker(repo) is None
+    late = repo / ".test-runs" / "reports" / "result.json"
+    late.parent.mkdir(parents=True)
+    late.write_text("{}", encoding="utf-8")
+    blocker = venv_reclaim.predelete_blocker(repo)
+    assert blocker and "preserved test-root content" in blocker
+    # Nothing is removed, not even the root that is still recognized.
+    assert late.exists() and (env / "Lib" / "site-packages" / "mod.py").exists()
+
+
+@pytest.mark.parametrize("bound", [("MAX_INSPECTED_ENTRIES", 3), ("MAX_INSPECTION_SECS", -1.0)])
+def test_inspection_over_its_bound_defers_and_removes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bound: tuple[str, float],
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    env = _venv(repo / ".test-venvs" / "env")
+    monkeypatch.setattr(venv_reclaim, *bound)
+    assert "exceeded its bound" in (venv_reclaim.data_blocker(repo) or "")
+    assert "exceeded its bound" in (venv_reclaim.predelete_blocker(repo) or "")
+    assert (env / "Lib" / "site-packages" / "mod.py").exists()
 
 
 def _reap(record: tracking.WorktreeRecord, tmp_path: Path) -> tuple[int, list[str]]:
@@ -206,3 +246,42 @@ def test_cleanup_removes_test_venvs_before_the_git_worktree(
     with pytest.raises(Removed):
         _reap(reapable, tmp_path)
     assert seen == [False] and (checkout / ".git").exists()
+
+
+def test_cleanup_process_blocker_skips_the_test_root_walk(
+    reapable: tracking.WorktreeRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _venv(Path(reapable.worktree_path) / ".test-venvs" / "env")
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: "pid 7 (python.exe) uses it")
+    monkeypatch.setattr(venv_reclaim, "_scan", lambda *a: pytest.fail("walk must not run"))
+    failures, warnings = _reap(reapable, tmp_path)
+    assert failures == 1 and "pid 7" in warnings[0]
+
+
+def test_cleanup_stops_before_git_remove_when_content_appears_late(
+    reapable: tracking.WorktreeRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkout = Path(reapable.worktree_path)
+    env = _venv(checkout / ".test-venvs" / "env")
+    late = checkout / ".test-venvs" / "capture.json"
+    real_gate = venv_reclaim.data_blocker
+
+    def gate_then_write(path: str | Path) -> str | None:
+        result = real_gate(path)
+        late.write_text("{}", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(venv_reclaim, "data_blocker", gate_then_write)
+    failures, warnings = _reap(reapable, tmp_path)
+    assert failures == 1 and "preserved test-root content" in warnings[0]
+    assert late.exists() and (env / "pyvenv.cfg").exists() and (checkout / ".git").exists()
+
+
+def test_cleanup_defers_when_the_test_root_walk_exceeds_its_bound(
+    reapable: tracking.WorktreeRecord, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _venv(Path(reapable.worktree_path) / ".test-venvs" / "env")
+    monkeypatch.setattr(venv_reclaim, "MAX_INSPECTED_ENTRIES", 3)
+    failures, warnings = _reap(reapable, tmp_path)
+    assert failures == 1 and "exceeded its bound" in warnings[0]
+    assert (env / "Lib" / "site-packages" / "mod.py").exists()

@@ -80,7 +80,7 @@ def _reap_locked(
         )
         return 0, warnings
 
-    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path) or venv_reclaim.data_blocker(rec.worktree_path)):
+    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path)):
         return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
     if rec.worktree_path and Path(rec.worktree_path).exists():
         process_blocker = procs.checkout_retirement_blocker(rec.worktree_path)
@@ -89,6 +89,9 @@ def _reap_locked(
                 f"Cannot retire {rec.worktree_id}: {process_blocker}. "
                 "Cleanup deferred; settle process use with its owner before retrying."
             ]
+        # The bounded test-root walk runs only once nothing uses the checkout.
+        if reason := venv_reclaim.data_blocker(rec.worktree_path):
+            return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
 
         if before_remove is not None:
             before_remove()

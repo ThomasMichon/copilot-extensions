@@ -1638,11 +1638,9 @@ def validate_and_finalize(
             not retain_checkout and checkout_managed and not inside_worktree and not has_live_session
             and not paired_pending and Path(worktree_path).exists()
         )
-        data_blocker = (preservation_reason(worktree_path) or venv_reclaim.data_blocker(worktree_path)) if removal_candidate else None
-        process_blocker = (
-            procs.checkout_retirement_blocker(worktree_path)
-            if removal_candidate and not data_blocker else None
-        )
+        data_blocker = preservation_reason(worktree_path) if removal_candidate else None
+        process_blocker = procs.checkout_retirement_blocker(worktree_path) if removal_candidate and not data_blocker else None
+        data_blocker = data_blocker or (venv_reclaim.data_blocker(worktree_path) if removal_candidate and not process_blocker else None)
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
         if pr_mode and record is not None:

@@ -402,8 +402,9 @@ When the user asks to clean up worktrees:
 **Recognized test venvs do not hold checkout disposal.** `cleanup` and
 `finalize` delete untracked, Git-ignored `.test-venvs`/`.test-runs` roots that
 hold only Python venvs, first, as part of removing the checkout. If a venv
-cannot be removed, disposal waits with the Git root intact. A test root with
-reports or other content holds the whole checkout for review. See
+cannot be removed, or the bounded inspection runs out of budget, disposal
+waits with the Git root intact. A test root with reports or other content
+holds the whole checkout for review. See
 [cli-reference.md](../../docs/cli-reference.md#checkout-local-test-venvs).
 
 **Resolve WIP; do not archive it as the outcome.** Commit and deliver useful

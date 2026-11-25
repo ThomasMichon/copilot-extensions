@@ -13,7 +13,7 @@ import pytest
 from machine_transport import detect_platform
 
 from agent_worktrees import config as cfg
-from agent_worktrees import cleanup_gc_cli, cleanup_reap, finalize, finalize_local, git_ops, procs, sessions, tracking
+from agent_worktrees import cleanup_gc_cli, cleanup_reap, finalize, finalize_local, git_ops, procs, sessions, tracking, venv_reclaim
 from pr_test_helpers import _git
 
 
@@ -208,6 +208,42 @@ def test_finalize_keeps_checkout_with_preserved_test_run_content(
     assert finalize.validate_and_finalize(wid, config)
     assert result.exists()
     assert "preserved test-root content" in capsys.readouterr().out
+
+
+def test_finalize_process_blocker_skips_the_test_root_walk(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: "pid 7 (python.exe) uses it")
+    monkeypatch.setattr(venv_reclaim, "data_blocker", lambda path: pytest.fail("walk must not run"))
+    assert finalize.validate_and_finalize(wid, config)
+    assert checkout.exists() and "pid 7" in capsys.readouterr().out
+
+
+def test_finalize_stops_before_git_remove_when_content_appears_late(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    env = checkout / ".test-venvs" / "plugin" / "Lib"
+    env.mkdir(parents=True)
+    (env.parent / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    late = checkout / ".test-runs" / "reports" / "result.json"
+    real_gate = venv_reclaim.data_blocker
+
+    def gate_then_write(path: str | Path) -> str | None:
+        result = real_gate(path)
+        late.parent.mkdir(parents=True)
+        late.write_text("{}", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(venv_reclaim, "data_blocker", gate_then_write)
+    monkeypatch.setattr(git_ops, "remove_worktree", lambda *a, **k: pytest.fail("checkout must stay"))
+    assert not finalize.validate_and_finalize(wid, config)
+    captured = capsys.readouterr()
+    assert "preserved test-root content" in captured.out + captured.err
+    assert late.exists() and (env.parent / "pyvenv.cfg").exists()
 
 
 def test_inherited_selectors_cannot_hide_configured_target_remote(
