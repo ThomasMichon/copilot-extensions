@@ -16,6 +16,9 @@ import pytest
 
 from test_install_engine_adoption import environment, function, run_ps
 
+BASE_EXECUTABLE = str(getattr(sys, "_base_executable", sys.executable))
+HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
 
 @pytest.mark.parametrize("machine_role,repository_role,expected", [
     ("host", "client", "host"),
@@ -24,8 +27,8 @@ from test_install_engine_adoption import environment, function, run_ps
     ("unconfigured", "unconfigured", "unconfigured"),
 ])
 def test_required_companion_role_preserves_machine_capability(
-    tmp_path, machine_role, repository_role, expected,
-):
+    tmp_path: Path, machine_role: str, repository_role: str, expected: str,
+) -> None:
     root = tmp_path / "runtime-role"
     root.mkdir()
     (root / "config.yaml").write_text(f"role: {machine_role}\n", encoding="utf-8")
@@ -46,7 +49,9 @@ if ((Get-ActivationRole) -ne '{repository_role}') {{ throw 'repository routing c
 
 
 @pytest.mark.parametrize("failure,expected", [("service-files", 17), ("environment", 2)])
-def test_shell_cutover_propagates_setup_failure_inside_or_list(tmp_path, failure, expected):
+def test_shell_cutover_propagates_setup_failure_inside_or_list(
+    tmp_path: Path, failure: str, expected: int,
+) -> None:
     bash = (
         Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
         if os.name == "nt" else Path(shutil.which("bash") or "")
@@ -80,7 +85,7 @@ exit "$result"
     result = subprocess.run(
         [str(bash), harness.as_posix()], cwd=tmp_path, env=environment(tmp_path),
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=HEADLESS,
     )
     assert result.returncode == expected, result.stdout + result.stderr
     assert not called.exists()
@@ -93,7 +98,9 @@ exit "$result"
     "client", "unconfigured", "no-service",
     "existing-host-failure",
 ])
-def test_native_installer_service_result_and_selected_identity(tmp_path, host, outcome):
+def test_native_installer_service_result_and_selected_identity(
+    tmp_path: Path, host: str, outcome: str,
+) -> None:
     if host == "bash" and os.name == "nt":
         pytest.skip("This is a native POSIX consumer, not Windows Bash qualification")
     if host == "powershell" and os.name != "nt":
@@ -134,7 +141,7 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
     )
 
     class Health(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self) -> None:
             body = json.dumps({
                 "status": "ok", "plugin": "agent-index",
                 "version": "1.0.0" if outcome == "health-stale" else version,
@@ -145,7 +152,7 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *_args):
+        def log_message(self, *_args: object) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
@@ -252,7 +259,7 @@ if ($env:AGENT_INDEX_HOST -ne '127.0.0.3' -or $env:AGENT_INDEX_DATA_DIR -ne 'unc
         result = subprocess.run(
             [*command, str(harness)], env=env, cwd=tmp_path, capture_output=True,
             text=True, timeout=25,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=HEADLESS,
         )
         skipped = outcome in {"client", "unconfigured", "no-service", "superseded"}
         success = skipped or outcome in {"ready", "dev-ready"}
@@ -270,7 +277,9 @@ if ($env:AGENT_INDEX_HOST -ne '127.0.0.3' -or $env:AGENT_INDEX_DATA_DIR -ne 'unc
 
 
 @pytest.mark.parametrize("failure", ["filesystem", "probe"])
-def test_required_server_repair_exception_refuses_activation_and_restores_preference(tmp_path, failure):
+def test_required_server_repair_exception_refuses_activation_and_restores_preference(
+    tmp_path: Path, failure: str,
+) -> None:
     (tmp_path / "slot/server").mkdir(parents=True)
     injection = (
         "function Test-IndexVenv { param($Dir,$Python) throw 'probe fixture failure' }"
@@ -340,7 +349,7 @@ function Write-Manifest {{
     return script, root
 
 
-def test_new_activation_cannot_enter_between_stamp_check_and_publication(tmp_path):
+def test_new_activation_cannot_enter_between_stamp_check_and_publication(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -405,7 +414,9 @@ Invoke-Stamp
 
 
 @pytest.mark.parametrize("authority", ["current-version", "stamped-version"])
-def test_runtime_publication_rechecks_freshness_before_all_writes(tmp_path, authority):
+def test_runtime_publication_rechecks_freshness_before_all_writes(
+    tmp_path: Path, authority: str,
+) -> None:
     definitions, root = publication_fixture(tmp_path)
     (root / authority).write_text("3.0.0", encoding="utf-8")
     for name in ("payload-dir", "launcher-version", "manifest-version"):
@@ -419,7 +430,7 @@ if (-not $script:RuntimePublicationSuperseded) { throw 'supersession not reporte
     for name in ("payload-dir", "launcher-version", "manifest-version"):
         assert (root / name).read_text() == "newer"
 
-def test_direct_launcher_writer_rejects_superseded_source(tmp_path):
+def test_direct_launcher_writer_rejects_superseded_source(tmp_path: Path) -> None:
     root = tmp_path / "runtime"
     root.mkdir()
     (root / "current-version").write_text("3.0.0")
@@ -436,7 +447,7 @@ Deploy-SetupGatedBinstub -PayloadRoot older-payload
 
 
 @pytest.mark.parametrize("mode", ["healthy", "corrupt", "base", "wrong-prefix", "probe-failure"])
-def test_posix_actual_interpreter_health_and_repair(tmp_path, mode):
+def test_posix_actual_interpreter_health_and_repair(tmp_path: Path, mode: str) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -446,7 +457,7 @@ def test_posix_actual_interpreter_health_and_repair(tmp_path, mode):
     if mode != "healthy":
         python.unlink()
         if mode == "base":
-            python.write_text(f"#!/bin/sh\nexec '{sys._base_executable}' \"$@\"\n")
+            python.write_text(f"#!/bin/sh\nexec '{BASE_EXECUTABLE}' \"$@\"\n")
             python.chmod(0o755)
         elif mode == "wrong-prefix":
             other = tmp_path / "other"
@@ -461,8 +472,10 @@ def test_posix_actual_interpreter_health_and_repair(tmp_path, mode):
     uv.write_text(
         "#!/usr/bin/env bash\n"
         f'echo "$*" >> "{log}"\n'
-        '[[ "$1" == venv && "$3" == --allow-existing && "$#" == 3 ]] || exit 97\n'
-        f"exec {shlex.quote(sys._base_executable)} -I -c "
+        '[[ "$1" == venv && "$3" == --python && "$4" == 3.10 && '
+        '"$5" == --managed-python && "$6" == --no-project && '
+        '"$7" == --allow-existing && "$#" == 7 ]] || exit 97\n'
+        f"exec {shlex.quote(BASE_EXECUTABLE)} -I -c "
         + shlex.quote(
             "import pathlib, sys, venv; root = pathlib.Path(sys.argv[1]); "
             "python = root / 'bin/python'; python.unlink(missing_ok=True); "
@@ -481,7 +494,7 @@ UV_COMMAND='{uv}'
 VENV_DIR='{directory}'
 if _test_index_venv '{directory}' '{python}'; then initial=healthy; else initial=invalid; fi
 echo "$initial"
-_new_index_venv '{directory}' '{python}' forbidden-base 1
+_new_index_venv '{directory}' '{python}'
 _test_index_venv '{directory}' '{python}'
 """
     result = subprocess.run([bash, "-c", script], env=environment(tmp_path),
@@ -493,19 +506,21 @@ _test_index_venv '{directory}' '{python}'
         assert len(log.read_text().splitlines()) == 1
 
 
-def test_posix_bad_created_venv_fails_explicitly(tmp_path):
+def test_posix_bad_created_venv_fails_explicitly(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
     directory = tmp_path / "venv"
     script = f"""
+. '{Path(__file__).resolve().parents[3] / "libs/installer-engine/installer-engine.sh"}'
 VENV_DIR='{directory}'
+UV_COMMAND=/bin/false
 {function("_test_index_venv", "sh")}
 {function("_new_index_venv", "sh")}
 _warn() {{ echo "$*" >&2; }}
 invoke_uv_venv_resilient() {{
     mkdir -p "$2/bin"; echo fixture > "$2/pyvenv.cfg"
-    printf '#!/bin/sh\\nexec "%s" "$@"\\n' '{sys._base_executable}' > "$2/bin/python"
+    printf '#!/bin/sh\\nexec "%s" "$@"\\n' '{BASE_EXECUTABLE}' > "$2/bin/python"
     chmod +x "$2/bin/python"
     return 0
 }}
@@ -516,4 +531,4 @@ _new_index_venv '{directory}' '{directory / "bin/python"}' fallback 1
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 1
     assert "uv venv failed health validation" in result.stderr
-    assert "Python venv fallback failed" in result.stderr
+    assert "forbidden-fallback" not in result.stderr

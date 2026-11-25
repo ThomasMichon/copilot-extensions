@@ -1247,27 +1247,29 @@ _test_index_venv() {
     [[ "$actual" == "$expected" ]]
 }
 
-_new_index_venv() {
-    local dir="$1" python="$2" base_python="$3" have_uv="$4" output rc=0
+_new_index_venv() (
+    local dir="$1" python="$2" output rc=0
     if _test_index_venv "$dir" "$python"; then return 0; fi
-    if [[ "$dir" != "$VENV_DIR" && -e "$dir" ]]; then
-        _warn "Existing venv failed interpreter/prefix health validation -- rebuilding: $dir"
-        rm -rf -- "$dir" || return 1
-    fi
-    if [[ "$have_uv" == 1 ]]; then
-        output="$(invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing 2>&1)" || rc=$?
-        if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
-        _warn "uv venv failed health validation (exit $rc): $output"
-    fi
-    if ! output="$("$base_python" -m venv "$dir" 2>&1)"; then
-        _warn "Python venv fallback failed: $output"
+    local uv_command="${UV_COMMAND:-}" helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    helper_dir="${helper_dir%/*}"
+    if [[ "$uv_command" != /* || ! -f "$uv_command" || ! -x "$uv_command" ||
+          "$helper_dir" != /* || ! -f "$helper_dir/bootstrap-uv.sh" ]]; then
+        _warn 'uv venv requires the selected UV executable and prepared bootstrap support'
         return 1
     fi
-    if ! _test_index_venv "$dir" "$python"; then
-        _warn "Created venv failed interpreter/prefix health validation: $dir"
-        return 1
-    fi
-}
+    . "$helper_dir/bootstrap-uv.sh" || return 1
+    unset UV_CONFIG_FILE
+    export UV_NO_CONFIG=1
+    _index_construct_venv() {
+        invoke_uv_bootstrap_environment "$uv_command" "$@"
+    }
+    # Runtime 3.10 is independent of the helper; the slot owner retains cleanup.
+    output="$(invoke_uv_venv_resilient _index_construct_venv "$dir" \
+        --python 3.10 --managed-python --no-project --allow-existing 2>&1)" || rc=$?
+    if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
+    _warn "uv venv failed health validation (exit $rc): $output"
+    return 1
+)
 
 _test_index_server_venv() {
     local dir="$1" python="$2"
@@ -1280,7 +1282,7 @@ _test_index_server_venv() {
 _install_server_venv() {
     # Hosts require one complete sibling service runtime. The primary CLI is
     # base-only; failed sibling provisioning must prevent candidate activation.
-    local install_role="$1" py="$2"
+    local install_role="$1"
     if [[ "$install_role" != "host" ]]; then
         _skip 'Server venv: skipped (client role never runs the service)'
         return 0
@@ -1291,7 +1293,7 @@ _install_server_venv() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    if ! _new_index_venv "$server_venv_dir" "$server_venv_python" "$py" "$have_uv"; then
+    if ! _new_index_venv "$server_venv_dir" "$server_venv_python"; then
             _warn "Server venv creation failed -- $server_venv_python not found"
             return 1
     fi
@@ -1523,7 +1525,7 @@ _ensure_runtime() {
     if [[ "$preparation_rc" == 3 ]]; then _skip 'Runtime preparation superseded'; return 0; fi
     [[ "$preparation_rc" == 0 ]] || return "$preparation_rc"
     if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean || return 1; fi
-    if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON" "$py" "$have_uv"; then
+    if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON"; then
         _fail "Runtime venv failed interpreter/prefix health validation: $VENV_DIR"
         exit 1
     fi
@@ -1593,7 +1595,7 @@ _ensure_runtime() {
     install_role="$(_required_runtime_role)"
     _ok 'Package installed: agent-index'
 
-    if ! _install_server_venv "$install_role" "$py"; then
+    if ! _install_server_venv "$install_role"; then
         _fail 'Required host runtime failed provisioning -- not activating'
         exit 1
     fi
@@ -1789,7 +1791,7 @@ _install_engine() {
         _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
     fi
     mkdir -p "$ENGINE_HOME"
-    _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" "$py" "$have_uv" || return 1
+    _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" || return 1
 
     # zdd is a declared dependency of agent-index but is not on PyPI -- install it
     # from the vendored lib first so pip can satisfy the requirement.

@@ -33,8 +33,22 @@ repeat the complete bootstrap-selection plus policy-reader path with a fresh
 then retained private UV cache. Their reports require one managed lookup and
 three UV calls per cycle, including the no-system-config capability probe.
 These observations do not measure child CPU, full install latency or tails.
-This does not qualify the remaining constructor
+This does not qualify Windows constructor
 interpreter-selection or installed-host migration work.
+
+Index's `tests/test_managed_runtime_construction_sh.py` exercises its actual
+POSIX constructor through raw and materialized shared providers. Seven controls
+retain partial-slot receipts and completed reuse, select managed runtime 3.10
+independently of helper 3.11.18, isolate inherited Python/project selectors and
+refuse unavailable offline runtimes, failed UV or a missing selected UV binding
+without PATH-UV or base-Python fallback.
+First/repeated samples distinguish one construction call from health-only
+reuse; seven report properties retain the actual work counts and unavailable
+full-install/CPU/tail measurements. The existing Linux native job prepares both
+declared interpreters and retains these seven controls plus six existing
+interpreter-health/repair controls, independently of its original 68 controls.
+No job, worker or five-minute deadline is added. Constructor controls do not
+replace integrated package/import qualification or installed-host acceptance.
 
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
@@ -98,11 +112,23 @@ Separate seven-case, no-skip and two-report performance verifiers retain both
 hosts, both selection paths and all four original reports. This balances
 measured five-minute exhaustion without adding a job, pooling native processes
 or increasing a limit.
-The existing Windows Dispatch-reader invocation also owns the original six
-service-query cleanup and three generated-unit controls: 41 cases, with
-independent 32/6/3 count and no-skip verifiers. The owner retains 75 Dispatch
-and all 33 Codespaces controls, 108 total. This removes measured query-tail
-exhaustion from the incoming owner packet without another runner preparation.
+The existing mixed-Python job now owns the Windows Dispatch-reader invocation
+and its original six service-query cleanup and three generated-unit controls:
+41 cases, with unchanged independent 32/6/3 count and no-skip verifiers.
+The prior command job exhausted its five-minute deadline twice at this tail.
+The first receiving job took 195 seconds, but its next run consumed 264 seconds
+before the measured 63-second packet and also reached the cap. The Windows
+command job's measured 233-second run now receives the existing 28 native
+reader/environment and three Index selector-handoff controls; the measured
+216-second launch job receives the eight Dispatch source/publication controls.
+Their original count, no-skip and measurement verifiers move with them. The
+command job prepares the moved reader's existing managed 3.12.13 prerequisite,
+and moved commands retain their original Python selector/source context.
+All retain Windows, Python 3.12 and UV 0.13.7. The Dispatch reader invocation
+retains its prepared old interpreter and neutralizes the receiving job's
+otherwise unrelated Python selector. The separate Dispatch service owner still
+retains 75 Dispatch and all 33 Codespaces controls, 108 total. No worker,
+deadline, native process, selector, assertion or control is added or omitted.
 
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
 activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case

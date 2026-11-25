@@ -48,6 +48,15 @@ engine construction instead of silently choosing a different package source.
 This does not change installed index configuration, ordinary startup, runtime
 interpreter selection or the engine's separate explicit lifecycle.
 
+POSIX CLI, sibling-server and engine venv construction requests managed Python
+3.10 through the shared resilient UV owner, independently of the prepared
+bootstrap helper. Foreign Python, virtualenv and project selectors are isolated
+inside construction, while managed storage and offline policy remain effective.
+Failure never retries an unversioned or base-Python constructor. Partial-slot
+cleanup remains with the versioned construction owner rather than deleting its
+receipt; healthy completed environments retain their existing reuse and health
+gates. Windows construction remains a separate implementation.
+
 ## What ships today
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,
