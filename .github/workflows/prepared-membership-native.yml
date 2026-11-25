@@ -16,9 +16,9 @@ on:
         type: boolean
         default: false
       native_observation_mode:
-        description: "Full diagnostics only: late samples, post-exit CPU, or report-only failure context"
+        description: "Full diagnostics only: late metadata, post-exit CPU, bounded code stacks, or failure context"
         type: choice
-        options: ["late", "post-exit", "report-only"]
+        options: ["late", "post-exit", "code-stack", "report-only"]
         default: "late"
   push:
     branches: ["pr/**"]
@@ -45,6 +45,10 @@ on:
       - "plugins/agent-worktrees/tests/test_hook_packet_receiver_diagnostics.py"
       - "plugins/agent-worktrees/tests/hook_child_observer.py"
       - "plugins/agent-worktrees/tests/test_hook_child_observer.py"
+      - "plugins/agent-worktrees/tests/hook_child_code_observer.py"
+      - "plugins/agent-worktrees/tests/hook_child_code_sample.py"
+      - "plugins/agent-worktrees/tests/hook_child_unwind.py"
+      - "plugins/agent-worktrees/tests/test_hook_child_code_sample.py"
       - "plugins/agent-worktrees/_native_portfolio_pytest.py"
       - "plugins/agent-worktrees/_native_failure_report_pytest.py"
       - "plugins/agent-worktrees/tests/test_native_failure_report.py"
@@ -72,6 +76,7 @@ jobs:
       COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ${{ inputs.runner_owner_diagnostics && '1' || '' }}
       PYTEST_PLUGINS: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode == 'report-only' && '_native_failure_report_pytest' || '_native_portfolio_pytest') || '' }}
       AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode || 'late') || '' }}
+      AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM: "${{ runner.temp }}\\prepared-native-code-${{ github.run_id }}-${{ github.run_attempt }}\\selected"
     strategy:
       fail-fast: false
       matrix:
@@ -114,6 +119,12 @@ jobs:
         with:
           python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare the diagnostic-only code selection boundary
+        if: ${{ inputs.full_native_diagnostics == true && inputs.native_observation_mode == 'code-stack' }}
+        run: >-
+          New-Item -ItemType Directory
+          -Path (Split-Path -Parent $env:AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM)
+          -ErrorAction Stop | Out-Null
       - name: Qualify native writes and original policy fallback
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
@@ -208,6 +219,7 @@ jobs:
       COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ${{ inputs.runner_owner_diagnostics && '1' || '' }}
       PYTEST_PLUGINS: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode == 'report-only' && '_native_failure_report_pytest' || '_native_portfolio_pytest') || '' }}
       AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode || 'late') || '' }}
+      AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM: "${{ runner.temp }}\\prepared-native-code-${{ github.run_id }}-${{ github.run_attempt }}\\selected"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -218,6 +230,12 @@ jobs:
         with:
           python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare the diagnostic-only code selection boundary
+        if: ${{ inputs.full_native_diagnostics == true && inputs.native_observation_mode == 'code-stack' }}
+        run: >-
+          New-Item -ItemType Directory
+          -Path (Split-Path -Parent $env:AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM)
+          -ErrorAction Stop | Out-Null
       - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
         if: ${{ inputs.full_native_diagnostics == true || inputs.sender_diagnostics != true }}
         env:

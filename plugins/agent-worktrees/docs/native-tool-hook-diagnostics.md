@@ -143,3 +143,57 @@ and unchanged worker and 10/30/300-second runner and 10-minute job limits.
 Those real native controls stay outside required unit-only CI. Pure numeric
 clock decoding has nineteen positively admitted cases; the real PowerShell source
 is a native-contract input, not an exemption from unit-source admission.
+
+## Bounded code-only native attribution
+
+The manual full profile's `native_observation_mode=code-stack` preserves the
+post-exit metadata and existing retained phase/bootstrap variant. It selects
+only original registered-write, natural-policy and selected-owner post-tool
+PowerShell calls, not intentional timeout or observer controls. The original
+fifteen-job topology, selectors, calls, order and deadlines stay unchanged.
+An atomic runner-owned directory claim is shared across each Windows job's
+pytest steps. Only an eligible child can take it, after the eight-second delay;
+at most one original child per worker receives one attempt. Missing claim
+configuration fails before observation; existing claims never authorize a retry.
+
+The source-only backend retains the original creation-owned process handle,
+verifies PID/birth and AMD64 architecture, and reuses the bounded PSS thread
+enumeration. Each of at most sixteen threads is pinned to its original owner
+and birth before a brief suspend/context/read/resume operation. It walks at
+most sixteen frames per thread using a restricted PE/AMD64 version-one unwind
+interpreter. Supported partial prologs and epilog suffixes are interpreted;
+unsupported versions, chained records, machine frames, dynamic code, ranges
+and operations stop explicitly rather than scanning for plausible addresses.
+Absent static entries are accepted as leaf frames only in the named Windows
+system modules. This is not a general managed-runtime or JIT stack walker.
+
+Reads validate committed, accessible regions: stack reads stay in the captured
+stack allocation, and image/unwind reads stay in the verified image allocation.
+All target reads, including PE headers and epilog instructions needed to unwind,
+share a 64 KiB attempt cap. The cooperative 250 ms budget begins at backend
+construction and is clamped to the original communicate deadline. Context
+buffers are aligned and scrubbed; every suspension is paired with resume, or
+the retained thread handle must confirm termination. Failed resume/close
+retains cleanup uncertainty. No target write, injection, privilege change,
+symbol download or private symbol service is used.
+
+The optional wrapper receives stdlib's already-established absolute
+communication endtime. It neither resets that deadline nor joins a collector
+before stdlib's original kill/drain/context cleanup. Reporting remains deferred.
+The additional `native_code_observation` summary is capped at 32 KiB per worker,
+separate from existing metadata and RPC row allowances. It exports verified
+process identity/status and normalized module/code-offset frames, never raw
+memory or registers, arguments, locals, environment, tool content or paths.
+At most 32 module signatures retain only basename, PE timestamp and image size
+from headers already read for unwinding, for later public-module identification;
+this adds no live symbol requests or target reads.
+Byte, frame, output, deadline and unsupported-unwind stops remain explicit.
+Nonselected and mode-off behavior retain their original paths.
+
+Focused controls cover identity refusal, context alignment/scrubbing,
+unwind operations, partial prologs/epilogs, range/byte/output caps, shared
+selection and actual Windows capture/closure. A blocked synthetic collector
+checks the exact original deadline and proves child exit before joining.
+These controls and all instrumented portfolios remain diagnostic only: a
+passing sample does not explain an earlier failure, accept observation
+perturbation, or qualify original hook latency or throughput.

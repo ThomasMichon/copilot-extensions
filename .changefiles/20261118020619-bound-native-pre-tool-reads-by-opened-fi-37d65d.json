@@ -1,5 +1,5 @@
 {
-  "comment": "Bound native pre-tool reads, reuse decoded events, avoid expected connect exceptions and retain opt-in bootstrap phases",
+  "comment": "Bound native pre-tool reads, reuse decoded events, avoid expected connect exceptions and retain opt-in bootstrap phases and code-only native attribution",
   "changes": [
     {
       "plugin": "agent-worktrees",

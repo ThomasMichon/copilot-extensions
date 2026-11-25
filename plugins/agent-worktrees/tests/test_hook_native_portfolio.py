@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -120,6 +121,106 @@ def test_full_observer_refuses_an_unknown_sampling_mode(monkeypatch: pytest.Monk
     monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "unknown")
     with pytest.raises(ValueError, match="Invalid native observation mode"):
         FullNativeChildObserver()
+
+
+@pytest.mark.guard
+def test_code_mode_requires_a_runner_owned_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "code-stack")
+    monkeypatch.delenv("AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM", raising=False)
+    with pytest.raises(ValueError, match="runner-owned selection claim"):
+        FullNativeChildObserver()
+
+
+@pytest.mark.guard
+def test_code_selection_claim_survives_real_suite_isolation_across_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "code_observer_environment_control", root / "tools" / "plugin_test_environment.py",
+    )
+    assert spec and spec.loader
+    environment = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(environment)
+    selection = tmp_path / "selection"
+    selection.mkdir()
+    claim = selection / "selected"
+    base = {
+        "AGENT_WORKTREES_NATIVE_OBSERVATION_MODE": "code-stack",
+        "AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM": str(claim),
+        "PYTEST_PLUGINS": "_native_portfolio_pytest",
+    }
+    results: list[bool] = []
+    for step in ("first", "second"):
+        isolated = environment.isolated_environment(
+            base, tmp_path / step, allow_explicit_tiers=True,
+        )
+        assert all(isolated[key] == value for key, value in base.items())
+        with monkeypatch.context() as patch:
+            for key, value in base.items():
+                patch.setenv(key, isolated[key])
+            observer = FullNativeChildObserver()
+            assert observer.code_claim is not None
+            results.append(observer.code_claim())
+    assert results == [True, False]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("original", [
+    "test_registered_file_local_write_reuses_original_guard_facts",
+    "test_native_timeout_kills_before_joining_a_blocked_collector",
+])
+def test_code_mode_only_wraps_the_declared_original_case_family(
+    original: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hook_native_portfolio as full
+
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "code-stack")
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM", str(tmp_path / "selected"))
+    observer = FullNativeChildObserver()
+    item = original_item(monkeypatch)
+    item.path, item.originalname = Path("test_managed_session.py"), original
+    observer.prepare(item, monkeypatch)
+    calls: list[dict[str, Any]] = []
+
+    def proxy(emit: object, **kwargs: Any) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(full, "observed_subprocess", proxy)
+    observer.subprocess_proxy(lambda row: None)
+    if original == "test_registered_file_local_write_reuses_original_guard_facts":
+        assert set(calls[0]) == {"deadline_factory"}
+    else:
+        assert calls == [{"factory": PostExitChildObserver}]
+    assert not (tmp_path / "selected").exists()
+
+
+@pytest.mark.guard
+def test_code_summary_is_additional_bounded_and_not_hidden_in_old_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "code-stack")
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM", str(tmp_path / "selected"))
+    observer = FullNativeChildObserver()
+    item = original_item(monkeypatch)
+    observer.rows[item] = [{"outcome": "returned"} for _ in range(observer.MAX_ROWS)]
+    value: Sample = {
+        "outcome": "timeout", "code_observation": {
+            "selection": "selected", "collector_settled": True,
+            "samples": [{"threads": [{"frames": [{"module": "ntdll.dll", "code_offset": 1}]}]}],
+        },
+    }
+    observer.emit(item, value)
+    observer.emit(item, value)
+    report = finish_report(observer, item, "failed")
+    lines = report.sections[0][1].splitlines()
+    code = [line.partition("=")[2] for line in lines if line.startswith("native_code_observation=")]
+    metadata = [line for line in lines if line.startswith("native_child_observation=")]
+    assert len(code) == 1 and len(metadata) == observer.MAX_ROWS
+    assert len(code[0].encode("ascii")) <= 32768
+    assert all("code_observation" not in line for line in metadata)
+    assert "code_observation" in value and observer.code_rows == {}
 
 
 @pytest.mark.guard

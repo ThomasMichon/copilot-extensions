@@ -1389,7 +1389,7 @@ diagnostic bootstrap on Windows; runtime packages and
 `conftest.py` are unchanged. The bootstrap removes its own environment entry
 before test children start, retaining unrelated entries.
 The existing Linux producer runs unchanged.
-The `late` and `post-exit` modes use `_native_portfolio_pytest.py` to
+The `late`, `post-exit` and `code-stack` modes use `_native_portfolio_pytest.py` to
 observe real ten-second PowerShell calls throughout the original
 selected tests, including legacy families without inline process markers.
 It leaves subprocess doubles and other commands untouched and rechecks the
@@ -1446,6 +1446,10 @@ original membership packets with the diagnostic plugin disabled.
 Full observation takes precedence over the focused `sender_diagnostics`
 input. It is not native acceptance or a latency distribution, and it does not
 clear earlier failures or authorize a runtime change.
+
+The explicit `code-stack` variant adds bounded code-only attribution to the
+post-exit profile. Its target, privacy, unwind, timing and cleanup limits live in
+[the component diagnostic reference](plugins/agent-worktrees/docs/native-tool-hook-diagnostics.md#bounded-code-only-native-attribution).
 
 The full profile's `native_observation_mode=report-only` instead loads the
 independent source-only `_native_failure_report_pytest.py`. It imports no
