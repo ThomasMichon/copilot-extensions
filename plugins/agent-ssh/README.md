@@ -187,6 +187,10 @@ an existing Gateway SSH alias. It retains source-independent local inputs and
 uses the same profile writer; it does not enroll peers, fetch keys, open a
 connection or start another controller.
 
+An independently acquired payload can also prepare
+[portable Windows OpenSSH prerequisites](docs/gateway-transport.md#windows-native-executable-prerequisites)
+without installing or activating dtssh or the broader suite.
+
 The optional `fleet` extra adds the
 [Fleet policy/public-directory provider](../../fleet-manager/docs/gateway-ssh-provider.md).
 `gateway-provider` previews independent-direction filtering; `--apply` uses
