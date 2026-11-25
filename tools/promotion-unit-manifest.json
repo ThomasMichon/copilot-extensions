@@ -3,6 +3,25 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_docker_identity_scope_units.py",
+[
+"test_selects_contract_surface[libs/docker-resource-producer/src/docker_resource_producer/models.py]",
+"test_selects_contract_surface[libs/docker-resource-producer/tests/test_identity.py]",
+"test_selects_contract_surface[libs/docker-resource-producer/pyproject.toml]",
+"test_selects_contract_surface[tools/docker_identity_ci_scope.py]",
+"test_selects_contract_surface[tools/test_docker_identity_ci_scope.py]",
+"test_selects_contract_surface[.github/workflows/ci.yml]",
+"test_selects_contract_surface[tools/accumulate_bumps.py]",
+"test_selects_contract_surface[tools/test_accumulate_bumps.py]",
+"test_unrelated_changes_do_not_select_fixture_processes[paths0]",
+"test_unrelated_changes_do_not_select_fixture_processes[paths1]",
+"test_unrelated_changes_do_not_select_fixture_processes[paths2]",
+"test_manual_dispatch_does_not_need_git",
+"test_unavailable_base_expands_scope_visibly",
+"test_diff_error_is_not_a_successful_unrelated_verdict"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_binstub_path_render_units.py",
 [
 "test_global_launchers_share_one_windows_file_root_spelling[C:\\\\fixture app-\\\\\\\\?\\\\C:\\\\fixture app]",
@@ -12606,6 +12625,9 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_docker_identity_scope_units.py":"e95673b90ca2ead65e196bebadd3fb3097dd5aceb2cce0f1c44c17f39f098513",
+"tools/test_docker_identity_ci_scope.py":"62df7af85aa1df2e527a62c63de782800bc3ecb8d186ec24a13c0620f16c6657",
+"tools/docker_identity_ci_scope.py":"c6536b69c22e8026990ff226567166dc4b70cf1364b852848fe6f496016855c1",
 "tools/promotion_unit_tests/test_original_binstub_path_render_units.py":"4fc1c0360045a9264eb8776481dd697e8cfedd6f7c9af1b39c12e273f93e545e",
 "tools/test_runtime_application_binstub_paths.py":"c39e0aa3e74e0120247563fc00efa3fc0c3d8ec7aa2c9af177f35ca4bc45abf6",
 "libs/installer-engine/runtime_application_binstubs.py":"c6ed6059ee1ddf7c22c704e39eac3d7d55f25a9414e7c4ebc1ab044e50e076d6",
@@ -14612,6 +14634,7 @@
 "tools/check_pre_uv_tier.py",
 "tools/check-promotion-release-scope.py",
 "tools/run_python_with.py",
-"libs/installer-engine/runtime_application_binstubs.py"
+"libs/installer-engine/runtime_application_binstubs.py",
+"tools/docker_identity_ci_scope.py"
 ]
 }
