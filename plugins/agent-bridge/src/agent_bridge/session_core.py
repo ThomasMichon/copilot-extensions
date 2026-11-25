@@ -321,7 +321,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 "session to adopt the current provider configuration"
             )
         try:
-            resolved = await self._resolver.resolve_async(session.agent_name)
+            from .container_fleet_context import restore_fleet_context
+
+            with restore_fleet_context(session.agent_name, persisted):
+                resolved = await self._resolver.resolve_async(session.agent_name)
         except Exception as exc:
             log.warning(
                 "Could not refresh provider target for session %s (%s)",

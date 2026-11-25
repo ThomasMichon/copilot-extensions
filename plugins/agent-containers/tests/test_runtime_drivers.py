@@ -568,6 +568,80 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     asyncio.run(resolver.ContainerResolver().ensure_ready("example-1"))
 
 
+def test_scoped_provider_keeps_fleet_checkout_for_later_calls(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "controller checkout"
+    (repo / ".git").mkdir(parents=True)
+    home = tmp_path / "home"
+    plugin = home / ".copilot" / "installed-plugins" / "example" / "fleet"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(json.dumps({"name": "fleet", "containersConfig": "fleets.yaml"}))
+    (plugin / "fleets.yaml").write_text(yaml.safe_dump({"fleets": {"example": {
+        "driver": "example-driver", "workspace_folder": "/workspaces/example", "relay_enabled": False,
+    }}}))
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"enabledPlugins": {"fleet@example": True}}))
+    (repo / "containers.yaml").write_text("fleets:\n  example:\n    exec_user: override\n")
+    for key in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(home))
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(home / ".agent-containers"))
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))  # A missed fleet cannot reach host Docker.
+    member = _provisioned(driver_config(size=1))
+    cmd = [sys.executable, "-m", "agent_containers"]
+
+    def resolve(cwd: Path, *scope: str) -> dict[str, Any]:
+        run = subprocess.run([*cmd, *scope, "namespace-resolve", "example-1"],
+                             cwd=cwd, capture_output=True, text=True, timeout=30)
+        assert run.returncode == 0, run.stderr
+        return cast(dict[str, Any], json.loads(run.stdout))
+
+    direct = resolve(repo)
+    scope = ["--fleet-repository", str(repo)]
+    scoped = resolve(tmp_path, *scope)
+    assert scoped["venue"]["instance_id"] == direct["venue"]["instance_id"] == member.container_id
+    assert scoped["venue"]["transport"] == "driver-exec" and scoped["user"] == "override"
+    assert scoped["venue"]["provider_command"][-2:] == scope
+    assert scoped["spawn_command"][-5:] == [*scope, "exec", "--stdio", "example-1"]
+
+
+@pytest.mark.parametrize("source", ["checkout", "explicit", "runtime"])
+def test_scoped_compatibility_launch_paths(
+    source: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import patch
+    from agent_containers import config as config_mod, devcontainer_launch
+    from agent_containers._invoke import fleet_repository
+
+    root = tmp_path / "checkout"
+    runtime = tmp_path / "runtime"
+    root.mkdir()
+    runtime.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_mod, "RUNTIME_DIR", runtime)
+    monkeypatch.setattr(config_mod, "_configuration_report", lambda: None)
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    path = (root if source != "runtime" else runtime) / "containers.yaml"
+    path.write_text("fleets:\n  example:\n    devcontainer_path: .\n    devcontainer_config: nested/spec.json\n")
+    if source == "explicit":
+        monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+    token = fleet_repository.set(root)
+    try:
+        selected = load_config(strict=True).fleets["example"]
+    finally:
+        fleet_repository.reset(token)
+    with patch("shutil.which", return_value="devcontainer"), patch.object(
+        subprocess, "run", return_value=SimpleNamespace(returncode=1, stderr="fixture stop"),
+    ) as launch, pytest.raises(RuntimeError, match="fixture stop"):
+        devcontainer_launch._devcontainer_up("example", selected, "example-1")
+    argv = launch.call_args.args[0]
+    base = root if source == "checkout" else Path(".")
+    assert Path(argv[argv.index("--workspace-folder") + 1]) == base
+    assert Path(argv[argv.index("--config") + 1]) == base / "nested" / "spec.json"
+
+
 def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
     fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
