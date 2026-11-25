@@ -635,7 +635,7 @@ def test_vault_incomplete_discovery_cannot_skip(
 ) -> None:
     from agent_worktrees import update_runtime_plan
 
-    def unreadable(_repo: Path) -> list[str]:
+    def unreadable(_repo: Path, **kwargs: object) -> list[str]:
         raise OSError("unreadable repository")
 
     monkeypatch.setattr(core, "_invocation_update_context", lambda: None)
@@ -655,6 +655,22 @@ def test_vault_incomplete_discovery_cannot_skip(
     )
     step, = modules if kind == "module" else registered
     assert step.blocked and "discovery incomplete" in step.status and not step.argv
+
+
+def test_global_vault_collects_inheriting_repositories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    inherited, disabled = tmp_path / "inherited", tmp_path / "disabled"
+    inherited.mkdir()
+    settings = disabled / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text('{"enabledPlugins":{"agent-vault@copilot-extensions":false}}')
+    monkeypatch.setattr(core, "_invocation_update_context", lambda: disabled)
+    monkeypatch.setattr(config, "load_config", lambda: SimpleNamespace(repos={
+        "inherited": SimpleNamespace(anchor=str(inherited)),
+    }))
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: ["agent-vault"])
+    monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: ["agent-vault"])
+    target = update_runtime._registered_plugin_targets()["agent-vault"]
+    assert target.context == inherited and target.planning_contexts("agent-vault") == (inherited,)
 
 
 def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio: Portfolio, monkeypatch: pytest.MonkeyPatch) -> None:

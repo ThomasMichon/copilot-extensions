@@ -361,9 +361,20 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
             "Could not discover enabled plugins from the invocation context",
             exc,
         )
+    try:
+        global_plugins = reconcile.read_user_enabled_plugins()
+    except Exception as exc:
+        global_plugins = []
+        record_activation_error("Could not read user-global enabled plugins", exc)
+
+    def enabled_in(context: Path) -> list[str]:
+        if "agent-vault" in global_plugins:
+            return reconcile.read_enabled_plugins(context, inherited_plugin="agent-vault")
+        return reconcile.read_enabled_plugins(context)
+
     if invocation_context is not None:
         try:
-            for name in reconcile.read_enabled_plugins(invocation_context):
+            for name in enabled_in(invocation_context):
                 add(
                     name,
                     invocation_context,
@@ -393,7 +404,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         seen_anchors.add(anchor)
         try:
             context = Path(anchor)
-            for name in reconcile.read_enabled_plugins(context):
+            for name in enabled_in(context):
                 add(name, context, activation=_PluginActivation.ACTIVE)
         except Exception as exc:
             record_activation_error(
@@ -407,14 +418,8 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
     except Exception as exc:
         output.warn(f"Could not read installed plugin inventory: {exc}")
 
-    try:
-        for name in reconcile.read_user_enabled_plugins():
-            add(name, None, activation=_PluginActivation.ACTIVE)
-    except Exception as exc:
-        record_activation_error(
-            "Could not read user-global enabled plugins",
-            exc,
-        )
+    for name in global_plugins:
+        add(name, None, activation=_PluginActivation.ACTIVE)
 
     inventory_activation = (
         _PluginActivation.UNKNOWN if activation_unknown else _PluginActivation.INACTIVE
