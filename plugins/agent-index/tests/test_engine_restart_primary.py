@@ -73,6 +73,7 @@ function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
         + script + "\n" + _function("Get-IndexPythonCacheArgs") + "\n" + _restart_body()
     )
     script += "\ntry { Restart-EngineDaemon } catch { Write-Output \"REFUSED:$_\" }\n"
+    assert PWSH
     result = subprocess.run(  # noqa: S603
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30, check=False,
@@ -101,7 +102,7 @@ function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
         assert "OK:" not in result.stdout
 
 
-def test_restart_never_constructs_or_adopts_and_keeps_engine_selection_separate():
+def test_restart_never_constructs_or_adopts_and_keeps_engine_selection_separate() -> None:
     restart = _restart_body()
     assert restart.index("Primary index runtime not installed") < restart.index("engine stop")
     for forbidden in ("Install-Runtime", "Install-Engine", "BrokerAdoption", "spawn_daemon"):
@@ -110,5 +111,6 @@ def test_restart_never_constructs_or_adopts_and_keeps_engine_selection_separate(
         encoding="utf-8",
     )
     command = daemon.split("def engine_command(", 1)[1].split("\ndef start(", 1)[0]
-    assert "py = engine_venv_python(home)" in command
+    assert "_engine_command(engine_venv_python(home), home)" in command
+    assert "resolve_runtime_python(py" in command
     assert "windowless_python(str(py))" in command

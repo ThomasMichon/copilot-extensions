@@ -658,13 +658,19 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-child').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==4 and len({c.attrib['name'] for c in cases})==4;
+          assert len(cases)==5 and len({c.attrib['name'] for c in cases})==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_managed_engine_launch'];
           assert len(reports)==4 and {r['scenario'] for r in reports}=={'current','last-good','legacy','missing-uv'};
           assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-uv' else 2)
-          and r['network']=='disabled' and r['service_started'] is False for r in reports)"
+          and r['network']=='disabled' and r['service_started'] is False for r in reports);
+          foreground=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_foreground_engine_launch'];
+          assert len(foreground)==1 and foreground[0]['cycles']==2
+          and foreground[0]['child_uv_lookups']==2
+          and foreground[0]['bound_uv_on_path'] is False
+          and foreground[0]['service_started'] is False"
 
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

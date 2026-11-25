@@ -205,7 +205,11 @@ Durable-engine child launch also admits the engine-owned completed (or
 pre-migration legacy) interpreter through prepared-only UV selection before
 windowless mapping. `engine start` selects that generation once; a healthy
 already-running engine needs no lookup. Foreground `engine run` uses the same
-admission. Missing UV/preparation or a different selected environment refuses
+admission and carries the original interpreter's companion environment to its
+foreground child. Native service admission forwards its selected absolute UV
+as `AGENT_INDEX_UV`, so descendants do not need that tool's directory on PATH.
+A supplied invalid binding never falls back to PATH. Missing UV/preparation or
+a different selected environment refuses
 without downloading Python or falling back to PATH Python. Application imports
 are isolated, UTF-8 and bytecode-free. The log-level bootstrap, original argv,
 independent engine home and existing foreground/detached process owners remain

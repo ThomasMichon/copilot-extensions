@@ -239,8 +239,9 @@ def test_embedded_cli_run_never_requests_a_detached_broker(
     def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("foreground embedded CLI attempted a detached launch")
 
-    def foreground(argv: list[str], *, instance: Any) -> SimpleNamespace:
+    def foreground(argv: list[str], *, instance: Any, env: dict[str, str]) -> SimpleNamespace:
         assert instance.runtime_root == tmp_path / "engine"
+        assert env["INDEX_COMPANION"] == str(engine_python)
         calls.append(list(argv))
         return SimpleNamespace(wait=lambda: 23)
 
@@ -256,7 +257,11 @@ def test_embedded_cli_run_never_requests_a_detached_broker(
     monkeypatch.setenv("AGENT_INDEX_ENGINE_HOST", "127.0.0.7")
     monkeypatch.setenv("AGENT_INDEX_ENGINE_PORT", "19421")
     monkeypatch.setattr(daemon, "engine_venv_python", lambda _home: engine_python)
+    monkeypatch.setattr(daemon, "resolve_runtime_python", lambda python, **kwargs: str(python))
     monkeypatch.setattr(daemon, "windowless_python", lambda python: python)
+    monkeypatch.setattr(
+        daemon, "windowless_python_env", lambda python: {"INDEX_COMPANION": python},
+    )
     monkeypatch.setattr(daemon, "spawn_daemon", forbidden)
     monkeypatch.setattr(cli, "spawn_daemon", forbidden)
     monkeypatch.setattr(daemon, "os", SimpleNamespace(
@@ -270,8 +275,8 @@ def test_embedded_cli_run_never_requests_a_detached_broker(
             cli.main(["engine", "run"])
     assert len(calls) == 1
     command = calls[0]
-    assert command[0] == str(engine_python) and command[1] == "-B"
-    assert command[2:] == [
+    assert command[0] == str(engine_python) and command[1:5] == ["-I", "-B", "-X", "utf8"]
+    assert command[5:] == [
         "-m", "agent_index_engine.app", "--host", "127.0.0.7", "--port", "19421",
     ]
 

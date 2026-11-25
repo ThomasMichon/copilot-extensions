@@ -69,6 +69,7 @@ python="$(cat <&"$_selection_result")"
 exec {_selection_result}>&- {_selection_log}>&-
 [[ "$python" == "$AGENT_RT_PY" ]] || exit 1
 unset PYTHONHOME PYTHONPATH
+export AGENT_INDEX_UV="$uv"
 cd -- "$root"
 if [[ "$mode" == engine ]]; then
     set -- engine run "$@"

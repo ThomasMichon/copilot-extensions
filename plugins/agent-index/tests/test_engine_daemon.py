@@ -21,7 +21,7 @@ from agent_index.engine import daemon
 @pytest.fixture(autouse=True)
 def prepared_runtime_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     """These lifecycle units substitute only managed interpreter admission."""
-    monkeypatch.setattr(daemon, "resolve_runtime_python", lambda python: str(python))
+    monkeypatch.setattr(daemon, "resolve_runtime_python", lambda python, **_kwargs: str(python))
 
 
 class FakeProc:
@@ -219,7 +219,7 @@ def test_engine_command_admits_selected_generation_before_windowless_mapping(mon
     admitted = []
     monkeypatch.setattr(daemon, "engine_venv_python", lambda home: selected)
 
-    def admission(python: Path) -> str:
+    def admission(python: Path, **_kwargs: Any) -> str:
         assert python == selected
         admitted.append(python)
         return str(python)
@@ -238,7 +238,7 @@ def test_engine_command_admits_selected_generation_before_windowless_mapping(mon
 def test_engine_refusal_precedes_foreground_instance_creation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(daemon, "engine_home", lambda: tmp_path)
 
-    def refused(python: Any) -> Any:
+    def refused(python: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("unprepared runtime")
 
     monkeypatch.setattr(daemon, "resolve_runtime_python", refused)

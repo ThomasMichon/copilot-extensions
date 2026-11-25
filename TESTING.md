@@ -8,12 +8,15 @@ compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
-Its four controls cover current, last-known-good and legacy environments,
+Its five controls cover current, last-known-good and legacy environments,
 missing UV, argument/exit/CWD fidelity, isolated imports and unchanged runtime
 bytes. Two cycles per control record selection counts and composed elapsed
-samples; model/service startup, CPU and latency tails remain unmeasured.
+samples. An integrated service-entry control uses the real foreground owner,
+with bound UV absent from PATH and no manually injected venv companion
+environment; the inert app must retain the selected venv on both platforms.
+Model/service startup, CPU and latency tails remain unmeasured.
 The source adapter runs the original controls without Index's application
-dependencies. Both existing command-bootstrap native jobs require all four
+dependencies. Both existing command-bootstrap native jobs require all five
 controls and reports without skips, using independently prepared runtime
 3.10.20 and helper 3.11.18 within their unchanged eight-minute limits.
 The shared selector's bounded work, invalid prerequisites, failure and

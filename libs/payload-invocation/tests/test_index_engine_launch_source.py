@@ -19,3 +19,6 @@ _original = cast(Any, _module)
 engine_daemon = _original.engine_daemon
 prepared_engine = _original.prepared_engine
 test_real_prepared_engine_child = _original.test_real_prepared_engine_child
+test_real_service_foreground_keeps_bound_uv_and_selected_environment = (
+    _original.test_real_service_foreground_keeps_bound_uv_and_selected_environment
+)

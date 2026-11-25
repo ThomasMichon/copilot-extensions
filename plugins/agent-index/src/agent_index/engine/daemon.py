@@ -235,7 +235,7 @@ def engine_command(home: Path | None = None) -> list[str]:
 
 def _engine_command(py: Path, home: Path | None) -> list[str]:
     host, port = engine_endpoint()
-    resolve_runtime_python(py)
+    resolve_runtime_python(py, uv=os.environ.get("AGENT_INDEX_UV"))
     return [
         windowless_python(str(py)),
         "-I",
@@ -364,7 +364,8 @@ def run_foreground() -> int:
     process (or falls back to a blocking child) with the durable-venv engine so
     the OS task supervises the real engine process.
     """
-    cmd = engine_command()
+    selected = engine_venv_python(None)
+    cmd = _engine_command(selected, None)
     py = Path(cmd[0])
     if not py.exists():
         raise FileNotFoundError(
@@ -376,5 +377,6 @@ def run_foreground() -> int:
         cmd, instance=DaemonInstanceSpec(
             "agent-index-engine", engine_home(), Path(__file__).resolve(),
         ),
+        env={**os.environ, **windowless_python_env(str(selected))},
     )
     return int(proc.wait())
