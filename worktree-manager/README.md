@@ -2785,6 +2785,8 @@ are not needed for Manager self-update.
 The standalone bootstrap expands retained sparse staging before construction:
 fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
 
+<a id="current-footprint-main-self-update"></a>
+
 ### Current-footprint Main bootstrap and self-update
 
 For an existing Manager root without an application project, Main self-update
