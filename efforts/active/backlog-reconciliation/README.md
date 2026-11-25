@@ -484,13 +484,15 @@ the non-public approval conversation.
 
 ## Plan
 
-The [identity/registration fixture follow-through](journal/2026/11.24-identity-and-registration-fixtures.md)
-proposes ten source-specific completions and retains two scalar discussion-scope
-research gaps. The [remote/state/runner record](journal/2026/11.24-remote-and-runner-contracts.md),
+The [handoff/launch fixture correspondence](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md)
+proposes eleven source-specific completions, distinguishing actual fixture
+corrections from later preparation/Resume refinements and retained owner gates.
+The [identity/registration record](journal/2026/11.24-identity-and-registration-fixtures.md),
+[remote/state/runner record](journal/2026/11.24-remote-and-runner-contracts.md),
 [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
-retain forty-five settled CI-report completions, the actual obsolete-warning
-retirement and the complete 910-open census. Unresolved signatures, all
+retain fifty-five settled CI-report completions, the actual obsolete-warning
+retirement and the complete 903-open census. Unresolved signatures, all
 independent holds and the fixed whole-queue target remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
@@ -5652,14 +5654,15 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [ten identity/registration fixture proposals](journal/2026/11.24-identity-and-registration-fixtures.md#proposed-dispositions-and-continuing-gate)
-map each complete original to its actual merged correction and retained
-positive, negative or fallback controls. Scalar root-merge evidence alone
-does not settle the two unadjudicated owner-follow-up discussions. Historical
-tests/CI are attributed, not campaign executions. Reviewed publication and the
-standing current-original, discussion, roster, source-review/check and
-independent-hold checks precede ten separate acknowledgments and `COMPLETED`
-judgments. The earlier forty-five transitions are settled, not replayed;
+The [eleven handoff/launch proposals](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md#proposed-dispositions-and-continuing-gate)
+map each complete original/discussion to a specific merged fixture correction
+and retained or explicitly refined current control. No all-green native,
+installed or broader-owner outcome follows from a source merge or group-level
+clearance. Historical tests/CI are attributed, not campaign executions.
+Reviewed publication and the standing current-original, discussion, roster,
+source-review/check and independent-hold checks precede eleven separate
+acknowledgments and `COMPLETED` judgments. The earlier fifty-five transitions
+are settled, not replayed;
 all incumbent campaign check states remain unchanged.
 
 The [passive-roster source map](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md#proposed-source-completion-passive-current-roster-freshness)
