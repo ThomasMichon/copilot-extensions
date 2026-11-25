@@ -129,10 +129,22 @@ class AuthReport:
         }
 
 
-def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) -> dict[str, str]:
-    base = int(env.get("GIT_CONFIG_COUNT", "0"))
-    if base < 0:
+def inherited_config_count(env: Mapping[str, str]) -> int:
+    """Parse ``GIT_CONFIG_COUNT`` as Git does: an empty value means no entries."""
+    raw = env.get("GIT_CONFIG_COUNT", "")
+    if raw == "":
+        return 0
+    try:
+        count = int(raw)
+    except ValueError:
+        raise ValueError("GIT_CONFIG_COUNT must be a non-negative integer") from None
+    if count < 0:
         raise ValueError("GIT_CONFIG_COUNT must not be negative")
+    return count
+
+
+def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) -> dict[str, str]:
+    base = inherited_config_count(env)
     for index in range(base):
         if f"GIT_CONFIG_KEY_{index}" not in env or f"GIT_CONFIG_VALUE_{index}" not in env:
             raise ValueError("incomplete inherited Git command configuration")
