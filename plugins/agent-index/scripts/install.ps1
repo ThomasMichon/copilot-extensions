@@ -143,10 +143,7 @@ function Invoke-IndexFiniteUninstall {
     . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     $python = Get-FiniteUninstallPython -InstallRoot $Root
     if (-not $python) { throw 'Index uninstall requires prepared uv-managed Python outside runtime and prefix closure' }
-    $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
-    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
-        $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
-    }
+    $helper = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'installer_engine_uninstall.py'
     $nativeError = ''
     $output = Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', $helper, '--payload-root', (Split-Path $PSScriptRoot),

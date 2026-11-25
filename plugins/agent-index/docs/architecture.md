@@ -60,6 +60,11 @@ or admission refuses instead of acquiring prerequisites or invoking ambient
 Python. Linux's native selector custody remains separate; this adds no Darwin
 supervisor, restart policy or installed-host lifetime guarantee.
 
+Finite PowerShell uninstall selects its remover beside the already-addressed
+installer dependency policy. Raw canonical-reference sources and materialized
+payloads therefore use their own engine's current removal inventory, rather
+than a stale sibling helper left in the source tree.
+
 The container engine shim admits its default worker's current environment through
 prepared-only UV (`AGENT_INDEX_UV` when bound, otherwise PATH) before reserving
 an instance or creating a process. It starts isolated Python with the same cache

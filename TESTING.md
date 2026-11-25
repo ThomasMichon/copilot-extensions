@@ -174,6 +174,8 @@ exported errexit must preserve denied status and timed-out group cleanup.
 An explicit post-release gate kills the actual caller before stdout consumption
 and still requires group and temporary-file settlement. `ps` is poisoned:
 production custody and the test's exit observations use native null-signal probes.
+Caller-loss observations poll within the existing finite cleanup allowance,
+without accepting permission errors or extending the launch observation bound.
 Linux exercises generated portable Bash, not Darwin
 supervision; a separate five-minute Ubuntu/macOS job matrix requires all
 thirty-two controls and measurement properties on each native host. Six serial
@@ -302,7 +304,11 @@ wheel-input substitution are forbidden. The source adapter also exports the
 original actual nested-runtime removal and preview controls, preserving data,
 unknown siblings, coordination identity and absent-root behavior.
 The existing POSIX command job requires nine native controls and eight selector
-reports; the Windows launch job requires twenty-two controls and sixteen reports.
+reports; the Windows launch job requires twenty-six controls and sixteen reports.
+Four added raw/materialized PowerShell controls execute the remover beside the
+addressed installer engine while poisoning the unused sibling/canonical location.
+They retain isolated, bytecode-disabled Python, literal arguments and no runtime
+mutation; an older helper in the development payload must not override its owner.
 Serial packets contain at most four cases, without new jobs or larger limits.
 Windows transactions run on Windows and POSIX transactions on POSIX; Core's
 cross-platform selector controls do not substitute for Windows removal.

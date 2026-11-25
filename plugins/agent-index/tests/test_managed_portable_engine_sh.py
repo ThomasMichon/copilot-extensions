@@ -23,6 +23,16 @@ from test_native_runtime_uninstall import (
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX engine launcher")
 
 
+def _wait_for_absence(probe: Callable[[], object], deadline: float) -> None:
+    while True:
+        assert time.monotonic() < deadline, "Owned capture exceeded its cleanup deadline"
+        try:
+            probe()
+        except ProcessLookupError:
+            return
+        time.sleep(.01)
+
+
 @pytest.mark.parametrize("materialized", [False, True])
 @pytest.mark.parametrize("selection", [
     "current", "lkg", "newest", "legacy", "incomplete",
@@ -249,15 +259,14 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
                 "cancel-release": -9,
             }[selection], result.stdout + result.stderr
             assert len(lines) == 1, result.stdout + result.stderr
+        cleanup_deadline = min(started + 20, time.monotonic() + 5)
         if selection == "cancel-release":
             group = int((tmp_path / "capture-release").read_text())
-            with pytest.raises(ProcessLookupError):
-                getattr(os, "killpg")(group, 0)
+            _wait_for_absence(lambda: getattr(os, "killpg")(group, 0), cleanup_deadline)
         elif selection.startswith("cancel-") or selection.endswith("timeout"):
             for name in ("uv-parent", "uv-child"):
                 pid = int((tmp_path / name).read_text())
-                with pytest.raises(ProcessLookupError):
-                    os.kill(pid, 0)
+                _wait_for_absence(lambda: os.kill(pid, 0), cleanup_deadline)
         assert not list(tmp_path.glob("native-capture.*"))
         assert not Path(environment["AMBIENT_MARKER"]).exists()
         assert {path.relative_to(root): path.read_bytes()
