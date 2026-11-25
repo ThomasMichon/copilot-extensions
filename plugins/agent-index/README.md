@@ -38,8 +38,10 @@ Native install/update/provision admission passes the selected interpreter to
 its existing driver. No PATH Python, launcher registration, standard Python
 directory, cached driver interpreter or incumbent runtime substitutes for a
 missing prerequisite; preparation belongs to explicit setup. Explicit closed-wheel
-inputs retain their own admission. Finite external uninstall remains a separate path;
-this helper selection does not authorize changing global PATH or acquiring Python.
+inputs retain their own admission. Finite external uninstall uses the prepared
+managed helper independently of wheel-install input, retaining its additional
+external-interpreter/prefix-closure checks. Missing preparation refuses before
+removal; uninstall never acquires Python or changes global PATH.
 
 Windows installer management uses that prepared helper for activation-role
 reading as well. Service ensure, engine management and stop share the binstub's
@@ -147,8 +149,9 @@ Missing helpers, UV or completed selections refuse with explicit installation
 guidance, never acquisition or ambient Python fallback. Read-only selection and
 `-B` keep the selected slot immutable. These launchers retain environment-file
 loading, optional scheduling/logon ownership and the primary CLI's detached
-broker; the engine entry remains foreground-only. Direct installer management,
-finite uninstall bootstrap and selected application children are separate paths.
+broker; the engine entry remains foreground-only. Installer management and
+finite uninstall retain their separate prepared entry paths; selected
+application children remain outside these ingress guarantees.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.
