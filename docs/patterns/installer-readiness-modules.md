@@ -139,6 +139,10 @@ floor or synchronized-rollout assumption substitutes for that evidence.
 
 ### Script-only runtime ownership
 
+For explicit dependency updates, `agent-machines installation-repair --module <qualified-id> --apply --refresh --expected-plan-digest <digest>` runs the same admitted manifest installer even if readiness already passes. This permits an idempotent owning installer to replace a stale but operational runtime. Without `--refresh`, existing repair behavior is unchanged. Preview never installs, with or without the flag. Refresh preserves closure selection, owner revalidation, post-readiness, failure propagation and restart confirmation; it does not activate a new service or permit an undeclared core action.
+
+The selected immutable Machines package advertises this additive capability as `refresh: 1` in `installation-repair-v1.json`. Callers must discover that support before sending the new flag. Older callers remain supported; a missing descriptor or missing capability is an unsupported refresh requirement, not permission to guess an installer or retry an uncertain apply.
+
 Native `agent-machines installation-repair` also needs an attributable runtime
 root and a read-only provisioning-inhibition protocol. A generated-command
 producer keeps declaring these in `payload-invocation.json`. A script-only
@@ -231,6 +235,12 @@ pretending the blocked branch succeeded.
 The plan carries required/optional classification and restart metadata but does
 not choose exit policy, prompt, summarize, or run commands. Those are consumer
 responsibilities.
+
+The Machines executor runs transient POSIX actions through the shared parent-lifetime owner. Before an installer starts, it also records an `inFlight` fence in the existing repair journal. Confirmed action cleanup removes that field. Cancellation is delivered only after a successful fence-record transition. A failed write restores the previous in-memory state and remains an error. If the caller dies or cleanup remains uncertain, later repair and restart confirmation refuse instead of replaying the installer. Older readers reject the additional journal field, so they cannot silently bypass this fence. Preserve the journal and establish execution cleanup before owner recovery; process age or a closed caller alone does not clear it.
+
+Read-only `agent-machines installation-repair --project-root <project> --json` reports `cleanup-required` and the pending action's module, plan and generation-bound digest. After the operator verifies that every transient action in that fence has retired and approves recovery, `agent-machines installation-repair --project-root <project> --confirm-cleanup <actionFence.pendingDigest> --json` records that attestation. It refuses while a live repair holds the lock, does not stop processes or install anything, and leaves restart obligations intact. A stale digest cannot clear a later action, even for the same module and plan. Obtain a fresh plan before another explicit apply.
+
+The digest and CLI flag do not grant cleanup or recovery authority. Never acknowledge from age, a missing caller or a process-name match alone; preserve and inspect the native owner's execution evidence first.
 
 ## Independence boundary
 

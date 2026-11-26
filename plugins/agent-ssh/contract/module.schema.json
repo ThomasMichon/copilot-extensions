@@ -11,6 +11,17 @@
       "description": "Transport name. Namespaces the drop-in fragment (~/.ssh/config.d/50-agent-ssh-<module>.conf) and the registry `transport:` dispatch key."
     },
     "kind": { "const": "transport" },
+    "runtimeDependencies": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256},
+      "description": "Installer-readiness module identities required locally by a selected fleet driver. Only explicit maintenance converges these through the canonical installation-repair owner."
+    },
+    "composesOutboundDrivers": {
+      "type": "boolean",
+      "description": "Opt in to dependency traversal of this machine's ssh.outbound driver references. Absence or false keeps that collection unselected; traversal never executes driver setup."
+    },
     "summary": { "type": "string" },
     "proxy_command": {
       "type": "string",

@@ -124,6 +124,24 @@ or `provision-server` scripts.
 
 ## Driver setup and status
 
+### Local runtime dependencies
+
+A transport may declare `runtimeDependencies: [example-provider/runtime]`. These are installer-readiness module identities, not package names, shell commands or remote-machine provisioning requests. SSH bounds the reference strings; the canonical owner validates identity syntax and binding through its admitted inventory. This preserves valid owner IDs containing dots or underscores without a second, narrower grammar. Omission preserves the existing behavior.
+
+A composite setup driver that consumes a machine's `ssh.outbound` driver references declares `composesOutboundDrivers: true`. Maintenance then follows those selected child drivers and their runtime prerequisites, without executing setup. Each machine's child selection is evaluated even when several machines share the same composite module. Missing/false composition metadata leaves outbound references unselected; malformed references and cycles refuse before installation.
+
+`agent-ssh driver-dependencies [--machines <registry>] [--project-root <project>] [--apply] --json` resolves the fleet's selected drivers through the normal trusted, enabled-plugin discovery. It deduplicates their prerequisites, then requires one active installation owner for each module. Preview plans only. Explicit apply delegates the selected closure to Agent Machines `installation-repair`, with its existing plan digest, ownership checks, manifest installers, post-readiness and restart obligations. SSH never implements another installer.
+
+The standard Worktrees update runs this operation after an active SSH runtime update, including when that runtime is already current. It does not run for inactive installed inventory. Startup, setup/status, profile emission, verification and connection probes do not invoke dependency maintenance. A standalone client with no selected dependencies does not require Machines.
+
+The selected Machines runtime must advertise `refresh: 1` in its packaged `installation-repair-v1.json`. Missing support refuses the maintenance operation before apply; update the owning installation. Explicit refresh reaches the idempotent installer even when an older runtime still passes readiness. An unavailable or ambiguous owner, failed installer, pending restart or unknown result is not successful convergence.
+
+Automatic driver dependency refresh supports restart-free closures only. A declared restart requirement refuses before any dependency installer runs. Use the canonical installation owner's explicit refresh, restart confirmation and non-refresh continuation for those modules; the SSH updater does not create its own durable restart workflow or repeat a completed refresh after confirmation. Every active repository that enables SSH supplies its own topology and plugin settings to maintenance.
+
+Repeat `--project-root` to process several repository contexts in one invocation. A pre-apply failure remains a failed overall result but does not prevent independent contexts from running. Once an apply has been attempted, any failure stops the batch; inspect that owner's result before retrying. The updater does not invent an active fallback context when all discovered repositories explicitly disable SSH.
+
+Without a local registry, only a successful external-state lookup saying no external source is required permits an implicit empty selection. An unavailable, failed or unbound lookup is not an empty fleet. A standalone caller can supply `--machines` explicitly. Native cleanup failures retain their original exception and stop the caller rather than becoming an optional-peer miss.
+
 Some transports need provider-owned per-machine setup (for example creating or
 enrolling a key, or a one-time interactive provider sign-in). A machine selects
 the transport module that owns this in `machines.yaml`:

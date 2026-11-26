@@ -76,6 +76,8 @@ def _read_state_root(
     own: Mapping[str, object] | None, *, timeout: float = 5, append_args: bool = True,
     input_text: str | None = None,
 ) -> tuple[Path | None, str]:
+    from agent_procutil.owned_process import OwnedCleanupError
+
     try:
         result = run_caller_owned(
             [*argv, "state-root", "--json"] if append_args else argv,
@@ -86,6 +88,8 @@ def _read_state_root(
             max_stdout_bytes=65536,
             max_stderr_bytes=65536,
         )
+    except OwnedCleanupError:
+        raise
     except (OSError, RuntimeError, UnicodeError, subprocess.SubprocessError) as exc:
         if own is not None:
             raise ContextRefused("same-cell Worktrees invocation failed") from exc

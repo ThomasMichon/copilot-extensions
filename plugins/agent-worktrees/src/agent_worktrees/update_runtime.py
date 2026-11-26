@@ -139,15 +139,18 @@ def _invocation_update_context() -> Path | None:
     invocation_cwd = cast(Path | None, getattr(_core(), "_INVOCATION_CWD", None))
     transported = os.environ.get(update_context_env)
     cwd = Path(transported) if transported else (invocation_cwd or Path.cwd())
+    repository_context = None
     for candidate in (cwd, *cwd.parents):
         try:
+            if repository_context is None and candidate.joinpath(".git").exists():
+                repository_context = candidate
             if any(candidate.joinpath(*rel).is_file() for rel in SETTINGS_RELS):
                 return candidate
         except OSError as error:
             raise ValueError(
                 f"cannot inspect plugin settings under {candidate}: {error}"
             ) from error
-    return None
+    return repository_context
 
 
 class _PluginActivation(str, enum.Enum):
@@ -164,9 +167,11 @@ class _RegisteredPluginTarget:
     discovery_complete: bool = True
 
     def planning_contexts(self, name: str) -> tuple[Path, ...] | None:
-        if name == "agent-vault" and (not self.discovery_complete or self.activation is _PluginActivation.UNKNOWN):
+        if name in {"agent-vault", "agent-ssh"} and (
+            not self.discovery_complete or self.activation is _PluginActivation.UNKNOWN
+        ):
             return None
-        return self.repository_contexts if name in {"agent-index", "agent-vault"} else ()
+        return self.repository_contexts if name in {"agent-index", "agent-vault", "agent-ssh"} else ()
 
     @property
     def required(self) -> bool:
@@ -368,8 +373,11 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         record_activation_error("Could not read user-global enabled plugins", exc)
 
     def enabled_in(context: Path) -> list[str]:
-        if "agent-vault" in global_plugins:
-            return reconcile.read_enabled_plugins(context, inherited_plugin="agent-vault")
+        inherited = tuple(name for name in ("agent-vault", "agent-ssh") if name in global_plugins)
+        if len(inherited) == 1:
+            return reconcile.read_enabled_plugins(context, inherited_plugin=inherited[0])
+        if inherited:
+            return reconcile.read_enabled_plugins(context, inherited_plugins=inherited)
         return reconcile.read_enabled_plugins(context)
 
     if invocation_context is not None:
@@ -426,8 +434,10 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
     )
     for name in installed_names:
         add(name, None, activation=inventory_activation)
-    if activation_unknown and "agent-vault" in targets:
-        targets["agent-vault"] = dataclasses.replace(targets["agent-vault"], discovery_complete=False)
+    if activation_unknown:
+        for name in ("agent-vault", "agent-ssh"):
+            if name in targets:
+                targets[name] = dataclasses.replace(targets[name], discovery_complete=False)
 
     warning_limit = 4
     for warning in activation_warnings[:warning_limit]:
@@ -576,6 +586,50 @@ def _reconcile_one_runtime_status(
 
 
 def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
+    status = _execute_runtime_installer_step(step)
+    if step.name != "agent-ssh" or not step.required or not (
+        status.startswith("OK") or status == "SKIPPED (current)"
+    ):
+        return status
+    script = step.artifact / "scripts" / "maintain-driver-dependencies.py"
+    if not script.is_file():
+        return status
+    if step.repository_contexts == ():
+        return status
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+    import sys
+
+    project = step.project_root or Path(
+        step.environment.get("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT") or Path.cwd()
+    )
+    contexts = tuple(dict.fromkeys(step.repository_contexts or (project,)))
+    argv = [sys.executable, "-I", "-B", str(script)]
+    for selected in contexts:
+        argv.extend(("--project-root", str(selected)))
+    environment = dict(step.environment)
+    environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(contexts[0])
+    environment["COPILOT_PROJECT_DIR"] = str(contexts[0])
+    try:
+        result = run_caller_owned(
+            argv, cwd=contexts[0], env=environment, timeout=3600,
+            max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
+        report = json.loads(result.stdout)
+        if (
+            result.returncode == 0 and isinstance(report, dict)
+            and report.get("schema") == "agent-ssh.driver-result"
+            and report.get("version") == 1 and report.get("state") in {"ready", "applied"}
+        ):
+            return status
+        detail = report.get("detail", "invalid result") if isinstance(report, dict) else "invalid result"
+        return f"SSH driver dependency maintenance failed: {detail}"
+    except OwnedCleanupError:
+        raise
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        return f"SSH driver dependency maintenance failed: {error}"
+
+
+def _execute_runtime_installer_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     from . import reconcile
 
     if step.status:

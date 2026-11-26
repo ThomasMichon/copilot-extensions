@@ -94,6 +94,29 @@ def cancel_on_termination() -> Iterator[None]:
 
 
 @contextmanager
+def defer_cancellation() -> Iterator[None]:
+    """Deliver cancellation after a finite durable-state transition completes."""
+    with cancel_on_termination():
+        previous = getattr(_termination, "deferring", False)
+        pending_before = getattr(_termination, "pending", False)
+        _termination.deferring = True
+        failed = False
+        try:
+            yield
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            _termination.deferring = previous
+            if (
+                not failed and not previous and not pending_before
+                and getattr(_termination, "pending", False)
+            ):
+                _ignore_cancellation()
+                raise KeyboardInterrupt
+
+
+@contextmanager
 def caller_owned_readiness(enabled: bool) -> Iterator[None]:
     """Borrow only an explicit caller's native containment, never an installer scope."""
     previous = getattr(_termination, "caller_owned_readiness", False)
@@ -160,12 +183,14 @@ def run_action(
             raise ValueError("invalid admitted CMD invocation")
         # CMD's already-quoted tail is not a CRT argument; do not escape it again.
         command = subprocess.list2cmdline(argv[:4]) + " " + argv[4]
-    if readonly and os.name != "nt" and getattr(_termination, "caller_owned_readiness", False):
+    if os.name != "nt":
         try:
             result = run_caller_owned(
                 list(argv), cwd=cwd, env=dict(environment), timeout=timeout,
                 max_stdout_bytes=MAX_OUTPUT, max_stderr_bytes=MAX_OUTPUT,
-                binary=True, borrow_parent_scope=True,
+                binary=True, borrow_parent_scope=(
+                    readonly and getattr(_termination, "caller_owned_readiness", False)
+                ),
                 budget=OwnedExecutionBudget.from_timeout(timeout + 2, cleanup_reserve=2),
             )
             return ActionResult("exited", result.returncode, result.stdout)
