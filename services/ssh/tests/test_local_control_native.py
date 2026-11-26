@@ -232,6 +232,116 @@ raise SystemExit(asyncio.run(local_service.serve(binding, config)))
             process.wait(timeout=5)
 
 
+@pytest.mark.parametrize("pending_activation", [False, True])
+def test_native_receiver_uses_same_private_control_and_holds_lease_until_cleanup(
+    tmp_path: Path, native_environment: dict[str, str], pending_activation: bool,
+) -> None:
+    from single_instance_lease import AlreadyRunningError
+    from fleet_manager.private_state import private_directory
+    if TYPE_CHECKING:
+        from services.ssh.tests.test_native_receiver import policy
+    else:
+        from test_native_receiver import policy
+
+    config = policy(tmp_path)
+    root = Path(config.to_dict()["data_dir"])
+    private_directory(root)
+    slot = tmp_path / "runtime" / "versions" / "native-fixture"
+    slot.mkdir(parents=True)
+    filename = tmp_path / "policy.json"
+    filename.write_bytes(config.encoded)
+    cleanup = root / "receiver-cleaned"
+    script = r"""
+import asyncio,pathlib,sys
+from types import SimpleNamespace
+from agent_ssh import gateway_receiver
+from agent_ssh_service import local_service,native_receiver,source_start
+from agent_ssh_service.config import ServiceConfig
+config=ServiceConfig.load(pathlib.Path(sys.argv[1]))
+slot=pathlib.Path(sys.argv[2])
+binding=SimpleNamespace(root=slot.parent.parent,slot=slot,
+    identity=SimpleNamespace(document=lambda:{'fixture':'service-source'}))
+source_start.ensure_selected=lambda _:None
+native_receiver.NativeReceiverConfig.ingress=lambda _:{'native_gateway':{}}
+async def transport(*args):
+    return None
+native_receiver._resolve_transport=transport
+class Receiver:
+    def __init__(self,*args,**kwargs):
+        self.started=asyncio.Event()
+        self.forward=SimpleNamespace(is_alive=False)
+        self.listener=SimpleNamespace(ready=lambda:True)
+        self.running=False
+    async def run(self,stop):
+        self.running=True
+        try:
+            if sys.argv[4]=='pending':
+                pathlib.Path(sys.argv[3]).with_name('activation-pending').write_text('entered')
+            else:
+                self.forward.is_alive=True
+                self.started.set()
+            await stop.wait()
+        finally:
+            self.started.clear()
+            self.forward.is_alive=False
+            pathlib.Path(sys.argv[3]).write_text('settled',encoding='ascii')
+            self.running=False
+gateway_receiver.NativeReceiver=Receiver
+raise SystemExit(asyncio.run(local_service.serve(binding,config)))
+"""
+    diagnostic = tmp_path / "native-receiver.log"
+    process = spawn_daemon(
+        [sys.executable, "-I", "-B", "-c", script, str(filename), str(slot), str(cleanup),
+         "pending" if pending_activation else "ready"],
+        cwd=root, log_path=diagnostic, env=native_environment,
+        instance=DaemonInstanceSpec("agent-ssh-service", root, Path(entry.__file__)),
+    )
+    callers = ThreadPoolExecutor(max_workers=1)
+    try:
+        deadline = time.monotonic() + 15
+        owner = None
+        while time.monotonic() < deadline and process.poll() is None:
+            owner = next((row for row in records(config)
+                          if row["peer"]["pid"] == process.pid), None)
+            if owner is not None:
+                break
+            time.sleep(0.05)
+        assert owner is not None, diagnostic.read_text(encoding="utf-8", errors="replace")
+        assert request(config, owner, "prepare")["prepared"]
+        assert not request(config, owner, "health")["ready"]
+        activation = None
+        if pending_activation:
+            activation = callers.submit(request, config, owner, "activate")
+            deadline = time.monotonic() + 5
+            while not (root / "activation-pending").exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+            assert (root / "activation-pending").exists(), diagnostic.read_text()
+            assert not activation.done()
+        else:
+            assert request(config, owner, "activate")["ready"]
+        contender = SingleInstance(str(root), service="agent-ssh-service")
+        with pytest.raises(AlreadyRunningError):
+            contender.acquire()
+        assert not cleanup.exists()
+        started = time.monotonic()
+        request(config, owner, "stop", wait_exit=True)
+        assert time.monotonic() - started < 10
+        if activation is not None:
+            with pytest.raises(Exception):
+                activation.result(timeout=3)
+        assert process.wait(timeout=5) == 0
+        assert cleanup.read_text(encoding="ascii") == "settled"
+        assert records(config) == []
+        assert not (root / "directory.sqlite3").exists()
+        contender.acquire()
+        contender.release()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+        callers.shutdown(wait=True)
+
+
 _RECOVERY_CHILD = r"""
 import asyncio, json, os, pathlib, sys
 from types import SimpleNamespace
@@ -333,7 +443,9 @@ def wait_record(config: ServiceConfig, process: Any) -> Document:
         if found:
             return found[0]
         time.sleep(.02)
-    pytest.fail("native owner registration missing")
+    logs = Path(config.to_dict()["data_dir"]).parent.glob("fixture-*.log")
+    diagnostic = "\n".join(path.read_text(errors="replace") for path in logs)
+    pytest.fail(f"native owner registration missing (exit={process.poll()}):\n{diagnostic}")
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Actual Linux native handoff and original pidfds")

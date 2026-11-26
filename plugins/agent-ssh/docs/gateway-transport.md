@@ -195,6 +195,33 @@ profiles. Those actions retain their existing owners and approval boundaries.
 
 ## Native listener integration
 
+The internal `agent_ssh.gateway_receiver.NativeReceiver` composition accepts a
+validated version-2 ingress configuration, the selected Gateway's strictly
+authenticated `SSHConfig`, and an async authenticated public-observation
+callback. Beneath its embedding application's lifetime, it starts the existing
+foreground listener, requires native listener attribution, and starts the shared
+fixed reverse-forward owner with literal `127.0.0.1` binding and an independent
+fixed local target. The shared monitor owns reverse reconnects. Periodic
+observations use the existing native authorization writer; unavailable,
+foreign or rejected membership never replaces the last valid key set.
+`membership_current` distinguishes failed catch-up from the last accepted
+observation time; neither field is independent inbound SSH proof.
+
+The embedding must serialize versions, supply the already-selected public-read
+transport with bounded output/cancellation cleanup, retain the same local
+identity, and await `run(stop_event)` through native retirement. This core does
+not enroll, install outbound profiles, register startup or select a credential,
+provider or executable from synchronized data. Native operations already in
+progress are joined before cleanup. Unconfirmed cleanup retains the instance
+and prevents reentry; the same owner can retry `close()` after reconciliation.
+The [SSH service's optional native receiving role](../../../services/ssh/README.md#optional-native-inbound-receiver)
+now embeds this composition beneath its existing installed application lifetime,
+native control and singleton lease. Local readiness remains distinct from an
+independent inbound SSH proof. The Gateway must actually permit fixed public
+reads for the selected identity; forwarding permission alone is insufficient.
+Provider/handoff preparation, logon activation and the complete one-command
+fresh-machine bootstrap remain separate integration work.
+
 `agent_ssh.gateway_sshd` is an installed internal service entrypoint for an
 existing target-local lifecycle owner. That owner invokes the selected immutable
 interpreter with `-m agent_ssh.gateway_sshd --config <absolute-config-path>`.
@@ -390,6 +417,12 @@ and private host key. It uses the same dedicated authorization file, private
 namespace, writer lock, atomic publication and foreground listener as Fleet.
 It does not create outbound profiles, modify conventional user keys, enroll
 a peer or restart an already running listener.
+
+An embedding can call `gateway_sshd.validate_bindings(config, projection)`
+before retiring an addressed incumbent. It validates the incoming executables,
+private host-key pin and actual login account, returning the account and native
+login principal without publishing files or checking the occupied endpoint.
+Activation still repeats those checks before configuring its own listener.
 
 The authorization owner retains `gateway-native-membership.json` as its local
 accepted-input receipt, not a second admission directory. The receipt binds

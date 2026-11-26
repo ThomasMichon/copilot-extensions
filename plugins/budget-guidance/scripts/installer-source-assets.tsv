@@ -125,6 +125,7 @@ copy	libs/agent-procutil/tests/test_caller_owned_native.py	libs/agent-procutil/t
 copy	libs/agent-procutil/tests/test_cleanup_diagnostics.py	libs/agent-procutil/tests/test_cleanup_diagnostics.py
 copy	libs/agent-procutil/tests/test_command_pipe.py	libs/agent-procutil/tests/test_command_pipe.py
 copy	libs/agent-procutil/tests/test_daemon_broker.py	libs/agent-procutil/tests/test_daemon_broker.py
+copy	libs/agent-procutil/tests/test_daemon_broker_cwd.py	libs/agent-procutil/tests/test_daemon_broker_cwd.py
 copy	libs/agent-procutil/tests/test_daemon_instance_bootstrap_python.py	libs/agent-procutil/tests/test_daemon_instance_bootstrap_python.py
 copy	libs/agent-procutil/tests/test_daemon_instance_clock.py	libs/agent-procutil/tests/test_daemon_instance_clock.py
 copy	libs/agent-procutil/tests/test_daemon_instance_cost.py	libs/agent-procutil/tests/test_daemon_instance_cost.py

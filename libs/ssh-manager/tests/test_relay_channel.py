@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import os
+import signal
 import subprocess
 import sys
+from typing import Any, cast
 
 import pytest
 
@@ -15,33 +18,33 @@ from ssh_manager.relay_channel import SupervisedRelayForward, _SettleResult
 class _FakeProc:
     def __init__(self, pid: int) -> None:
         self.pid = pid
-        self.returncode = None
-        self.stderr = None
+        self.returncode: int | None = None
+        self.stderr: asyncio.StreamReader | None = None
 
 
-async def test_settle_preserves_bounded_raw_tail_without_changing_legacy_error_text():
+async def test_settle_preserves_bounded_raw_tail_without_changing_legacy_error_text() -> None:
     relay = SupervisedRelayForward(SSHConfig(host_alias="fixture"), 41001, ready_timeout=0.01)
     proc = _FakeProc(123)
     proc.stderr = asyncio.StreamReader()
     proc.stderr.feed_data(b"remote port forwarding ")
-    result = await relay._wait_settled(proc)
+    result = await relay._wait_settled(cast(asyncio.subprocess.Process, proc))
     assert result.ready and not result.remote_forward_failed
     assert result.stderr == "remote port forwarding"
     assert result.raw_tail == "remote port forwarding "
     assert "raw_tail" not in repr(result)
 
 
-def test_pid_change_callback_tracks_establish_restart_and_stop(monkeypatch):
+def test_pid_change_callback_tracks_establish_restart_and_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     procs = [_FakeProc(111), _FakeProc(222)]
     seen: list[tuple[int | None, str | None]] = []
 
-    async def fake_spawn(*_args, **_kwargs):
+    async def fake_spawn(*_args: Any, **_kwargs: Any) -> _FakeProc:
         return procs.pop(0)
 
-    async def fake_wait_settled(self, proc):
+    async def fake_wait_settled(self: SupervisedRelayForward, proc: _FakeProc) -> _SettleResult:
         return _SettleResult(True, "", False)
 
-    async def fake_kill(self, proc):
+    async def fake_kill(self: SupervisedRelayForward, proc: _FakeProc) -> None:
         proc.returncode = -9
 
     monkeypatch.setattr(relay_mod, "create_ssh_subprocess", fake_spawn)
@@ -57,7 +60,7 @@ def test_pid_change_callback_tracks_establish_restart_and_stop(monkeypatch):
         ),
     )
 
-    async def exercise():
+    async def exercise() -> None:
         await forward.establish()
         await forward._cancel_process()
         await forward.establish()
@@ -70,28 +73,36 @@ def test_pid_change_callback_tracks_establish_restart_and_stop(monkeypatch):
 
 
 class _KillableProc(_FakeProc):
+    args: tuple[Any, ...]
+    env: dict[str, str] | None
+    killed = False
+
     def kill(self) -> None:
         self.killed = True
         self.returncode = -9
 
 
-def _supervised(monkeypatch, *, gate=None):
+def _supervised(
+    monkeypatch: pytest.MonkeyPatch, *, gate: Callable[[], Awaitable[bool]] | None = None,
+    **options: Any,
+) -> tuple[SupervisedRelayForward, list[_KillableProc]]:
     """A relay whose spawned ssh 'dies' on demand, with fake spawn/kill."""
-    spawned: list[_FakeProc] = []
+    spawned: list[_KillableProc] = []
 
-    async def fake_spawn(*_args, **kwargs):
+    async def fake_spawn(*_args: Any, **kwargs: Any) -> _KillableProc:
         proc = _KillableProc(1000 + len(spawned))
+        proc.args = _args
         proc.env = kwargs.get("env")
         spawned.append(proc)
         return proc
 
-    async def fake_wait_settled(self, proc):
+    async def fake_wait_settled(self: SupervisedRelayForward, proc: _FakeProc) -> _SettleResult:
         return _SettleResult(True, "", False)
 
-    async def fake_kill(self, proc):
+    async def fake_kill(self: SupervisedRelayForward, proc: _FakeProc) -> None:
         proc.returncode = -9
 
-    async def fast_sleep(self, _delay):
+    async def fast_sleep(self: SupervisedRelayForward, _delay: float) -> None:
         await asyncio.sleep(0)
 
     monkeypatch.setattr(relay_mod, "create_ssh_subprocess", fake_spawn)
@@ -100,12 +111,54 @@ def _supervised(monkeypatch, *, gate=None):
     monkeypatch.setattr(SupervisedRelayForward, "_kill", fake_kill)
     monkeypatch.setattr(SupervisedRelayForward, "_sleep", fast_sleep)
     relay = SupervisedRelayForward(
-        SSHConfig(host_alias="box"), 41000, reconnect_gate=gate,
+        SSHConfig(host_alias="box"), 41000, reconnect_gate=gate, **options,
     )
     return relay, spawned
 
 
-async def _settle(predicate, *, attempts: int = 200) -> None:
+@pytest.mark.parametrize("host,prefix", [
+    (None, ""), ("127.0.0.1", "127.0.0.1:"),
+    ("localhost", "localhost:"), ("::1", "[::1]:"),
+])
+async def test_fixed_reverse_bind_and_target_survive_monitor_reconnect(
+    monkeypatch: pytest.MonkeyPatch, host: str | None, prefix: str,
+) -> None:
+    relay, spawned = _supervised(
+        monkeypatch, remote_bind_host=host, host_port=24107,
+    )
+    try:
+        await relay.start()
+        spawned[0].returncode = 255
+        await _settle(lambda: len(spawned) == 2)
+        for proc in spawned:
+            index = proc.args.index("-R")
+            assert proc.args[index + 1] == prefix + "41000:127.0.0.1:24107"
+            assert "ExitOnForwardFailure=yes" in proc.args
+        assert relay._established_host_port == 24107
+    finally:
+        await relay.stop()
+
+
+@pytest.mark.parametrize("options", [
+    {"remote_bind_host": "0.0.0.0"}, {"remote_bind_host": "*"},
+    {"remote_bind_host": "[::1]"}, {"remote_bind_host": "127.0.0.1:22"},
+    {"remote_bind_host": ""}, {"host_port": True}, {"host_port": "22"},
+    {"host_port": 0}, {"host_port": 65536},
+    {"host_port": 24107, "host_port_resolver": lambda: 24108},
+])
+def test_explicit_reverse_endpoint_rejects_ambiguous_or_unsafe_bindings(options: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        SupervisedRelayForward(SSHConfig(host_alias="box"), 41000, **options)
+
+
+@pytest.mark.parametrize("port", [True, "41000", 0, 65536])
+@pytest.mark.parametrize("options", [{"remote_bind_host": "127.0.0.1"}, {"host_port": 24107}])
+def test_explicit_reverse_bind_rejects_invalid_remote_port(port: Any, options: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        SupervisedRelayForward(SSHConfig(host_alias="box"), port, **options)
+
+
+async def _settle(predicate: Callable[[], bool], *, attempts: int = 200) -> None:
     for _ in range(attempts):
         if predicate():
             return
@@ -113,8 +166,10 @@ async def _settle(predicate, *, attempts: int = 200) -> None:
     raise AssertionError("condition was not reached")
 
 
-async def test_monitor_retires_instead_of_reconnecting_to_stopped_venue(monkeypatch):
-    gate_calls = []
+async def test_monitor_retires_instead_of_reconnecting_to_stopped_venue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate_calls: list[bool] = []
 
     async def gate() -> bool:
         gate_calls.append(True)
@@ -135,8 +190,10 @@ async def test_monitor_retires_instead_of_reconnecting_to_stopped_venue(monkeypa
     await relay.stop()
 
 
-async def test_monitor_skips_reconnect_while_gate_is_inconclusive(monkeypatch):
-    answers = [RuntimeError("api down"), RuntimeError("api down"), True]
+async def test_monitor_skips_reconnect_while_gate_is_inconclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: list[RuntimeError | bool] = [RuntimeError("api down"), RuntimeError("api down"), True]
 
     async def gate() -> bool:
         answer = answers.pop(0)
@@ -156,7 +213,7 @@ async def test_monitor_skips_reconnect_while_gate_is_inconclusive(monkeypatch):
     await relay.stop()
 
 
-async def test_monitor_without_gate_still_reconnects(monkeypatch):
+async def test_monitor_without_gate_still_reconnects(monkeypatch: pytest.MonkeyPatch) -> None:
     relay, spawned = _supervised(monkeypatch)
     await relay.start()
     spawned[0].returncode = 255
@@ -167,8 +224,10 @@ async def test_monitor_without_gate_still_reconnects(monkeypatch):
     await relay.stop()
 
 
-async def test_reconnect_gate_fault_does_not_log_raw_provider_exception(monkeypatch, caplog):
-    async def gate():
+async def test_reconnect_gate_fault_does_not_log_raw_provider_exception(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def gate() -> bool:
         raise RuntimeError("private-provider-value")
     relay, spawned = _supervised(monkeypatch, gate=gate)
     assert await relay._reconnect_allowed() is None
@@ -177,14 +236,17 @@ async def test_reconnect_gate_fault_does_not_log_raw_provider_exception(monkeypa
     assert "private-provider-value" not in caplog.text
 
 
-async def test_stop_nowait_cancels_monitor_and_kills_owned_tree(monkeypatch):
+async def test_stop_nowait_cancels_monitor_and_kills_owned_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     relay, spawned = _supervised(monkeypatch)
     await relay.start()
     proc = spawned[0]
-    sweeps = []
+    sweeps: list[SupervisedRelayForward] = []
+    def sweep(self: SupervisedRelayForward) -> int:
+        sweeps.append(self)
+        return 0
     monkeypatch.setattr(
         SupervisedRelayForward, "_kill_owned_descendants",
-        lambda self: sweeps.append(self) or 0,
+        sweep,
     )
     monitor = relay._monitor_task
 
@@ -196,16 +258,18 @@ async def test_stop_nowait_cancels_monitor_and_kills_owned_tree(monkeypatch):
     assert sweeps, "surviving ProxyCommand descendants must be swept"
     assert relay._proc is None
     assert relay._monitor_task is None
+    assert monitor is not None
     assert monitor.cancelled() or monitor.done()
     # A stopped relay never reconnects, even if the monitor were to run again.
     assert await relay._reconnect_allowed() is False
     assert len(spawned) == 1
 
 
-async def test_spawned_ssh_carries_the_supervisor_owner_token(monkeypatch):
+async def test_spawned_ssh_carries_the_supervisor_owner_token(monkeypatch: pytest.MonkeyPatch) -> None:
     relay, spawned = _supervised(monkeypatch)
     await relay.establish()
 
+    assert spawned[0].env is not None
     assert spawned[0].env[relay_mod._OWNER_ENV] == relay._owner_token
     other, _ = _supervised(monkeypatch)
     assert other._owner_token != relay._owner_token
@@ -215,10 +279,10 @@ async def test_spawned_ssh_carries_the_supervisor_owner_token(monkeypatch):
 @pytest.mark.skipif(
     not sys.platform.startswith("linux")
     or not hasattr(os, "pidfd_open")
-    or not hasattr(relay_mod.signal, "pidfd_send_signal"),
+    or not hasattr(signal, "pidfd_send_signal"),
     reason="owner-token sweep is Linux-only",
 )
-def test_owner_sweep_kills_only_processes_carrying_its_token():
+def test_owner_sweep_kills_only_processes_carrying_its_token() -> None:
     relay = SupervisedRelayForward(SSHConfig(host_alias="box"), 41000)
     sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
     # An orphaned ProxyCommand child that outlived its ssh root.
@@ -239,21 +303,24 @@ def test_owner_sweep_kills_only_processes_carrying_its_token():
                 proc.wait(timeout=10)
 
 
-async def test_teardown_sweeps_descendants_after_root_exited(monkeypatch):
+async def test_teardown_sweeps_descendants_after_root_exited(monkeypatch: pytest.MonkeyPatch) -> None:
     relay, spawned = _supervised(monkeypatch)
     await relay.establish()
     proc = spawned[0]
     proc.returncode = 255  # root gone; a ProxyCommand child may survive
-    sweeps = []
+    sweeps: list[SupervisedRelayForward] = []
+    def sweep(self: SupervisedRelayForward) -> int:
+        sweeps.append(self)
+        return 0
     monkeypatch.setattr(
         SupervisedRelayForward, "_kill_owned_descendants",
-        lambda self: sweeps.append(self) or 0,
+        sweep,
     )
 
     await relay.stop()
 
     assert sweeps == [relay]
-async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch):
+async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     answers = [True, False, False]
 
     async def gate() -> bool:
@@ -261,7 +328,7 @@ async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch):
 
     relay, spawned = _supervised(monkeypatch, gate=gate)
 
-    async def bind_fails(self, proc):
+    async def bind_fails(self: SupervisedRelayForward, proc: _FakeProc) -> _SettleResult:
         return _SettleResult(False, "remote port forwarding failed", True)
 
     monkeypatch.setattr(SupervisedRelayForward, "_wait_settled", bind_fails)
@@ -272,26 +339,26 @@ async def test_gated_reconnect_rechecks_gate_before_each_retry(monkeypatch):
     assert relay.retired is True
 
 
-def test_owner_sweep_is_a_noop_without_pidfd_send_signal(monkeypatch):
+def test_owner_sweep_is_a_noop_without_pidfd_send_signal(monkeypatch: pytest.MonkeyPatch) -> None:
     relay = SupervisedRelayForward(SSHConfig(host_alias="box"), 41000)
-    monkeypatch.delattr(relay_mod.signal, "pidfd_send_signal", raising=False)
+    monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
     monkeypatch.setattr(
-        relay_mod.os, "scandir",
+        os, "scandir",
         lambda *_a: (_ for _ in ()).throw(AssertionError("must not scan")),
     )
 
     assert relay._kill_owned_descendants() == 0
 
 
-async def test_terminate_releases_owner_even_if_sweep_fails(monkeypatch):
+async def test_terminate_releases_owner_even_if_sweep_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     relay, spawned = _supervised(monkeypatch)
     await relay.establish()
-    released = []
+    released: list[_FakeProc] = []
 
-    def broken_sweep(self):
+    def broken_sweep(self: SupervisedRelayForward) -> int:
         raise RuntimeError("boom")
 
-    async def fake_cleanup(proc, **_kw):
+    async def fake_cleanup(proc: _FakeProc, **_kw: Any) -> None:
         released.append(proc)
 
     monkeypatch.setattr(SupervisedRelayForward, "_kill_owned_descendants", broken_sweep)
@@ -302,7 +369,7 @@ async def test_terminate_releases_owner_even_if_sweep_fails(monkeypatch):
     assert released == [spawned[0]]
 
 
-async def test_definitive_stop_seen_on_inner_retry_is_final(monkeypatch):
+async def test_definitive_stop_seen_on_inner_retry_is_final(monkeypatch: pytest.MonkeyPatch) -> None:
     # True to start reconnecting, then a definitive "stopped" on the retry
     # gate, then "running" again: the supervisor must stay retired.
     answers = [True, False, True, True]
@@ -312,7 +379,7 @@ async def test_definitive_stop_seen_on_inner_retry_is_final(monkeypatch):
 
     relay, spawned = _supervised(monkeypatch, gate=gate)
 
-    async def bind_fails(self, proc):
+    async def bind_fails(self: SupervisedRelayForward, proc: _FakeProc) -> _SettleResult:
         return _SettleResult(False, "remote port forwarding failed", True)
 
     monkeypatch.setattr(SupervisedRelayForward, "_wait_settled", bind_fails)

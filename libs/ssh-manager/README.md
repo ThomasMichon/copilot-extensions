@@ -102,6 +102,16 @@ errors. OS errors and an explicitly bounded resolver's
 
 ## Optional finite reverse-forward selection
 
+For an already-assigned fixed reverse port, `SupervisedRelayForward` accepts
+`remote_bind_host="127.0.0.1"` (also `localhost` or `::1`) to retain the literal
+host required by the Gateway's `permitlisten` grant. The default still omits
+the host, preserving existing consumers. `host_port=<local-port>` selects a
+fixed loopback target independently of the remote port; it cannot be combined
+with `host_port_resolver`. Both selections survive monitor-driven reconnects.
+An explicit bind requires an integer remote port in 1..65535; a fixed target
+requires the same range. These options do not allocate a port, widen a grant
+or turn process-settle observation into authenticated SSH readiness.
+
 `ssh_manager.reverse_candidates.FiniteReverseForward` subclasses the existing
 `SupervisedRelayForward` process and monitor owner; it does not start a second
 keeper. Existing fixed-port consumers and their constructor remain unchanged.

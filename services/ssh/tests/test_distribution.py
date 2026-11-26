@@ -4,10 +4,16 @@ from pathlib import Path
 import shutil
 import sys
 import tarfile
+import time
 import zipfile
 from typing import Any, TYPE_CHECKING, cast
 
 import pytest
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 from agent_ssh_service import __version__
 from agent_procutil.owned_process import run_caller_owned
@@ -41,6 +47,46 @@ def test_standalone_wheel_construction_keeps_declared_runtime_libraries(
     assert libraries["single-instance-lease"] == repo / "libs" / "single-instance-lease"
     assert libraries["agent-procutil"] == repo / "libs" / "agent-procutil"
     assert libraries["zdd"] == repo / "libs" / "zdd"
+
+
+@pytest.mark.parametrize("extra,missing", [
+    ("", "fleet-manager"),
+    ("native-receiver", "agent-ssh"),
+])
+def test_application_profile_requires_associated_first_party_inputs(
+    monkeypatch: pytest.MonkeyPatch, extra: str, missing: str,
+) -> None:
+    source = Path(__file__).resolve().parents[1]
+    monkeypatch.syspath_prepend(str(source.parents[1] / "tools"))
+    if TYPE_CHECKING:
+        from tools.application_sources import application_sources
+        from tools.local_install_profile import ProfileError, registry_roots
+    else:
+        from application_sources import application_sources
+        from local_install_profile import ProfileError, registry_roots
+    metadata = tomllib.loads((source / "pyproject.toml").read_text("utf-8"))
+    project = metadata["project"]
+    requirements = [*project["dependencies"], *(
+        requirement + f'; extra == "{name}"'
+        for name, requirements in project["optional-dependencies"].items()
+        for requirement in requirements
+    )]
+    wheels: dict[str, dict[str, Any]] = {
+        project["name"]: {
+            "version": project["version"], "requires_dist": requirements,
+            "provides_extras": list(project["optional-dependencies"]),
+            "application_sources": application_sources(metadata),
+        },
+    }
+    if missing == "agent-ssh":
+        wheels["fleet-manager"] = {
+            "version": "0.1.0.dev1", "requires_dist": [],
+            "provides_extras": ["service-gateway"],
+            "source_project": "standalone:fleet-manager",
+        }
+    root = project["name"] + (f"[{extra}]" if extra else "")
+    with pytest.raises(ProfileError, match=missing + ": selected associated application source"):
+        registry_roots(wheels, root, {}, deadline=time.monotonic() + 10)
 
 
 @pytest.mark.parametrize("flag", ["--help", "--version"])
@@ -96,6 +142,10 @@ def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_pa
         assert "agent_ssh_service/hosting.py" in wheel.namelist()
         assert "agent_ssh_service/relay.py" in wheel.namelist()
         assert "agent-procutil" in cast(list[str], metadata.get_all("Requires-Dist"))
+        assert json.loads(wheel.read("agent_ssh_service/native-receiver-v1.json"))[
+            "capabilities"
+        ] == ["gateway-native-receiver-v1"]
+        assert "agent_ssh_service/native_receiver.py" in wheel.namelist()
     with tarfile.open(next(output.glob("*.tar.gz"))) as archive:
         assert any(name.endswith("/container/Dockerfile") for name in archive.getnames())
     monkeypatch.chdir(tmp_path)

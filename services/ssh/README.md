@@ -191,6 +191,91 @@ or child custody. The existing legacy relay path remains supported separately.
 Neither passive preparation nor Windows/synthetic-connector tests qualify an
 external Gateway, Linux/OpenSSH relay or live fleet deployment.
 
+## Optional native inbound receiver
+
+The same installed application can instead select
+`agent-ssh.native-receiver` configuration version 1. Its immutable runtime
+declares `gateway-native-receiver-v1` in
+`agent_ssh_service/native-receiver-v1.json`; select that declaration from the
+actual installed slot, not a newer plugin payload. Build the application with
+its `native-receiver` extra. Existing directory-service configuration and
+activation retain their previous meaning.
+The existing application-source associations require the selected
+`standalone:fleet-manager` input and, for this extra, `agent-ssh` from the same
+prepared source set. Supply those alongside `standalone:ssh-service` through
+the normal repeated `--project` selections; these are application SDK inputs,
+not vendored-library paths or independently resolved registry substitutes.
+
+This role runs the existing agent-ssh foreground listener, fixed loopback
+reverse channel and periodic native-public-membership consumer. It requires
+neither Fleet Gateway credentials nor an active Fleet controller, full harness
+or outbound profile-manager role. It reuses their shared libraries and the
+standard application installer, retained launcher, native instance admission,
+local control and process-spawn owner. It does not install a second supervisor.
+
+For example, the **local private policy**, prepared by independently trusted
+setup code, has this shape:
+
+```json
+{
+  "schema": "agent-ssh.native-receiver",
+  "version": 1,
+  "data_dir": "C:\\AgentData\\receiver",
+  "ingress_file": "C:\\AgentData\\receiver-config\\ingress.json",
+  "transport": {
+    "ssh_config": "C:\\AgentData\\receiver-config\\ssh_config",
+    "host_alias": "selected-gateway",
+    "gateway_command": ["/opt/native-gateway/launcher"]
+  }
+}
+```
+
+`ingress_file` uses the existing native ingress version-2 contract. Its
+`state_dir` must be exactly `<data_dir>/native-ingress`. Configuration, mutable
+state, identity and provider references stay outside the installed runtime
+slots. The local SSH profile must select one matching client identity, the
+descriptor's Gateway user and exact public host pin, strict host checking,
+batch mode, identities-only authentication and no identity agent. Routing,
+identity and authentication options are frozen for this lifetime. An
+independently installed provider may supply its ProxyCommand; that provider
+owns normal login and transport prerequisites, not this generic service.
+Never obtain a command, profile or executable source from synchronized handoff
+data.
+
+Set the existing `AGENT_SSH_SERVICE_CONFIG` selection before the standard
+application install/start callback. The callback converges through the
+existing `__source-start` owner. The native role holds the OS singleton lease
+for its complete listener/reverse lifetime. An exact healthy owner is reused.
+An addressed predecessor is stopped through authenticated native control only
+after the new local bindings and read-only public access pass preflight;
+cleanup and native exit precede the replacement listener. Failed preflight
+preserves the predecessor. Preflight checks foreground platform support, the
+incoming listener executable, host private key and admitted login account
+without probing the still-occupied listener endpoint. Lost replies remain
+uncertain, and native cleanup
+refusal retains the original owner and lease for reconciliation. This is a
+cold replacement, not a claim of seamless listener transfer or arbitrary
+legacy-process takeover.
+
+Membership uses only `export-client --machine <self>`, `export-directory`
+and `status` through the selected native public-command adapter. The Gateway
+must actually permit those read-only operations for this identity. A
+forwarding-only key forced to `/bin/false` is insufficient; an owner-provided,
+restricted public-read path is required. The receiver never borrows a
+management credential, performs admission or interprets a failed command as
+permission to install a new Gateway.
+
+Local readiness attests an attributed listener and live reverse-forward
+process, **not independent authenticated inbound reachability**. Unavailable
+or rejected membership retains valid login keys and reports stale membership
+inside the receiving role, including bounded native validation timeouts.
+Authenticated local stop remains responsive while activation is pending; the
+control worker retains bounded pending replies instead of blocking on readiness.
+Stopping during reverse-forward startup cancels and joins that startup's
+cleanup before retiring the listener. This source integration does not itself prepare
+a synchronized handoff, install a provider, register logon activation, admit
+a machine or prove the complete one-command fresh-machine flow.
+
 ## Optional explicit peer approval
 
 Select this additional nonsecret configuration only on a capable service:

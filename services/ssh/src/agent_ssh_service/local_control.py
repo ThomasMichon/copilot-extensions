@@ -181,7 +181,8 @@ def request(config: ServiceConfig, record: Document, operation: str, *,
     path = cell / ("request-" + nonce + ".json")
     channel: Channel | None = None
     held = None
-    limit = 15 if operation == "activate" else 10 if wait_exit else 3
+    native = config.to_dict()["schema"] == "agent-ssh.native-receiver"
+    limit = (240 if native else 15) if operation == "activate" else 10 if wait_exit else 3
     deadline = Deadline(limit if timeout is None else min(limit, max(0, timeout)))
     with _request_listener(nonce) as (listener, address):
         try:
@@ -223,7 +224,7 @@ class LocalControl:
         self.record: Path | None = None
         self.handled: set[str] = set()
         self.work_lock = threading.Lock()
-        self.pending: Future[Document] | None = None
+        self.pending: dict[Future[Document], tuple[Channel, Deadline, str]] = {}
         self.operations: set[asyncio.Task[Any]] = set()
         owner = writer_identity(asdict(self.peer), self.identity)
         def selected_writer() -> None:
@@ -235,6 +236,8 @@ class LocalControl:
         self.connector: ServiceConnector | None = None
         self.relay: NativeRelay | None = None
         self.read_selection: Callable[[], str | None] | None = None
+        self.receiver: Any = None
+        self.native = config.to_dict()["schema"] == "agent-ssh.native-receiver"
 
     async def prepare(self, *, stop: asyncio.Event, lease: SingleInstance) -> None:
         check("relay" not in self.config.to_dict(), "native-relay-transfer-unsupported")
@@ -270,6 +273,12 @@ class LocalControl:
         self.store, self.service, self.connector, self.relay = store, service, connector, relay
         self.initialized.set()
 
+    def attach_receiver(self, receiver: Any) -> None:
+        """Attach receiving readiness without claiming Fleet directory authority."""
+        check(self.native, "native-receiver-role-required")
+        self.receiver = receiver
+        self.initialized.set()
+
     def _locally_prepared(self) -> bool:
         return (
             not self.closed.is_set() and not self.stop.is_set()
@@ -286,6 +295,20 @@ class LocalControl:
         )
 
     async def _attest(self) -> Document:
+        if self.native:
+            ready = (
+                self._locally_prepared() and self.receiver is not None
+                and self.receiver.started.is_set() and self.receiver.forward.is_alive
+                and self.receiver.listener is not None
+            )
+            if ready:
+                from agent_ssh.gateway_receiver import _local
+
+                ready = await _local(self.receiver.listener.ready)
+                ready = ready and self._locally_prepared()
+            return asdict(RuntimeAttestation(
+                self.peer.pid, self.peer.start_time, self.binding.slot.name, self.identity, ready,
+            ))
         from .hosting import _observe_writer
 
         ready = self._locally_ready()
@@ -322,10 +345,10 @@ class LocalControl:
 
     async def _operation(self, operation: str) -> Document:
         if operation == "prepare":
-            from .hosting import _observe_writer
-
             prepared = self._locally_prepared()
-            if prepared and self.initialized.is_set():
+            if prepared and self.initialized.is_set() and not self.native:
+                from .hosting import _observe_writer
+
                 prepared = (
                     await _observe_writer(self.writer) == self.writer.owner
                     and self._locally_prepared()
@@ -337,7 +360,10 @@ class LocalControl:
         if operation == "activate":
             self.activation.set()
             await self.initialized.wait()
-            await cast("ServiceConnector", self.connector).connected.wait()
+            if self.native:
+                await self.receiver.started.wait()
+            else:
+                await cast("ServiceConnector", self.connector).connected.wait()
         return await self._attest()
 
     def _supersession_unchanged(self, owner: str, selection: str) -> bool:
@@ -404,6 +430,8 @@ class LocalControl:
 
     def _observe_supersession(self) -> None:
         """Only this outgoing owner retires, and only from current ready evidence."""
+        if self.native:
+            return
         try:
             if not self.initialized.is_set() or self.closed.is_set() or self.stop.is_set():
                 return
@@ -444,7 +472,44 @@ class LocalControl:
             return
 
     def _serve(self) -> None:
+        try:
+            self._serve_requests()
+        finally:
+            with self.work_lock:
+                pending, self.pending = self.pending, {}
+            for future, (channel, _, _) in pending.items():
+                future.cancel()
+                channel.close()
+
+    def _complete_replies(self) -> None:
+        with self.work_lock:
+            pending = tuple(self.pending.items())
+        for future, (channel, deadline, operation) in pending:
+            complete = True
+            try:
+                if not future.done():
+                    deadline.remaining()
+                    complete = False
+                    continue
+                result = future.result()
+                if not self.closed.is_set():
+                    write_frame(channel, result, Deadline(min(2, deadline.remaining())))
+                    if operation == "stop":
+                        self.loop.call_soon_threadsafe(self.stop.set)
+            except Exception as error:
+                logging.getLogger(__name__).warning(
+                    "local-control-request-refused type=%s", type(error).__name__,
+                )
+            finally:
+                if complete or self.closed.is_set():
+                    future.cancel()
+                    with self.work_lock:
+                        self.pending.pop(future, None)
+                    channel.close()
+
+    def _serve_requests(self) -> None:
         while not self.closed.wait(CONTROL_CADENCE):
+            self._complete_replies()
             self._observe_supersession()
             paths = sorted(self.cell.glob("request-*.json"))
             self.handled.intersection_update(path.name for path in paths)
@@ -466,9 +531,15 @@ class LocalControl:
                     check(value["config_identity"] == self.identity, "local-config-mismatch")
                     check(value["operation"] in ("prepare", "activate", "health", "stop"),
                           "invalid-local-operation")
+                    check(len(self.pending) < 32 or (
+                        value["operation"] == "stop" and len(self.pending) < 33
+                    ),
+                          "local-control-pending-limit")
                     expected = PeerIdentity(**value["peer"])
                     check(expected.principal == self.peer.principal, "local-principal-mismatch")
-                    deadline = Deadline(14 if value["operation"] == "activate" else 2)
+                    deadline = Deadline(
+                        (239 if self.native else 14) if value["operation"] == "activate" else 2,
+                    )
                     transport_deadline = Deadline(min(2, deadline.remaining()))
                     if os.name == "nt":
                         from zdd.private_windows import connect as windows_connect
@@ -484,19 +555,8 @@ class LocalControl:
                         pending = asyncio.run_coroutine_threadsafe(
                             self._operate(value["operation"]), self.loop,
                         )
-                        self.pending = pending
-                    try:
-                        result = pending.result(timeout=deadline.remaining())
-                    finally:
-                        if not pending.done():
-                            pending.cancel()
-                        with self.work_lock:
-                            self.pending = None
-                    if self.closed.is_set():
-                        break
-                    write_frame(channel, result, Deadline(min(2, deadline.remaining())))
-                    if value["operation"] == "stop":
-                        self.loop.call_soon_threadsafe(self.stop.set)
+                        self.pending[pending] = (channel, deadline, value["operation"])
+                        channel = None
                 except Exception as error:
                     logging.getLogger(__name__).warning(
                         "local-control-request-refused type=%s", type(error).__name__,
@@ -511,8 +571,8 @@ class LocalControl:
 
         with self.work_lock:
             self.closed.set()
-            if self.pending is not None:
-                self.pending.cancel()
+            for pending in self.pending:
+                pending.cancel()
         operations = tuple(self.operations)
         for task in operations:
             task.cancel()
