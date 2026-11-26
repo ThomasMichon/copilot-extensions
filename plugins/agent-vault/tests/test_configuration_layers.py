@@ -356,6 +356,74 @@ def test_native_project_scope_rejects_invalid_requests_before_dispatch(monkeypat
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("operation", ["contract", "scoped-contract", "invalid-contract", "pipe-client"])
+def test_native_client_startup_does_not_import_server_code(
+    tmp_path: Path, operation: str,
+) -> None:
+    source = Path(config.__file__).resolve().parents[1]
+    blocked = ["asyncio"] if operation == "pipe-client" else [
+        "agent_vault.cli", "agent_vault.winpipe", "asyncio",
+    ]
+    arguments = ["invocation-contract", "--json"]
+    if operation != "contract":
+        arguments = [
+            "--configuration-root",
+            "relative" if operation == "invalid-contract" else str(tmp_path),
+            *arguments,
+        ]
+    script = (
+        "import importlib.abc,json,sys\n"
+        f"sys.path.insert(0,{str(source)!r})\n"
+        f"blocked={blocked!r}\n"
+        "assert not set(blocked).intersection(sys.modules)\n"
+        "class NoServerImports(importlib.abc.MetaPathFinder):\n"
+        " def find_spec(self,fullname,path=None,target=None):\n"
+        "  if fullname in blocked: raise AssertionError('eager server import: '+fullname)\n"
+        "sys.meta_path.insert(0,NoServerImports())\n"
+    )
+    script += (
+        "import agent_vault.winpipe\nassert not set(blocked).intersection(sys.modules)\nprint('{}')\n"
+        if operation == "pipe-client" else
+        "from agent_vault.__main__ import main\n"
+        f"sys.argv=['agent-vault',*{arguments!r}]\nraise SystemExit(main())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script], cwd=tmp_path,
+        env={**os.environ, "AGENT_VAULT_NO_SELFPROVISION": "1"},
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == (2 if operation == "invalid-contract" else 0), result.stderr
+    if operation == "invalid-contract":
+        assert "--configuration-root" in result.stderr
+    elif operation != "pipe-client":
+        contract = json.loads(result.stdout)
+        assert contract["schema"] == "agent-vault.invocation" and contract["version"] == 1
+        assert "ssh-key-install-pin-v1" in contract["capabilities"]
+    assert not list(tmp_path.iterdir())
+
+
+def test_native_entrypoint_preserves_ordinary_cli_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import __main__ as entry
+    from agent_vault.invocation import configuration_root, use_configuration_root
+
+    calls: list[tuple[list[str] | None, str | None]] = []
+
+    def command(argv: list[str] | None = None) -> int:
+        calls.append((argv, configuration_root()))
+        return 9
+
+    monkeypatch.setattr(entry, "cli_main", command)
+    monkeypatch.setattr(sys, "argv", [
+        "agent-vault", "--configuration-root", str(tmp_path), "status", "--json",
+    ])
+    with use_configuration_root(str(tmp_path / "outer")):
+        assert entry.main() == 9
+    assert calls == [(None, str(tmp_path / "outer"))]
+
+
 def test_native_invocation_contract_is_read_only(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_vault import cli
 

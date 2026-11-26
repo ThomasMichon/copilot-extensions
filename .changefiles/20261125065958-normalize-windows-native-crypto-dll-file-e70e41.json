@@ -1,5 +1,5 @@
 {
-  "comment": "Normalize Windows native crypto DLL filenames without modifying optional dependency bytes.",
+  "comment": "Normalize Windows native crypto DLL filenames without modifying optional dependency bytes, and keep pure metadata and synchronous clients free of eager server-loop imports.",
   "changes": [
     {
       "plugin": "agent-vault",
