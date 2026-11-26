@@ -233,7 +233,9 @@ After the reviewed proposal, the operator admitted execution:
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a
-  corpus-wide listing.
+  corpus-wide listing. The bounded opt-in GitHub hinted-item slice
+  [#14679](https://github.com/ThomasMichon/copilot-extensions/issues/14679)
+  uses the existing page journal; larger discussions and full repair stay open.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
   reconciliation slices. A missing checkpoint or expired cursor requests
   visible repair; it must not disguise an unlimited rebuild as a tiny update.
@@ -355,15 +357,22 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-25 - Bounded GitHub hinted acquisition
+
+The [hinted-acquisition journal](journal/2026/11.25%20github-hinted-acquisition.md)
+records #14679's explicit connector opt-in, existing journal composition and
+single-comment-page bound. Default callers, full reconciliation and the ten
+open parent Plan/Validation items remain unchanged.
+
 ### 2026-11-25 - Explicit point client delivered
 
 The [client-delivery journal](journal/2026/11.25%20point-client-delivery.md)
 records merged #13719, lossless shared-inventory reconciliation, current-head
 review and actual unit CI, followed by explicit-client native acquisition and
-replay counts at three corpus sizes. Existing callers, source activation and
-rollout remain unchanged. The canonical Plan and Validation Plan retain ten
-open items; bounded source coverage, repair and consumer evidence remain
-separate gates.
+replay counts at three corpus sizes, merged in #14674. Existing callers, source
+activation and rollout remain unchanged. The canonical Plan and Validation Plan
+retain ten open items; bounded source coverage, repair and consumer evidence
+remain separate gates.
 
 ### 2026-11-20 - Named-point native corpus counts
 

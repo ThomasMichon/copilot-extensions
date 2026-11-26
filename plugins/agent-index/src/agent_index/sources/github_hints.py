@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from agent_index.indexing.change_hints import ChangeHints
 from agent_index.sources.base import FileEntry
-from agent_index.sources.delta import SourceDelta
+from agent_index.sources.delta import AcquisitionPage, SourceDelta
 from agent_index.sources.good_citizen_http import has_next_link
 
 if TYPE_CHECKING:
@@ -33,11 +35,10 @@ def _revision(value: object) -> datetime:
     return parsed
 
 
-def acquire_hints(
-    connector: GitHubConnector, hints: ChangeHints, last_commit: str | None,
+def _targets(
+    connector: GitHubConnector, hints: ChangeHints,
     *, cancel_check: Callable[[], None] | None = None,
-) -> SourceDelta:
-    """Fetch each unique item and all its comments, or refuse the whole delta."""
+) -> tuple[list[int], dict[int, datetime]]:
     if type(hints) is not ChangeHints or hints.source != connector.source_name:
         raise ValueError("GitHub hints require the exact configured repository source")
     if hints.ref_ranges:
@@ -55,14 +56,59 @@ def acquire_hints(
         cancel_check()
     if connector.hint_scope != (hints.canonical_family, hints.account_id):
         raise ValueError("GitHub hints do not match the effective family/account scope")
+    return sorted(numbers), revisions
+
+
+def acquire_hints(
+    connector: GitHubConnector, hints: ChangeHints, last_commit: str | None,
+    *, cancel_check: Callable[[], None] | None = None,
+) -> SourceDelta:
+    """Fetch each unique item and all its comments, or refuse the whole delta."""
+    numbers, revisions = _targets(connector, hints, cancel_check=cancel_check)
     entries = []
-    for number in sorted(numbers):
+    for number in numbers:
         entries.append(acquire_item(
             connector, number, minimum_revision=revisions.get(number), cancel_check=cancel_check,
         ))
     if cancel_check:
         cancel_check()
     return SourceDelta(upserts=entries, commit=last_commit)
+
+
+def acquire_page(
+    connector: GitHubConnector, hints: ChangeHints, last_commit: str | None,
+    cursor: str | None, *, cancel_check: Callable[[], None] | None = None,
+) -> AcquisitionPage:
+    """Retain one complete, single-comment-page item under the shared journal."""
+    numbers, revisions = _targets(connector, hints, cancel_check=cancel_check)
+    binding = hashlib.sha256(json.dumps(
+        [hints.to_dict(), last_commit, connector.recovery_identity],
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    index = 0
+    if cursor is not None:
+        data = json.loads(cursor)
+        if (
+            not isinstance(data, dict) or set(data) != {"version", "binding", "index"}
+            or type(data["version"]) is not int or data["version"] != 1
+            or data["binding"] != binding or type(data["index"]) is not int
+            or not 1 <= data["index"] < len(numbers)
+        ):
+            raise ValueError("Invalid GitHub hinted acquisition continuation binding")
+        index = data["index"]
+    if not numbers:
+        return AcquisitionPage(SourceDelta(commit=last_commit))
+    number = numbers[index]
+    entry = acquire_item(
+        connector, number, minimum_revision=revisions.get(number),
+        cancel_check=cancel_check, comment_limit=100,
+    )
+    index += 1
+    return AcquisitionPage(
+        SourceDelta(upserts=[entry], commit=last_commit),
+        json.dumps({"version": 1, "binding": binding, "index": index})
+        if index < len(numbers) else None,
+    )
 
 
 def validate_item(connector: GitHubConnector, item: object, number: int) -> datetime:
@@ -89,7 +135,7 @@ def validate_item(connector: GitHubConnector, item: object, number: int) -> date
 
 def acquire_item(
     connector: GitHubConnector, number: int, *, minimum_revision: datetime | None = None,
-    cancel_check: Callable[[], None] | None = None,
+    cancel_check: Callable[[], None] | None = None, comment_limit: int | None = None,
 ) -> FileEntry:
     if cancel_check:
         cancel_check()
@@ -103,6 +149,11 @@ def acquire_item(
     if minimum_revision is not None and updated < minimum_revision:
         raise ValueError("GitHub hinted response predates a required metadata revision")
     count = item["comments"]
+    if comment_limit is not None and count > comment_limit:
+        raise ValueError(
+            "GitHub paged hints support at most 100 comments per item; "
+            "larger discussions require separate acquisition",
+        )
     comments = []
     seen: set[int] = set()
     page = 1
@@ -126,6 +177,8 @@ def acquire_item(
             seen.add(comment["id"])
             comments.append(comment)
         more = has_next_link(result.headers.get("Link", ""))
+        if comment_limit is not None and more:
+            raise ValueError("GitHub paged hints require a single complete comment page")
         if len(comments) > count or (more and (not data or len(comments) >= count)):
             raise ValueError("GitHub hinted comment pagination is inconsistent")
         if not more:
