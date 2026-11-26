@@ -66,6 +66,8 @@ def source_code() -> Callable[[Path], CodeType]:
 def boundary(
     monkeypatch: pytest.MonkeyPatch, source_code: Callable[[Path], CodeType],
 ) -> ResumeBoundary:
+    monkeypatch.delenv("AGENT_BRIDGE_LEGACY_RESUME", raising=False)
+
     def module(name: str, **attributes: Any) -> ModuleType:
         value = ModuleType(name)
         value.__dict__.update(attributes)
@@ -280,7 +282,7 @@ def test_legacy_resume_cannot_silently_ignore_bridge_scope(
     boundary: ResumeBoundary, options: list[str],
 ) -> None:
     with pytest.raises(SystemExit) as refused:
-        boundary.invoke("resume", "worktree-123", *options)
+        boundary.invoke("resume", "worktree-123", "--legacy-selector", *options)
     assert refused.value.code == 2
     assert boundary.discovered == [] and boundary.calls == []
 
@@ -470,7 +472,7 @@ def test_exact_selector_uses_only_the_actual_worktree_route(
         boundary.response.update(
             session_id="native-123", mode="cli", status="starting", read_only=True,
         )
-    args = ["--json", "resume", "--worktree-id", "worktree-123", "--strict"]
+    args = ["--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123", "--strict"]
     args += ["--cli"] if cli else []
     args += ["--force"] if force else []
     boundary.invoke(*args)
@@ -529,7 +531,7 @@ def test_exact_refusal_never_selects_an_alternative_or_replays(
         status, {"reason": "owner_refused", "detail": "synthetic refusal"},
     ))
     with pytest.raises(SystemExit) as raised:
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123", "--strict")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123", "--strict")
     assert raised.value.code == 1
     result = json.loads(capsys.readouterr().out)
     assert result["reason"] == "owner_refused"
@@ -550,7 +552,7 @@ def test_unproven_response_is_unknown_not_replaced(
 ) -> None:
     boundary.response.update(change)
     with pytest.raises(SystemExit) as raised:
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
     assert raised.value.code == 1
     result = json.loads(capsys.readouterr().out)
     assert result["reason"] == "resume_response_unconfirmed"
@@ -563,7 +565,7 @@ def test_connection_loss_is_unconfirmed_and_never_replayed(
 ) -> None:
     boundary.failures.append(boundary.errors.BridgeConnectionError("response lost"))
     with pytest.raises(SystemExit):
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
     result = json.loads(capsys.readouterr().out)
     assert result["reason"] == "resume_outcome_unknown"
     assert "may have started" in result["error"]
@@ -579,7 +581,7 @@ def test_unsupported_daemon_refuses_before_effect(
     assert "exact-worktree-target" in capsys.readouterr().out
     assert boundary.calls == []
     with pytest.raises(SystemExit):
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
     assert "cannot preserve an authoritative native head" in capsys.readouterr().out
     assert all(method == "GET" for method, _, _ in boundary.calls)
 
@@ -599,7 +601,7 @@ def test_resume_requires_shared_protocol_range(
     assert boundary.client.daemon_supports(40) is supported
     if supported:
         boundary.client.assert_client_supported()
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
         assert json.loads(capsys.readouterr().out)["worktree_id"] == "worktree-123"
         assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
     else:
@@ -607,7 +609,7 @@ def test_resume_requires_shared_protocol_range(
             boundary.client.assert_client_supported()
         assert raised.value.status == 426
         with pytest.raises(SystemExit):
-            boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+            boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
         assert "error" in json.loads(capsys.readouterr().out)
         assert all(method == "GET" for method, _, _ in boundary.calls)
 
@@ -656,7 +658,7 @@ def test_hosting_fence_survives_exact_selection_without_effect_retry(
         boundary.health["capabilities"] = {}
     with pytest.raises(SystemExit):
         boundary.invoke(
-            "--json", "resume", "--worktree-id", "worktree-123",
+            "--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123",
             "--require-agent-hosting", "--strict",
         )
     assert "error" in json.loads(capsys.readouterr().out)
@@ -667,7 +669,7 @@ def test_hosting_fence_survives_exact_selection_without_effect_retry(
 def test_legacy_positional_owned_session_still_wins(
     boundary: ResumeBoundary, capsys: Any,
 ) -> None:
-    boundary.invoke("--json", "resume", "alias")
+    boundary.invoke("--json", "resume", "--legacy-selector", "alias")
     assert boundary.calls == [(
         "POST", "/api/v1/sessions/alias/resume", {"request_timeout": 17.0},
     )]
@@ -683,7 +685,7 @@ def test_legacy_positional_singleton_still_canonicalizes(
     )
     monkeypatch.setattr(boundary.client, "list_agents", lambda: [])
     boundary.failures.append(boundary.errors.BridgeClientError(404, "not owned"))
-    boundary.invoke("--json", "resume", "example")
+    boundary.invoke("--json", "resume", "--legacy-selector", "example")
     effects = [call for call in boundary.calls if call[0] == "POST"]
     assert [call[1] for call in effects] == [
         "/api/v1/sessions/example/resume", "/api/v1/worktrees/example@anchor/resume/acp",
@@ -730,6 +732,7 @@ def test_executing_cli_disclosure_matches_actual_parser(
                 "version": 1, "capabilities": [
                     "exact-worktree-target", "keyed-worktree-writer", "retained-native-recovery",
                     "exact-bridge-workspace-resume",
+                    "bridge-workspace-resume-default",
                 ],
             },
             "bridge-session-current-requests-v1": {
@@ -742,7 +745,7 @@ def test_executing_cli_disclosure_matches_actual_parser(
     }
     assert boundary.calls == []
     assert boundary.discovered == []
-    boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+    boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
     assert json.loads(capsys.readouterr().out)["worktree_id"] == "worktree-123"
 
 
@@ -871,7 +874,7 @@ def test_non_object_response_is_not_success(
 
     monkeypatch.setattr(boundary.client, "_request", request)
     with pytest.raises(SystemExit):
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123")
     assert json.loads(capsys.readouterr().out)["reason"] == "resume_response_unconfirmed"
     assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
 
@@ -881,7 +884,7 @@ def test_cli_response_cannot_substitute_an_escrow_identity(
 ) -> None:
     boundary.response["mode"] = "cli"
     with pytest.raises(SystemExit):
-        boundary.invoke("--json", "resume", "--worktree-id", "worktree-123", "--cli")
+        boundary.invoke("--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123", "--cli")
     assert json.loads(capsys.readouterr().out)["reason"] == "resume_response_unconfirmed"
     assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
 
@@ -890,7 +893,7 @@ def test_exact_hosting_success_keeps_the_receivers_capability_fence(
     boundary: ResumeBoundary, capsys: Any,
 ) -> None:
     boundary.invoke(
-        "--json", "resume", "--worktree-id", "worktree-123", "--require-agent-hosting",
+        "--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123", "--require-agent-hosting",
     )
     assert json.loads(capsys.readouterr().out) == {**boundary.response, "verb": "loaded"}
     assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
@@ -963,7 +966,7 @@ def test_truncated_http_body_is_unconfirmed_without_replay(
         boundary.client, "_request",
         boundary.errors.BridgeClient._request.__get__(boundary.client),
     )
-    args = ["--json", "resume", "--worktree-id", "worktree-123", "--strict"]
+    args = ["--json", "resume", "--legacy-selector", "--worktree-id", "worktree-123", "--strict"]
     args += ["--require-agent-hosting"] if hosting else []
     with pytest.raises(SystemExit) as raised:
         boundary.invoke(*args)
@@ -976,4 +979,85 @@ def test_truncated_http_body_is_unconfirmed_without_replay(
     assert "Traceback" not in output.err
     assert [url for method, url in requests if method == "POST"] == [
         "http://example.invalid/api/v1/worktrees/worktree-123/resume/acp?strict=true",
+    ]
+
+
+@pytest.mark.parametrize("cli", [False, True], ids=["acp", "cli"])
+@pytest.mark.parametrize("target", ["worktree-123", "native-123", "owned-123"])
+def test_plain_resume_defaults_to_the_exact_selected_conversation(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any,
+    cli: bool, target: str,
+) -> None:
+    if cli:
+        boundary.response.update(session_id="native-123", mode="cli")
+    boundary.invoke("--json", "resume", target, *(["--cli"] if cli else []))
+    assert json.loads(capsys.readouterr().out) == {**boundary.response, "verb": "loaded"}
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        f"/api/v1/worktrees/worktree-123/resume/{'cli' if cli else 'acp'}/exact",
+    ]
+
+
+def test_plain_resume_scope_does_not_need_the_explicit_bridge_alias(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any,
+) -> None:
+    boundary.invoke("--json", "resume", "native-123", "--all-projects")
+    assert json.loads(capsys.readouterr().out)["acp_session_id"] == "native-123"
+    assert [call[2]["params"] for call in boundary.calls if call[1] == "/api/v1/bridges"] == [
+        {"local_only": "true"},
+    ]
+
+
+def test_force_keeps_its_original_resume_contract_without_common_selection(
+    boundary: ResumeBoundary, capsys: Any,
+) -> None:
+    boundary.invoke("--json", "resume", "--worktree-id", "worktree-123", "--force")
+    assert json.loads(capsys.readouterr().out)["verb"] == "took over"
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/worktrees/worktree-123/resume/acp",
+    ]
+
+
+def test_resume_selector_choices_are_exclusive_before_discovery(
+    boundary: ResumeBoundary,
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        boundary.invoke("resume", "native-123", "--bridge", "--legacy-selector")
+    assert raised.value.code == 2
+    assert boundary.discovered == []
+
+
+@pytest.mark.parametrize("capability", ["bridge_inventory", "worktree_exact_resume"])
+def test_plain_resume_refuses_prior_providers_without_legacy_retry(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any, capability: str,
+) -> None:
+    boundary.health["capabilities"].pop(capability)
+    with pytest.raises(SystemExit) as raised:
+        boundary.invoke("--json", "resume", "native-123")
+    assert raised.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["requested_target"] == "native-123"
+    assert result["error"]
+    assert all(method == "GET" for method, _, _ in boundary.calls)
+
+
+def test_retained_resume_environment_preserves_the_original_session_owner(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_RESUME", "1")
+    boundary.invoke("--json", "resume", "alias")
+    assert json.loads(capsys.readouterr().out)["verb"] == "resumed"
+    assert boundary.calls == [(
+        "POST", "/api/v1/sessions/alias/resume", {"request_timeout": 17.0},
+    )]
+
+
+def test_explicit_bridge_resume_overrides_the_retained_caller_environment(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_RESUME", "1")
+    boundary.invoke("--json", "resume", "native-123", "--bridge")
+    assert json.loads(capsys.readouterr().out)["acp_session_id"] == "native-123"
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/worktrees/worktree-123/resume/acp/exact",
     ]

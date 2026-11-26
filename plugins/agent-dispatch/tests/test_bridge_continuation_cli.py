@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 import os
 import shlex
 import shutil
 import subprocess
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -70,6 +72,7 @@ def test_fleet_continuation_startup_producers_keep_existing_owner_contract(
         assert calls[0][0] == [
             "bridge", "--json", "resume", "worker-a", "--require-agent-hosting",
         ]
+        assert calls[0][1]["env"]["AGENT_BRIDGE_LEGACY_RESUME"] == "1"
         assert len(calls) == 2
     else:
         result = bridge_reclaim._send(
@@ -179,3 +182,31 @@ def test_fleet_continuation_reclaim_without_proven_identity_never_sends(
         caller="agent-dispatch:controller-a", wait=False, json_output=False, timeout=20.0,
     )
     assert result.returncode == 1 and "no session_id" in result.stderr
+
+
+@pytest.mark.parametrize("operation", ["resume", "send"])
+def test_ordinary_resume_preserves_its_owner_without_changing_send_or_parent_config(
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from agent_dispatch import ordinary_bridge_diagnostics
+
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_RESUME", "parent-value")
+    before = dict(os.environ)
+    calls: list[dict[str, Any]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    diagnostics: Any = SimpleNamespace(
+        stage=lambda name: nullcontext({}), secrets={}, reservation_key="reservation-a",
+    )
+    ordinary_bridge_diagnostics.run(
+        ["bridge"], ["--json", operation, "session-a"], diagnostics=diagnostics,
+        runner=run, timeout=20.0, read_only=True,
+    )
+    if operation == "resume":
+        assert calls[0]["env"] == {**before, "AGENT_BRIDGE_LEGACY_RESUME": "1"}
+    else:
+        assert "env" not in calls[0]
+    assert dict(os.environ) == before

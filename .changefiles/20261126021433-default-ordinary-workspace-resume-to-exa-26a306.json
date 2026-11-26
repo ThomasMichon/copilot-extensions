@@ -1,0 +1,13 @@
+{
+  "comment": "Default ordinary workspace resume to exact conversation selection while retaining existing Dispatch recovery selectors",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

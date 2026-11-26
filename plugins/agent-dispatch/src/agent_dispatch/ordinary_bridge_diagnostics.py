@@ -25,9 +25,12 @@ def run(
             input_reference=diagnostics.reservation_key, timeout=timeout,
         )
         try:
+            from .bridge_continuation_cli import resume_environment
+
             result = runner(
                 [*prefix, *argv], input=prompt_input, capture_output=True,
                 text=True, encoding="utf-8", check=False, timeout=timeout,
+                **({"env": resume_environment()} if operation == "resume" else {}),
                 **no_window_kwargs(),
             )
         except (subprocess.TimeoutExpired, OSError) as exc:

@@ -254,7 +254,7 @@ silently latching onto it, and tells you to end the existing one first:
 
 For a **singleton repo** (one anchor checkout, no worktree isolation),
 `create` is also a declared refusal: there is no second checkout to create.
-Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
+Use `resume <repo-or-agent> --legacy-selector` to load the anchor's current head, or
 `handoff <repo-or-agent>` to roll it forward deliberately.
 Recognized singleton agent aliases are canonicalized to `<repo>@anchor`
 before worktree-ID validation; the raw alias is not treated as a worktree ID.
@@ -450,42 +450,46 @@ be discarded (or the cancel signature *persists* across sends). See the
 # exits 1. The notice never resumes a session a concurrent stop just stopped.
 <agent-bridge catalog argv[0]> --json stop <session-id> --grace 60
 
-# Resume a stopped session -- or load/take-over a worktree / singleton anchor.
-# The target may be an owned ACP session id, a worktree handle, or a
-# singleton repo key / agent name. Singleton repos are keyed internally by a
-# stable `<repo>@anchor` pseudo-worktree id, but the CLI accepts the repo key.
+# Resume one exact, project-scoped workspace conversation.
+# The target may be a native/managed session ID or a worktree handle.
 # A stopped worktree resumes its owner's exact native head, including a CLI
 # conversation with no retained bridge record. Default: headless ACP.
 # --cli chooses a headed/muxed CLI without changing conversation identity.
 # A live conflicting holder, unknown head, pending handoff or failed native
 # load refuses. Stop the incumbent explicitly; cold resume never kills it or
 # creates replacement history, including when --force was supplied.
-<agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
-<agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
+<agent-bridge catalog argv[0]> resume <native-or-managed-id|worktree-handle>
+<agent-bridge catalog argv[0]> resume <worktree-handle> --cli
 
-# Select exactly one managed worktree, without session-alias or singleton lookup.
+# Require exactly one managed worktree ID.
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --strict
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --cli
 
-# Opt in to project-scoped common selection and pin the selected native identity.
+# Explicit alias for the default exact selection.
 <agent-bridge catalog argv[0]> --json --project <repo> resume <native-or-managed-id> --bridge
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --bridge --cli
+
+# Retain original session, singleton-repo and agent/profile matching.
+<agent-bridge catalog argv[0]> resume <session-id|repo-or-agent> --legacy-selector
 ```
 
-`--bridge` uses the common exact inventory selector and one identity-pinned
+Plain resume uses the common exact inventory selector and one identity-pinned
 workspace resume. It requires the executing daemon's `bridge_inventory: 2`
 and `worktree_exact_resume: 1` capabilities. The executing CLI separately
-advertises `exact-bridge-workspace-resume` in `agent-bridge.resume/v1`.
+advertises `exact-bridge-workspace-resume` and `bridge-workspace-resume-default`
+in `agent-bridge.resume/v1`.
 Selection supports `--all-projects`, `--machine` and `--namespace` through the
 local serving daemon, not a remote `--host`. Without `--cli`, the existing ACP
 mode remains selected; cached hosting does not authorize takeover.
 Standalone conversations lacking a workspace owner refuse. A singleton's
 known conversation can resume, but an empty singleton cannot initialize.
-This form rejects writer/recovery inputs and `--force`/`--reclaim` before
+The exact mode rejects writer/recovery inputs and `--force`/`--reclaim` before
 input or discovery. It never ensures the service, falls back to a profile,
-or retries a refused or unknown operation. Plain resume and the specialized
-contracts below retain their existing behavior. See
-[exact workspace resume](../../../docs/target-inventory.md#opt-in-exact-workspace-resume)
+or retries a refused or unknown operation. `--legacy-selector`, the invocation
+environment `AGENT_BRIDGE_LEGACY_RESUME=1`, and the specialized contracts below
+retain their original selectors. Explicit `--bridge` wins over the environment.
+See
+[exact workspace resume](../../../docs/target-inventory.md#exact-workspace-resume)
 for identity checks and rollback.
 
 For an original keyed creation with a retained writer requirement,

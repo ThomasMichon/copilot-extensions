@@ -218,7 +218,7 @@ def test_root_cli_selector_reaches_the_existing_resume_owner_without_identity_su
         monkeypatch.setattr(client, "_request", request)
         monkeypatch.setattr(cli, "_ensure_daemon", lambda: pytest.fail("must not ensure"))
         monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
-        argv = ["--json", "--project", "example", "resume", "native-original", "--bridge"]
+        argv = ["--json", "--project", "example", "resume", "native-original"]
         argv += ["--cli"] if cli_mode else []
         if changed_head:
             with pytest.raises(SystemExit) as refused:
