@@ -6,7 +6,7 @@
       "type": "patch"
     },
     {
-      "plugin": "agent-worktrees",
+      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]
