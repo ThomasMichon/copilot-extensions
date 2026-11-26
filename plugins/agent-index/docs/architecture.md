@@ -982,6 +982,20 @@ so existing invalid-target rollback still runs. These capture diagnostics name
 the exception class without exposing captured child output.
 Other construction commands retain their existing installation owners.
 
+Regular cell environment creation now uses Installer Engine's resilient UV
+constructor with explicit managed runtime `3.11`, matching the current native
+Index policy rather than borrowing the bootstrap interpreter or ambient
+project/selector settings. Canonical bootstrap-environment helpers isolate
+the constructor child; UV storage, caller CWD/environment, slot receipts,
+health/profile checks and cleanup remain with their existing owners.
+Selected UV and shell paths are bound before the native child changes CWD.
+Progress goes to stderr, preserving coordinator JSON stdout. Windows headless
+commands explicitly retain the coordinator's redirected standard handles.
+Missing prerequisites or failed requested construction has no helper/system-Python or
+unversioned fallback. Explicit setup retains its acquisition policy; completed
+runtime use does not construct an environment. The smoke-test builder remains
+separate, and full declared-project/environment adoption is not implied.
+
 The default durable tier now registers the same stable launchers with the
 lowest-privilege host mechanism that satisfies "restart on next logon without a
 live Copilot session": Windows writes HKCU Run entries for the service and

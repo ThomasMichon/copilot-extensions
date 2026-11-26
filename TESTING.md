@@ -102,6 +102,25 @@ Actor-free units retain original uncertain-cleanup process/Job/resource custody
 without candidate deletion and verify smoke-build delegation. These probes are
 not full installation, installed-service health or composed-command qualification.
 
+Index's `tests/test_managed_cell_construction.py` exercises the default cell
+constructor adapter through the existing Installer Engine UV-venv owner.
+Eight Bash controls on each of Ubuntu/macOS and sixteen controls across the two
+Windows PowerShell hosts cover raw/materialized layouts, real prepared managed
+construction, missing UV/support and an unavailable requested version.
+Successful controls construct two fresh private slots with an independent
+3.11.18 helper and 3.10.20 application request; they are not ordinary-reuse
+measurements. Test-only native instrumentation records the actual UV arguments
+without replacing UV or capture. Poisoned Python/project selectors cannot
+replace the request, caller CWD/environment and unrelated environments remain
+unchanged, preallocated ownership receipts survive construction/refusal, and
+constructor progress cannot corrupt JSON stdout. The same
+path-gated native jobs require every applicable case/report within unchanged
+eight-minute deadlines. Thirteen actor-free units cover the actual builder's
+current `3.11` policy, existing-interpreter constructor bypass, original failure
+propagation, callback ownership and pre-execution prerequisite refusal.
+The smoke-test builder and full project declarations remain separate; no
+installed service, model or host setup is qualified by these fixtures.
+
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
 Its five cross-platform controls cover current, last-known-good and legacy environments,
