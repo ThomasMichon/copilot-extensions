@@ -95,9 +95,20 @@ def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str], main: Any) -> Any:
     (["push-changes", "--title", "t"], ("pr", "push")),
     (["finalize", "--", "--dry-run"], ("pr", "merge")),
     (["finalize", "--ab", "--handoff-to", "x"], ("pr", "abandon")),
-    (["worktree", "finalize", "--a", "--h", "x"], ("pr", "abandon")),
+    (["worktree", "finalize", "--a", "--han", "x"], ("pr", "abandon")),
     (["pr-merge", "1", "--now", "--he"], None), (["finalize", "--hel"], None),
     (["push-changes", "--he"], None), (["create-pr", "--help=x"], None),
+    # An ambiguous --help prefix is a usage error on every parser: nothing mutates.
+    (["finalize", "--a", "--h", "x"], None), (["pr-merge", "1", "--h"], None),
+    (["lease", "acquire", "k", "r", "--holder", "h", "--he"], None),
+    (["lease", "--he"], None), (["lease", "--o", "u", "renew", "k", "r", "--hel"], None),
+    (["pr-publication-labels", "--he"], None), (["create", "--he"], None),
+    (["bind-session", "--hel"], None), (["pr-publication-labels", "--", "--he"], ("pr", "label")),
+    (["lease", "--o", "X", "acquire", "worktree", "resource", "--holder", "h"], ("stage", "lease")),
+    (["lease", "--or=u", "renew", "k", "r"], ("stage", "lease")),
+    (["lease", "--p", "release", "k", "r"], ("stage", "lease")),
+    (["lease", "--pr", "--o", "u", "borrow", "k", "r", "--holder", "h"], ("stage", "lease")),
+    (["lease", "--o", "u", "inspect", "k", "r"], None), (["lease", "--p", "list"], None),
 ])
 def test_classify_observes_only_mutating_lifecycle_verbs(
     argv: list[str], expected: tuple[str, str] | None,
@@ -120,6 +131,8 @@ def test_legacy_install_runs_unchanged_and_starts_nothing(
     ["worktree", "push", "--title-only"], ["push-changes", "--dry-run"],
     ["finalize", "--explain-landing", "--json"], ["worktree", "finalize", "--explain-landing"],
     ["push-changes", "--d"], ["finalize", "--e", "--json"],
+    ["lease", "acquire", "k", "r", "--holder", "h", "--he"], ["pr-publication-labels", "--he"],
+    ["lease", "--o", "u", "inspect", "k", "r"],
 ])
 def test_unobserved_verbs_never_read_the_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str],

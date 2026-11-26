@@ -127,15 +127,45 @@ def _without_project_option(args: list[str]) -> list[str]:
     return remaining
 
 
+def _help_requested(rest: list[str]) -> bool:
+    """True when any parser on the path would print usage (or reject) instead of running.
+
+    argparse resolves any unambiguous prefix of ``--help``; an ambiguous one is a
+    usage error. Neither mutates, so neither is observed, on every instrumented
+    verb and subparser without consulting its option table.
+    """
+    for token in rest:
+        if token == "--":
+            break
+        if token in _HELP:
+            return True
+        if len(token) >= 3 and "--help".startswith(token):
+            return True
+    return False
+
+
+_LEASE_GLOBALS = ("--origin", "--pretty")
+
+
+def _lease_global(token: str) -> str | None:
+    """The lease-global option ``token`` resolves to (argparse prefix rules)."""
+    name = token.split("=", 1)[0]
+    if len(name) < 3 or not name.startswith("--"):
+        return None
+    matches = [option for option in _LEASE_GLOBALS if option.startswith(name)]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _lease_subcommand(rest: list[str]) -> str | None:
     """The lease subcommand after the lease-global options, if any."""
     i = 0
     while i < len(rest):
         token = rest[i]
-        if token == "--origin":
+        option = _lease_global(token)
+        if option == "--origin" and "=" not in token:
             i += 2
             continue
-        if token == "--pretty" or token.startswith("--origin="):
+        if option is not None:
             i += 1
             continue
         return token
@@ -169,7 +199,7 @@ def classify(argv: list[str]) -> tuple[str, str] | None:
         verb = alias[args[index]]
     rest = args[index + 1:]
     observed = _VERBS.get(verb)
-    if observed is None or _HELP.intersection(rest) or "help" in rest[:1]:
+    if observed is None or _help_requested(rest) or "help" in rest[:1]:
         return None
     if verb == "lease" and _lease_subcommand(rest) not in _MUTATING_LEASE:
         return None
