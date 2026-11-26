@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Dispatch continuation and observation across Bridge selector defaults",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

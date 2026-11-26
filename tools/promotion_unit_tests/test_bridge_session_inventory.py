@@ -939,6 +939,68 @@ def test_remote_registered_send_retains_binding_without_result_reads_or_replay(
     }
 
 
+@pytest.mark.parametrize("module", ["bridge_send_cli", "bridge_observation_cli"], ids=["send", "observe"])
+@pytest.mark.parametrize("options,expected", [
+    ([], True), (["--bridge"], True), (["--legacy-selector"], False),
+], ids=["default", "exact", "legacy"])
+def test_selector_defaults(
+    monkeypatch: pytest.MonkeyPatch, module: str, options: list[str], expected: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(monkeypatch, "_default_bridge." + module, BRIDGE + module + ".py")
+    parser = argparse.ArgumentParser()
+    adapter.register(parser)
+    args = parser.parse_args(options)
+    assert adapter.selected(args) is expected
+    with pytest.raises(SystemExit) as conflict:
+        parser.parse_args(["--bridge", "--legacy-selector"])
+    assert conflict.value.code == 2
+
+
+@pytest.mark.parametrize("module,field,value", [
+    ("bridge_send_cli", "force", True),
+    ("bridge_send_cli", "expected_native_session_id", ""),
+    ("bridge_send_cli", "delivery", "queue"),
+    ("bridge_send_cli", "receipt_only", True),
+    ("bridge_observation_cli", "event", 0),
+    ("bridge_observation_cli", "tail", 0),
+    ("bridge_observation_cli", "attention", ["input_required"]),
+    ("bridge_observation_cli", "no_follow", True),
+    ("bridge_send_cli", "target", "live:host-b:worker-project:workspace-a"),
+], ids=["force", "startup", "queued", "receipt", "events", "tail", "attention", "no-follow", "peer"])
+def test_specialized_owners(
+    monkeypatch: pytest.MonkeyPatch, module: str, field: str, value: Any,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(monkeypatch, "_default_bridge." + module, BRIDGE + module + ".py")
+    args = argparse.Namespace(bridge=None, **{field: value})
+    assert adapter.selected(args) is False
+    args.host = "host-b"
+    with pytest.raises(SystemExit, match="exact bridge selection"):
+        adapter.selected(args)
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_observation_env_precedence(
+    monkeypatch: pytest.MonkeyPatch, exact: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(
+        monkeypatch, "_default_bridge.bridge_observation_cli", BRIDGE + "bridge_observation_cli.py",
+    )
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_OBSERVATION", "1")
+    parser = argparse.ArgumentParser()
+    adapter.register(parser)
+    args = parser.parse_args(["--bridge"] if exact else [])
+    assert adapter.selected(args) is exact
+
+
 @pytest.mark.parametrize("option", [
     "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
     "native_invocation_file", "settle_native_send", "expected_session_id",

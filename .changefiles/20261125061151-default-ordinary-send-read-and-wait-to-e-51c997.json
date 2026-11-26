@@ -1,0 +1,9 @@
+{
+  "comment": "Default ordinary send, read and wait to exact project bridges with explicit legacy compatibility",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

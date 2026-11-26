@@ -74,7 +74,8 @@ details.
 
 ### Observe One Exact Conversation
 
-Opt in with `--bridge` to select an exact workspace, native or managed identity.
+Plain `read ID` and `wait ID` select an exact, project-scoped workspace,
+native or managed identity. `--bridge` remains an explicit alias.
 Without `--host`, selection stays local. One explicit configured host selects
 only that host's inventory and pins its result owner and native conversation:
 
@@ -88,12 +89,22 @@ start a daemon, resume a session or follow a successor. `wait` rechecks a
 represented registration on the selected host after each snapshot before it
 reports idle. The observer requires `bridge_inventory: 2` and, for another
 host, `remote_native_result: 1`; the remote result owner must support native
-identity. Unsupported peers refuse without local fallback. Existing defaults,
-event-range and attention forms remain unchanged without `--bridge`.
+identity. Unsupported peers refuse without local fallback. Explicit legacy
+selection and specialized event-range and attention forms retain their existing
+operations. Automated older-compatible observation callers can set
+`AGENT_BRIDGE_LEGACY_OBSERVATION=1` in the child's environment; explicit
+`--bridge` still wins.
 See [exact observations](../../../docs/target-inventory.md#exact-local-conversation-observation)
 for bounds, deadlines, refusal and rollback.
 
 ### Send a Prompt to an Agent
+
+Plain `send ID PROMPT` selects an existing exact conversation in the caller's
+project; it does not match profiles or start/resume a conversation.
+The profile and implicit-startup examples below deliberately select
+`--legacy-selector`. See [ordinary selector defaults](../../../docs/target-inventory.md#ordinary-selector-defaults-and-legacy-support)
+for supported specialized forms and rollback. Never retry an uncertain exact
+send through legacy selection.
 
 Use `targets --json` to list the union of active Session Host/extension
 registrations and discovered workspaces, including workspaces without a
@@ -109,30 +120,30 @@ for compatibility and held-owner outcomes.
 ```bash
 # Reuse this caller's session for the agent (resumes it if stopped),
 # or start one if none exists, then send a prompt (streams response)
-<agent-bridge catalog argv[0]> send <agent-name> "your prompt here"
+<agent-bridge catalog argv[0]> send <agent-name> "your prompt here" --legacy-selector
 
 # Send to a specific existing session
 <agent-bridge catalog argv[0]> send <session-id> "follow-up prompt"
 
 # Fire-and-forget (don't wait for response)
-<agent-bridge catalog argv[0]> send <agent-name> "do this" --no-wait
+<agent-bridge catalog argv[0]> send <agent-name> "do this" --no-wait --legacy-selector
 
 # Multi-line / quote-heavy prompt: read it from a file (or '-' for stdin) so it
 # never transits the shell's argv (avoids PowerShell mangling a prompt at the
 # first embedded double-quote). Mutually exclusive with the positional prompt.
-<agent-bridge catalog argv[0]> send <agent-name> --prompt-file ./dispatch.md
-Get-Content ./dispatch.md | & "<agent-bridge catalog argv[0]>" send <agent-name> --prompt-file -
+<agent-bridge catalog argv[0]> send <agent-name> --prompt-file ./dispatch.md --legacy-selector
+Get-Content ./dispatch.md | & "<agent-bridge catalog argv[0]>" send <agent-name> --prompt-file - --legacy-selector
 
 # Deliver INTO a live interactive session (human-attached), attributed and
 # answerable -- routes to the message queue, not an ACP turn. The receiver
 # replies with `<agent-bridge catalog argv[0]> send <reply-to> "..."`.
-<agent-bridge catalog argv[0]> send <live-session-id> "message body"
-<agent-bridge catalog argv[0]> send <live-session-id> "msg" --from "reviewer@example-host" --reply-to <my-session-id>
+<agent-bridge catalog argv[0]> send <live-session-id> "message body" --legacy-selector
+<agent-bridge catalog argv[0]> send <live-session-id> "msg" --from "reviewer@example-host" --reply-to <my-session-id> --legacy-selector
 # Durable producers pass a stable key so retries return the original message id.
-<agent-bridge catalog argv[0]> send <live-session-id> "wake" --no-wait --idempotency-key wake:example:1
+<agent-bridge catalog argv[0]> send <live-session-id> "wake" --no-wait --idempotency-key wake:example:1 --legacy-selector
 ```
 
-`send` auto-detects whether the target is an agent name, a bridge-owned session
+`send --legacy-selector` auto-detects whether the target is an agent name, a bridge-owned session
 ID, or a **live interactive session** (delivered as an attributed
 `<agent-message>` envelope). See
 [agent-messages.md](agent-messages.md) for the receive/reply convention.
@@ -148,7 +159,7 @@ not ordinary sending or passive receipt observation. See
 [native-send settlement](../../../docs/native-send-settlement.md) for running
 support discovery, exact request retention and unknown-outcome recovery.
 
-**Typed outcomes.** `<agent-bridge catalog argv[0]> --json send ...` prints exactly one JSON
+**Legacy typed outcomes.** `<agent-bridge catalog argv[0]> --json send ... --legacy-selector` prints exactly one JSON
 document on stdout for every classified outcome (progress text goes to
 stderr), always with an `outcome`.
 Explicit settlement resolves with `accepted` or `not_admitted`; neither means
@@ -753,10 +764,11 @@ flagged once, at adoption time:
 agent-worktrees register <Project> --base-repo --elevated # marketplace-isolation: allow agent-worktrees-management
 ```
 
-After that, **just send to it by its bare name** -- no special prefix:
+After that, select the existing profile by its bare name with explicit legacy
+selection:
 
 ```bash
-<agent-bridge catalog argv[0]> send <Project> "do the elevated work"
+<agent-bridge catalog argv[0]> send <Project> "do the elevated work" --legacy-selector
 ```
 
 The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so

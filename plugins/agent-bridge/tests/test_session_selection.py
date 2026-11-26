@@ -279,6 +279,8 @@ def test_cli_creation_and_delivery_share_caller(monkeypatch: Any, command: Any, 
         lambda *a, caller_id, **kw: delivered.append(caller_id),
     )
     argv = [command, "agent-x", "discover selected skills", "--no-wait"]
+    if command == "send":
+        argv.append("--legacy-selector")
     if caller is not None:
         argv.extend(["--caller", caller])
     args = m.build_parser().parse_args(argv)
@@ -303,7 +305,8 @@ def test_send_explicit_caller_reuses_its_own_session(monkeypatch: Any) -> None:
         lambda _client, _args, sid, _prompt, *, caller_id: delivered.append((sid, caller_id)),
     )
     args = m.build_parser().parse_args([
-        "send", "agent-x", "discover selected skills", "--caller", "explicit-controller", "--no-wait",
+        "send", "agent-x", "discover selected skills", "--legacy-selector",
+        "--caller", "explicit-controller", "--no-wait",
     ])
 
     m._cmd_send(args)
@@ -311,6 +314,21 @@ def test_send_explicit_caller_reuses_its_own_session(monkeypatch: Any) -> None:
     assert delivered == [("explicit", "explicit-controller")]
     assert client.started == []
     assert client.ended == []
+
+
+@pytest.mark.parametrize("target", ["agent-x", "host-b", "codespace:example"])
+def test_profile_startup_hint_has_complete_legacy_argv(target: str) -> None:
+    args = m.build_parser().parse_args(["send", target, "work", "--legacy-selector"])
+    assert args.target == target and args.prompt == "work"
+    assert args.bridge is False
+
+
+def test_receipt_wait_keeps_its_specialized_owner() -> None:
+    from agent_bridge.bridge_send_cli import selected
+
+    args = m.build_parser().parse_args(["send", "live-1", "work", "--wait"])
+    assert args.wait_delivery is True
+    assert selected(args) is False
 
 
 def test_start_retry_retains_selected_caller(monkeypatch: Any) -> None:
