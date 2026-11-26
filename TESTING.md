@@ -12717,6 +12717,19 @@ consumer selectors. No operational writer or installed reader is switched.
 These source results do not prove
 deployed reader adoption, installed/native qualification or full-census coverage.
 
+The logical-machine environment adapter now exports all fifteen original cases
+from three complete functions. Its remaining six invalid/conflicting identity
+rows and one native/guest-distinction case were held only by the former v2
+storage frontier. Complete original/adapter metadata comparison preserves
+objects, code/global origins, fixtures, parameter values/types, marks and IDs
+before execution. All seven new cases pass unchanged effect guarding with
+actual decomposition call coverage, zero prohibited effects and 25 bound reads.
+Only their seven identities and the existing adapter hash are added/refreshed;
+the original tests, pure string/regex/dataclass owner, existing eight identities,
+other source bindings, targets, helper decisions and limits are unchanged.
+These cases do not probe an OS, change environment variables or execute a native
+or guest process. They do not qualify broader native/environment integration.
+
 The version-bump guard packet exports eleven original cases through eight exact
 test objects and the original `guard_module` fixture. Mocked Git protocol and
 diff-error controls retain their original CLI result/output checks without

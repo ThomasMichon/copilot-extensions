@@ -1,0 +1,9 @@
+{
+  "comment": "Admit all remaining original logical-environment identity controls without OS probing",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
