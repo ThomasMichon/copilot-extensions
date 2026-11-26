@@ -650,7 +650,9 @@ text facts retain strict UTF-8 decoding. Each caller keeps its existing path
 eligibility, source hashing and original policy fallback. This bounds input
 work; it does not make managed guard observations reusable input witnesses.
 After guard or proof-dependency source changes, regenerate the shipped contract
-with `python tools/render-hook-read-policy.py`. Registered-consumer fixtures use
+with `python tools/render-hook-read-policy.py`. Required units compare the shipped
+contract with its source renderer; registered-consumer controls separately
+qualify native guard behavior. Registered-consumer fixtures use
 the actual packaged declaration; literal comparator legs explicitly omit only
 its optional proof and record that contract identity. Argument comparator legs
 omit only the optional argument facts, retaining the existing literal proof.
