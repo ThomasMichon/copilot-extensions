@@ -55,8 +55,7 @@ def _environment(
     commands = tmp_path / "commands"
     commands.mkdir()
     for name in ("bash", "dirname", "wc", "cat", "sed", "head", "git", "id",
-                 "cut", "awk", "grep", "tr", "date", "basename", "getent",
-                 "mktemp", "mkfifo", "sleep", "rm", "rmdir"):
+                 "cut", "awk", "grep", "tr", "date", "basename", "getent"):
         executable = shutil.which(name)
         assert executable, name
         (commands / name).symlink_to(executable)
@@ -214,6 +213,10 @@ def test_actual_cold_gate_never_falls_back_when_generated_assets_are_missing(
     elif scenario == "missing-request":
         (gate.parent / "bootstrap-python-version.txt").unlink()
     reader_env = _environment(tmp_path, prepared_helper, scenario)
+    for name in ("mktemp", "mkfifo", "sleep", "rm", "rmdir"):
+        utility = shutil.which(name)
+        assert utility, name
+        (Path(reader_env["PATH"]) / name).symlink_to(utility)
     env.update(reader_env)
     env["AGENT_INDEX_REPO"] = str(tmp_path)
     result = subprocess.run(

@@ -24,23 +24,13 @@ permissions:
   contents: read
 
 jobs:
-  index-command-gate:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            selector: bash
-            expected: 14
-          - os: macos-latest
-            selector: bash
-            expected: 14
-          - os: windows-latest
-            selector: not bash
-            expected: 28
-    runs-on: ${{ matrix.os }}
+  index-command-gate-linux:
+    runs-on: ubuntu-latest
     timeout-minutes: 8
-    steps:
+    env:
+      GATE_SELECTOR: bash
+      EXPECTED_CASES: "14"
+    steps: &command-gate-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -61,11 +51,9 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_index_command_gate_source.py --allow-explicit-tiers
-          -k "${{ matrix.selector }}"
+          -k "${{ env.GATE_SELECTOR }}"
           --junit-dir qualification-evidence/index-command-gate
       - name: Require every native control and repeated offline report
-        env:
-          EXPECTED_CASES: ${{ matrix.expected }}
         run: >-
           python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-command-gate').rglob('*.xml')];
@@ -81,3 +69,17 @@ jobs:
           ('current','lkg','newest','namespaced','setup','readiness','missing-marker','provisioned') else 1)
           for r in reports);
           print(json.dumps({'index_command_gate_performance':reports},sort_keys=True))"
+  index-command-gate-macos:
+    runs-on: macos-latest
+    timeout-minutes: 8
+    env:
+      GATE_SELECTOR: bash
+      EXPECTED_CASES: "14"
+    steps: *command-gate-steps
+  index-command-gate-windows:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      GATE_SELECTOR: not bash
+      EXPECTED_CASES: "28"
+    steps: *command-gate-steps
