@@ -1598,7 +1598,7 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         pytest.skip("POSIX runtime-gate test")
     script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     env["HOME"] = str(tmp_path)
-    if os.name != "nt":
+    if sys.platform != "win32":
         import pwd
 
         account = pwd.getpwuid(os.getuid())
