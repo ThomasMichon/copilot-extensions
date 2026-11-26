@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -20,7 +21,7 @@ from agent_procutil import owned_process as ownership
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
 
-def test_darwin_native_structures_match_xnu_64_bit_field_offsets():
+def test_darwin_native_structures_match_xnu_64_bit_field_offsets() -> None:
     # XNU bsd/sys/signal.h (siginfo_t) and bsd/sys/proc_info.h (proc_bsdinfo).
     assert ctypes.sizeof(darwin._SigInfo) == 104
     assert {
@@ -44,9 +45,10 @@ def test_darwin_native_structures_match_xnu_64_bit_field_offsets():
     (1, None, "default SIGCHLD"), (0, 0, "already released"), (0, None, None),
 ])
 def test_darwin_wait_dispatch_preserves_common_custody_checks(
-    monkeypatch, disposition, returncode, error,
-):
-    observations = []
+    monkeypatch: pytest.MonkeyPatch, disposition: int,
+    returncode: int | None, error: str | None,
+) -> None:
+    observations: list[object] = []
     process = SimpleNamespace(pid=40, returncode=returncode)
     status = object()
     monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="darwin"))
@@ -54,9 +56,11 @@ def test_darwin_wait_dispatch_preserves_common_custody_checks(
         SIGCHLD=20, SIG_DFL=0, getsignal=lambda signum: disposition,
     ))
     monkeypatch.setattr(ownership, "os", SimpleNamespace())  # no Python waitid or constants
-    monkeypatch.setattr(
-        darwin, "observe_unreaped", lambda root: observations.append(root) or status,
-    )
+    def observe(root: object) -> object:
+        observations.append(root)
+        return status
+
+    monkeypatch.setattr(darwin, "observe_unreaped", observe)
     if error:
         with pytest.raises(RuntimeError, match=error):
             ownership._observe_unreaped(process)
@@ -67,10 +71,12 @@ def test_darwin_wait_dispatch_preserves_common_custody_checks(
 
 
 @pytest.mark.parametrize("failure", ["none", "native", "sigchld"])
-def test_darwin_pre_spawn_requires_native_waitid_without_python_exposure(monkeypatch, failure):
-    calls = []
+def test_darwin_pre_spawn_requires_native_waitid_without_python_exposure(
+    monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    calls: list[str] = []
 
-    def probe():
+    def probe() -> None:
         calls.append("native")
         if failure == "native":
             raise OSError("native waitid unavailable")
@@ -78,7 +84,7 @@ def test_darwin_pre_spawn_requires_native_waitid_without_python_exposure(monkeyp
     class ReachedSpawn(Exception):
         pass
 
-    def spawn(*args, **kwargs):
+    def spawn(*args: object, **kwargs: object) -> NoReturn:
         calls.append("spawn")
         assert kwargs["start_new_session"] is True
         raise ReachedSpawn
@@ -106,16 +112,18 @@ def test_darwin_pre_spawn_requires_native_waitid_without_python_exposure(monkeyp
 
 
 @pytest.mark.parametrize("pid,result", [(0, None), (40, "exit"), (41, "mismatch")])
-def test_native_waitid_construction_retains_original_child(monkeypatch, pid, result):
-    calls = []
+def test_native_waitid_construction_retains_original_child(
+    monkeypatch: pytest.MonkeyPatch, pid: int, result: str | None,
+) -> None:
+    calls: list[tuple[int, int, int]] = []
 
-    def waitid(kind, child, data, flags):
+    def waitid(kind: int, child: int, data: Any, flags: int) -> int:
         calls.append((kind, child, flags))
         assert ctypes.sizeof(data._obj) == 104
         data._obj.si_pid = pid
         return 0
 
-    def load(path, **kwargs):
+    def load(path: str, **kwargs: object) -> SimpleNamespace:
         assert path == "/usr/lib/libSystem.B.dylib" and kwargs == {"use_errno": True}
         return SimpleNamespace(waitid=waitid)
 
@@ -131,8 +139,8 @@ def test_native_waitid_construction_retains_original_child(monkeypatch, pid, res
     assert calls == [(1, 40, 37)] and process.returncode is None
 
 
-def test_native_waitid_error_cannot_release_custody(monkeypatch):
-    def fail(*args):
+def test_native_waitid_error_cannot_release_custody(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args: object) -> int:
         ctypes.set_errno(errno.ECHILD)
         return -1
 
@@ -141,12 +149,17 @@ def test_native_waitid_error_cannot_release_custody(monkeypatch):
         darwin.observe_unreaped(SimpleNamespace(pid=40, returncode=None))
 
 
-def _queue(monkeypatch, *, parents=(40, 40), registration=(), events=None):
-    calls, closed = [], []
+def _queue(
+    monkeypatch: pytest.MonkeyPatch, *, parents: tuple[int, ...] = (40, 40),
+    registration: tuple[object, ...] | list[object] = (),
+    events: list[SimpleNamespace] | None = None,
+) -> tuple[list[tuple[Any, int, float | None]], list[bool]]:
+    calls: list[tuple[Any, int, float | None]] = []
+    closed: list[bool] = []
     ancestry = iter(parents)
     exit_event = SimpleNamespace(ident=40, filter=-5, flags=0, fflags=0x80000000)
 
-    def control(changes, count, timeout):
+    def control(changes: Any, count: int, timeout: float | None) -> object:
         calls.append((changes, count, timeout))
         return registration if changes is not None else (
             [exit_event] if events is None else events
@@ -163,7 +176,7 @@ def _queue(monkeypatch, *, parents=(40, 40), registration=(), events=None):
     return calls, closed
 
 
-def test_kqueue_binds_exact_parent_before_waiting(monkeypatch):
+def test_kqueue_binds_exact_parent_before_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
     calls, closed = _queue(monkeypatch)
     watch = darwin.OwnerWatch(40)
     watch.wait()
@@ -177,7 +190,10 @@ def test_kqueue_binds_exact_parent_before_waiting(monkeypatch):
 @pytest.mark.parametrize("parents,registration", [
     ((1,), ()), ((40, 1), ()), ((40,), [object()]),
 ])
-def test_kqueue_rejects_reparenting_or_dead_owner(monkeypatch, parents, registration):
+def test_kqueue_rejects_reparenting_or_dead_owner(
+    monkeypatch: pytest.MonkeyPatch, parents: tuple[int, ...],
+    registration: tuple[object, ...] | list[object],
+) -> None:
     _, closed = _queue(monkeypatch, parents=parents, registration=registration)
     with pytest.raises(RuntimeError):
         darwin.OwnerWatch(40)
@@ -191,7 +207,9 @@ def test_kqueue_rejects_reparenting_or_dead_owner(monkeypatch, parents, registra
     SimpleNamespace(ident=40, filter=1, flags=0, fflags=0x80000000),
     None,
 ])
-def test_kqueue_rejects_wrong_identity_and_native_errors(monkeypatch, event):
+def test_kqueue_rejects_wrong_identity_and_native_errors(
+    monkeypatch: pytest.MonkeyPatch, event: SimpleNamespace | None,
+) -> None:
     _queue(monkeypatch, events=[] if event is None else [event])
     watch = darwin.OwnerWatch(40)
     try:
@@ -201,15 +219,18 @@ def test_kqueue_rejects_wrong_identity_and_native_errors(monkeypatch, event):
         watch.close()
 
 
-def _census(monkeypatch, *, status=5, group=10, pid=20, info_error=None, short=False):
-    calls = []
+def _census(
+    monkeypatch: pytest.MonkeyPatch, *, status: int = 5, group: int = 10,
+    pid: int = 20, info_error: int | None = None, short: bool = False,
+) -> tuple[darwin.GroupCensus, list[int]]:
+    calls: list[int] = []
 
-    def listing(leader, data, size):
+    def listing(leader: int, data: Any, size: int) -> int:
         assert leader == 10 and size == ctypes.sizeof(data)
         data[0], data[1] = 10, 20
         return 2
 
-    def info(number, flavor, argument, data, size):
+    def info(number: int, flavor: int, argument: int, data: Any, size: int) -> int:
         calls.append(number)
         assert number == 20 and flavor == 3 and argument == 0
         assert size == ctypes.sizeof(darwin._BSDInfo) == 136
@@ -219,7 +240,7 @@ def _census(monkeypatch, *, status=5, group=10, pid=20, info_error=None, short=F
         data._obj.pid, data._obj.pgid, data._obj.status = pid, group, status
         return size - 1 if short else size
 
-    def load(path, **kwargs):
+    def load(path: str, **kwargs: object) -> SimpleNamespace:
         assert path == "/usr/lib/libproc.dylib" and kwargs == {"use_errno": True}
         return SimpleNamespace(proc_listpgrppids=listing, proc_pidinfo=info)
 
@@ -229,7 +250,9 @@ def _census(monkeypatch, *, status=5, group=10, pid=20, info_error=None, short=F
 
 
 @pytest.mark.parametrize("status,group,active", [(2, 10, True), (5, 10, False), (2, 99, False)])
-def test_libproc_observes_only_live_members_of_owned_group(monkeypatch, status, group, active):
+def test_libproc_observes_only_live_members_of_owned_group(
+    monkeypatch: pytest.MonkeyPatch, status: int, group: int, active: bool,
+) -> None:
     census, calls = _census(monkeypatch, status=status, group=group)
     assert census.active(10) is active
     assert calls == [20]
@@ -238,35 +261,41 @@ def test_libproc_observes_only_live_members_of_owned_group(monkeypatch, status, 
 @pytest.mark.parametrize("kwargs", [
     {"pid": 21}, {"short": True}, {"info_error": errno.EPERM}, {"info_error": 0},
 ])
-def test_libproc_refuses_unconfirmed_member_identity(monkeypatch, kwargs):
+def test_libproc_refuses_unconfirmed_member_identity(
+    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any],
+) -> None:
     census, _ = _census(monkeypatch, **kwargs)
     with pytest.raises(RuntimeError):
         census.active(10)
 
 
-def test_libproc_tolerates_only_proven_disappearance(monkeypatch):
+def test_libproc_tolerates_only_proven_disappearance(monkeypatch: pytest.MonkeyPatch) -> None:
     census, _ = _census(monkeypatch, info_error=errno.ESRCH)
     assert not census.active(10)
 
 
-def test_libproc_full_pid_count_retries_instead_of_accepting_truncation(monkeypatch):
+def test_libproc_full_pid_count_retries_instead_of_accepting_truncation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     census, calls = _census(monkeypatch)
     listing = census.list_pids
-    capacities = []
+    capacities: list[int] = []
 
-    def full_first(leader, data, size):
+    def full_first(leader: int, data: Any, size: int) -> int:
         capacities.append(len(data))
-        return len(data) if len(capacities) == 1 else listing(leader, data, size)
+        return len(data) if len(capacities) == 1 else int(listing(leader, data, size))
 
     census.list_pids = full_first
     assert not census.active(10)
     assert capacities == [64, 128] and calls == [20]
 
 
-def test_libproc_zero_with_native_error_is_not_an_empty_group(monkeypatch):
+def test_libproc_zero_with_native_error_is_not_an_empty_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     census, _ = _census(monkeypatch)
 
-    def fail(*args):
+    def fail(*args: object) -> int:
         ctypes.set_errno(errno.EPERM)
         return 0
 
@@ -276,15 +305,93 @@ def test_libproc_zero_with_native_error_is_not_an_empty_group(monkeypatch):
 
 
 @pytest.mark.parametrize("size", [-1, 3, 257])
-def test_libproc_rejects_failed_or_malformed_census(monkeypatch, size):
+def test_libproc_rejects_failed_or_malformed_census(
+    monkeypatch: pytest.MonkeyPatch, size: int,
+) -> None:
     census, _ = _census(monkeypatch)
     census.list_pids = lambda *args: size
     with pytest.raises((OSError, RuntimeError)):
         census.active(10)
 
 
-def test_darwin_public_dispatch_uses_guard_and_caller_pid(monkeypatch):
-    probes, invocations = [], []
+def _support_probe(
+    monkeypatch: pytest.MonkeyPatch, **kwargs: Any,
+) -> tuple[darwin.GroupCensus, list[int], list[int]]:
+    census, calls = _census(monkeypatch, **kwargs)
+    closed: list[int] = []
+    monkeypatch.setattr(darwin, "os", SimpleNamespace(getpid=lambda: 20, getpgrp=lambda: 10))
+    monkeypatch.setattr(darwin, "_waitid", lambda: None)
+    monkeypatch.setattr(darwin, "OwnerWatch", lambda pid, **kw: SimpleNamespace(
+        close=lambda: closed.append(pid),
+    ))
+    monkeypatch.setattr(darwin, "GroupCensus", lambda: census)
+    return census, calls, closed
+
+
+@pytest.mark.parametrize("members", [(10, 30, 20), (20, 30, 10)])
+def test_support_probe_does_not_inspect_unrelated_borrowed_members(
+    monkeypatch: pytest.MonkeyPatch, members: tuple[int, ...],
+) -> None:
+    census, calls, closed = _support_probe(monkeypatch, status=2)
+    info = census.info
+
+    def listing(group: int, data: Any, size: int) -> int:
+        assert group == 10
+        for index, pid in enumerate(members):
+            data[index] = pid
+        return len(members)
+
+    def protected_peer(pid: int, *args: object) -> int:
+        if pid == 30:
+            ctypes.set_errno(errno.EPERM)
+            return 0
+        return int(info(pid, *args))
+
+    census.list_pids, census.info = listing, protected_peer
+    darwin.require_support()
+    assert calls == [20] and closed == [20]
+
+    def owned_listing(group: int, data: Any, size: int) -> int:
+        data[0], data[1] = 10, 30
+        return 2
+
+    census.list_pids = owned_listing
+    with pytest.raises(RuntimeError, match="member identity is unavailable"):
+        census.active(10)
+
+
+@pytest.mark.parametrize("kwargs,members", [
+    ({"pid": 21}, (10, 20)),
+    ({"group": 99}, (10, 20)),
+    ({"short": True}, (10, 20)),
+    ({"info_error": errno.EPERM}, (10, 20)),
+    ({"info_error": errno.ESRCH}, (10, 20)),
+    ({"status": 5}, (10, 20)),
+    ({}, (10, 30)),
+    ({}, (10, 20, 0)),
+])
+def test_support_probe_refuses_unconfirmed_self_before_spawn(
+    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any], members: tuple[int, ...],
+) -> None:
+    census, _, closed = _support_probe(monkeypatch, **{"status": 2, **kwargs})
+
+    def listing(group: int, data: Any, size: int) -> int:
+        for index, pid in enumerate(members):
+            data[index] = pid
+        return len(members)
+
+    census.list_pids = listing
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(protocol, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(protocol, "_run_owned", lambda *a, **k: pytest.fail("spawned"))
+    with pytest.raises(RuntimeError, match="native"):
+        run_caller_owned(["product"], timeout=2, max_stdout_bytes=10, max_stderr_bytes=10)
+    assert closed == [20]
+
+
+def test_darwin_public_dispatch_uses_guard_and_caller_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    probes: list[bool] = []
+    invocations: list[tuple[list[str], dict[str, Any]]] = []
     monkeypatch.setattr(darwin, "require_support", lambda: probes.append(True))
     monkeypatch.setattr(protocol, "sys", SimpleNamespace(
         platform="darwin", executable=sys.executable, exc_info=sys.exc_info,
@@ -295,7 +402,7 @@ def test_darwin_public_dispatch_uses_guard_and_caller_pid(monkeypatch):
     ))
     monkeypatch.setattr(protocol, "signal", SimpleNamespace(SIGKILL=9))
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         invocations.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, -9, json.dumps({
             "version": 1, "kind": "completed", "returncode": 7, "stdout": "ok", "stderr": "",
@@ -313,11 +420,11 @@ def test_darwin_public_dispatch_uses_guard_and_caller_pid(monkeypatch):
     assert options["pass_fds"] == (int(argv[-2]),)
 
 
-def test_darwin_native_failure_refuses_before_guard_spawn(monkeypatch):
+def test_darwin_native_failure_refuses_before_guard_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(protocol, "os", SimpleNamespace(name="posix"))
 
-    def refuse():
+    def refuse() -> NoReturn:
         raise OSError("native unavailable")
 
     monkeypatch.setattr(darwin, "require_support", refuse)
@@ -327,11 +434,18 @@ def test_darwin_native_failure_refuses_before_guard_spawn(monkeypatch):
 
 
 @pytest.mark.parametrize("live", [True, False])
-def test_darwin_confirmation_keeps_unreaped_root_and_refuses_live_members(monkeypatch, live):
+def test_darwin_confirmation_keeps_unreaped_root_and_refuses_live_members(
+    monkeypatch: pytest.MonkeyPatch, live: bool,
+) -> None:
     clock = [0.]
-    roots = []
+    roots: list[object] = []
     monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="darwin"))
-    monkeypatch.setattr(protocol, "_observe_unreaped", lambda root: roots.append(root) or object())
+
+    def observe(root: object) -> object:
+        roots.append(root)
+        return object()
+
+    monkeypatch.setattr(protocol, "_observe_unreaped", observe)
     monkeypatch.setattr(darwin, "GroupCensus", lambda: SimpleNamespace(active=lambda pid: live))
     monkeypatch.setattr(protocol, "time", SimpleNamespace(
         monotonic=lambda: clock[0],
@@ -349,13 +463,12 @@ def test_darwin_confirmation_keeps_unreaped_root_and_refuses_live_members(monkey
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS kernel APIs")
-def test_native_darwin_kqueue_and_libproc_construction():
+def test_native_darwin_kqueue_and_libproc_construction() -> None:
     darwin.require_support()
-    assert darwin.GroupCensus().active(os.getpgrp()) in (True, False)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS kernel APIs")
-def test_native_darwin_guard_identity_and_bounded_execution():
+def test_native_darwin_guard_identity_and_bounded_execution() -> None:
     result = run_caller_owned(
         [sys.executable, "-I", "-c",
          "import os,json; print(json.dumps([os.getppid(),os.getpgrp(),os.getsid(0)]))"],
@@ -371,8 +484,10 @@ def test_native_darwin_guard_identity_and_bounded_execution():
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires actual macOS kernel APIs")
-def test_native_darwin_caller_death_retires_guard_target_and_descendant(tmp_path):
-    import select
+def test_native_darwin_caller_death_retires_guard_target_and_descendant(tmp_path: Path) -> None:
+    import select as native_select
+
+    select = cast(Any, native_select)
 
     marker = tmp_path / "identities.json"
     target = (
@@ -413,7 +528,7 @@ def test_native_darwin_caller_death_retires_guard_target_and_descendant(tmp_path
             assert not queue.control(changes, 3, 0)
             # This Popen child remains unreaped and cannot have its PID reused.
             process.kill()
-            gone = set()
+            gone: set[int] = set()
             deadline = time.monotonic() + 1.5
             while len(gone) < 3 and time.monotonic() < deadline:
                 for event in queue.control(None, 3, .05):

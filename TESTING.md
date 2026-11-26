@@ -84,6 +84,12 @@ macOS and Windows within eight-minute job limits. These fixtures isolate
 installation-context decisions and do not qualify installed-host lifetime,
 every MCP child producer or complete command latency.
 
+The macOS MCP job also runs `agent-procutil`'s Darwin caller-owned packet.
+It requires native self-identity/membership admission, bounded execution and
+caller-death descendant retirement without skips. Synthetic controls retain
+strict owned-group identity refusal while admission ignores unrelated borrowed
+peers; non-macOS skips are not native qualification.
+
 Vault's `tests/test_managed_command_gate.py` runs its actual Bash and PowerShell
 gates with real prepared UV and an inert 3.10.20 application independent of the
 3.11.18 helper. Thirteen raw/materialized scenarios cover current/LKG/newest,
