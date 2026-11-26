@@ -17,6 +17,21 @@ from plugin_resolve.reflection import selection_spec, selection_json
 
 from . import consumer_telemetry as ct
 
+# Reserved status of an attached launch whose staged preparation failed, so it
+# is told apart from the interactive session's own exit status.
+_ATTACHED_PREPARATION_EXIT = 86
+
+
+def _after_preparation(prefix: str, command: str) -> str:
+    """Run ``command`` after the staged preparation, which exits reserved on failure.
+
+    The session's own status is kept by ``exit`` inside the group; only a
+    preparation that stopped the ``&&`` chain reaches the reserved exit.
+    """
+    if not prefix.rstrip().endswith("&&"):
+        return prefix + command
+    return f"{prefix}{{ {command}\nexit\n}}; exit {_ATTACHED_PREPARATION_EXIT}"
+
 
 def add_plugin_selection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -163,7 +178,19 @@ def cmd_copilot(
     from .config import load_config as _load_config
     from .runtime_drivers import require_ssh_transport
 
-    require_ssh_transport(_load_config(), args.name, "The `copilot` verb")
+    if getattr(args, "stop", False):
+        require_ssh_transport(_load_config(), args.name, "The `copilot` verb")
+    else:
+        preflight_started = ct.clock()
+        try:
+            require_ssh_transport(_load_config(), args.name, "The `copilot` verb")
+        except BaseException as exc:
+            ct.note(
+                "container_lookup", "failure",
+                "interrupted" if ct.lookup_reason(exc) == "interrupted" else "engine_unavailable",
+                started=preflight_started,
+            )
+            raise
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 
@@ -325,7 +352,6 @@ def cmd_copilot(
                         started=preparation_started,
                     )
                     raise
-                ct.note("plugin_preparation", "success", "none", started=preparation_started)
                 remote_command = attached_launch_command(
                     remote_command, cast(str, prepared_context.get("workspace")),
                 )
@@ -334,7 +360,7 @@ def cmd_copilot(
                 elif remote_env:
                     from .ssh_transport import build_remote_command
                     remote_command = build_remote_command(remote_command, remote_env)
-                remote_command = preparation + remote_command
+                remote_command = _after_preparation(preparation, remote_command)
                 spawn_cmd = build_ssh_command(
                     ssh_config, remote_command,
                     reverse_forwards=reverse_forwards, pty=True,
@@ -346,12 +372,18 @@ def cmd_copilot(
                     spawn_cmd, env=env, creationflags=creation_flags()
                 ).returncode
                 # The interactive session's own exit status is not a connect
-                # failure; only OpenSSH's reserved transport status is.
-                ct.note(
-                    "container_connect",
-                    *(("failure", "connect_failed") if rc == ct.SSH_TRANSPORT_EXIT else ("success", "none")),
-                    started=connect_started,
-                )
+                # failure; only OpenSSH's reserved transport status is. The
+                # staged preparation runs inside that channel, so its outcome
+                # is known only from its own reserved status.
+                if rc == ct.SSH_TRANSPORT_EXIT:
+                    ct.note("container_connect", "failure", "connect_failed", started=connect_started)
+                else:
+                    ct.note(
+                        "plugin_preparation",
+                        *(("failure", "plugin_install_failed") if rc == _ATTACHED_PREPARATION_EXIT
+                          else ("success", "none")),
+                    )
+                    ct.note("container_connect", "success", "none", started=connect_started)
                 if auth_env:
                     if auth.attached_created_child(args.name, user, auth_env):
                         auth.wait_for_consumption(args.name, user, auth_env)

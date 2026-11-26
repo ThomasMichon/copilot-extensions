@@ -39,13 +39,13 @@ output or exit status, and the original error is always reported unchanged.
 
 | Stage | Where | Outcomes and reasons |
 |-------|-------|----------------------|
-| `container_lookup` | both paths | `engine_unavailable` (container CLI, daemon or runtime driver unavailable), `listing_failed` (other lookup failures; not reported as missing), `not_found` (not a fleet member), `not_running` (container not ready) |
+| `container_lookup` | both paths | `engine_unavailable` (container CLI, daemon or runtime driver unavailable, including the SSH-transport preflight that runs before either path; `--stop` is not observed), `listing_failed` (other lookup failures; not reported as missing), `not_found` (not a fleet member), `not_running` (container not ready) |
 | `seed_validation` | detached | `seed_too_long`, `seed_invalid` (also unreadable reference files) |
 | `claim` | both paths | `claim_busy`; success with `force_claimed` when `--force` was used |
 | `account_resolution` | both paths, only when the fleet forwards a GitHub token | `account_unresolved` |
 | `bridge_payload` | detached | `payload_install_failed` (the agent-worktrees launch payload could not be installed in the container) |
 | `credential_relay` | both paths, only when the relay is enabled | `relay_not_listening` (no live published relay port, or its ping probe failed) |
-| `plugin_preparation` | both paths | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening` |
+| `plugin_preparation` | both paths | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening`; the attached path runs the staged script inside the interactive channel, so it records the outcome after that session ends, as `plugin_install_failed` when the script fails and nothing when the transport itself failed |
 | `exec` | detached | `timeout`/`transport_failed` with `limit_ms`, `transport_failed` (OpenSSH exit 255) |
 | `remote_embody` | detached | `installer_unavailable`, `bootstrap_python_unavailable` |
 | `bridge_registration` | detached | `session_unregistered`, `session_unrepresented` |

@@ -422,3 +422,77 @@ def test_an_attached_session_exit_is_not_a_connect_failure(
         subprocess_run=lambda *a, **k: types.SimpleNamespace(returncode=3),
     )
     assert ("container_connect", "success", "none") in _shapes(rc)
+
+
+@pytest.mark.parametrize("extra", [[], ["--detach"]])
+def test_console_entry_records_an_unavailable_runtime_driver(
+    monkeypatch: pytest.MonkeyPatch, extra: list[str],
+) -> None:
+    from agent_containers import __main__ as cli
+    import agent_containers.config as config_mod
+    import agent_containers.runtime_drivers as drivers
+
+    def unavailable(config: Any, name: str, operation: str) -> None:
+        raise RuntimeError("runtime driver unavailable")
+
+    offered: list[Any] = []
+    monkeypatch.setattr(config_mod, "load_config", lambda *a, **k: object())
+    monkeypatch.setattr(drivers, "require_ssh_transport", unavailable)
+    monkeypatch.setattr(ct, "_offer", offered.append)
+    try:
+        assert cli.main(["copilot", "member", *extra]) != 0
+    except RuntimeError:
+        pass
+    assert [_shape(event)[:3] for event in offered[0]] == [
+        ("container_lookup", "failure", "engine_unavailable"),
+    ]
+
+
+def test_console_entry_stop_stays_uninstrumented(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_containers import __main__ as cli
+    import agent_containers.config as config_mod
+    import agent_containers.runtime_drivers as drivers
+
+    def unavailable(config: Any, name: str, operation: str) -> None:
+        raise RuntimeError("runtime driver unavailable")
+
+    offered: list[Any] = []
+    monkeypatch.setattr(config_mod, "load_config", lambda *a, **k: object())
+    monkeypatch.setattr(drivers, "require_ssh_transport", unavailable)
+    monkeypatch.setattr(ct, "_offer", offered.append)
+    try:
+        assert cli.main(["copilot", "member", "--stop"]) != 0
+    except RuntimeError:
+        pass
+    assert offered == []
+
+
+def test_an_attached_preparation_failure_is_noted_after_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_containers.copilot_venue import _ATTACHED_PREPARATION_EXIT as ATTACHED_PREPARATION_EXIT
+
+    rc, _ = _venue_tests._call(
+        _venue_tests._args(no_relay=True), target=_venue_tests._target(),
+        monkeypatch=monkeypatch,
+        subprocess_run=lambda *a, **k: types.SimpleNamespace(returncode=ATTACHED_PREPARATION_EXIT),
+    )
+    shapes = _shapes(rc)
+    assert ("plugin_preparation", "failure", "plugin_install_failed") in shapes
+    assert ("plugin_preparation", "success", "none") not in shapes
+    assert ("container_connect", "success", "none") in shapes
+
+
+def test_the_attached_command_keeps_the_session_status_apart_from_preparation() -> None:
+    import shutil
+
+    from agent_containers.copilot_venue import _ATTACHED_PREPARATION_EXIT, _after_preparation
+
+    bash = shutil.which("bash")
+    if bash is None or sys.platform == "win32":
+        pytest.skip("needs a POSIX shell")
+    for prepared, session, expected in (
+        ("true", "exit 3", 3), ("true", "true", 0), ("false", "exit 3", _ATTACHED_PREPARATION_EXIT),
+    ):
+        command = _after_preparation(f"{prepared} && ", session)
+        assert subprocess.run([bash, "-c", command], check=False).returncode == expected
