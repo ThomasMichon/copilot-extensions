@@ -15,11 +15,15 @@ import stat
 import subprocess
 import sys
 import tempfile
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from agent_procutil import no_window_kwargs
 
 from .git_ops import repository_identity_env
+
+if TYPE_CHECKING:
+    import argparse
 
 DECLARATION = ".agent-worktrees/repository-setup.json"
 ENGINE_CONTEXT = "AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE"
@@ -59,8 +63,8 @@ def https_url(value: str) -> str:
     return urlunsplit(("https", authority, path, "", ""))
 
 
-def _object(pairs: list[tuple[str, object]]) -> dict:
-    result: dict = {}
+def _object(pairs: list[tuple[str, object]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise SetupError("Setup JSON contains duplicate fields.")
@@ -68,7 +72,7 @@ def _object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def _json(path: Path) -> dict:
+def _json(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         raw = stream.read(LIMIT + 1)
     if len(raw) > LIMIT:
@@ -82,13 +86,13 @@ def _json(path: Path) -> dict:
     return value
 
 
-def _fields(value: object, expected: set[str]) -> dict:
+def _fields(value: object, expected: set[str]) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise SetupError("Setup JSON has missing or unknown fields.")
     return value
 
 
-def _version(value: dict) -> None:
+def _version(value: dict[str, Any]) -> None:
     if type(value["version"]) is not int or value["version"] != 1:
         raise SetupError("Unsupported repository setup version.")
 
@@ -109,7 +113,7 @@ def _git(path: Path, *args: str) -> str:
     )
     if result.returncode:
         raise SetupError("Repository source could not be qualified by Git.")
-    return result.stdout.strip()
+    return cast(str, result.stdout.strip())
 
 
 def _tracked(path: Path, relative: str) -> Path:
@@ -330,12 +334,12 @@ def _terminal() -> bool:
         import ctypes
 
         # NUL can report isatty() without a console to inherit.
-        if ctypes.windll.kernel32.GetConsoleCP():
+        if cast(Any, ctypes).windll.kernel32.GetConsoleCP():
             return True
     return False
 
 
-def _stdio_kwargs() -> dict:
+def _stdio_kwargs() -> dict[str, Any]:
     options = {} if _terminal() else no_window_kwargs()
     if os.name == "nt":
         # Headless Windows children otherwise receive new console handles, not caller pipes.
@@ -429,7 +433,7 @@ def run(setup: Setup, *, apply: bool, trusted: bool) -> Outcome:
     return _call(setup, "check")
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = sub.add_parser(
         "trust-repository-configuration", allow_abbrev=False,
         help="Explicitly trust native Copilot configuration for a qualified repository revision",
@@ -440,7 +444,7 @@ def add_parsers(sub) -> None:
     parser.add_argument("--apply", action="store_true")
 
 
-def cmd_trust_configuration(args) -> int:
+def cmd_trust_configuration(args: argparse.Namespace) -> int:
     from . import permissions
 
     changed = None
