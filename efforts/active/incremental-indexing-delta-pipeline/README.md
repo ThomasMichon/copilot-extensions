@@ -227,7 +227,8 @@ After the reviewed proposal, the operator admitted execution:
   [explicit caller proposal](point-required-admission.md#explicit-caller-migration-proposal)
   was reviewed in #13717. Its opt-in `AgentIndexClient.reindex_points` checks
   selected-peer support before submission and validates the typed admission
-  receipt without replay after unknown acceptance. No ordinary caller migrates.
+  receipt without replay after unknown acceptance; implementation merged in
+  #13719. No ordinary caller migrates.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
@@ -353,6 +354,16 @@ Implementation should use dependency-ordered, reviewable PRs, with explicit
 source-owner coordination rather than one large rewrite.
 
 ## Journal
+
+### 2026-11-25 - Explicit point client delivered
+
+The [client-delivery journal](journal/2026/11.25%20point-client-delivery.md)
+records merged #13719, lossless shared-inventory reconciliation, current-head
+review and actual unit CI, followed by explicit-client native acquisition and
+replay counts at three corpus sizes. Existing callers, source activation and
+rollout remain unchanged. The canonical Plan and Validation Plan retain ten
+open items; bounded source coverage, repair and consumer evidence remain
+separate gates.
 
 ### 2026-11-20 - Named-point native corpus counts
 
