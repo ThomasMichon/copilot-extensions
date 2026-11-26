@@ -130,7 +130,9 @@ def _duplicate(
     if row["producer_target_json"] is not None:
         from .durable_inbox import original_target
 
-        same_target = row["producer_target_json"] == original_target(request)
+        same_target = row["producer_target_json"] == original_target(
+            request, retained_only=json.loads(row["producer_target_json"]).get("retained_only") is True,
+        )
         same_expected = same_target
     if (
         same_target and same_expected

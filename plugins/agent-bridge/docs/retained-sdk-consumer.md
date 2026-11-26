@@ -221,6 +221,8 @@ allocation and mutation controls remain separate from ordinary receiving.
 The same exact native session and admitted endpoint are required; this is not
 permission to create or resume a dormant target. Portable prompts cannot enter
 the legacy inbox while enrollment is pending.
+Durable acceptance records that retained-only boundary with the original input,
+so registration cleanup cannot expose it to legacy polling or acknowledgement.
 Its explicit unique-plugin/root selection is checked through readonly public SDK
 observations before begin and again at the SDK edge. A known missing or duplicate
 loadout therefore cannot consume the one-shot grant, and no private controller

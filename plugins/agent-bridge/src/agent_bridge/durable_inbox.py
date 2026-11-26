@@ -21,15 +21,19 @@ LEGACY_SUPPORTED_SQL = (
     "AND json_extract(message_contract_json,'$.type_version')=1 "
     "AND json_extract(message_contract_json,'$.requires')='[]' "
     f"AND (kind IN ({_KNOWN_TYPES}) OR kind GLOB 'startup:prompt:[1-9]*') "
-    "ELSE 0 END)"
+    "ELSE 0 END) "
+    "AND COALESCE(json_extract(producer_target_json,'$.retained_only'),0)=0 "
+    "AND NOT EXISTS (SELECT 1 FROM live_sessions target "
+    "WHERE target.session_id=live_messages.session_id AND target.venue IS NOT NULL)"
 )
 
 
-def original_target(request: LiveMessageEnqueue) -> str:
+def original_target(request: LiveMessageEnqueue, *, retained_only: bool = False) -> str:
     return encode({
         "version": 1, "session_id": request.session_id,
         "expected_session_id": request.expected_session_id,
         "exact_session": request.exact_session,
+        **({"retained_only": True} if retained_only else {}),
     })
 
 
@@ -52,7 +56,7 @@ def enqueue(
             f"SELECT {CANONICAL_SESSION_SQL}", (target_id, target_id),
         ).fetchone()[0]
     target = conn.execute(
-        "SELECT session_id FROM live_sessions WHERE session_id=?", (target_id,),
+        "SELECT session_id,venue FROM live_sessions WHERE session_id=?", (target_id,),
     ).fetchone()
     if target is None:
         return None, "not_found"
@@ -75,7 +79,7 @@ def enqueue(
                 request.kind, type_version=request.message_version,
                 requires=request.message_requires,
             ),
-            original_target(request),
+            original_target(request, retained_only=target["venue"] is not None),
         ),
     )
     return int(cur.lastrowid or 0), None
