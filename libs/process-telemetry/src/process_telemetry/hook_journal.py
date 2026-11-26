@@ -10,6 +10,12 @@ Capacity checks, appends and drains serialize on one advisory OS lock that the
 kernel releases when its holder exits, so a killed hook cannot wedge it.  Every
 wait is bounded; a writer that cannot take the lock drops its observation
 rather than delay the hook.
+
+Occupancy is bounded for the whole shared journal, not per entry: markers are
+capped in aggregate, sequence files exist only for the admitted plugin and
+entry vocabulary, and every scratch file is written under the lock, so any
+scratch file a lock holder finds was abandoned.  The sum stays inside the one
+complete-scan limit, so a start and a drain always examine every marker.
 """
 
 from __future__ import annotations
@@ -26,21 +32,34 @@ from pathlib import Path
 from typing import Any
 
 from .append import append_bytes
-from .stage_projection import for_schema
+from .stage_projection import HOOK_ENTRIES, HOOK_PLUGINS, for_schema
 
 _, _project = for_schema("hook.lifecycle.v1")
 PENDING_LIMIT = 65536
 DRAIN_LIMIT = 128
 STALE_AFTER_MS = 120_000
 LOCK_WAIT_S = 0.25
-# Directory entries and markers one start may examine; the rest wait for later starts.
+# Directory entries one start or drain may examine.
 SCAN_LIMIT = 256
 RECOVER_LIMIT = 8
+# Markers across every plugin and entry sharing the journal.
 MARKER_LIMIT = 64
 RECLAIM_LIMIT = 16
+# The lock file and the pending journal.
+_FIXED_ENTRIES = 2
 # One aggregate wall budget for reading stale markers during a start.
 RECOVERY_BUDGET_S = 0.05
 _SCRATCH_SUFFIXES = (".tmp", ".seq", ".pending", ".recovering")
+
+
+def _occupancy_bound() -> int:
+    """Worst-case entries: markers, sequence files, fixed files and the scratch
+    left by holders interrupted between two reclaiming starts."""
+    sequences = len(HOOK_PLUGINS) * len(HOOK_ENTRIES)
+    return MARKER_LIMIT + sequences + _FIXED_ENTRIES + RECLAIM_LIMIT
+
+
+assert _occupancy_bound() <= SCAN_LIMIT, "hook journal occupancy must fit one complete scan"
 
 
 def _now_ms() -> int:
@@ -231,6 +250,9 @@ class HookRun:
         return run
 
     def _begin(self, stale_after_ms: int) -> None:
+        if self.plugin not in HOOK_PLUGINS or self.entry not in HOOK_ENTRIES:
+            # Unadmitted names would add files outside the bounded vocabulary.
+            raise ValueError("hook plugin or entry is not admitted")
         self.directory.mkdir(parents=True, exist_ok=True)
         self.started_ms = _now_ms()
         self.started_mono_ms = _monotonic_ms()
@@ -240,7 +262,7 @@ class HookRun:
             if not held:
                 raise OSError("hook journal is busy")
             markers, scratch, crowded = self._scan()
-            _reclaim(scratch, self.started_ms, stale_after_ms)
+            _reclaim(scratch)
             recovered = self._recover(markers, stale_after_ms)
             if crowded or len(markers) - recovered >= MARKER_LIMIT:
                 # Storage is bounded: an unobserved run is preferable to an unbounded directory.
@@ -253,20 +275,31 @@ class HookRun:
         self.marker = marker
 
     def _scan(self) -> tuple[list[Path], list[Path], bool]:
-        """One bounded enumeration: this entry's markers and abandoned scratch files."""
-        prefix = f"{self.plugin}.{self.entry}."
+        """One bounded enumeration: every entry's markers and abandoned scratch files.
+
+        Markers that do not name an admitted plugin and entry are treated as
+        scratch, so foreign names cannot consume the shared marker capacity.
+        """
+        own = f"{self.plugin}.{self.entry}."
         markers: list[Path] = []
+        others: list[Path] = []
         scratch: list[Path] = []
         with os.scandir(self.directory) as entries:
             for examined, item in enumerate(entries, 1):
                 if examined > SCAN_LIMIT:
-                    return markers, scratch, True
+                    return markers + others, scratch, True
                 name = item.name
-                if name.startswith(prefix) and name.endswith(".start"):
-                    markers.append(self.directory / name)
-                elif name.startswith(".") and name.endswith(_SCRATCH_SUFFIXES):
+                if name.startswith(".") and name.endswith(_SCRATCH_SUFFIXES):
                     scratch.append(self.directory / name)
-        return markers, scratch, False
+                elif name.endswith(".start"):
+                    if _marker_owner(name) is None:
+                        scratch.append(self.directory / name)
+                    elif name.startswith(own):
+                        markers.append(self.directory / name)
+                    else:
+                        others.append(self.directory / name)
+        # This entry's own markers first; then other entries' leftovers.
+        return markers + others, scratch, False
 
     def _recover(self, markers: list[Path], stale_after_ms: int) -> int:
         """Report up to RECOVER_LIMIT markers within one time budget; the lock is held."""
@@ -281,16 +314,24 @@ class HookRun:
                     state = {"started_ms": marker.stat().st_mtime_ns // 1_000_000}
             except OSError:
                 continue
+            owner = _marker_owner(marker.name)
+            if owner is None:
+                continue
+            plugin, entry = owner
+            # Another entry's hook may run under a longer budget than this one.
+            stale_ms = stale_after_ms if owner == (self.plugin, self.entry) else max(
+                stale_after_ms, STALE_AFTER_MS,
+            )
             record = state.get("record")
             if type(record) is dict:
                 # A holder stopped after committing its outcome; report that outcome.
                 check = True
             else:
                 started = state.get("started_ms")
-                if type(started) is not int or self.started_ms - started < stale_after_ms:
+                if type(started) is not int or self.started_ms - started < stale_ms:
                     continue
                 record = {
-                    "kind": "hook", "plugin": self.plugin, "entry": self.entry,
+                    "kind": "hook", "plugin": plugin, "entry": entry,
                     "outcome": "unfinished", "failure_category": "unfinished_prior_run",
                 }
                 sequence = state.get("run_sequence")
@@ -337,14 +378,26 @@ class HookRun:
             pass
 
 
-def _reclaim(scratch: list[Path], now_ms: int, stale_after_ms: int) -> None:
-    """Remove a bounded number of abandoned scratch files left by interrupted writers."""
+def _marker_owner(name: str) -> tuple[str, str] | None:
+    """The admitted (plugin, entry) a marker file name carries, if any."""
+    parts = name.split(".")
+    if len(parts) != 4 or parts[3] != "start":
+        return None
+    plugin, entry = parts[0], parts[1]
+    if plugin not in HOOK_PLUGINS or entry not in HOOK_ENTRIES:
+        return None
+    return plugin, entry
+
+
+def _reclaim(scratch: list[Path]) -> None:
+    """Remove a bounded number of abandoned scratch files; the lock is held.
+
+    Every scratch file is written and renamed while its writer holds the
+    journal lock, so one found by the current holder cannot be in flight.
+    """
     for path in scratch[:RECLAIM_LIMIT]:
-        try:
-            if now_ms - path.stat().st_mtime_ns // 1_000_000 >= max(stale_after_ms, 1):
-                path.unlink()
-        except OSError:
-            continue
+        with contextlib.suppress(OSError):
+            path.unlink()
 
 
 def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> set[tuple[Any, ...]]:
@@ -352,15 +405,20 @@ def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> set[tuple[Any, ...]]
 
     The lock is held.  A key stays unconfirmed when its marker could not be
     removed, or when the bounded scan ended before every entry was examined.
+    The same scan reclaims abandoned scratch files.
     """
-    if not keys:
-        return set()
     unsettled: set[tuple[Any, ...]] = set()
+    scratch: list[Path] = []
     with os.scandir(directory) as entries:
         for examined, item in enumerate(entries, 1):
             if examined > SCAN_LIMIT:
+                _reclaim(scratch)
                 return set(keys)
-            if not item.name.endswith(".start"):
+            name = item.name
+            if name.startswith(".") and name.endswith(_SCRATCH_SUFFIXES):
+                scratch.append(directory / name)
+                continue
+            if not keys or not name.endswith(".start"):
                 continue
             path = directory / item.name
             try:
@@ -379,6 +437,7 @@ def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> set[tuple[Any, ...]]
                 continue
             except OSError:
                 unsettled.add(key)
+    _reclaim(scratch)
     return unsettled
 
 

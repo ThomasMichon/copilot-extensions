@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -259,16 +258,55 @@ def test_marker_storage_is_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_abandoned_scratch_files_are_reclaimed(tmp_path: Path) -> None:
+    # Scratch is only written under the journal lock, so a holder's find is abandoned.
     hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
-    old = [tmp_path / f".abandoned{suffix}" for suffix in (".tmp", ".seq", ".pending", ".recovering")]
-    young = tmp_path / ".inflight.tmp"
-    for path in [*old, young]:
+    scratch = [tmp_path / f".abandoned{suffix}" for suffix in (".tmp", ".seq", ".pending", ".recovering")]
+    for path in scratch:
         path.write_bytes(b"x")
-    for path in old:
-        os.utime(path, (1, 1))
     hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
-    assert not any(path.exists() for path in old)
-    assert young.exists()
+    assert not any(path.exists() for path in scratch)
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart").finish(outcome="success")
+    for path in scratch:
+        path.write_bytes(b"x")
+    assert len(hook_journal.drain(tmp_path)) == 1
+    assert not any(path.exists() for path in scratch)
+
+
+def test_shared_journal_occupancy_stays_within_one_complete_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from process_telemetry.stage_projection import HOOK_PLUGINS
+
+    assert hook_journal._occupancy_bound() <= hook_journal.SCAN_LIMIT
+    monkeypatch.setattr(hook_journal, "MARKER_LIMIT", 3)
+    plugins = sorted(HOOK_PLUGINS)
+    runs = [
+        hook_journal.HookRun.begin(tmp_path, plugin, "sessionStart")
+        for _ in range(3) for plugin in plugins
+    ]
+    assert sum(run.marker is not None for run in runs) == 3
+    assert len(list(tmp_path.glob("*.start"))) == 3
+    assert len(list(tmp_path.iterdir())) <= hook_journal._occupancy_bound()
+    # A different plugin's start recovers every stalled run under its own name.
+    monkeypatch.setattr(hook_journal, "STALE_AFTER_MS", 0)
+    fresh = hook_journal.HookRun.begin(tmp_path, plugins[-1], "sessionStart", stale_after_ms=0)
+    assert fresh.marker is not None
+    fresh.finish(outcome="success")
+    events = hook_journal.drain(tmp_path)
+    assert sorted(event["plugin"] for event in events if event["outcome"] == "unfinished") == sorted(
+        run.plugin for run in runs if run.marker is not None
+    )
+    assert not list(tmp_path.glob("*.start"))
+
+
+def test_unadmitted_hook_names_add_no_journal_files(tmp_path: Path) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "not-a-plugin", "sessionStart")
+    assert run.marker is None
+    assert not tmp_path.exists() or not list(tmp_path.iterdir())
+    (tmp_path / "not-a-plugin.sessionStart.0.start").write_bytes(b"{}")
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    assert [path.name for path in tmp_path.glob("*.start")] != []
+    assert not (tmp_path / "not-a-plugin.sessionStart.0.start").exists()
 
 
 def test_a_run_recovered_as_unfinished_is_not_also_reported_complete(tmp_path: Path) -> None:

@@ -406,7 +406,12 @@ reports with its real outcome, and one stopped after the append leaves a
 marker that recovery or the next drain matches to the already-pending record,
 so each run is recorded at most once. Pending records, live markers, abandoned scratch files
 and per-start recovery work are all bounded; a start that would exceed a
-bound goes unobserved rather than grow storage. The journal is content-free;
+bound goes unobserved rather than grow storage. Bounds apply to the whole
+shared journal: markers are capped across every plugin and entry, only the
+admitted plugin/entry vocabulary creates files, any start recovers every
+admitted entry's stalled markers, and each start and drain reclaims scratch
+(written only under the lock), so total occupancy fits the one complete scan
+each start and drain performs. The journal is content-free;
 a separate finite owner of the registered
 source later drains it into its own admitted route. Only the executing
 provider's adopted hooks write the journal; listing a plugin in the enum is
