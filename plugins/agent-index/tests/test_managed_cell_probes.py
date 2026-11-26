@@ -156,6 +156,12 @@ def test_real_prepared_cell_probe(
             assert "outside the selected runtime slot" in report["error"]
         elif scenario == "failed-import":
             assert "inert import failure" in report["error"]
+        elif scenario == "excess-output":
+            assert "OutputLimitExceeded" in report["error"]
+        elif scenario == "invalid-utf8":
+            expected_error = "UnicodeDecodeError" if os.name == "nt" else "UnicodeError"
+            assert expected_error in report["error"], report
+            assert "\\xff" not in report["error"]
         if admitted and scenario != "site":
             observed = json.loads(marker.read_text(encoding="utf-8"))
             assert Path(observed["python"]) == python

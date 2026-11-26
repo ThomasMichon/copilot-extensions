@@ -52,7 +52,7 @@ def runtime_probe(
         if cleanup_pending(exc):
             raise
         raise error_type(
-            "runtime probe requires prepared UV and process support; "
+            f"runtime probe failed ({type(exc).__name__}); "
             "use explicit installation management"
         ) from exc
 

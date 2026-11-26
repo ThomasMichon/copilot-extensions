@@ -54,7 +54,7 @@ def cell(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.mark.parametrize("phase", ["lookup", "probe"])
-@pytest.mark.parametrize("outcome", ["ordinary", "output-limit", "invalid-utf8", "uncertain"])
+@pytest.mark.parametrize("outcome", ["ordinary", "timeout", "output-limit", "invalid-utf8", "uncertain"])
 def test_probe_failure_preserves_custody(
     cell: Any, monkeypatch: pytest.MonkeyPatch,
     phase: str, outcome: str,
@@ -66,12 +66,16 @@ def test_probe_failure_preserves_custody(
     error: Any
     if outcome == "uncertain":
         error = owner.OwnedCleanupError(process, job, cleanup_resources=(("fixture", resource),))
+    elif outcome == "timeout":
+        error = subprocess.TimeoutExpired(
+            "private child command", 10, output="private child output", stderr="private child stderr",
+        )
     elif outcome == "output-limit":
         error = owner.OutputLimitExceeded("stdout", 65536)
     elif outcome == "invalid-utf8":
         error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid fixture byte")
     else:
-        error = RuntimeError("fixture refusal")
+        error = RuntimeError("private child refusal")
     calls = []
 
     def select(_python: Path) -> str:
@@ -101,6 +105,9 @@ def test_probe_failure_preserves_custody(
         assert error.cleanup_resources == (("fixture", resource),)
     else:
         assert caught.value.__cause__ is error
+        assert type(error).__name__ in str(caught.value)
+        assert "private child" not in str(caught.value)
+        assert "\\xff" not in str(caught.value)
 
 
 def test_smoke_site_probe_uses_shared_admission(
