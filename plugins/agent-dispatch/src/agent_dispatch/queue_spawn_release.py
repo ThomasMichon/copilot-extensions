@@ -33,6 +33,26 @@ class SpawnReleaseMixin:
         now: float | None = None,
     ) -> SpawnReservation:
         """Retire a release on exact absence without reviving historical ownership."""
+        return self.retire_spawn_outcome(
+            key, exact_absence=exact_absence, detail=detail, conclusion_state=conclusion_state,
+            conclusion_detail=conclusion_detail, now=now,
+        )[0]
+
+    def retire_spawn_outcome(
+        self,
+        key: str,
+        *,
+        exact_absence: bool,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+        now: float | None = None,
+    ) -> tuple[SpawnReservation, Task | None]:
+        """Retire a release and report the task it abandoned, when it settled one.
+
+        The abandonment commits with the retirement, so the caller publishes its
+        terminal transition exactly once.
+        """
         from .queue_spawn_reservations import _newer_worktree_reservation, _validate_conclusion_claim
 
         if not exact_absence:
@@ -103,10 +123,11 @@ class SpawnReleaseMixin:
             ).fetchone()
             from .queue_relevance_owner import settle_unowned_closeout
             settled = settle_unowned_closeout(self, conn, row["task_id"], ts)
+            abandoned = self._fetch(conn, row["task_id"]) if settled else None
             conn.execute("COMMIT")
         if settled:
             self._notify_owned_transition()
-        return SpawnReservation._from_row(updated)
+        return SpawnReservation._from_row(updated), abandoned
 
     def request_spawn_release(
         self,

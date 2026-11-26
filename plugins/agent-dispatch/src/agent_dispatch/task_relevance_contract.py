@@ -14,6 +14,7 @@ CLOSEOUT_PROTOCOL = "task_relevance_closeout/v1"
 RESERVATION_OWNER = "original-reservation/v1"
 FINALIZE_FIRST_PROTOCOL = "task_relevance_finalize_first/v1"
 FINALIZE_FIRST_PATH = f"{RELEVANCE_PATH}/finalize-first/candidates"
+FINALIZE_FIRST_UNKNOWN_PATH = f"{RELEVANCE_PATH}/finalize-first/unknown"
 
 
 def emitter_spec_revision(spec: dict[str, Any]) -> str:

@@ -197,12 +197,132 @@ def test_refused_cold_closeout_rearms_its_owner_to_close_out(q: TaskQueue) -> No
     token = fence(q, t, r)
     refused = q.release_relevance_finalize(t.id, token=token, detail="finalize refused")
 
-    assert refused["phase"] == "cold" and refused["rearm"] == Status.SUSPENDED
-    assert "pending" in [w.status for w in q.list_wakes(t.id)]
+    assert refused["phase"] == "cold" and refused["rearm"] == "pending"
     assert q.relevance_finalize_candidates("allocator") == []
-    gate(q, t.id)
-    assert q.resume(t.id, "host-a/wt-b").status in {Status.STARTED, Status.SUSPENDED}
+    # The re-armed wake is the owner's linked closeout: it is claimed and admitted.
+    wake = q.claim_due_wake(now=200)
+    assert wake is not None and wake.task_id == t.id
+    with q._connect() as conn:
+        from agent_dispatch.queue_relevance_delivery import closeout_wake
+
+        assert closeout_wake(conn, wake)
+        require_relevant_goal(conn, t.id, owner_wake=wake)
     assert current_task(q, t.id).status != Status.ABANDONED
+
+
+def test_a_fence_refuses_the_owner_closeout_wake_until_it_is_lifted(q: TaskQueue) -> None:
+    t, r = cold(q)
+    token = fence(q, t, r)
+    q.release_relevance_finalize(t.id, token=token, detail="finalize refused")
+    wake = q.claim_due_wake(now=200)
+    assert wake is not None
+    with q._connect() as conn:
+        # A later fence on the same checkout (the row persists after release) re-closes the gate.
+        assert conn.execute(
+            "UPDATE task_relevance_finalize_first SET state='fenced', token='other', expires_at=?"
+            " WHERE task_id=?", (10**12, t.id),
+        ).rowcount == 1
+        with pytest.raises(TaskError, match="requires owner closeout"):
+            require_relevant_goal(conn, t.id, owner_wake=wake)
+
+
+def test_a_fence_refuses_a_pending_before_start_closeout_wake(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from agent_dispatch import queue_relevance_delivery
+
+    t, r = unstarted(q)
+    # The unstarted cohort admits a merely pending linked wake; the fence must still outrank it.
+    monkeypatch.setattr(queue_relevance_delivery, "closeout_wake", lambda conn, wake: True)
+    wake: Any = SimpleNamespace(task_id=t.id)
+    with q._connect() as conn:
+        require_relevant_goal(conn, t.id, owner_wake=wake)
+    fence(q, t, r)
+    with q._connect() as conn, pytest.raises(TaskError, match="requires owner closeout"):
+        require_relevant_goal(conn, t.id, owner_wake=wake)
+
+
+def test_an_expired_fence_never_settles_a_newly_started_worker(q: TaskQueue) -> None:
+    t, r = unstarted(q)
+    token = fence(q, t, r)
+    with q._connect() as conn:
+        conn.execute("UPDATE task_relevance_finalize_first SET expires_at=1 WHERE task_id=?", (t.id,))
+    gate(q, t.id)
+    q.record_spawn(r.key, session_handle="native", worktree="wt-a")
+    q.record_spawn(r.key, session_handle="native", startup_complete=True, startup_revision=1)
+    q.start(t.id, "host-a/wt-a", owner_session_id="native",
+            expected_generation=current_task(q, t.id).generation, now=101)
+
+    with pytest.raises(TaskError, match="not held"):
+        q.settle_relevance_finalize(t.id, token=token, evidence=evidence("wt-a"))
+    assert current_task(q, t.id).status == Status.STARTED
+
+
+def test_an_unknown_finalize_effect_keeps_custody_past_fence_expiry(q: TaskQueue) -> None:
+    t, r = unstarted(q)
+    token = fence(q, t, r)
+    assert q.retain_relevance_finalize(t.id, token=token, detail="finalize timed out")["state"] == "unknown"
+    with q._connect() as conn:
+        conn.execute("UPDATE task_relevance_finalize_first SET expires_at=1 WHERE task_id=?", (t.id,))
+    with pytest.raises(TaskError, match="requires owner closeout"):
+        gate(q, t.id)
+    assert q.relevance_finalize_candidates("allocator") == []
+    assert [row["task_id"] for row in q.relevance_finalize_unknown("allocator")] == [t.id]
+    assert q.relevance_finalize_unknown("another-supervisor") == []
+
+    q.settle_relevance_finalize(t.id, token=token, evidence=evidence("wt-a"))
+    assert current_task(q, t.id).status == Status.ABANDONED
+
+
+def test_candidates_page_past_a_full_first_page(q: TaskQueue) -> None:
+    publish(q, pool(capacity=6))
+    ids = []
+    for i in range(6):
+        t = source_task(q)
+        r, _ = place(q, t)
+        workspace(q, r, f"wt-{i}")
+        assert report(q, t.id, request_id=f"closed-{i}")["decision"] == "closeout_pending"
+        ids.append(t.id)
+    first = q.relevance_finalize_candidates("allocator")
+    assert len(first) == 4
+    rest = q.relevance_finalize_candidates(
+        "allocator", after=(first[-1]["cursor"]["updated_at"], first[-1]["cursor"]["task_id"]),
+    )
+    assert sorted(c["task_id"] for c in first + rest) == sorted(ids)
+
+
+def test_retire_endpoint_publishes_the_committed_abandonment_once(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from agent_dispatch import handoff_claim_release
+    from agent_dispatch.coordinator import create_app
+
+    t, r = unstarted(q)
+    q.exhaust_pool_startup(r.key, generation=t.generation, startup_revision=1, now=700)
+    q.request_spawn_release(r.key, finished_startup_revision=1, now=701)
+    app = create_app(q)
+    api = TestClient(app)
+    events: list[dict[str, Any]] = []
+    released: list[str] = []
+    monkeypatch.setattr(app.state.bus, "publish", events.append)
+    monkeypatch.setattr(
+        handoff_claim_release, "release_if_handoff",
+        lambda task, **kwargs: released.append(task["id"]),
+    )
+
+    resp = api.post(f"/spawn-reservations/{r.key}/retire", json={"exact_absence": True})
+    assert resp.status_code == 200, resp.text
+    assert [e["type"] for e in events if e["type"].startswith(("spawn.", "task."))] == [
+        "spawn.retired", "task.abandoned",
+    ]
+    assert released == [t.id]
+    assert current_task(q, t.id).status == Status.ABANDONED
+    assert api.post(f"/spawn-reservations/{r.key}/retire", json={"exact_absence": True}).status_code == 409
+    assert [e["type"] for e in events].count("task.abandoned") == 1
 
 
 # Case 2: nothing to close out, so an obsolete report abandons directly.

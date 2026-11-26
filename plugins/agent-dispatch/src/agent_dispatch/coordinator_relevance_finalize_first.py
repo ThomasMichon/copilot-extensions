@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import math
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -11,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from .queue import TaskQueue
 from .queue_records import TaskError
 from .queue_common import CompletionOutcome
-from .task_relevance_contract import FINALIZE_FIRST_PATH, FINALIZE_FIRST_PROTOCOL, RELEVANCE_PATH
+from .task_relevance_contract import (
+    FINALIZE_FIRST_PATH, FINALIZE_FIRST_PROTOCOL, FINALIZE_FIRST_UNKNOWN_PATH, RELEVANCE_PATH,
+)
 
 
 class FenceBody(BaseModel):
@@ -50,8 +53,21 @@ def register_finalize_first_routes(
     base = f"{RELEVANCE_PATH}/tasks/{{task_id}}/finalize-first"
 
     @app.get(FINALIZE_FIRST_PATH, dependencies=dependencies)
-    def candidates(supervisor_id: str = Query(min_length=1, max_length=4096)) -> dict[str, Any]:
-        return envelope(queue.relevance_finalize_candidates(supervisor_id))
+    def candidates(
+        supervisor_id: str = Query(min_length=1, max_length=4096),
+        after_updated_at: float | None = Query(default=None),
+        after_task_id: str | None = Query(default=None, min_length=1, max_length=4096),
+    ) -> dict[str, Any]:
+        if (after_updated_at is None) != (after_task_id is None) or (
+            after_updated_at is not None and not math.isfinite(after_updated_at)
+        ):
+            raise HTTPException(422, detail="a candidate cursor needs after_updated_at and after_task_id")
+        after = None if after_updated_at is None or after_task_id is None else (after_updated_at, after_task_id)
+        return envelope(queue.relevance_finalize_candidates(supervisor_id, after=after))
+
+    @app.get(FINALIZE_FIRST_UNKNOWN_PATH, dependencies=dependencies)
+    def unknown(supervisor_id: str = Query(min_length=1, max_length=4096)) -> dict[str, Any]:
+        return envelope(queue.relevance_finalize_unknown(supervisor_id))
 
     @app.post(f"{base}/fence", dependencies=dependencies)
     def fence(task_id: str, body: FenceBody, request: Request) -> dict[str, Any]:
@@ -75,6 +91,13 @@ def register_finalize_first_routes(
             raise HTTPException(409, detail=str(exc)) from exc
         transition(outcome)
         return envelope({"task_id": task_id, "status": outcome.task.status})
+
+    @app.post(f"{base}/retain", dependencies=dependencies)
+    def retain(task_id: str, body: ReleaseBody) -> dict[str, Any]:
+        try:
+            return envelope(queue.retain_relevance_finalize(task_id, token=body.token, detail=body.detail))
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
 
     @app.post(f"{base}/release", dependencies=dependencies)
     def release(task_id: str, body: ReleaseBody) -> dict[str, Any]:

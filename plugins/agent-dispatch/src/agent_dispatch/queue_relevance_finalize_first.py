@@ -5,8 +5,10 @@ obsolete task, it may fence the task and run a real ``agent-worktrees finalize``
 on the task's own managed worktree. An accepted finalization is authoritative
 evidence there is nothing left for a worker to clean up, so the task is
 abandoned without a wake and its reservation is released through normal
-cleanup. A refused, unavailable or failed finalization only lifts the fence:
-the worker is started or resumed and performs the closeout itself.
+cleanup. A confirmed refusal only lifts the fence: the worker is started or
+resumed and performs the closeout itself. A finalization whose effect is
+unknown (timeout, unavailable runner, malformed result) keeps the fence as
+``unknown`` until the supervisor reconciles the worktree's actual state.
 """
 
 from __future__ import annotations
@@ -34,27 +36,40 @@ _RESERVATION_FIELDS = (
 )
 
 
+_TABLE = (
+    "CREATE TABLE IF NOT EXISTS task_relevance_finalize_first ("
+    "task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, token TEXT NOT NULL,"
+    " state TEXT NOT NULL CHECK (state IN ('fenced','unknown','refused')),"
+    " phase TEXT NOT NULL, reservation_key TEXT NOT NULL, supervisor_id TEXT NOT NULL,"
+    " updated_at REAL NOT NULL, expires_at REAL NOT NULL, detail TEXT)"
+)
+
+# A fence held by an unexpired claim, or retained because finalization's effect is unknown.
+_HELD = "(state='unknown' OR (state='fenced' AND expires_at>?))"
+
+
 def migrate(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS task_relevance_finalize_first ("
-        "task_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, token TEXT NOT NULL,"
-        " state TEXT NOT NULL CHECK (state IN ('fenced','refused')),"
-        " phase TEXT NOT NULL, reservation_key TEXT NOT NULL, supervisor_id TEXT NOT NULL,"
-        " updated_at REAL NOT NULL, expires_at REAL NOT NULL, detail TEXT)"
-    )
+    existing = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='task_relevance_finalize_first'",
+    ).fetchone()
+    if existing is not None and "'unknown'" not in existing[0]:
+        conn.execute("ALTER TABLE task_relevance_finalize_first RENAME TO task_relevance_finalize_first_v1")
+        conn.execute(_TABLE)
+        conn.execute("INSERT INTO task_relevance_finalize_first SELECT * FROM task_relevance_finalize_first_v1")
+        conn.execute("DROP TABLE task_relevance_finalize_first_v1")
+    conn.execute(_TABLE)
 
 
 def finalize_fenced(conn: sqlite3.Connection, task_id: str, now: float | None = None) -> bool:
-    """A live fence keeps any session from starting against the worktree mid-finalize."""
+    """A held fence keeps any session from starting against the worktree mid-finalize."""
     return conn.execute(
-        "SELECT 1 FROM task_relevance_finalize_first"
-        " WHERE task_id=? AND state='fenced' AND expires_at>?",
+        f"SELECT 1 FROM task_relevance_finalize_first WHERE task_id=? AND {_HELD}",
         (task_id, time.time() if now is None else now),
     ).fetchone() is not None
 
 
 _CANDIDATES = (
-    "SELECT t.id AS task_id, t.status, t.generation, t.owner, t.owner_session_id,"
+    "SELECT t.id AS task_id, t.status, t.generation, t.owner, t.owner_session_id, t.updated_at,"
     " " + ", ".join(f"s.{name} AS r_{name}" for name in _RESERVATION_FIELDS) +
     " FROM tasks t JOIN task_relevance_closeouts c ON c.task_id=t.id"
     " JOIN spawn_reservations s ON s.task_id=t.id"
@@ -66,15 +81,19 @@ _CANDIDATES = (
     # Unstarted: an ownerless claim whose acquisition failed or is unknown.
     " AND ((t.status=? AND t.owner IS NULL AND t.owner_session_id IS NULL AND s.state IN (?,?)"
     " AND NOT EXISTS (SELECT 1 FROM task_attachments a"
-    " WHERE a.task_id=t.id AND a.detached_at IS NULL))"
+    " WHERE a.task_id=t.id AND a.detached_at IS NULL)"
+    # A wake already handed to delivery is never raced; a pending one meets the fence.
+    " AND NOT EXISTS (SELECT 1 FROM wake_outbox w WHERE w.task_id=t.id"
+    " AND (w.status='delivering' OR w.execution_send_state IN ('pending','unknown'))))"
     # Cold: a suspended owner whose closeout wake was delivered and not re-armed.
     " OR (t.status=? AND s.state=? AND t.resume_requested=0"
     " AND NOT EXISTS (SELECT 1 FROM wake_outbox w WHERE w.task_id=t.id"
     " AND (w.status IN ('pending','delivering')"
     " OR w.execution_send_state IN ('pending','unknown')))))"
     " AND NOT EXISTS (SELECT 1 FROM task_relevance_finalize_first f WHERE f.task_id=t.id"
-    " AND f.expires_at>? AND (f.state='fenced' OR f.generation=t.generation))"
+    " AND (f.state='unknown' OR (f.expires_at>? AND (f.state='fenced' OR f.generation=t.generation))))"
 )
+_ORDER = " ORDER BY t.updated_at ASC, t.id ASC"
 
 
 def _params(supervisor_id: str) -> tuple[object, ...]:
@@ -91,6 +110,15 @@ def _candidate(row: sqlite3.Row) -> dict[str, Any]:
         "owner": row["owner"], "owner_session_id": row["owner_session_id"],
         "phase": "unstarted" if row["status"] == Status.CLAIMED else "cold",
         "reservation": {name: row[f"r_{name}"] for name in _RESERVATION_FIELDS},
+        "cursor": {"updated_at": row["updated_at"], "task_id": row["task_id"]},
+    }
+
+
+def _unknown(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "task_id": row["task_id"], "token": row["token"], "generation": row["generation"],
+        "phase": row["phase"], "detail": row["detail"],
+        "reservation": {name: row[f"r_{name}"] for name in _RESERVATION_FIELDS},
     }
 
 
@@ -101,18 +129,39 @@ class QueueRelevanceFinalizeFirstMixin:
         _fetch: Callable[[sqlite3.Connection, str], Task | None]
         _audit: Callable[..., None]
         _transition: Callable[..., Task | tuple[Task, bool]]
-        submit_steer: Callable[..., Task]
+        _notify_wake: Callable[[], None]
 
     def relevance_finalize_candidates(
-        self, supervisor_id: str, *, limit: int = CANDIDATE_LIMIT, now: float | None = None,
+        self, supervisor_id: str, *, limit: int = CANDIDATE_LIMIT,
+        after: tuple[float, str] | None = None, now: float | None = None,
     ) -> list[dict[str, Any]]:
-        """Obsolete tasks this supervisor's own reservation could settle by finalizing first."""
+        """One page of obsolete tasks this supervisor could settle by finalizing first.
+
+        ``after`` is the previous page's last ``cursor`` so a caller that skips
+        a full page (remote or hot workers) can reach later candidates.
+        """
+        sql, params = _CANDIDATES, _params(supervisor_id)
+        if after is not None:
+            sql += " AND (t.updated_at>? OR (t.updated_at=? AND t.id>?))"
+            params = (*params, after[0], after[0], after[1])
         with self._connect() as conn:
             rows = conn.execute(
-                _CANDIDATES + " ORDER BY t.updated_at ASC LIMIT ?",
-                (*_params(supervisor_id), max(1, min(limit, CANDIDATE_LIMIT))),
+                sql + _ORDER + " LIMIT ?", (*params, max(1, min(limit, CANDIDATE_LIMIT))),
             ).fetchall()
         return [_candidate(row) for row in rows]
+
+    def relevance_finalize_unknown(self, supervisor_id: str) -> list[dict[str, Any]]:
+        """Fences this supervisor retained because a finalization's effect is unknown."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT f.*, " + ", ".join(f"s.{name} AS r_{name}" for name in _RESERVATION_FIELDS) +
+                " FROM task_relevance_finalize_first f"
+                " JOIN spawn_reservations s ON s.key=f.reservation_key"
+                " WHERE f.state='unknown' AND f.supervisor_id=? ORDER BY f.updated_at ASC, f.task_id ASC"
+                " LIMIT ?",
+                (supervisor_id, CANDIDATE_LIMIT),
+            ).fetchall()
+        return [_unknown(row) for row in rows]
 
     def fence_relevance_finalize(
         self, task_id: str, *, supervisor_id: str, generation: int, reservation_key: str,
@@ -141,13 +190,38 @@ class QueueRelevanceFinalizeFirstMixin:
         return {"token": token, **candidate}
 
     def _finalize_fence(self, conn: sqlite3.Connection, task_id: str, token: str) -> sqlite3.Row:
+        # An expired claim may already have admitted a worker; it is never settlement authority.
         fence: sqlite3.Row | None = conn.execute(
-            "SELECT * FROM task_relevance_finalize_first WHERE task_id=? AND token=? AND state='fenced'",
-            (task_id, token),
+            f"SELECT * FROM task_relevance_finalize_first WHERE task_id=? AND token=? AND {_HELD}",
+            (task_id, token, time.time()),
         ).fetchone()
         if fence is None:
             raise TaskError("relevance finalize-first fence is not held by this request")
         return fence
+
+    def retain_relevance_finalize(
+        self, task_id: str, *, token: str, detail: str, now: float | None = None,
+    ) -> dict[str, Any]:
+        """Keep the fence when finalization's effect is unknown, pending reconciliation."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            fence = self._finalize_fence(conn, task_id, token)
+            conn.execute(
+                "UPDATE task_relevance_finalize_first SET state='unknown', updated_at=?, detail=?"
+                " WHERE task_id=?",
+                (ts, detail[:1024], task_id),
+            )
+            if fence["state"] != "unknown":
+                task = self._fetch(conn, task_id)
+                status = task.status if task is not None else Status.ABANDONED
+                self._audit(
+                    conn, task_id, ts=ts, from_status=status, to_status=status,
+                    worker=fence["supervisor_id"],
+                    note=f"relevance finalize-first effect unknown; custody retained: {detail[:256]}",
+                )
+            conn.execute("COMMIT")
+        return {"task_id": task_id, "state": "unknown", "phase": fence["phase"]}
 
     def settle_relevance_finalize(
         self, task_id: str, *, token: str, evidence: dict[str, Any], now: float | None = None,
@@ -225,21 +299,35 @@ class QueueRelevanceFinalizeFirstMixin:
             conn.execute("COMMIT")
         rearmed = None
         if fence["phase"] == "cold":
-            # Suspended owners have no other automatic next move: resume them to close out.
-            try:
-                rearmed = self.submit_steer(
-                    task_id, sender=fence["supervisor_id"], wake_requested=True,
-                    expected_status=Status.SUSPENDED,
-                    idempotency_key=f"relevance-finalize-first-rearm:{token}",
-                    fields={"task_relevance": {
-                        "rearm": True, "generation": fence["generation"],
-                        "instruction": (
-                            "The source of this task is obsolete. Resume only to close out: "
-                            "preserve existing work and obligations, finalize the managed "
-                            "worktree and abandon or submit the task."
-                        ),
-                    }},
-                ).status
-            except TaskError as exc:
-                rearmed = f"refused: {exc}"[:256]
+            rearmed = self._rearm_closeout(task_id, fence, ts)
         return {"task_id": task_id, "state": "refused", "phase": fence["phase"], "rearm": rearmed}
+
+    def _rearm_closeout(self, task_id: str, fence: sqlite3.Row, ts: float) -> str:
+        """Re-deliver the original linked closeout wake to the suspended owner."""
+        from .queue_relevance_delivery import enqueue_closeout
+
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            closeout = conn.execute(
+                "SELECT * FROM task_relevance_closeouts WHERE task_id=? AND acknowledgement IS NULL",
+                (task_id,),
+            ).fetchone()
+            if (
+                task is None or closeout is None or task.status != Status.SUSPENDED
+                or task.generation != fence["generation"] or task.hold_reason is not None
+            ):
+                conn.execute("COMMIT")
+                return "refused: closeout owner changed"
+            # The delivered wake ended with its session; a fresh linked wake is the owner's closeout.
+            conn.execute(
+                "UPDATE task_steer SET wake_operation_id=NULL, taken=0, taken_at=NULL WHERE id=?",
+                (closeout["steer_id"],),
+            )
+            wake = enqueue_closeout(self, conn, task, closeout, ts=ts)
+            if wake is None:
+                conn.execute("ROLLBACK")
+                return "refused: closeout owner is not resumable"
+            conn.execute("COMMIT")
+        self._notify_wake()
+        return wake.status

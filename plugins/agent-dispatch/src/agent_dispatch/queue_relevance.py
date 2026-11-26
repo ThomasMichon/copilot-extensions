@@ -67,14 +67,14 @@ def require_relevant_goal(
     row = closeout_request(conn, task_id)
     if row is not None:
         held = conn.execute("SELECT hold_reason FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if held is not None and held["hold_reason"] is None:
+        from .queue_relevance_finalize_first import finalize_fenced
+        # A finalize-first fence outranks every exception, including the owner's closeout wake.
+        if held is not None and held["hold_reason"] is None and not finalize_fenced(conn, task_id):
             from .queue_relevance_delivery import closeout_wake
             if owner_wake is not None and owner_wake.task_id == task_id and closeout_wake(conn, owner_wake):
                 return
             if closeout_start and row["acknowledgement"] is None:
-                from .queue_relevance_finalize_first import finalize_fenced
-                if not finalize_fenced(conn, task_id):
-                    return
+                return
         raise TaskError("task relevance requires owner closeout, not restarting its original goal")
 
 

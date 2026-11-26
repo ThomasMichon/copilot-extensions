@@ -49,6 +49,18 @@ def local_policy() -> Iterator[tuple[str, str, frozenset[str]]]:
         yield machine, env, frozenset(overrides.overridden_off_ids(policy))
 
 
+def publish_task_transition(queue: TaskQueue, bus: Any, outcome: CompletionOutcome) -> None:
+    """Run the normal terminal-transition side effects for one committed outcome."""
+    from . import telemetry
+    from .handoff_claim_release import release_if_handoff
+
+    task = asdict(outcome.task)
+    release_if_handoff(task, cancel_pending=True, queue=queue)
+    event_task = _event_task_dict(task)
+    bus.publish({"type": outcome.event_type, "task": event_task})
+    telemetry.emit_for(bus, telemetry.task_lifecycle_event(cast(str, outcome.event_type), event_task))
+
+
 def register_relevance_routes(
     app: FastAPI, queue: TaskQueue, *, control_token: str | None,
     sources: RegistrarSources | None = None,
@@ -64,14 +76,7 @@ def register_relevance_routes(
         return {"protocol": RELEVANCE_PROTOCOL, "version": 1, "result": result}
 
     def transition(outcome: CompletionOutcome) -> None:
-        from . import telemetry
-        from .handoff_claim_release import release_if_handoff
-
-        task = asdict(outcome.task)
-        release_if_handoff(task, cancel_pending=True, queue=queue)
-        event_task = _event_task_dict(task)
-        app.state.bus.publish({"type": outcome.event_type, "task": event_task})
-        telemetry.emit_for(app.state.bus, telemetry.task_lifecycle_event(cast(str, outcome.event_type), event_task))
+        publish_task_transition(queue, app.state.bus, outcome)
 
     @app.get(f"{RELEVANCE_PATH}/contract", dependencies=dependencies)
     def contract() -> dict[str, Any]:

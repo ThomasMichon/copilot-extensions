@@ -90,19 +90,31 @@ permitted `abandon` decision can retire obsolete SUBMITTED work directly.
 - **Finalize-first.** Before starting or resuming a worker for a pending,
   unacknowledged closeout, the supervisor that owns the task's created
   reservation may settle it itself. Candidates are an unstarted ownerless
-  claim (reservation reserving/spawned, no attachment) or a suspended task
-  with a cold reservation and no pending wake or resume request. The
-  supervisor skips remote or live workers, fences the task (start, resume
-  and steering are refused while the fence lasts) and runs a real
-  `agent-worktrees finalize` on the task's worktree. Only a clean finalize of
-  that exact worktree is accepted: the task becomes ABANDONED, the closeout
-  is acknowledged with `finish_action: supervisor-finalize-first/v1` plus the
-  finalize evidence, and the reservation is released through normal cleanup
-  without waking a worker. A refusal, unavailable command or error is never
-  acceptance: the fence lifts, the attempt cools down for the generation and
-  the task falls back to case 1. For a suspended task the refusal re-arms the
-  closeout wake to its owner so the worker closes out itself. The supervisor
-  attempts at most one candidate per cycle.
+  claim (reservation reserving/spawned, no attachment, no wake handed to
+  delivery) or a suspended task with a cold reservation and no pending wake
+  or resume request. Candidates are paged by `(updated_at, id)` so skipped
+  remote or hot workers never starve later ones. The supervisor requires
+  confirmed worker absence (an unknown liveness probe, such as a Bridge
+  outage, retains custody), fences the task, and runs a real
+  `agent-worktrees finalize` on the task's worktree in a bounded background
+  operation that later cycles observe, so ordinary supervision never waits
+  on it. While the fence is unexpired, start, resume, steering and every
+  closeout-wake admission exception are refused. Only a clean finalize of
+  that exact worktree, under an unexpired fence, is accepted: the task
+  becomes ABANDONED, the closeout is acknowledged with
+  `finish_action: supervisor-finalize-first/v1` plus the finalize evidence,
+  and the reservation is released through normal cleanup without waking a
+  worker. A confirmed refusal is never acceptance: the fence lifts, the
+  attempt cools down for the generation and the task falls back to case 1;
+  for a suspended task the refusal re-arms the owner's linked closeout wake
+  so the worker closes out itself. A timeout or malformed result has an
+  unknown effect: the task stays held (`unknown`, without expiry) until a
+  later cycle reconciles the worktree status — finalized or absent settles,
+  still tracked releases to the fallback. The supervisor attempts at most one
+  finalize at a time.
+- **Retirement abandonment.** When retiring a reservation abandons its task,
+  the retire endpoint publishes `task.abandoned` (with handoff-release and
+  lifecycle telemetry) once, alongside `spawn.retired`.
 
 The finalize-first operation is advertised in
 `/health.task_relevance.finalize_first` (`task_relevance_finalize_first/v1`).

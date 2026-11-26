@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .client_errors import DispatchError, DispatchUpgradeRequired
-from .task_relevance_contract import FINALIZE_FIRST_PATH, FINALIZE_FIRST_PROTOCOL, RELEVANCE_PATH
+from .task_relevance_contract import (
+    FINALIZE_FIRST_PATH, FINALIZE_FIRST_PROTOCOL, FINALIZE_FIRST_UNKNOWN_PATH, RELEVANCE_PATH,
+)
 
 if TYPE_CHECKING:
     import httpx
@@ -47,14 +49,24 @@ class RelevanceFinalizeFirstClientMixin:
             raise DispatchUpgradeRequired("invalid relevance finalize-first result")
         return result
 
-    def relevance_finalize_candidates(self, supervisor_id: str) -> list[dict[str, Any]]:
+    def _finalize_first_list(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         result = self._finalize_first_result(self._http.get(
-            FINALIZE_FIRST_PATH, params={"supervisor_id": supervisor_id},
-            headers=self._control_headers(),
+            path, params=params, headers=self._control_headers(),
         ))
         if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
             raise DispatchUpgradeRequired("invalid relevance finalize-first candidates")
         return result
+
+    def relevance_finalize_candidates(
+        self, supervisor_id: str, *, after: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"supervisor_id": supervisor_id}
+        if after is not None:
+            params.update(after_updated_at=after["updated_at"], after_task_id=after["task_id"])
+        return self._finalize_first_list(FINALIZE_FIRST_PATH, params)
+
+    def relevance_finalize_unknown(self, supervisor_id: str) -> list[dict[str, Any]]:
+        return self._finalize_first_list(FINALIZE_FIRST_UNKNOWN_PATH, {"supervisor_id": supervisor_id})
 
     def fence_relevance_finalize(
         self, task_id: str, *, supervisor_id: str, generation: int, reservation_key: str,
@@ -66,6 +78,9 @@ class RelevanceFinalizeFirstClientMixin:
 
     def settle_relevance_finalize(self, task_id: str, *, token: str, evidence: dict[str, Any]) -> dict[str, Any]:
         return self._finalize_first_post(task_id, "settle", {"token": token, "evidence": evidence})
+
+    def retain_relevance_finalize(self, task_id: str, *, token: str, detail: str) -> dict[str, Any]:
+        return self._finalize_first_post(task_id, "retain", {"token": token, "detail": detail})
 
     def release_relevance_finalize(self, task_id: str, *, token: str, detail: str) -> dict[str, Any]:
         return self._finalize_first_post(task_id, "release", {"token": token, "detail": detail})
