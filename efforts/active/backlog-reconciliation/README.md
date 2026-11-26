@@ -522,13 +522,19 @@ the non-public approval conversation.
 
 ## Plan
 
+The [hosted activation and incomplete-attempt proposal](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
+maps two finite completion candidates and three complete automation-status
+unions into existing OPEN #4783. Its later hosted-execution witness, causal
+limits and owners remain; review and actual receiving precede dispositions.
+
 The [Git deadline and optional snapshot-batching correspondence](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
 records reviewed #14787 and two separately consumed final units after actual
 code/test inspection and current Main/Dev comparison. Source-review assessment
 gaps leave both candidates OPEN, alongside twelve independently unfinished
 originals: zero tracker dispositions, not two completed bugs. Two equal
 complete censuses remain 599 whole OPEN, with no arrivals or departures;
-all parent states, spent procedures and actual holds remain.
+the factual outcome merged in #14789. All parent states, spent procedures
+and actual holds remain.
 
 The [seven further TTY cases and two source keepers](journal/2026/11.26-seven-further-tty-cases-and-two-source-keepers.md)
 records reviewed #14780, complete accepted receiving and seven separately
