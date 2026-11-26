@@ -10,8 +10,12 @@ bootstrap imports a validator through an unvalidated payload pointer.
 Repeated in-process owner observations retain the packaged validator by its
 canonical source path, with serialized first load and a fork-reset load lock.
 Only code is retained: every observation still revalidates current installation,
-namespace and governance receipts. Peer validators selected from independently
-updated payloads are loaded fresh.
+namespace and governance receipts. Successfully loaded peer validators are also
+retained by canonical payload path and the identities and content hashes of
+their Python source files. Every observation rereads that code signature and
+revalidates current receipts and governance; no accepted selection is retained.
+A different payload path loads its own validator. Changed code at a retained
+path refuses until a fresh caller loads it, including same-metadata rewrites.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
 `agent-containers`, `agent-dispatch`, `agent-ssh`, `agent-machines`, and
 `agent-pull-requests`, plus `agent-vault` -- each a canonical

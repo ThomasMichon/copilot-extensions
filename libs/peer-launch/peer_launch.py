@@ -37,6 +37,7 @@ OWNERS = {
     "agent-ssh", "agent-mcp", "agent-vault",
 }
 _packaged_primitives: dict[Path, ModuleType] = {}
+_peer_primitives: dict[Path, tuple[tuple[tuple[str, int, int, str], ...], ModuleType]] = {}
 _peer_runtimes: dict[Path, tuple[tuple[tuple[str, int, int, int, int], ...], ModuleType | None]] = {}
 _primitive_lock = threading.Lock()
 
@@ -168,6 +169,32 @@ def _readiness_support(own: dict[str, Any]) -> ModuleType:
             path = Path(own["payloadRoot"]) / "scripts" / "versioned_runtime_probe.py"
             support = _load_primitive(path, "configuration_context.readiness")
         return support
+
+
+def _peer_context_primitive(context: dict[str, Any]) -> ModuleType:
+    """Retain unchanged validator code, never its receipt or governance results."""
+    path = (Path(context["payloadRoot"]) / "scripts" / "installation-context" / "installation_context.py").resolve()
+
+    def signature() -> tuple[tuple[str, int, int, str], ...]:
+        return tuple(
+            (source.name, info.st_dev, info.st_ino, hashlib.sha256(source.read_bytes()).hexdigest())
+            for source in sorted(path.parent.glob("*.py"))
+            for info in (source.stat(),)
+        )
+
+    with _primitive_lock:
+        current = signature()
+        retained = _peer_primitives.get(path)
+        if retained is not None:
+            original, module = retained
+            if current != original:
+                raise ValueError("Peer installation-context code changed; restart the observing caller")
+            return module
+        module = _load_primitive(path, "_peer_installation_context_" + str(len(_peer_primitives)))
+        if signature() != current:
+            raise ValueError("Peer installation-context code changed during loading")
+        _peer_primitives[path] = (current, module)
+        return module
 
 
 def _active_context(
@@ -514,10 +541,7 @@ def _resolve_peer_observation(
             payload = support.payload_contract(Path(peer["payloadRoot"]), plugin)
             if payload.module != PEERS[plugin]:
                 raise support.ProbeContractError("Peer probe module differs from its payload contract.")
-    peer_primitive = _load_primitive(
-        Path(peer["payloadRoot"]) / "scripts" / "installation-context"
-        / "installation_context.py", "_peer_installation_context",
-    )
+    peer_primitive = _peer_context_primitive(peer)
     # Use the peer's shipped contract too: a peer may update independently.
     validated = _active_context(
         peer_primitive, peer_receipt, durable, plugin, cell, environment,

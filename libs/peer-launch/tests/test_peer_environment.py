@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -272,6 +273,77 @@ def test_peer_primitive_loader_does_not_convert_nested_unknown_to_configuration_
     )
     with pytest.raises(ProbeContractError, match="nested contract gap"):
         peer_launch._load_primitive(path, "_probe_nested_primitive")
+
+
+def test_retained_peer_validator_still_observes_each_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = tmp_path / "payload"
+    primitive = payload / "scripts" / "installation-context" / "installation_context.py"
+    primitive.parent.mkdir(parents=True)
+    loaded = tmp_path / "loads"
+    primitive.write_text(
+        f"from pathlib import Path\np=Path({str(loaded)!r})\n"
+        "p.write_text((p.read_text() if p.exists() else '') + 'x')\n", encoding="utf-8",
+    )
+    root = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-worktrees"
+    own = {"cellRoot": str(root.parent.parent)}
+    peer = {
+        **_context("agent-vault"), "payloadRoot": str(payload),
+        "pluginRoot": str(root.with_name("agent-vault")), "marketplaceId": "example",
+        "generation": 1,
+    }
+    owners, receipts = [], []
+
+    def active(*args: object) -> dict[str, Any]:
+        receipts.append(peer["generation"])
+        return dict(peer)
+
+    def owner(*args: object) -> dict[str, Any]:
+        owners.append(True)
+        return dict(own)
+
+    monkeypatch.setattr(peer_launch, "validate_owner", owner)
+    monkeypatch.setattr(peer_launch, "_packaged_primitive", lambda: object())
+    monkeypatch.setattr(peer_launch, "_active_context", active)
+    monkeypatch.setattr(peer_launch, "_governance", lambda *args: {})
+    monkeypatch.setattr(peer_launch, "_peer_python_inprocess", lambda *args: None)
+    monkeypatch.delenv(PROBE_ENV, raising=False)
+    first = peer_launch._resolve_peer_observation(
+        "agent-worktrees", root, "receipt", "agent-vault", allow_native=False,
+    )
+    peer["generation"] = 2
+    second = peer_launch._resolve_peer_observation(
+        "agent-worktrees", root, "receipt", "agent-vault", allow_native=False,
+    )
+    assert first[1]["generation"] == 1 and second[1]["generation"] == 2
+    assert loaded.read_text() == "x"
+    assert len(owners) == 4 and receipts == [1, 1, 1, 2, 2, 2]
+
+
+@pytest.mark.parametrize("change", ["entry", "fragment", "same-metadata", "added"])
+def test_retained_peer_validator_refuses_changed_code(
+    tmp_path: Path, change: str,
+) -> None:
+    primitive = tmp_path / "scripts" / "installation-context" / "installation_context.py"
+    primitive.parent.mkdir(parents=True)
+    primitive.write_text("VALUE = 1\n", encoding="utf-8")
+    fragment = primitive.with_name("_installation_context_test.py")
+    fragment.write_text("VALUE = 1\n", encoding="utf-8")
+    context = {"payloadRoot": str(tmp_path)}
+    retained = peer_launch._peer_context_primitive(context)
+    assert retained.VALUE == 1
+    target = fragment if change == "fragment" else primitive
+    before = target.stat()
+    if change == "added":
+        primitive.with_name("_installation_context_added.py").write_text("VALUE = 2\n", encoding="utf-8")
+    else:
+        target.write_text("VALUE = 2\n", encoding="utf-8")
+        if change == "same-metadata":
+            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+    with pytest.raises(ValueError, match="code changed"):
+        peer_launch._peer_context_primitive(context)
+    assert retained.VALUE == 1
 
 
 @pytest.mark.parametrize("qualification", ["qualified", "payload-missing", "runtime-missing", "unsupported"])
