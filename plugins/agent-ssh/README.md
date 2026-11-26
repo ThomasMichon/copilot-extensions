@@ -30,10 +30,18 @@ Their fixed SSH-only `stamp-provision` request holds the same queue custody
 across stamping and provisioning from the exact selected snapshot, including
 caller loss between those steps. The primary delegates to its own tagged
 snapshot dispatcher rather than today's installed payload. Healthy commands
-still dispatch directly with their original arguments and exit outcomes;
+admit their exact selected application interpreter through prepared-only
+`uv python find --no-project --managed-python --no-python-downloads`, then
+dispatch with their original arguments, stdio and exit outcomes. Missing UV,
+selection support or native capture refuses before application execution; it
+does not acquire prerequisites or submit a first-use request.
+The native installation-context evaluator and first-use policy are unchanged;
 cold custom roots/cells and missing/skewed support refuse without an outer
 provision lock, status writes or a foreground fallback. Explicit installers and
 network-backed retained-source qualification under #5379 remain separate.
+
+The backend-free [command controls](tests/README.md) cover raw and materialized
+payloads without opening connections or modifying SSH configuration.
 
 The installer's `uninstall` action serializes with install/update. It removes
 only explicitly named runtime code and selectors, retaining configuration,
