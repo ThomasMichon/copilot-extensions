@@ -200,6 +200,30 @@ def test_a_torn_tail_never_absorbs_the_next_healthy_completion(tmp_path: Path) -
     assert hook_journal.drain(tmp_path) == []
 
 
+def test_a_committed_record_missing_its_newline_is_reported_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _finish_runs(tmp_path, 1)
+    real_append = hook_journal.append_bytes
+
+    def stopped_before_newline(path: Path, data: bytes, **kwargs: object) -> None:
+        real_append(path, data.rstrip(b"\n"), **kwargs)
+        raise KeyboardInterrupt  # the runtime stops the hook mid-append
+
+    monkeypatch.setattr(hook_journal, "append_bytes", stopped_before_newline)
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    with pytest.raises(KeyboardInterrupt):
+        run.finish(outcome="failure", failure_category="nonzero_exit", exit_code=3)
+    monkeypatch.setattr(hook_journal, "append_bytes", real_append)
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    events = hook_journal.drain(tmp_path)
+    assert [(event["run_sequence"], event["outcome"]) for event in events] == [
+        (1, "success"), (2, "failure"),
+    ]
+    assert events[1]["exit_code"] == 3
+    assert hook_journal.drain(tmp_path) == []
+
+
 def test_drain_waits_out_an_in_progress_append_without_losing_it(tmp_path: Path) -> None:
     _finish_runs(tmp_path, 1)
     with hook_journal._journal_lock(tmp_path) as held:

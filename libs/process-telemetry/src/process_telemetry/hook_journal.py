@@ -165,12 +165,33 @@ def _key(event: dict[str, Any]) -> tuple[Any, ...] | None:
     return (event.get("plugin"), event.get("entry"), event["run_sequence"], event["started_at"])
 
 
-def _pending_keys(directory: Path) -> set[tuple[Any, ...]]:
+def _discard_torn_tail(directory: Path) -> bytes:
+    """Drop an unterminated final line and return the complete lines; the lock is held.
+
+    A writer stopped mid-append can leave a whole JSON object without its
+    newline.  `drain` never reports such a line, so it must not count as
+    pending either: its committed marker remains the record of that run.
+    """
+    path = directory / "pending.jsonl"
     try:
-        with (directory / "pending.jsonl").open("rb") as stream:
-            data = stream.read(PENDING_LIMIT)
+        with path.open("rb") as stream:
+            data = stream.read(PENDING_LIMIT + 1)
     except FileNotFoundError:
-        return set()
+        return b""
+    if not data or data.endswith(b"\n"):
+        return data
+    kept = data[: data.rfind(b"\n") + 1]
+    if kept:
+        scratch = directory / f".{uuid.uuid4().hex}.pending"
+        scratch.write_bytes(kept)
+        os.replace(scratch, path)
+    else:
+        path.unlink()
+    return kept
+
+
+def _pending_keys(directory: Path) -> set[tuple[Any, ...]]:
+    data = _discard_torn_tail(directory)
     keys: set[tuple[Any, ...]] = set()
     for line in data.splitlines():
         try:
