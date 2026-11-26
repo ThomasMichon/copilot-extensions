@@ -41,6 +41,7 @@ on:
       - libs/payload-invocation/tests/test_native_publication.py
       - libs/payload-invocation/tests/test_simple_first_use_publication.py
       - libs/payload-invocation/tests/test_evaluator_bootstrap_consumers.py
+      - libs/payload-invocation/tests/test_readiness_dispatcher_imports.py
       - plugins/agent-codespaces/scripts/runtime-gate.sh
       - plugins/agent-codespaces/scripts/runtime-gate.ps1
       - plugins/agent-codespaces/scripts/bootstrap-python.ps1
@@ -1143,6 +1144,22 @@ jobs:
           cases=[c for p in Path('qualification-evidence/index-constructor-regressions').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==10 and len({c.attrib['name'] for c in cases})==10;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Retain Codespaces installed-readiness and checkout-import isolation
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_readiness_dispatcher_imports.py --allow-explicit-tiers
+          -k "agent-codespaces and ${{ env.CODESPACES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/codespaces-readiness
+      - name: Require every retained readiness assertion without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.CODESPACES_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/codespaces-readiness').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=32 if os.environ['QUALIFIED_SHELL']=='pwsh' else 16;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   budget-bootstrap-owner:
     runs-on: windows-latest

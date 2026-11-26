@@ -34,3 +34,10 @@ packet has run under the system Bash. That packet isolates context decisions;
 it does not qualify canonical namespaced management under Bash 3.2. Windows
 evaluator packets select the host through the fixture parameter, not a substring
 filter that could also match another host's test name.
+
+The retained dispatcher-import packet also requires every Codespaces readiness
+case: sixteen per Bash/Windows PowerShell host and thirty-two for Core's standard
+and Legacy modes. Existing canonical bins are reused instead of recopied over
+the fixture's materialized closure. Qualified/unqualified installed descriptors,
+option prefixes, checkout-import refusal, bytecode and unchanged-payload
+assertions remain intact.
