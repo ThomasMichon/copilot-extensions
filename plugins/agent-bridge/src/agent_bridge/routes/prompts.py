@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 
 from ..prompt_models import (
     PendingPrompt,
@@ -18,12 +19,35 @@ from ..native_keyed_admission import KeyedNativePrompt, submit as keyed_submit
 from ..native_send_admission import NativeSendPrompt, read_receipt, submit as native_send
 from ..acquisition_contract import AcquisitionRefused
 from ..native_send_settlement import settle as settle_native_send
+from ..managed_messages import ManagedMessage
 
 if TYPE_CHECKING:
     from ..native_receipt_records import NativeReceiptRecords
     from ..session_manager import SessionManager
 
 router = APIRouter()
+
+
+@router.post("/{session_id}/messages", status_code=202)
+async def accept_managed_message(
+    session_id: str, req: ManagedMessage, request: Request, background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """Accept durable ordinary input without admitting a turn or changing lifecycle."""
+    from ..managed_messages import accept
+
+    manager: SessionManager = request.app.state.session_manager
+    try:
+        receipt = accept(manager.db, session_id, req)
+    except KeyError as exc:
+        raise HTTPException(404, detail={"code": "session_not_found"}) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(503, detail={"code": "managed_message_write_unconfirmed"}) from exc
+    session = manager._sessions.get(session_id)
+    if session is not None and not receipt["duplicate"]:
+        background_tasks.add_task(manager._kick_pending_drain, session, allow_resume=False)
+    return receipt
 
 
 @router.post("/{session_id}/turns/native-bound/send/settle")

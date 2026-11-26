@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import threading
 
-from .db_core import SCHEMA_VERSION, _SCHEMA_SQL, _SESSIONS_ENSURE_COLUMNS, log
+from .db_core import SCHEMA_VERSION, _SCHEMA_SQL, log
 from .owner_membership_schema import ensure_schema as ensure_membership_indexes
 from .mux_question_schema import ensure_schema as ensure_mux_question_schema
 from .mux_question_schema import validate_schema as validate_mux_question_schema
@@ -20,17 +20,10 @@ from .dispatch_cli_origin import validate_schema as validate_cli_origin_schema
 from .native_send_settlement_schema import ensure_schema as ensure_send_settlement
 from .native_send_settlement_schema import validate_schema as validate_send_settlement
 from .live_message_schema import validate_exact_live_schema as validate_exact_live_schema
-
-
-def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
-    """Require writable preparation of the durable cold-recovery stop gate."""
-    column = next(
-        (row for row in conn.execute("PRAGMA table_info(sessions)")
-         if row[1] == "cold_recovery_stop_token"),
-        None,
-    )
-    if column is None or column[2].upper() != "TEXT" or column[3] != 0:
-        raise ValueError("Cold recovery stop gate requires supported writable preparation")
+from .managed_message_schema import ensure_schema as ensure_managed_messages
+from .managed_message_schema import validate_schema as validate_managed_messages
+from .db_session_schema import ensure_columns
+from .db_session_schema import validate_cold_recovery_schema as validate_cold_recovery_schema
 
 
 class _SchemaMixin:
@@ -109,6 +102,8 @@ class _SchemaMixin:
                     validate_cli_origin_schema(conn)
                 if recorded is not None and recorded["version"] >= 48:
                     validate_send_settlement(conn)
+                if recorded is not None and recorded["version"] >= 51:
+                    validate_managed_messages(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -126,6 +121,7 @@ class _SchemaMixin:
                 ensure_mux_question_schema(conn)
                 ensure_status_schema(conn)
                 ensure_send_settlement(conn)
+                ensure_managed_messages(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
@@ -163,6 +159,7 @@ class _SchemaMixin:
             validate_exact_live_schema(conn)
             validate_cli_origin_schema(conn)
             validate_send_settlement(conn)
+            validate_managed_messages(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -255,44 +252,8 @@ class _SchemaMixin:
             conn.execute("ALTER TABLE live_sessions ADD COLUMN process_started_at REAL")
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
-        """Idempotently add any missing post-base ``sessions`` columns.
-
-        Independent of ``schema_version`` (that is the whole point): the
-        version-gated migrations below only run when the DB is *below* their
-        target version, so a table already stamped at/after that version but
-        missing the column would never receive it. This ensures the canonical
-        nullable column set on every init.
-        """
-        existing = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
-        added: list[str] = []
-        for col, col_type in _SESSIONS_ENSURE_COLUMNS:
-            if col not in existing:
-                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {col_type}")
-                added.append(col)
-        if "background_recovery_enabled" in added:
-            # The v20 migration's stopped-row backfill only runs when
-            # from_version < 20; a DB already stamped 20 but missing this
-            # column (reaching this safety net instead) would otherwise keep
-            # the blanket `DEFAULT 1`, silently re-enabling background
-            # recovery for existing dormant `stopped` rows.
-            conn.execute(
-                "UPDATE sessions SET background_recovery_enabled = "
-                "CASE WHEN status = 'stopped' THEN 0 ELSE 1 END"
-            )
-        if "cold_recovery_stop_token" in added:
-            # Legacy dormancy cannot distinguish an explicit stop from cold
-            # drain suppression. Preserve that ambiguity conservatively.
-            conn.execute(
-                "UPDATE sessions SET cold_recovery_stop_token=lower(hex(randomblob(16))) "
-                "WHERE status='stopped' AND background_recovery_enabled=0"
-            )
-        if added:
-            conn.commit()
-            log.warning(
-                "Ensured missing sessions column(s) via safety net: %s "
-                "(schema was stamped past their migration gate; see #815)",
-                ", ".join(added),
-            )
+        """Apply the shared idempotent session-column preparation."""
+        ensure_columns(conn)
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
         """Run schema migrations from from_version to SCHEMA_VERSION."""
@@ -998,3 +959,10 @@ class _SchemaMixin:
             from .inbox_custody import migrate_durable_messages
 
             migrate_durable_messages(conn)
+
+        if from_version < 51:
+            with conn:
+                ensure_managed_messages(conn)
+                validate_managed_messages(conn)
+                conn.execute("UPDATE schema_version SET version=?", (51,))
+            log.info("Schema migrated to version 51: original managed message queue receipts")

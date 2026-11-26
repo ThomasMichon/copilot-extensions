@@ -42,6 +42,8 @@ from ..status_schema import CAPABILITY as HOST_STATUS_CAPABILITY
 from ..dispatch_origin import CAPABILITY as DISPATCH_ORIGIN_CAPABILITY
 from ..dispatch_cli_origin import CAPABILITY as DISPATCH_CLI_ORIGIN_CAPABILITY
 from ..native_send_settlement import CAPABILITY as NATIVE_SEND_SETTLEMENT_CAPABILITY
+from ..managed_messages import CAPABILITY as MANAGED_MESSAGES_CAPABILITY
+from ..client_worktree_exact_resume import CAPABILITY as WORKTREE_EXACT_RESUME_CAPABILITY
 
 router = APIRouter()
 
@@ -72,6 +74,7 @@ async def health(request: Request) -> dict[str, Any]:
             HOSTING_CAPABILITY: HOSTING_CAPABILITY_VERSION,
             NATIVE_SEND_RECEIPT_CAPABILITY: NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
             NATIVE_SEND_SETTLEMENT_CAPABILITY: 1,
+            MANAGED_MESSAGES_CAPABILITY: 1,
             NATIVE_SEND_NO_RESUME_CAPABILITY: NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
             LIVE_KEYED_RECEIPT_CAPABILITY: 1,
             LIVE_EXACT_NOTIFY_CAPABILITY: 1,
@@ -101,6 +104,7 @@ async def health(request: Request) -> dict[str, Any]:
             "remote_native_prompt": 1,
             "remote_exact_live_prompt": 1,
             "worktree_metadata_hydration": 1,
+            WORKTREE_EXACT_RESUME_CAPABILITY: 1,
             LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
             LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,
             MUX_QUESTION_ANSWERS_CAPABILITY: 1,
