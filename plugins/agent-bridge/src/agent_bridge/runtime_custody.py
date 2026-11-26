@@ -84,7 +84,7 @@ class RuntimeAdmission:
     @classmethod
     def parse(cls, raw: str) -> RuntimeAdmission:
         """Decode an original association without losing duplicate fields."""
-        def unique(pairs):
+        def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
             result = {}
             for key, value in pairs:
                 if key in result:
@@ -147,6 +147,7 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
 
 def operation_triggers(
     tables: tuple[str, ...], *, compatible_messages: bool = False,
+    durable_messages: bool = False,
 ) -> dict[str, tuple[str, str]]:
     """Canonical admission, association and history guards for DB-owned operations."""
     triggers = {}
@@ -161,6 +162,13 @@ def operation_triggers(
                 "WHERE session_id=NEW.session_id AND current=1 "
                 "AND installation!='compatible-inbox-v1')) "
             )
+            if durable_messages:
+                closed_guard = (
+                    "AND NOT (NEW.producer_target_json IS NOT NULL "
+                    "AND NEW.runtime_custody_json IS NULL "
+                    "AND NEW.kind NOT LIKE 'control:%' AND NEW.kind NOT LIKE 'startup:%') "
+                    + closed_guard
+                )
         triggers[f"{table}_runtime_admission"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_admission "
             f"BEFORE INSERT ON {table} BEGIN "

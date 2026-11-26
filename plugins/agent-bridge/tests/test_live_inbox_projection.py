@@ -7,12 +7,11 @@ import json
 
 import pytest
 
-from agent_bridge.runtime_custody import RuntimeCustodyError
-from test_inbox_custody import inbox as inbox
+from test_inbox_custody import Inbox, inbox as inbox
 
 
 @pytest.mark.parametrize("history_size", [0, 20_000])
-def test_empty_inbox_does_not_scan_unrelated_retained_history(inbox, history_size) -> None:
+def test_empty_inbox_does_not_scan_unrelated_retained_history(inbox: Inbox, history_size: int) -> None:
     db, _, _, admission, consumer = inbox
     with db._runtime_transaction(write=True) as conn:
         conn.executemany(
@@ -43,7 +42,7 @@ def test_empty_inbox_does_not_scan_unrelated_retained_history(inbox, history_siz
     ("legacy", "unrelated-native"), ("enrolled", "native-a"), ("retired", "native-a"),
 ])
 def test_ordinary_admission_is_bounded_by_consumer_history_indexes(
-    inbox, history_size, target, history_session,
+    inbox: Inbox, history_size: int, target: str, history_session: str,
 ) -> None:
     db, _, _, admission, consumer = inbox
     original = dict(db.execute_read("SELECT * FROM bridge_inbox_consumers")[0])
@@ -77,19 +76,14 @@ def test_ordinary_admission_is_bounded_by_consumer_history_indexes(
 
     conn.set_progress_handler(progress, 100)
     try:
-        def send():
+        def send() -> tuple[int | None, str | None]:
             return db.enqueue_live_message_if_fresh(
                 sid, sender="sender", body="new input", now=11.0,
                 idempotency_key="new-operation", enrolled_inbox=True, runtime_admission=admission,
             )
 
-        if target == "retired":
-            with pytest.raises(RuntimeCustodyError, match="current frontend and consumer enrollment"):
-                send()
-            assert db.execute_read("SELECT * FROM live_messages") == []
-        else:
-            mid, reason = send()
-            assert mid is not None and reason is None
+        mid, reason = send()
+        assert mid is not None and reason is None
     finally:
         conn.set_progress_handler(None, 0)
     assert len(ticks) * 100 <= 10_000
@@ -98,7 +92,7 @@ def test_ordinary_admission_is_bounded_by_consumer_history_indexes(
 @pytest.mark.parametrize("history_size", [0, 20_000])
 @pytest.mark.parametrize("retained", [False, True])
 def test_admission_indexes_retained_history_without_reclassifying_legacy(
-    inbox, history_size, retained,
+    inbox: Inbox, history_size: int, retained: bool,
 ) -> None:
     db, _, _, admission, _ = inbox
     sid = "never-enrolled"
@@ -114,10 +108,10 @@ def test_admission_indexes_retained_history_without_reclassifying_legacy(
         )
     original = None
     if retained:
-        mid = db.enqueue_live_message(
+        original_id = db.enqueue_live_message(
             sid, "sender", "retained original", 10.0, runtime_admission=admission,
         )
-        original = dict(db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0])
+        original = dict(db.execute_read("SELECT * FROM live_messages WHERE id=?", (original_id,))[0])
     ticks = []
     conn = db._get_conn()
 
@@ -127,23 +121,21 @@ def test_admission_indexes_retained_history_without_reclassifying_legacy(
 
     conn.set_progress_handler(progress, 100)
     try:
-        def send():
+        def send() -> tuple[int | None, str | None]:
             return db.enqueue_live_message_if_fresh(
                 sid, sender="sender", body="new legacy input", now=11.0,
                 idempotency_key="new-operation", enrolled_inbox=True, runtime_admission=admission,
             )
 
-        if retained:
-            with pytest.raises(RuntimeCustodyError, match="current frontend and consumer enrollment"):
-                send()
-        else:
-            mid, reason = send()
-            assert mid is not None and reason is None
+        mid, reason = send()
+        assert mid is not None and reason is None
     finally:
         conn.set_progress_handler(None, 0)
     assert len(ticks) * 100 <= 10_000
     stored, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))
     if retained:
-        assert dict(stored) == original
-    else:
-        assert stored["runtime_custody_json"] is None and stored["handoff_json"] is None
+        assert original is not None
+        previous, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (original["id"],))
+        assert dict(previous) == original
+    assert stored["runtime_custody_json"] is None and stored["handoff_json"] is None
+    assert stored["producer_target_json"] is not None

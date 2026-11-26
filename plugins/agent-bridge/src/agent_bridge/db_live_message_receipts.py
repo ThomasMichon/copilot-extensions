@@ -12,7 +12,7 @@ from .db_operations import DatabaseOperations
 
 _HANDOFF_COLUMNS = (
     "id,session_id,created_at,delivered_at,consumed_at,handoff_json,"
-    "runtime_custody_json,handoff_started_at,outcome,disposition_json"
+    "runtime_custody_json,handoff_started_at,outcome,disposition_json,producer_target_json"
 )
 MAX_RECOVERY_MESSAGE_ID = (1 << 63) - 1
 
@@ -73,9 +73,14 @@ class _LiveMessageReceiptsMixin(DatabaseOperations):
         """Return the retained admission and delivery evidence for one message."""
         rows = self.execute_read(
             "SELECT session_id, id AS message_id, created_at AS admitted_at, "
-            "delivered_at AS sdk_accepted_at, consumed_at, disposition_json FROM live_messages "
-            f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=?",
-            (session_id, session_id, session_id, message_id),
+            "delivered_at AS sdk_accepted_at, consumed_at, disposition_json, "
+            "CASE WHEN producer_target_json IS NOT NULL AND handoff_json IS NULL "
+            "AND delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
+            "THEN CASE WHEN claimed_at IS NOT NULL THEN 'legacy_delivery_unconfirmed' "
+            "ELSE 'awaiting_consumer' END END AS queue_reason FROM live_messages "
+            f"WHERE (session_id={MESSAGE_TARGET_SQL} OR "
+            "json_extract(producer_target_json,'$.session_id')=?) AND id=?",
+            (session_id, session_id, session_id, session_id, message_id),
         )
         if not rows:
             return None
@@ -88,17 +93,26 @@ class _LiveMessageReceiptsMixin(DatabaseOperations):
         from .message_contracts import receipt_disposition
 
         receipt_disposition(row, raw)
+        if row["queue_reason"] is None:
+            row.pop("queue_reason")
         return row
 
     def consume_live_message(self, session_id: str, message_id: int, now: float) -> int:
         """Record consumption once, independently of the SDK-send acknowledgement."""
+        from .durable_inbox import LEGACY_SUPPORTED_SQL
+
         cur = self.execute_write(
-            "UPDATE live_messages SET consumed_at=? "
+            "UPDATE live_messages SET consumed_at=?, "
+            "claimed_at=CASE WHEN producer_target_json IS NOT NULL "
+            "THEN COALESCE(claimed_at,?) ELSE claimed_at END "
             f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=? AND consumed_at IS NULL "
             "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
+            "AND (producer_target_json IS NULL OR claimed_at IS NOT NULL OR NOT EXISTS ("
+            "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=live_messages.session_id)) "
+            f"AND {LEGACY_SUPPORTED_SQL} "
             "AND disposition_json IS NULL "
             "AND kind NOT LIKE 'control:%'",
-            (now, session_id, session_id, session_id, message_id),
+            (now, now, session_id, session_id, session_id, message_id),
         )
         return cur.rowcount
 

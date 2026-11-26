@@ -108,6 +108,7 @@ async def health(request: Request) -> dict[str, Any]:
             DISPATCH_ORIGIN_CAPABILITY: 1,
             DISPATCH_CLI_ORIGIN_CAPABILITY: 1,
             "compatible_native_inbox": 1,
+            "durable_live_inbox": 1,
             "retained_delivery_reattempt": 1,
             "native_consumption_inbox": 1,
             "versioned_messages": 1,

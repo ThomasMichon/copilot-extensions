@@ -147,11 +147,10 @@ def enqueue_message(
     request: Request, db: Database, session_id: str, body: SendMessageRequest, *,
     kind: str, expected_session_id: str | None, now: float,
 ) -> tuple[int | None, str | None]:
-    """Associate ordinary admitted sends only with their currently enrolled inbox.
+    """Persist ordinary input before a consumer selects its delivery owner.
 
-    Observing unavailable owners is not a legacy fallback. The DB serializes
-    the actual enrollment decision and surfaces this refusal for retained work.
-    Identical keyed recovery needs neither a new enrollment nor an open epoch.
+    Controls and typed startup keep their separate effect-admission contract.
+    Identical keyed recovery retains its original input and receipt.
     """
     if db.read_only:
         raise HTTPException(status_code=503, detail="retained inbox database is read-only")
@@ -160,15 +159,19 @@ def enqueue_message(
         "WHERE session_id=? AND installation=? AND current=1",
         (session_id, compatible_inbox.BINDING),
     ))
-    if compatible and _serving_database(request) is not db:
+    ordinary = not kind.casefold().startswith(("control:", "startup:"))
+    if not ordinary and compatible and _serving_database(request) is not db:
         raise HTTPException(status_code=503, detail="inbox frontend database owner changed")
     admission = None
     refusal = None
     try:
-        current_db = _serving_database(request)
+        if ordinary:
+            current_db = db
+        else:
+            current_db = _serving_database(request)
         if current_db is not db:
             raise RuntimeCustodyError("Inbox frontend database owner changed")
-        if not compatible:
+        if not ordinary and not compatible:
             _, governance, runtime = _current_owners(request)
             admission = runtime.producer_admission(db, governance)
     except HTTPException as exc:
