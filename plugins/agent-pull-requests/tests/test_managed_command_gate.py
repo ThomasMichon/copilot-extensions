@@ -164,6 +164,8 @@ def test_ready_command_admits_exact_prepared_application(
     arguments = ["inspect", "space value", 'quote"value', "", "end\\", "\u03bb", "1234", "True"]
     if scenario.endswith("long-body"):
         arguments[-2:-2] = ["--body", "x" * 8000 + "\U0001f642" * 1000 + "y" * 16000]
+    elif scenario in ("newest", "cell"):
+        arguments = []
     command = [shell, str(payload / "bin/agent-pull-requests"), *arguments]
     descriptors = tmp_path / "inherited-fds"
     if host == "bash" and scenario == "current":
@@ -179,10 +181,14 @@ def test_ready_command_admits_exact_prepared_application(
     elif host != "bash":
         harness = tmp_path / "invoke.ps1"
         quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments[:-2])
+        values = (
+            f"$port=1234\n$enabled=$true\n$forward=@({quoted}) + @($port,$enabled)\n"
+            if arguments else "$forward=@()\n"
+        )
         harness.write_text(
             "$PSNativeCommandArgumentPassing='Legacy'\n"
             "$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0='caller-owned'\n"
-            f"$port=1234\n$enabled=$true\n$forward=@({quoted}) + @($port,$enabled)\n"
+            + values +
             f"& '{str(payload / 'bin/agent-pull-requests.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
             "$code=$LASTEXITCODE\n"
             "if ($env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0 -cne 'caller-owned') { throw 'caller argument environment changed' }\n"
