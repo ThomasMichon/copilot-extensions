@@ -6265,6 +6265,11 @@ draining and rechecks share the original deadline. No accepted Source cache or
 metadata-only substitute for byte validation is introduced.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
+One inspected-wheel scope remains open through emission, offline locking and
+final readback. The emitted profile and Source record must stay exact, and
+the emitted wheel files are independently recaptured against the inspected
+digests before completion. Retained private copies never stand in for that
+final emitted-byte check; all checks share the original absolute deadline.
 Generated projects carrying a complete admitted construction profile omit the
 relative resolver-age cutoff: their retained local-wheel lock must remain usable
 when configuration discovery changes or installation happens later.

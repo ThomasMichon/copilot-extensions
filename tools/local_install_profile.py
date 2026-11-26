@@ -34,6 +34,7 @@ import install_source as install_source
 source_inputs = install_source
 from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
 from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs as retain_wheel_inputs
+from installer_source_build import frozen_procutil
 
 from build_toolchain_lock import _query_marker_environment
 from application_sources import application_sources
@@ -326,54 +327,68 @@ def _write_snapshot(
     (prepared / source_inputs.MANIFEST).write_text(
         json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
     )
-    if uv is not None:
-        from runtime_application_project import emit, install_callbacks
-
-        project_metadata = dependencies._toml(frozen.plugin / "pyproject.toml")
-        metadata = project_metadata["project"]
-        profile_record = profile.record()
-        environment = profile_record["target"]["environment"]
-        major, minor = environment["python_full_version"].split(".")[:2]
-        application = prepared / "applications" / component
-        commands = metadata.get("scripts", {})
-        primary = metadata["name"] if metadata["name"] in commands else next(iter(commands), "")
-        roots = profile_record["roots"]
-        root_names = {
-            canonicalize_name(_requirement(requirement, deadline).name) for requirement in roots
-        }
-        with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
-            construction = source_inputs.application_inputs(observed, inputs)
-        setup, start = install_callbacks(
-            primary, extras=tuple(construction["extras"]), metadata=project_metadata,
-        )
-        emit(
-            application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
-            requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
-            commands=commands, primary=primary, setup=setup, start=start,
-            remove=project_metadata.get("tool", {}).get(
-                "copilot-extensions", {},
-            ).get("application", {}).get("remove"),
-            callback_timeout_seconds=project_metadata.get("tool", {}).get(
-                "copilot-extensions", {},
-            ).get("application", {}).get("callback_timeout_seconds"),
-            wheels={row["name"]: wheels / row["filename"] for row in profile_record["wheels"]},
-            runtime_source=selected.identity.document(), target_environment=environment,
-            target_tags=profile_record["target"]["tags"],
-            construction=construction,
-            requirements=[
-                *roots,
-                *(row["name"] + "==" + row["version"] for row in profile_record["wheels"]
-                  if row["name"] not in root_names),
-            ],
-        )
-        _lock_application(application, uv=uv, deadline=deadline)
-        project["application"] = application.relative_to(prepared).as_posix()
-    (prepared / source_inputs.MANIFEST).write_text(
-        json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
-    )
     with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
         if observed.identity != selected.identity:
             raise ProfileError("prepared snapshot source changed during readback")
+        if uv is not None:
+            from runtime_application_project import emit, install_callbacks
+
+            project_metadata = dependencies._toml(frozen.plugin / "pyproject.toml")
+            metadata = project_metadata["project"]
+            profile_record = profile.record()
+            environment = profile_record["target"]["environment"]
+            major, minor = environment["python_full_version"].split(".")[:2]
+            application = prepared / "applications" / component
+            commands = metadata.get("scripts", {})
+            primary = metadata["name"] if metadata["name"] in commands else next(iter(commands), "")
+            roots = profile_record["roots"]
+            root_names = {
+                canonicalize_name(_requirement(requirement, deadline).name) for requirement in roots
+            }
+            construction = source_inputs.application_inputs(observed, inputs)
+            setup, start = install_callbacks(
+                primary, extras=tuple(construction["extras"]), metadata=project_metadata,
+            )
+            emit(
+                application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
+                requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
+                commands=commands, primary=primary, setup=setup, start=start,
+                remove=project_metadata.get("tool", {}).get(
+                    "copilot-extensions", {},
+                ).get("application", {}).get("remove"),
+                callback_timeout_seconds=project_metadata.get("tool", {}).get(
+                    "copilot-extensions", {},
+                ).get("application", {}).get("callback_timeout_seconds"),
+                wheels={row["name"]: wheels / row["filename"] for row in profile_record["wheels"]},
+                runtime_source=selected.identity.document(), target_environment=environment,
+                target_tags=profile_record["target"]["tags"],
+                construction=construction,
+                requirements=[
+                    *roots,
+                    *(row["name"] + "==" + row["version"] for row in profile_record["wheels"]
+                      if row["name"] not in root_names),
+                ],
+            )
+            _lock_application(application, uv=uv, deadline=deadline)
+            project["application"] = application.relative_to(prepared).as_posix()
+        (prepared / source_inputs.MANIFEST).write_text(
+            json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
+        )
+        readback = source_inputs.select_project(prepared, component)
+        if readback.identity != selected.identity or readback.record != record:
+            raise ProfileError("prepared snapshot source changed during readback")
+        if profile_path.read_bytes() != profile.canonical:
+            raise ProfileError("prepared snapshot profile changed during emission")
+        # The inspected scope owns private copies, not these emitted files.
+        with retain_wheel_inputs(
+            {
+                name: source_inputs._member(prepared, project["wheel_inputs"] + "/" + name)
+                for name in retained.archives
+            },
+            retained.digests, max_wheels=256, max_archive_bytes=128 << 20,
+            max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
+        ) as emitted:
+            emitted.verify()
         inputs.verify()
     return prepared
 
@@ -474,7 +489,7 @@ def _prepare_profile(
         record["files"], feeds=feed.feeds, download_origins=feed.download_origins,
         cutoffs=feed.cutoffs, policy_id=feed.policy_id, limits=limits, deadline=deadline,
         ssl_context=feed.context, proxies=feed.proxies,
-        procutil=engine._procutil(engine.FrozenInputs(
+        procutil=frozen_procutil(engine.FrozenInputs(
             selected.payload, tuple(sorted(packages)),
             selected.identity.assembly_hash,
         )),

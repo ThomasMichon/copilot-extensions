@@ -1,7 +1,8 @@
 """Contained Source preparation controls; no backend, environment or application runs."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -144,6 +145,67 @@ def test_closed_wheels_preserve_development_source_and_real_application_lock(
     with pytest.raises(profiles.dependencies.DependencyPolicyError, match="release age"):
         profiles.engine._package_roots(selected.payload)
     with pytest.raises(ValueError, match="already exists"):
+        closed.prepare(**application)
+
+
+def test_snapshot_retains_one_inspected_wheel_scope_through_real_lock(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_inputs = profiles.source_inputs.project_inputs
+    original_lock = profiles._lock_application
+    entered = 0
+    active = 0
+
+    @contextmanager
+    def project_inputs(*args: Any, **kwargs: Any) -> Iterator[Any]:
+        nonlocal entered, active
+        entered += 1
+        with original_inputs(*args, **kwargs) as selected:
+            active += 1
+            try:
+                yield selected
+            finally:
+                active -= 1
+
+    def lock(*args: Any, **kwargs: Any) -> None:
+        assert active == 1, "application emission must retain its inspected wheel custody"
+        original_lock(*args, **kwargs)
+
+    monkeypatch.setattr(profiles.source_inputs, "project_inputs", project_inputs)
+    monkeypatch.setattr(profiles, "_lock_application", lock)
+    prepared = closed.prepare(**application)
+    assert entered == 1 and active == 0
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    assert (prepared / selected.project["application"] / "uv.lock").is_file()
+
+
+@pytest.mark.parametrize("changed", ["profile", "wheel", "source"])
+def test_snapshot_retained_scope_refuses_changes_during_real_lock(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    original_lock = profiles._lock_application
+
+    def lock(directory: Path, *, uv: str, deadline: float) -> None:
+        original_lock(directory, uv=uv, deadline=deadline)
+        prepared = directory.parent.parent
+        if changed == "profile":
+            path = prepared / "profiles" / "demo-app.json"
+            record = json.loads(path.read_bytes())
+            record["approval_source"] += "-changed"
+            path.write_text(json.dumps(record))
+        else:
+            path = (
+                prepared / "wheels" / "demo-app" / "helper-1.0.0-py3-none-any.whl"
+                if changed == "wheel"
+                else prepared / "source" / "app" / "src" / "demo_app" / "__init__.py"
+            )
+            before = path.stat()
+            content = path.read_bytes()
+            path.write_bytes(bytes((content[0] ^ 1,)) + content[1:])
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    monkeypatch.setattr(profiles, "_lock_application", lock)
+    with pytest.raises((ValueError, RuntimeError), match="changed|differs|identity|digest"):
         closed.prepare(**application)
 
 
