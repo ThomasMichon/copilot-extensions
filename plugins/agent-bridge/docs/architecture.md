@@ -6,6 +6,17 @@ the Bridge control ID, native conversation ID and first turn separately.
 
 ## Service Design
 
+Payload-local foreground commands retain the installation-context and completed
+generation resolver, then admit that exact interpreter through the shared
+prepared-only UV selector before application entry. Missing UV, selector or
+finite capture support refuses with setup guidance and existing command-error
+evidence; it does not acquire prerequisites or enter first-use provisioning.
+Passive observation and configuration-only telemetry keep their no-provision
+policy. Readiness retains isolated, no-bytecode execution, and ordinary
+commands retain argv, native stdin, PowerShell object input, streams and exit
+status. This command admission does not select a new generation or change the
+separate service-launch and installer owners.
+
 Agent Bridge runs as a persistent HTTP service on a loopback port. By default
 it binds an **OS-assigned ephemeral** port and advertises the actual port
 through its routing table (`active.json`), so nothing well-known is reserved

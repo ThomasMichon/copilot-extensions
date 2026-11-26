@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import os
+import runpy
 import shutil
 import struct
 import subprocess
@@ -233,6 +234,13 @@ def windows_payload_runtime(tmp_path_factory: pytest.TempPathFactory) -> Payload
     shutil.copytree(PLUGIN / "scripts", plugin / "scripts")
     for name in ("plugin.json", "payload-invocation.json"):
         shutil.copy2(PLUGIN / name, plugin / name)
+    previous_path = sys.path[:]
+    try:
+        owner = runpy.run_path(str(PLUGIN.parents[1] / "tools/materialize_payload_invocation.py"))
+        changes = owner["materialize"](plugin, canonical_root=PLUGIN.parents[1], source_consumer=PLUGIN)
+    finally:
+        sys.path[:] = previous_path
+    assert changes and not any(line.startswith("SKIP") for line in changes), changes
     home = tmp_path / "home"
     home.mkdir()
     runtime = home / ".agent-bridge"
@@ -740,6 +748,7 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
         "legacyRuntimeRoot": ".agent-bridge",
         "installationContext": "required",
         "bootstrapPython": "3.11.18",
+        "bootstrapLauncher": "uv",
         "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
