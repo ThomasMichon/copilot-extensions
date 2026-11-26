@@ -1236,6 +1236,8 @@ share that cleanup boundary. Windows stdin writing has independent absolute
 deadline supervision; supervision and pipe-reader threads finish before return.
 Unsupported or lost custody fails visibly rather than signalling a reused ID.
 
+On POSIX, callable SIGINT/SIGTERM handlers are deferred through native child creation and process-group cleanup, then restored and replayed after custody is established or cleanup is confirmed. Ignored and default signal dispositions are not changed. A brief mask protects handler restoration only, never child creation, so the guard does not pass a blocked signal mask to children. An unconfirmed-cleanup error retains priority over a pending interrupt.
+
 An explicitly contained worker may call `require_contained_worker()` and launch
 nested peers with `inherit_process_group=True`. Kernel checks require Windows
 Job membership or the worker's own POSIX session/group root; an environment flag

@@ -81,6 +81,7 @@ class RuntimeUpdateStep:
     source: PreparedRuntimeSource | None = None
     source_target: SourceRuntimeTarget | None = None
     project_root: Path | None = None
+    repository_contexts: tuple[Path, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "environment", MappingProxyType(dict(self.environment)))
@@ -166,6 +167,7 @@ def _select_inputs(
     project: Path | None = None,
     *, repository_contexts: tuple[Path, ...] = (),
 ) -> RuntimeUpdateStep:
+    step = dataclasses.replace(step, repository_contexts=repository_contexts)
     try:
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
         environment = dict(environment)
@@ -328,7 +330,8 @@ def plan_registered(
     pdir = reconcile.core_installed_payload_dir(name)
     step = RuntimeUpdateStep(name, "runtime_reconcile", pdir or Path())
     if repository_contexts is None:
-        return dataclasses.replace(step, status="Vault repository discovery incomplete")
+        detail = "SSH" if name == "agent-ssh" else "Vault"
+        return dataclasses.replace(step, status=f"{detail} repository discovery incomplete")
     if pdir is None:
         return dataclasses.replace(step, status="payload not installed")
     scope = reconcile.manifest_runtime_scope(pdir) or "none"

@@ -28,7 +28,7 @@ PACKAGE_FILES = (
     "_interactive_session.py", "_interactive_terminal.py", "_interpreter.py",
     "_job_scopes.py", "_linux_pidfd.py", "_native_owned.py", "_native_query.py", "_output_relay.py",
     "_retirement_channel.py", "_retirement_custodian.py",
-    "_shell_caller_owned.py", "_suspended_handoff.py", "_terminal_offer.py", "_windows_caller_owned.py",
+    "_shell_caller_owned.py", "_spawn_signals.py", "_suspended_handoff.py", "_terminal_offer.py", "_windows_caller_owned.py",
     "_windows_parent_job.py", "_windows_job_types.py", "_windows_owned_output.py", "async_foreground.py",
     "cleanup_diagnostics.py", "command_pipe.py", "daemon.py", "daemon_broker.py", "daemon_instances.py",
     "daemon_observation.py",

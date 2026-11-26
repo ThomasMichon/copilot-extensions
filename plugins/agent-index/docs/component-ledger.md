@@ -567,9 +567,12 @@ ingestion behavior are unchanged.
 
 ### Explicit service binding
 
-`server.build_app(point_service_factory=...)` optionally constructs a
+`server.build_app(point_service_factory=...)` and the synchronous
+`server.serve(..., point_service_factory=...)` entrypoint optionally construct a
 `indexing.point_service.PointService` when the service's existing task runner
 starts. A passive application does not invoke that factory until promotion.
+Both entrypoints use the same factory and lifecycle; the default CLI supplies
+none. Passing a factory does not activate execution.
 The binding takes an explicit `IndexConfig`, complete `PointScope`, and
 `executor_context`: an async-context-manager factory yielding the synchronous
 point executor. That context owns the configured connector and all model

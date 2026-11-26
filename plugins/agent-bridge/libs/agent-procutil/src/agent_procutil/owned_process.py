@@ -679,6 +679,9 @@ def _run_owned(
         from agent_procutil._windows_caller_owned import spawn as windows_spawn
         spawn = windows_spawn
 
+    from agent_procutil._spawn_signals import SpawnSignals
+
+    spawn_signals = SpawnSignals()
     try:
         process, job = spawn(
             argv, require_job=True, allow_breakaway=allow_daemon_breakaway,
@@ -697,9 +700,18 @@ def _run_owned(
                if bounded_windows and budget is not None else {}),
         )
     except subprocess.TimeoutExpired as error:
+        spawn_signals.finish()
         raise subprocess.TimeoutExpired(argv, cast(float, timeout)) from error
     except OwnedCleanupError as error:
+        try:
+            spawn_signals.restore()
+        except BaseException as interruption:
+            error._retain_on_settled(on_settled)
+            raise error from interruption
         error._retain_on_settled(on_settled)
+        raise
+    except BaseException:
+        spawn_signals.finish()
         raise
     retained = False
     stream_capture = None
@@ -708,6 +720,7 @@ def _run_owned(
     stdout: Any
     stderr: Any
     try:
+        spawn_signals.finish()
         if streaming:
             from agent_procutil.streaming import SyncProcessOutput
 

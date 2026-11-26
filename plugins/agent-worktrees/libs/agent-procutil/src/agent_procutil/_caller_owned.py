@@ -28,6 +28,7 @@ from agent_procutil.owned_process import (
 )
 from agent_procutil._linux_pidfd import open_pidfd
 from agent_procutil.owned_budget import OwnedExecutionBudget
+from agent_procutil._spawn_signals import defer_termination
 
 _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
@@ -270,6 +271,7 @@ def _posix_cleanup_error(
     )
 
 
+@defer_termination()
 def _settle_exited_group(
     process: _CleanupProcess, *, budget: OwnedExecutionBudget | None,
     on_settled: Callable[[], None] | None,
@@ -285,6 +287,7 @@ def _settle_exited_group(
         ) from error
 
 
+@defer_termination()
 def _finish_posix_process(
     process: _CleanupProcess, *, confirm_group: bool, inherit_process_group: bool,
     budget: OwnedExecutionBudget | None, group_settled: bool,
