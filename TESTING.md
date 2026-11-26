@@ -9862,6 +9862,14 @@ The Driver connector-selection packet substitutes storage and native execution.
 It exercises explicit launch binding, old/new capability selection, unchanged
 defaults, provider rollback, immutable retained choice and actual child
 environment construction without a process, socket or service.
+The existing selection case additionally executes seven fixture-only controls
+of Core's actual staging command-root validator with its canonical native argument
+options. They retain split/equal
+plugin-directory syntax, selected manifest identity and refusal of missing,
+duplicate, substituted or option/positional-hidden roots. The adapter exports
+the existing hash-bound staging module; it does not import the
+launcher runtime or create a Host. The ordinary launcher suite separately
+checks refusal before staging or native process creation.
 The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
 controls exercise the actual entrypoints with a synthetic SDK, shared adapter
 input ownership, startup/auth-wait, takeover and unknown-send refusal.

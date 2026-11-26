@@ -108,6 +108,97 @@ function observedSelection() {
   return { options, plugins, native };
 }
 
+function executingSelection() {
+  const f = observedSelection();
+  f.options.extensionPid = process.pid;
+  f.extensions = [{
+    id: "plugin:copilot-driver-headed:copilot-driver-headed",
+    name: "copilot-driver-headed", source: "plugin", status: "running", pid: process.pid,
+  }];
+  f.native.rpc.extensions = { list: async () => ({ extensions: f.extensions }) };
+  f.native.rpc.plugins.list = () => assert.fail("Configuration metadata is not executing-module evidence");
+  return f;
+}
+
+test("the launch-bound executing connector needs no installer origin or configuration deduplication", async () => {
+  const f = executingSelection();
+  f.plugins.forEach((plugin) => { delete plugin.installedFrom; });
+  f.plugins.push({ name: "agent-remote-driver", enabled: true, source: "live" });
+  await selectedLoadout(f.native, f.options);
+});
+
+test("live-owner validation retains the module root check independently of the observed PID", async () => {
+  const f = executingSelection();
+  f.options.extensionPluginRoot = bridgeRoot;
+  await assert.rejects(selectedLoadout(f.native, f.options), (error) =>
+    error.selectedContextReason === "selection-root-mismatch");
+});
+
+test("a competing live sender leaves prompt and cancellation held without replay", async () => {
+  const f = nativeFixture(), observed = executingSelection();
+  observed.extensions.push({
+    id: "plugin:agent-remote-driver:agent-remote-driver", name: "agent-remote-driver",
+    source: "plugin", status: "running", pid: process.pid + 1,
+  });
+  let checks = 0, aborts = 0;
+  f.native.abort = async () => { aborts++; };
+  const adapter = createHeadedAdapter(f.native, {
+    emit() {}, cwd: root, validateSendContext: async () => {
+      checks++;
+      await selectedLoadout(observed.native, observed.options);
+    },
+  });
+  try {
+    const response = await adapter.handle({
+      jsonrpc: "2.0", id: 1, method: "session/prompt",
+      params: { sessionId, prompt: [{ type: "text", text: "not dispatched" }] },
+    });
+    assert.equal(response.error.code, -32001);
+    assert.match(response.error.message, /\[extension-competing:driver\]/);
+    await assert.rejects(adapter.interrupt(), /control is unavailable/);
+    assert.equal(checks, 1);
+    assert.equal(aborts, 0);
+    assert.equal(f.sends.length, 0);
+  } finally { adapter.close(); }
+});
+
+for (const [label, change, reason, plugin] of [
+  ["missing live observer", (f) => { delete f.native.rpc.extensions; }, "extensions-list-unsupported"],
+  ["failed live observer", (f) => {
+    f.native.rpc.extensions.list = async () => { throw new Error("private observer details"); };
+  }, "extensions-list-failed"],
+  ["invalid live observation", (f) => { f.native.rpc.extensions.list = async () => []; },
+    "extension-observation-invalid"],
+  ["missing executing connector", (f) => { f.extensions.length = 0; }, "plugin-missing", "connector"],
+  ["duplicate executing connector", (f) => { f.extensions.push({ ...f.extensions[0] }); },
+    "plugin-duplicated", "connector"],
+  ["another connector process", (f) => { f.extensions[0].pid++; }, "extension-process-mismatch", "connector"],
+  ["a non-plugin connector", (f) => { f.extensions[0].source = "user"; },
+    "extension-identity-mismatch", "connector"],
+  ["another connector identity", (f) => { f.extensions[0].id = "plugin:another:copilot-driver-headed"; },
+    "extension-identity-mismatch", "connector"],
+  ["a disabled connector", (f) => { f.extensions[0].status = "disabled"; },
+    "extension-not-running", "connector"],
+  ["a competing global Driver", (f) => { f.extensions.push({
+    id: "plugin:agent-remote-driver:agent-remote-driver", name: "agent-remote-driver",
+    source: "plugin", status: "running", pid: process.pid + 1,
+  }); }, "extension-competing", "driver"],
+  ["a starting Bridge sender", (f) => { f.extensions.push({
+    id: "plugin:agent-bridge:agent-bridge", name: "agent-bridge", source: "plugin", status: "starting",
+  }); }, "extension-competing", "bridge"],
+]) {
+  test(`executing context refuses ${label} before using a configured origin`, async () => {
+    const f = executingSelection();
+    change(f);
+    await assert.rejects(selectedLoadout(f.native, f.options), (error) => {
+      assert.equal(error.selectedContextReason, reason);
+      assert.equal(error.selectedContextPlugin, plugin);
+      assert.doesNotMatch(error.message, /private observer details/);
+      return true;
+    });
+  });
+}
+
 for (const [label, change, reason, plugin] of [
   ["missing plugin observer", (f) => { delete f.native.rpc.plugins.list; }, "plugins-list-unsupported"],
   ["missing metadata observer", (f) => { delete f.native.rpc.metadata; }, "metadata-snapshot-unsupported"],
