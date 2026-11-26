@@ -128,6 +128,38 @@ function Resolve-Runtime([string]$TraceMode = 'ready') {
     return $AgentRtPy
 }
 function Invoke-Runtime([string]$Python) {
+    try {
+        $supportRoot = Join-Path $PSScriptRoot '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Python -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        $Python = $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-dispatch] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
     $env:AGENT_DISPATCH_INSTALL_DIR = $runtimeRoot
     if ($context) { $env:COPILOT_EXTENSIONS_CONTEXT = $context } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
