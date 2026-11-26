@@ -12,6 +12,7 @@ from typing import Any, BinaryIO, NoReturn
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 COMPACT_PROFILE = "copilot-extensions.promotion-units/v2"
+PREFIX_COMPACT_PROFILE = "copilot-extensions.promotion-units/v3"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
 WINDOWS_NATIVE_PROFILE = "copilot-extensions.windows-native-units/v1"
 MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
@@ -211,9 +212,60 @@ def _expand_compact_manifest(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _expand_prefix_manifest(data: dict[str, Any]) -> dict[str, Any]:
+    if set(data) != {
+        "profile", "node_groups", "sources", "coverage_targets", "max_seconds",
+    }:
+        raise UnitEvidenceError("invalid prefix unit manifest fields")
+    groups = data["node_groups"]
+    if not isinstance(groups, list) or not groups:
+        raise UnitEvidenceError("prefix unit node groups must be explicit")
+    nodes: list[str] = []
+    expanded_bytes = 0
+    for group in groups:
+        if (
+            not isinstance(group, list) or len(group) != 2
+            or not isinstance(group[1], list) or not group[1]
+        ):
+            raise UnitEvidenceError("prefix unit group must contain a source and runs")
+        path = relative_file(group[0])
+        try:
+            path_bytes = len(path.encode("utf-8")) + 2
+        except UnicodeEncodeError as error:
+            raise UnitEvidenceError("prefix unit nodes must be valid UTF-8") from error
+        for run in group[1]:
+            if (
+                not isinstance(run, list) or len(run) != 2
+                or not isinstance(run[0], str) or not run[0]
+                or not isinstance(run[1], list) or not run[1]
+            ):
+                raise UnitEvidenceError("prefix unit runs require a nonempty prefix and suffix list")
+            prefix, suffixes = run
+            try:
+                prefix_bytes = path_bytes + len(prefix.encode("utf-8"))
+            except UnicodeEncodeError as error:
+                raise UnitEvidenceError("prefix unit nodes must be valid UTF-8") from error
+            for suffix in suffixes:
+                if not isinstance(suffix, str):
+                    raise UnitEvidenceError("prefix unit suffixes must be strings")
+                try:
+                    expanded_bytes += prefix_bytes + len(suffix.encode("utf-8"))
+                except UnicodeEncodeError as error:
+                    raise UnitEvidenceError("prefix unit nodes must be valid UTF-8") from error
+                if expanded_bytes > MAX_PACKET_FILE_BYTES:
+                    raise UnitEvidenceError("prefix unit nodes exceed the expanded byte bound")
+                nodes.append(path + "::" + prefix + suffix)
+    return {
+        "profile": PROFILE, "max_seconds": data["max_seconds"], "nodes": nodes,
+        "coverage_targets": data["coverage_targets"], "sources": data["sources"],
+    }
+
+
 def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict[str, Any]:
     if isinstance(data, dict) and data.get("profile") == COMPACT_PROFILE:
         data = _expand_compact_manifest(data)
+    elif isinstance(data, dict) and data.get("profile") == PREFIX_COMPACT_PROFILE:
+        data = _expand_prefix_manifest(data)
     candidate = isinstance(data, dict) and data.get("profile") == CANDIDATE_PROFILE
     fields = {
         "profile", "nodes", "sources", "coverage_targets", "max_seconds",
@@ -289,6 +341,31 @@ def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict[
         ):
             raise UnitEvidenceError("candidate coverage origins are incomplete")
     return data
+
+
+def compact_manifest(data: object) -> dict[str, Any]:
+    """Encode contiguous case-prefix runs without changing logical admission."""
+    manifest = admit_manifest(data)
+    if manifest["profile"] != PROFILE:
+        raise UnitEvidenceError("prefix compaction requires a development unit manifest")
+    groups: list[list[Any]] = []
+    for node in manifest["nodes"]:
+        path, _, case = node.partition("::")
+        prefix, marker, suffix = case.partition("[")
+        prefix, suffix = (prefix, marker + suffix) if prefix else (case, "")
+        if not groups or groups[-1][0] != path:
+            groups.append([path, []])
+        runs = groups[-1][1]
+        if not runs or runs[-1][0] != prefix:
+            runs.append([prefix, []])
+        runs[-1][1].append(suffix)
+    compact = {
+        "profile": PREFIX_COMPACT_PROFILE, "max_seconds": manifest["max_seconds"],
+        "node_groups": groups, "sources": manifest["sources"],
+        "coverage_targets": manifest["coverage_targets"],
+    }
+    admit_manifest(compact)
+    return compact
 
 
 def windows_native_manifest(data: object, *, platform: str) -> dict[str, Any]:

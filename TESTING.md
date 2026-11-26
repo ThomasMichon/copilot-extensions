@@ -12617,13 +12617,20 @@ remove admitted cases to accommodate formatting.
 ### Unit-manifest storage compatibility
 
 The checked-in source inventory uses the compact source-storage profile
-`copilot-extensions.promotion-units/v2`. The admission reader also accepts
-`copilot-extensions.promotion-units/v1`, with flat, ordered `nodes`.
+`copilot-extensions.promotion-units/v2` until the separately reviewed successor
+migration. The admission reader accepts flat, ordered v1 `nodes`, v2 file
+groups, and `copilot-extensions.promotion-units/v3` prefix groups.
 V2 replaces only `nodes` with
 `node_groups`: an ordered list of `[test_file, [case_suffix, ...]]` pairs.
 Each full identity is `test_file + "::" + case_suffix`. Repeated nonadjacent
 file groups are allowed and their order is significant; grouping by a
 dictionary must not reorder interleaved selections.
+V3 keeps the root fields but represents each file's cases as ordered
+`[prefix, [suffix, ...]]` runs. Every identity is
+`test_file + "::" + prefix + suffix`; prefixes and suffix lists are nonempty,
+while an individual suffix may be empty. Repeated noncontiguous runs remain
+separate. `compact_manifest` is a data-only v3 encoder for development-unit
+manifests, not candidate/native profiles or an automatic writer switch.
 All other required fields remain `max_seconds`, `sources` and `coverage_targets`.
 Unknown fields, incomplete/empty groups, invalid UTF-8, duplicate full identities
 and every original path/source/target/budget violation refuse admission.
@@ -12636,7 +12643,7 @@ Formatting preserves object/array order, every stored value and the normalized
 logical manifest; it does not change the representation, admission policy,
 source-file cap, parser bound, packet deadline or proof contract.
 
-Admission normalizes v2 storage to the existing logical v1 manifest.
+Admission normalizes v2/v3 storage to the existing logical v1 manifest.
 For identical logical data, complete node order, source/target sets, limits
 and canonical manifest digest are identical. Raw source/packet file hashes
 still bind actual bytes: storage conversion cannot relabel a prior artifact
@@ -12653,22 +12660,30 @@ The shared admission module also ships in Worktree Manager's declared
 proof that an installed consumer has selected the capable reader.
 Its source preparer copies the inventory opaquely; this operation does not
 decode the source node list. Packaged evidence readers still consume flat v1.
-The actual prior source runner accepts v1 and refuses v2 before source
+The historical pre-v2 source runner accepts v1 and refuses v2 before source
 verification, output-directory creation or test execution. Rolling that runner
 back requires the matching v1 source inventory too; decoder-only rollback with
 v2 storage is explicitly incompatible. A representation-only migration retains
 the matching v1 source revision with identical admission data; rollback must
 not silently discard newer admissions to regain compatibility.
+The frozen pre-v3 reader accepts v1/v2 and refuses v3. Fresh-process receipt-file
+checks compare both readers across all three forms, preserving complete ordered
+logical data and truthful unsupported-version refusal. Reader-only rollback
+with unsupported stored data remains incompatible; no admitted witness may be
+dropped to manufacture a matching older representation.
 Future format changes must prove capable readers at each actual selected
 consumer, reconcile raw node-list assertions, and retain an equivalent supported
 rollback or explicit pre-effect incompatibility. They must not infer support
 from a package version, drop tests to produce a fallback, weaken limits or
 activate an independently owned control path.
 
-Fourteen focused compact-format controls cover strict admission, bounded
+Fifteen focused existing controls cover strict admission, bounded
 expansion, ordered normalization, actual source/packet loading and candidate
-composition. The existing real compatibility-CLI controls exercise both storage
-forms without running Git or release actors. These source results do not prove
+composition. Both existing real compatibility-CLI cases exercise v1/v2/v3
+without running Git or release actors. New assertions run under existing
+admitted identities; old parameter tables, assertions and selection remain.
+The reader-only stage honestly rebinds changed existing code/test hashes while
+keeping the active source profile v2. These source results do not prove
 deployed reader adoption, installed/native qualification or full-census coverage.
 
 The version-bump guard packet exports eleven original cases through eight exact
