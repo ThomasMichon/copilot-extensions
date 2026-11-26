@@ -27,6 +27,7 @@ _native_capture_check_signal() {
 
 _native_capture_settle() {
     local probe empty=0 deadline=$((SECONDS + 5))
+    __native_capture_settlement_reason=lifetime-release
     printf '%s\n' "${1:-cancel}" >&8
     exec 8>&-
     # The live in-group guardian signals itself, never a saved numeric PID.
@@ -36,13 +37,22 @@ _native_capture_settle() {
         elif [[ "$probe" == *"No such process"* ]]; then
             empty=$((empty + 1))
         else
+            __native_capture_settlement_reason="group-observation-unavailable: $probe"
             return 1
         fi
         (( empty == 2 )) || sleep .02 || return 1
     done
-    (( empty == 2 )) || return 1
+    if (( empty != 2 )); then
+        __native_capture_settlement_reason=group-present-at-cleanup-deadline
+        return 1
+    fi
     wait "$__native_capture_pid" 2>/dev/null || :
-    [[ ! -e "$__native_capture_directory" && ! -L "$__native_capture_directory" ]]
+    if [[ -e "$__native_capture_directory" || -L "$__native_capture_directory" ]]; then
+        __native_capture_settlement_reason=private-directory-retained
+        return 1
+    fi
+    __native_capture_settlement_reason=settled
+    return 0
 }
 
 _native_capture_cancel() {
@@ -53,7 +63,8 @@ _native_capture_cancel() {
     exec 5>&- 6<&- 7>&-
     if [[ -n "$__native_capture_pid" ]]; then
         _native_capture_settle 2>/dev/null ||
-            printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
+            printf 'Native capture cleanup is unconfirmed: %s (%s)\n' \
+                "$__native_capture_directory" "$__native_capture_settlement_reason" >&2
     else
         exec 8>&-
         _native_capture_remove_files "$__native_capture_directory" ||
@@ -91,6 +102,7 @@ capture_native_process() {
     __native_capture_output=''
     __native_capture_directory=''
     __native_capture_pid=''
+    __native_capture_settlement_reason=not-started
     __native_capture_pending_signal=0
     __native_capture_defer_signal=1
     trap '_native_capture_cancel $?' EXIT
@@ -111,7 +123,8 @@ capture_native_process() {
         exec 5>&- 6<&- 7>&- 8>&- 9<&-
         code=1
         if ! _native_capture_remove_files "$__native_capture_directory"; then
-            printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
+            printf 'Native capture cleanup is unconfirmed: %s (%s)\n' \
+                "$__native_capture_directory" "$__native_capture_settlement_reason" >&2
             code=125
         fi
         _native_capture_restore_traps
