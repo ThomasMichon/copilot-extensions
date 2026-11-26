@@ -6262,7 +6262,8 @@ bytes stay bound across passes under the original absolute deadline. Development
 metadata outside that build-export contract retains the original full, data-only
 extraction under the same deadline, never a fallback around archive refusal.
 Metadata discovery and selected extraction use sequential digesting archive
-passes instead of header seeks followed by another full read. Each pass binds
+passes instead of header seeks followed by another full read. Moderate stream
+buffers avoid repeated large tail copies between small members. Each pass binds
 all bytes, including excluded payloads and trailing padding, while the same
 entry validator retains its path/type/collision checks. Final archive identity
 and full-byte rechecks still precede publication and completion; parsing,

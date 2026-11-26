@@ -41,8 +41,9 @@ def _archive_pass(
 ) -> Iterator[tuple[tarfile.TarFile, Callable[[], bytes]]]:
     with archive.open("rb") as source:
         reader = _DigestReader(source, deadline)
+        # tarfile slices the unread buffer tail for each small member.
         with tarfile.open(
-            name=str(archive), fileobj=cast(BinaryIO, reader), mode="r|", bufsize=1 << 20,
+            name=str(archive), fileobj=cast(BinaryIO, reader), mode="r|", bufsize=1 << 16,
         ) as stream:
             yield stream, reader.hash.digest
             # Tar iteration ends before padding or trailing data; bind those bytes too.
