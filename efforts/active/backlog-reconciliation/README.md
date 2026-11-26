@@ -522,6 +522,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [later workflow-status intake and keeper boundaries](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
+qualify six complete originals and all six discussions, preserve the
+remaining unadmitted union and three carried controls, and propose only
+#5598's two unverified historical attempts for additive receiving in OPEN
+#4783. No new source completion, tracker disposition, branch deletion or
+execution is claimed; every parent Plan/Validation state remains.
+
 The [hosted activation and incomplete-attempt outcomes](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
 record reviewed #14796/#14798, whole accepted receiving and four separately
 audited dispositions: one finite `COMPLETED` and three `NOT_PLANNED`
@@ -529,7 +536,8 @@ status retirements. #4380's spent assessment remains OPEN; #4783 retains
 its original hosted-execution acceptance and eight historical records,
 not eight new rerun tasks. Two equal complete censuses measure 596 whole
 OPEN, with four departures offset by one arrival and no unrelated departure.
-All parent states, existing owners and actual holds remain.
+The factual outcome merged in #14800; all parent states, existing owners
+and actual holds remain.
 
 The [Git deadline and optional snapshot-batching correspondence](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
 records reviewed #14787 and two separately consumed final units after actual
