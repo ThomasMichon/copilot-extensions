@@ -1204,10 +1204,11 @@ def _build_runtime(
     elif not interpreter.exists():
         uv = shutil.which("uv")
         if uv:
-            _run_checked(
-                [uv, "venv", str(slot), "--allow-existing"],
-                environment=_isolated_environment(),
-                cwd=snapshot_root,
+            _cell_process_helpers().construct_runtime(
+                policy_payload_root or snapshot_root, str(Path(uv).absolute()), slot, snapshot_root,
+                python_version="3.11", error_type=CellError,
+                validate_file=_assert_regular_file, quote=_powershell_quote,
+                isolated_environment=_isolated_environment, execute=_run_checked,
             )
         else:
             raise CellError("uv is required; unrestricted pip fallback is not supported")
