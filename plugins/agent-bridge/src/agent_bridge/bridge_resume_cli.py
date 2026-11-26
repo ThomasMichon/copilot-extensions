@@ -1,27 +1,35 @@
-"""Opt-in workspace resume through the common exact conversation selector."""
+"""Workspace resume through the common exact conversation selector."""
 
 from __future__ import annotations
 
 import argparse
 from http.client import HTTPException
+import os
 import sys
 from typing import Any, NoReturn
 
 
 def selected(args: argparse.Namespace) -> bool:
-    enabled = bool(getattr(args, "bridge", False))
+    specialized = bool(getattr(args, "force", False)) or any(
+        getattr(args, name, None) is not None
+        for name in ("worktree_writer_file", "retained_recovery_file")
+    )
+    retained = specialized or any(
+        getattr(args, name, False) for name in ("strict", "require_agent_hosting")
+    )
+    choice = getattr(args, "bridge", False)
+    enabled = (
+        not retained and os.environ.get("AGENT_BRIDGE_LEGACY_RESUME") != "1"
+        if choice is None else bool(choice)
+    )
     if not enabled and any(
         getattr(args, name, None) for name in ("all_projects", "machine", "namespace")
     ):
         raise argparse.ArgumentTypeError(
-            "--all-projects, --machine and --namespace require --bridge",
+            "--all-projects, --machine and --namespace require exact bridge selection; "
+            "omit legacy modes or select --bridge explicitly",
         )
-    if enabled and (
-        getattr(args, "force", False)
-        or any(getattr(args, name, None) is not None for name in (
-            "worktree_writer_file", "retained_recovery_file",
-        ))
-    ):
+    if enabled and specialized:
         raise argparse.ArgumentTypeError(
             "--bridge does not support takeover, writer or recovery inputs; "
             "use their existing resume contracts without --bridge",
@@ -94,10 +102,15 @@ def resume(args: argparse.Namespace, target: str, *, worktree_only: bool) -> Non
 
 
 def register(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--bridge", action="store_true",
-        help="Resolve one local-provider workspace conversation and pin its native identity",
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--bridge", action="store_true", default=None,
+        help="Explicitly select the default exact workspace conversation selector",
+    )
+    selection.add_argument(
+        "--legacy-selector", action="store_false", dest="bridge",
+        help="Use the original session, singleton or agent/profile resume selector",
     )
     parser.add_argument("--all-projects", action="store_true", help="Select across projects")
-    parser.add_argument("--machine", help="Filter the conversation's machine; requires --bridge")
-    parser.add_argument("--namespace", help="Filter the conversation's namespace; requires --bridge")
+    parser.add_argument("--machine", help="Filter the conversation's machine")
+    parser.add_argument("--namespace", help="Filter the conversation's namespace")

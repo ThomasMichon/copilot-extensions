@@ -74,6 +74,7 @@ def cli_contracts() -> dict[str, Any]:
                 "capabilities": [
                     "exact-worktree-target", "keyed-worktree-writer", "retained-native-recovery",
                     "exact-bridge-workspace-resume",
+                    "bridge-workspace-resume-default",
                 ],
             },
             "bridge-session-current-requests-v1": {
