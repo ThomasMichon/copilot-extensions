@@ -428,6 +428,7 @@ def _create_namespaced_runtime(
             "bootstrap-capture.ps1", "bootstrap-capture.exe",
         ):
             shutil.copyfile(source / "scripts" / name, scripts / name)
+        shutil.copytree(source / "scripts/_bootstrap_python", scripts / "_bootstrap_python")
         (home / ".copilot" / "settings.json").write_text(
             json.dumps({"extraKnownMarketplaces": {
                 "fixture": {"source": {"kind": "github", "repo": "example/extensions"}},
@@ -490,7 +491,8 @@ def _create_namespaced_runtime(
         COPILOT_PLUGIN_ROOT=str(plugin),
         EXPECTED_RUNTIME_ROOT=str(runtime), EXPECTED_RUNTIME_SLOT=str(slot),
         EXPECTED_RUNTIME_PYTHON=str(slot / "Scripts" / "python.exe"),
-        PATH=str(system32), UV_PYTHON_INSTALL_DIR=str(tmp_path / "empty-managed-root"),
+        PATH=os.pathsep.join((base_env["BRIDGE_TEST_UV_TOOLS"], str(system32))),
+        UV_PYTHON_INSTALL_DIR=str(tmp_path / "empty-managed-root"),
         UV_PYTHON_DOWNLOADS="never",
     )
     if locator == "installed":
@@ -775,7 +777,7 @@ def test_prepared_runtime_is_offline_bootstrap_handoff(
     tmp_path: Path,
     shell: str,
 ) -> None:
-    """A completed installation remains usable without global bootstrap tools."""
+    """A completed installation uses prepared UV without global bootstrap Python."""
     plugin, _, base_env = windows_payload_runtime
     host = shutil.which(shell)
     if host is None:
@@ -784,7 +786,8 @@ def test_prepared_runtime_is_offline_bootstrap_handoff(
     env.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", None)
     system32 = Path(os.environ["SystemRoot"]) / "System32"
     env["PATH"] = os.pathsep.join(
-        (str(system32), str(system32 / "WindowsPowerShell" / "v1.0")),
+        (base_env["BRIDGE_TEST_UV_TOOLS"], str(system32),
+         str(system32 / "WindowsPowerShell" / "v1.0")),
     )
     managed_root = tmp_path / "empty-managed-root"
     managed_root.mkdir()

@@ -34,6 +34,7 @@ on:
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
       - libs/payload-invocation/tests/test_mcp_ready_source.py
       - libs/payload-invocation/tests/test_vault_ready_source.py
+      - libs/payload-invocation/tests/test_bridge_ready_source.py
       - plugins/agent-mcp/scripts/runtime-gate.sh
       - plugins/agent-mcp/scripts/runtime-gate.ps1
       - plugins/agent-mcp/tests/test_managed_command_gate.py
@@ -46,6 +47,10 @@ on:
       - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
       - plugins/agent-bridge/tests/test_payload_invocation.py
+      - plugins/agent-bridge/tests/managed_command_fixture.py
+      - plugins/agent-bridge/tests/test_managed_command_gate.py
+      - plugins/agent-bridge/scripts/runtime-gate.sh
+      - plugins/agent-bridge/scripts/runtime-gate.ps1
       - plugins/agent-bridge/scripts/install.sh
       - plugins/agent-bridge/scripts/install.ps1
       - plugins/agent-bridge/scripts/bootstrap-uv.ps1
@@ -1342,6 +1347,61 @@ jobs:
       MCP_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *mcp-ready-steps
+
+  bridge-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      BRIDGE_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &bridge-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Bridge foreground and passive command admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bridge_ready_source.py --allow-explicit-tiers
+          -k "${{ env.BRIDGE_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/bridge-ready
+      - name: Require all Bridge command controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.BRIDGE_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          expected=22 if os.environ['QUALIFIED_SHELL']=='bash' else 24;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='bridge_command_admission'];
+          assert len(reports)==expected and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['application_uv_lookups']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'bridge_command_admission':reports},sort_keys=True))"
+
+  bridge-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      BRIDGE_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *bridge-ready-steps
+
+  bridge-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      BRIDGE_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *bridge-ready-steps
 
   vault-ready-admission-windows:
     runs-on: windows-latest

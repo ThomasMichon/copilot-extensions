@@ -1,10 +1,10 @@
 {
-  "bundle": "33c8d28a50095ba4981b853933e9eef31835f8fe5e0ad43eab864ac36d404816",
+  "bundle": "ab0ce4529cae61539076456b59a8ee0eca58dd97c142defb8e182770b1ee2f07",
   "consumer": "agent-remote-driver",
   "files": {
     "command-causes.tsv": "c3b13cc324c75342da9487c963e98755f2e97ceae5cd7ee473094bf63af98cb3",
     "command-errors.ps1": "d4191e5f97994d7fe81044b75b829ef9ba765671d8e12a3dbfc62733c84b85d1",
-    "command-errors.sh": "98ec1528cdfb282e61e89ce6ad0f9fea7135856ee67a839f9c6c14e6b06a33f7",
+    "command-errors.sh": "6795cb3a786238139bf63030f49efc8a34dec4d1170bf0395dd3408f3ed11ae0",
     "private-paths.ps1": "3b76f10f84eea6e88b4c1dc2e37cb55b3bcfe677e8eb31748cf84b1b6e767c3d",
     "private-paths.sh": "0fd11ac897dd140e223f05c22c81f564b164afdcaeb579a6cee1261b67db0494"
   },

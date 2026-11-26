@@ -124,6 +124,8 @@ def _native(
         command = [host, "-NoProfile", "-NonInteractive", "-Command", script]
     else:
         script = '. "$1/command-errors.sh"; '
+        if mode == "missing-bashpid":
+            script += "unset BASHPID; set -u; "
         if mode == "closed-error":
             script += "exec 2>&-; set -e; "
         if mode == "custom-ifs":
@@ -218,6 +220,18 @@ def test_native_unavailable_store_keeps_primary_result(
     result = _native(native)
     assert result.returncode == 37 and b"command evidence unavailable" in result.stderr
     assert native[2].read_bytes() == b"private retained fixture"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Bash missing-identity refusal control")
+def test_missing_bashpid_keeps_primary_result_without_storage(
+    native: tuple[str, Path, Path, dict[str, str]],
+) -> None:
+    result = _native(native, mode="missing-bashpid")
+    assert result.returncode == 37
+    assert result.stdout == b"\x00\xffnative stdin\r\n"
+    assert b"command evidence unavailable" in result.stderr
+    assert b"unbound variable" not in result.stderr
+    assert not native[2].exists()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux native metadata and clock binding")

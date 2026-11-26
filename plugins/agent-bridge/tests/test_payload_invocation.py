@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import os
+import runpy
 import shutil
 import struct
 import subprocess
@@ -233,6 +234,13 @@ def windows_payload_runtime(tmp_path_factory: pytest.TempPathFactory) -> Payload
     shutil.copytree(PLUGIN / "scripts", plugin / "scripts")
     for name in ("plugin.json", "payload-invocation.json"):
         shutil.copy2(PLUGIN / name, plugin / name)
+    previous_path = sys.path[:]
+    try:
+        owner = runpy.run_path(str(PLUGIN.parents[1] / "tools/materialize_payload_invocation.py"))
+        changes = owner["materialize"](plugin, canonical_root=PLUGIN.parents[1], source_consumer=PLUGIN)
+    finally:
+        sys.path[:] = previous_path
+    assert changes and not any(line.startswith("SKIP") for line in changes), changes
     home = tmp_path / "home"
     home.mkdir()
     runtime = home / ".agent-bridge"
@@ -337,6 +345,12 @@ sys.exit(17)
         EXPECTED_RUNTIME_PYTHON=str(slot / "Scripts" / "python.exe"),
         POWERSHELL_TELEMETRY_OPTOUT="1",
     )
+    uv = shutil.which("uv")
+    assert uv is not None, "prepared UV is required for application admission"
+    tools = tmp_path / "prepared tools"
+    tools.mkdir()
+    shutil.copy2(uv, tools / Path(uv).name)
+    env["BRIDGE_TEST_UV_TOOLS"] = str(tools)
     installer = (plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
     start = installer.index("function Publish-RuntimeHelperFile {")
     end = installer.index("\nfunction Resolve-SnapshotInstallerEngineSource {", start)
@@ -379,9 +393,10 @@ def _assert_generated_windows_binary_frames(
     bin_dir = plugin / "bin" if surface == "payload" else legacy_bin
     if entrypoint.endswith("51"):
         system32 = Path(os.environ["SystemRoot"]) / "System32"
-        # Select the legacy shell without removing its declared Python prerequisite.
+        # Select the legacy shell without removing prepared application admission.
         env["PATH"] = os.pathsep.join(
-            (sys.base_prefix, str(system32), str(system32 / "WindowsPowerShell" / "v1.0"))
+            (base_env["BRIDGE_TEST_UV_TOOLS"], sys.base_prefix,
+             str(system32), str(system32 / "WindowsPowerShell" / "v1.0"))
         )
     if entrypoint.startswith("powershell"):
         host = (
@@ -740,6 +755,7 @@ def test_payload_manifest_describes_agent_bridge_runtime() -> None:
         "legacyRuntimeRoot": ".agent-bridge",
         "installationContext": "required",
         "bootstrapPython": "3.11.18",
+        "bootstrapLauncher": "uv",
         "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
         "purpose": "Communicate with persistent agent sessions",
         "installer": "install",
