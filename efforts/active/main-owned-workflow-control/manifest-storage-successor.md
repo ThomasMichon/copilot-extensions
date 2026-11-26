@@ -2,7 +2,7 @@
 
 Parent and completion gate: [Main-Owned Workflow Control](README.md).
 Coordination: #6237; existing CI/release and operational owners remain.
-Status: proposed implementation plan; automated plan review must precede code.
+Status: compatible reader implemented and locally checked; reader review/CI/merge precedes data migration.
 
 ## Goal
 
@@ -101,21 +101,55 @@ unchanged. Confirm this concrete shape against actual consumers and bootstrap
 constraints before implementation; materially different realization returns
 through ordinary design review.
 
+## Consumer and bootstrap closure
+
+The November 26 read-only trace closes the following actual paths:
+
+| Consumer | Executing reader and data selection | Consequence |
+|---|---|---|
+| PR CI | Checked-out head's `ci_pr_unit_reuse.py` and central contract | Reader/code and active manifest share the tested revision |
+| Promotion unit execution | Frozen candidate's runner, paired with the admitted immutable Dev input | No mutable-latest lookup or new controller route is needed |
+| Qualification and publication | `reviewed-helpers` and `validated-dev` both checkout `needs.gate.outputs.sha` | The helpers reading source data come from that same frozen Dev revision |
+| Receipt and packet verification | `load_manifest` and `verify_packet` normalize through `admit_manifest` | Keep raw file digests separate from logical manifest identity |
+| Release-scope guard | Reads sources, targets and each outer file group's path only | Nested case-prefix groups do not change its selection semantics |
+
+Fetched and independently provider-confirmed Main
+`07549ae5e5831f7c00263572d3375ddb276d4122` uses those frozen-Dev helper
+selections. Its initial Main-selected lifecycle helper does not read the unit
+manifest. Preserve this distinction rather than assuming every helper runs
+from Main or adding a new release/rollout prerequisite.
+Before migration, confirm that the actual selected readers contain the merged
+compatibility code and that the migration's source descends from it.
+
+The central contract and compact contract/packet/candidate test owners are
+already admitted. Extend their existing admitted test flows, retaining old
+assertions and all test/parameter identities. New reader branches will execute
+under existing gates without adding a source binding or splitting a table.
+Honest full-width code/test hash updates do not grow the v2 serialization.
+The reader stage keeps the active representation in v2 and the existing
+1 MiB cap; it adds no preload or eligibility exception.
+
 ## Plan
 
 _Agent-recommended realization within the selected scope; not new authority._
 
-- [ ] Review and merge this phase's intent before implementing the codec or
+- [x] Review and merge this phase's intent before implementing the codec or
   changing the active stored representation.
-- [ ] Trace actual manifest readers, writers/converters, proof/recipe consumers
+- [x] Trace actual manifest readers, writers/converters, proof/recipe consumers
   and independently selected control revisions. Close the 29-byte bootstrap:
   make new focused coverage execute without dropping old nodes/bindings,
   exceeding the cap, inventing a profile exception or preloading production.
-- [ ] Implement a strictly versioned compatible reader and focused controls in
+- [x] Implement a strictly versioned compatible reader and focused controls in
   the owning source. Keep active source data in v2 during reader delivery.
   Prefer the existing bound owners while bootstrap space is constrained.
   Record the concrete representation and compatibility contract in the code
   review before using it.
+  V3 prefix groups normalize through unchanged logical admission. Fifteen
+  existing contract/packet/candidate controls and both real compatibility-CLI
+  cases pass unchanged effect guarding. Names, parameter tables, old assertions
+  and selection remain; only five existing code/test hashes are rebound in v2.
+  Fresh-process old/new file consumers preserve ordered full-corpus values.
+  Reader delivery and data migration remain unchecked below.
 - [ ] Merge the reader and prove the actual consumers can read the successor
   before migration. Use their real code/control selection, not package-version
   equality. If a separately owned consumer needs adoption, preserve that
@@ -169,7 +203,8 @@ _Agent-recommended checks preserving the established acceptance boundary._
 
 ## Decision and progress record
 
-The [dated Journal](journal/2026/11.25-original-unit-delivery.md) owns the
-approval and subsequent review/delivery history. This phase's Plan/Validation,
+The [approval Journal](journal/2026/11.25-original-unit-delivery.md) and
+[implementation Journal](journal/2026/11.26-manifest-successor.md) own the
+decision and subsequent review/delivery history. This phase's Plan/Validation,
 not an opened PR or a reader-only milestone, owns its bounded completion.
 The parent remains the root completion owner.

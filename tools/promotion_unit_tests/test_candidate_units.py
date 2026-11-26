@@ -13,7 +13,7 @@ import pytest
 
 import installer_engine_ref
 from promotion_candidate_units import candidate_manifest, derive_manifest
-from promotion_unit_contract import CANDIDATE_PROFILE, COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, manifest_digest, verify_sources, windows_native_manifest
+from promotion_unit_contract import CANDIDATE_PROFILE, COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, compact_manifest, manifest_digest, verify_sources, windows_native_manifest
 
 DEV, TREE = "a" * 40, "b" * 40
 TEST = "tools/promotion_unit_tests/test_example.py"
@@ -56,6 +56,8 @@ def test_candidate_manifest_admits_actual_stamp_not_raw_source_relabeling() -> N
         windows_native_manifest(manifest, platform="win32")
     with pytest.raises(UnitEvidenceError, match="profile"):
         derive(windows_native_manifest(template, platform="win32"), development, candidate, origins)
+    with pytest.raises(UnitEvidenceError, match="development unit manifest"):
+        compact_manifest(manifest)
 
 
 def test_compact_template_keeps_candidate_selection_origins_and_digest() -> None:
@@ -67,6 +69,10 @@ def test_compact_template_keeps_candidate_selection_origins_and_digest() -> None
     assert actual == expected
     assert actual["composition"]["source_manifest_sha256"] == manifest_digest(template)
     assert template["profile"] == PROFILE
+    prefixed = compact_manifest(template)
+    from_prefix = derive(json.loads(json.dumps(prefixed)), development, candidate, origins)
+    assert from_prefix == expected
+    assert from_prefix["composition"]["source_manifest_sha256"] == manifest_digest(template)
 
 
 @pytest.mark.parametrize("change", ["dev-bytes", "missing-source", "extra-source", "wrong-origin", "bad-copy"])

@@ -5289,6 +5289,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-26 UTC - Manifest successor implementation](journal/2026/11.26-manifest-successor.md)
 - [2026-11-25 UTC - Original unit delivery and documentation assessment](journal/2026/11.25-original-unit-delivery.md)
 - [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
 - [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)
