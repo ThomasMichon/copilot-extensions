@@ -166,8 +166,44 @@ function Resolve-RuntimePython {
     return $AgentRtPy
 }
 
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $scriptDir '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-ssh] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
+    $Python = Get-AdmittedRuntimePython $Python
     $env:AGENT_SSH_HOME = $runtimeRoot
     $env:AGENT_SSH_PAYLOAD_ROOT = $payloadRoot
     if ($context) {
@@ -179,10 +215,18 @@ function Invoke-Runtime {
     # exit code is the only contract this dispatcher relays, so a
     # legitimate stderr diagnostic from a non-zero exit must never become
     # a terminating exception here (copilot-extensions#5494).
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_ssh @forwardArgs
+        if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+            $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+            $runtimeBootstrap = "import base64,json,runpy,sys;sys.argv=['agent_ssh']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_ssh',run_name='__main__',alter_sys=True)"
+            & $Python -c $runtimeBootstrap $encoded
+        } else {
+            & $Python -m agent_ssh @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }
