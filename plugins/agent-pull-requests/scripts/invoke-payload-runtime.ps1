@@ -1,7 +1,69 @@
 # Installation driver contract: pull-requests-first-use-v1
 $ErrorActionPreference = 'Stop'
-$forward = @($args)
+$forward = [string[]]@($args)
 $mode = & (Join-Path $PSScriptRoot 'payload-mode.ps1')
+$env:PYTHONUTF8 = '1'
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $PSScriptRoot '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-pull-requests] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
+function Invoke-PythonEntry {
+    param([string]$Python, [string]$Target, [switch]$ScriptEntry, [string[]]$Arguments)
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    $ErrorActionPreference = 'Continue'
+    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+        $json = ConvertTo-Json -InputObject @($Arguments) -Compress
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+        if ($ScriptEntry) {
+            $entry = "import base64,json,runpy,sys;script=sys.argv[1];sys.argv=[script,'--']+json.loads(base64.b64decode(sys.argv[2]));runpy.run_path(script,run_name='__main__')"
+            & $Python -I -c $entry $Target $encoded
+        } else {
+            $entry = "import base64,json,runpy,sys;module=sys.argv[1];sys.argv=[module]+json.loads(base64.b64decode(sys.argv[2]));runpy.run_module(module,run_name='__main__',alter_sys=True)"
+            & $Python -c $entry $Target $encoded
+        }
+    } elseif ($ScriptEntry) {
+        & $Python -I $Target -- @Arguments
+    } else {
+        & $Python -m $Target @Arguments
+    }
+    exit $LASTEXITCODE
+}
+
 if ($mode -ceq 'legacy') {
     $env:AGENT_RT_ROOT = Join-Path $env:USERPROFILE '.agent-pull-requests'
     $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
@@ -37,20 +99,17 @@ if ($mode -ceq 'legacy') {
         . $resolver -TraceMode ready
     }
     if (-not $AgentRtPy) { throw 'Owning installer returned without a resolvable runtime' }
-    $ErrorActionPreference = 'Continue'
-    & $AgentRtPy -m agent_pull_requests @forward
-    exit $LASTEXITCODE
+    $AgentRtPy = Get-AdmittedRuntimePython $AgentRtPy
+    Invoke-PythonEntry -Python $AgentRtPy -Target 'agent_pull_requests' -Arguments $forward
 }
 if ($mode -cne 'cell') { throw 'Native installation admission returned an unknown mode' }
-$python = $null
-foreach ($candidate in @('python3', 'python')) {
-    $command = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($command -and $command.Source -notmatch 'WindowsApps') {
-        & $command.Source -I -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>$null
-        if ($LASTEXITCODE -eq 0) { $python = $command.Source; break }
-    }
+try {
+    $python = & (Join-Path $PSScriptRoot '_bootstrap_python\select.ps1') `
+        -Operation Inspect -TimeoutMilliseconds 10000
+    if (-not $python) { throw 'Prepared command bootstrap Python is unavailable.' }
+} catch {
+    [Console]::Error.WriteLine("[agent-pull-requests] command bootstrap Python admission failed: $($_.Exception.Message)")
+    exit 126
 }
-if (-not $python) { throw 'Governed invocation requires an existing Python 3.10+ interpreter' }
-$ErrorActionPreference = 'Continue'
-& $python -I (Join-Path $PSScriptRoot 'cell_invoke.py') -- @forward
-exit $LASTEXITCODE
+Invoke-PythonEntry -Python $python -Target (Join-Path $PSScriptRoot 'cell_invoke.py') `
+    -ScriptEntry -Arguments $forward

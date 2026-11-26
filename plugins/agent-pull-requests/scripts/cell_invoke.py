@@ -7,22 +7,25 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 sys.dont_write_bytecode = True
 PAYLOAD = Path(__file__).resolve().parent.parent
 PLUGIN = "agent-pull-requests"
 
 
-def installer():
+def installer() -> Any:
     spec = importlib.util.spec_from_file_location(
         "apr_invocation_installer", PAYLOAD / "scripts" / "cell_install.py",
     )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Owning installer adapter is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def discover(api):
+def discover(api: Any) -> tuple[dict[str, Any], Path, Path, dict[str, Any]]:
     _, profile = api._current_environment(
         environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
     )
@@ -55,7 +58,7 @@ def discover(api):
     return status, durable, profile, probe
 
 
-def require_active(status):
+def require_active(status: dict[str, Any]) -> None:
     if (status["status"], status["reason"], status["actualMode"]) != (
         "ready", "namespaced-active", "namespaced",
     ):
@@ -64,7 +67,10 @@ def require_active(status):
         )
 
 
-def activate_fresh(api, status, durable, profile, probe, *, version):
+def activate_fresh(
+    api: Any, status: dict[str, Any], durable: Path, profile: Path,
+    probe: dict[str, Any], *, version: str,
+) -> None:
     """Only an absent legacy installation may enter canonical first-touch activation."""
     if (
         (status["status"], status["reason"], status["desiredMode"]) != (
@@ -111,7 +117,9 @@ def activate_fresh(api, status, durable, profile, probe, *, version):
     )
 
 
-def refresh_management(api, status, durable, profile, *, version):
+def refresh_management(
+    api: Any, status: dict[str, Any], durable: Path, profile: Path, *, version: str,
+) -> None:
     """Bootstrap may advance only this already-active source and payload."""
     require_active(status)
     validated = api.validate_context_receipt(
@@ -157,7 +165,9 @@ def refresh_management(api, status, durable, profile, *, version):
         raise PermissionError("Management activation changed; explicit revalidation required")
 
 
-def selection(api, status, durable):
+def selection(
+    api: Any, status: dict[str, Any], durable: Path,
+) -> tuple[Path, Path] | None:
     """No LKG/newest fallback: all selected metadata must describe one completed slot."""
     helper = Path(__file__).resolve().parents[1] / "src" / PLUGIN.replace("-", "_") / "_selected_runtime.py"
     spec = importlib.util.spec_from_file_location("apr_selected_runtime", helper)
@@ -165,10 +175,31 @@ def selection(api, status, durable):
         raise RuntimeError("Owning selection helper is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.select_runtime(api, status, durable, payload_root=PAYLOAD)
+    return cast(
+        tuple[Path, Path] | None,
+        module.select_runtime(api, status, durable, payload_root=PAYLOAD),
+    )
 
 
-def execute(arguments, *, bootstrap=False):
+def admitted_runtime(adapter: Any, python: Path) -> str:
+    """Reuse the owning process library's prepared-only application admission."""
+    helpers = adapter.process_helpers()
+    existing = sys.modules.get("agent_procutil")
+    if existing is not None and Path(existing.__file__ or "").resolve() != Path(helpers.__file__).resolve():
+        raise RuntimeError("Application admission process support belongs to a different payload")
+    # The adapter's private package name predates helpers' absolute package imports.
+    sys.modules.setdefault("agent_procutil", helpers)
+    try:
+        managed = importlib.import_module("agent_procutil.managed_python")
+        admit = managed.resolve_runtime_python
+    except (ImportError, AttributeError) as error:
+        raise RuntimeError(
+            "Application runtime admission support is unavailable; use explicit installation management."
+        ) from error
+    return cast(str, admit(python))
+
+
+def execute(arguments: list[str], *, bootstrap: bool = False) -> int:
     adapter = installer()
     api = adapter.foundation()
     status, durable, profile, probe = discover(api)
@@ -218,12 +249,13 @@ def execute(arguments, *, bootstrap=False):
             raise PermissionError("Owning installer returned without a selected completed runtime")
     if bootstrap:
         return 0
+    python, root = selected
+    python_entry = admitted_runtime(adapter, python)
     before = status
     status, _, _, _ = discover(api)
     require_active(status)
     if status != before or selection(api, status, durable) != selected:
         raise PermissionError("Installation selection changed before command dispatch")
-    python, root = selected
     environment = os.environ.copy()
     environment.update(
         COPILOT_EXTENSIONS_CONTEXT=status["context"], COPILOT_PLUGIN_ROOT=str(PAYLOAD),
@@ -231,13 +263,13 @@ def execute(arguments, *, bootstrap=False):
     )
     # Windows execv does not preserve the native target's exit status.
     return subprocess.run(  # noqa: S603 -- canonically validated same-cell target, argv only
-        [str(python), "-I", "-m", "agent_pull_requests", *arguments],
+        [python_entry, "-I", "-m", "agent_pull_requests", *arguments],
         env=environment, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
         check=False, **adapter.process_helpers().no_window_kwargs(),
     ).returncode
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bootstrap", action="store_true")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
