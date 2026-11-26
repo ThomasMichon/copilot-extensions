@@ -17,7 +17,10 @@ existing helper version check and helper lookup.
 
 The path-gated Ubuntu/macOS/Windows jobs require every applicable case and report
 without skips within eight-minute deadlines. Retained publication-policy,
-evaluator/transport and readiness-import controls run separately. Namespaced
+evaluator/transport and readiness-import controls run separately.
+Fresh-provision controls restore prepared UV after their setup-only refusal
+stub, then require global command admission for both legacy and selected-cell
+bindings. Namespaced
 installation management retains Bash 4.4+ on macOS, selected after the command
 packet runs under system Bash; canonical management under Bash 3.2 is not
 qualified by the synthetic context decisions.

@@ -1557,6 +1557,21 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==12 and len({c.attrib['name'] for c in cases})==12;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Retain fresh Containers provision-to-command admission
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: ${{ env.CONTAINERS_QUALIFICATION_SHELL }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_containers_review_regressions.py --allow-explicit-tiers
+          -k "fresh_provision and native"
+          --junit-dir qualification-evidence/containers-fresh
+      - name: Require both fresh publication controls without skips
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-fresh').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==2 and len({c.attrib['name'] for c in cases})==2;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Retain independent Windows evaluator and application transport
         if: runner.os == 'Windows'
         env:
