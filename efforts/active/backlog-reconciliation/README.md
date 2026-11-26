@@ -524,10 +524,13 @@ the non-public approval conversation.
 
 The [later workflow-status intake and keeper boundaries](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
 qualify six complete originals and all six discussions, preserve the
-remaining unadmitted union and three carried controls, and propose only
-#5598's two unverified historical attempts for additive receiving in OPEN
-#4783. No new source completion, tracker disposition, branch deletion or
-execution is claimed; every parent Plan/Validation state remains.
+remaining unadmitted union and three carried controls, and record reviewed
+#14803, whole accepted additive receiving in OPEN #4783 and separately
+audited `NOT_PLANNED` #5598. Its two historical attempts are preserved,
+not repaired or rerun. Two equal complete censuses measure 595 whole OPEN,
+with exactly that departure and no arrival or unrelated departure.
+No new source completion, branch deletion or execution is claimed;
+every parent Plan/Validation state remains.
 
 The [hosted activation and incomplete-attempt outcomes](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
 record reviewed #14796/#14798, whole accepted receiving and four separately
