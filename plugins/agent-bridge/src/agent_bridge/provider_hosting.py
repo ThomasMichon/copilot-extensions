@@ -223,6 +223,7 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
                 not isinstance(scope, dict)
                 or scope.keys() != {
                     "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_STATE_DIR",
+                    "AGENT_CONTAINERS_CONFIG", "AGENT_CONTAINERS_DRIVERS_DIR",
                     "AGENT_CONTAINERS_PAYLOAD_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
                 }
                 or any(value is not None and (not isinstance(value, str) or "\0" in value)

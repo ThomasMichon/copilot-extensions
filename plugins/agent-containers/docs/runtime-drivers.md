@@ -31,6 +31,8 @@ The resolver advertises `venue.runtime_proxy` version 1 only when exactly one co
 
 Older Bridge versions ignore the declaration and use the existing proxy syntax. New Bridge versions use that same syntax when resolving through a provider that does not advertise the declaration. No separate capability probe or driver protocol change is needed. A retained declaration whose provider executable was removed must be resolved again, not redirected to an unverified runtime.
 
+The declared variables include `AGENT_CONTAINERS_CONFIG` and `AGENT_CONTAINERS_DRIVERS_DIR`. If the resolving provider used the default configuration or driver registration lookup, replay also uses that lookup rather than an override from Bridge.
+
 ## Fleet configuration
 
 ```yaml

@@ -130,6 +130,7 @@ def current_provider_environment() -> dict[str, str | None]:
     """Reproduce installation routing, including absent values, on replay."""
     return {key: os.environ.get(key) for key in (
         "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_STATE_DIR",
+        "AGENT_CONTAINERS_CONFIG", "AGENT_CONTAINERS_DRIVERS_DIR",
         _PAYLOAD_ROOT_ENV, "COPILOT_EXTENSIONS_CONTEXT",
     )}
 

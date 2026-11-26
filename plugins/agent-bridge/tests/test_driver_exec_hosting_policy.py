@@ -20,6 +20,7 @@ INSTANCE = "0123456789ab"
 PROVIDER = ["/payload/bin/agent-containers"]
 INSTALLATION_ENV = (
     "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_STATE_DIR",
+    "AGENT_CONTAINERS_CONFIG", "AGENT_CONTAINERS_DRIVERS_DIR",
     "AGENT_CONTAINERS_PAYLOAD_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
 )
 ALLOWED = {
@@ -94,8 +95,9 @@ async def test_undeclared_driver_venue_keeps_legacy_guest_check(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("override", [True, False], ids=["explicit-selectors", "default-selectors"])
 async def test_bound_hosting_reaches_real_proxy_without_inventory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: bool,
 ) -> None:
     from agent_bridge import hosting_policy
     from agent_bridge.session_host import container_transport
@@ -116,14 +118,22 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
     monkeypatch.delenv("PYTHONPATH", raising=False)
     monkeypatch.delenv("PYTHONHOME", raising=False)
     monkeypatch.setenv("PATH", "")  # no host Docker or guest tools
+    monkeypatch.chdir(tmp_path)
     provider_home = tmp_path / "provider"
-    drivers = provider_home / "drivers.d"
+    drivers = tmp_path / "explicit-drivers" if override else provider_home / "drivers.d"
+    config = tmp_path / "explicit-config.yaml" if override else provider_home / "containers.yaml"
+    provider_home.mkdir()
     drivers.mkdir(parents=True)
     monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(provider_home))
     monkeypatch.setenv("AGENT_CONTAINERS_STATE_DIR", str(tmp_path / "provider-state"))
     monkeypatch.setenv("AGENT_CONTAINERS_PAYLOAD_ROOT", str(root))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
-    monkeypatch.delenv("AGENT_CONTAINERS_DRIVERS_DIR", raising=False)
+    if override:
+        monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(config))
+        monkeypatch.setenv("AGENT_CONTAINERS_DRIVERS_DIR", str(drivers))
+    else:
+        monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+        monkeypatch.delenv("AGENT_CONTAINERS_DRIVERS_DIR", raising=False)
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     state_path = runtime / "state.json"
@@ -136,13 +146,11 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
             "schema_version": 1, "name": driver,
             "command": [sys.executable, str(root / "tests" / "fake_runtime_driver.py"), *options],
         }))
-    config = tmp_path / "containers.yaml"
     config.write_text(json.dumps({"fleets": {
         "example": {"driver": "example-driver", "workspace_folder": "/workspaces/example",
                     "relay_enabled": False},
         "slow": {"driver": "slow-driver", "relay_enabled": False},
     }}))
-    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(config))
     monkeypatch.setenv("FAKE_DRIVER_ROOT", str(runtime))
     monkeypatch.setenv("FAKE_DRIVER_EXEC_STDOUT", json.dumps(ALLOWED))
     state_path.write_text(json.dumps({"members": {
