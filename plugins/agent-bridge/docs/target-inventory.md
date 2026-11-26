@@ -661,12 +661,15 @@ conversation or creates a replacement. Metadata-only rows without an input
 owner are not fabricated into managed conversations.
 
 Default listings still omit non-live anchor conversations. When an exact local
-managed/native ID is absent from that projection, resolution may read that
-single persisted managed record. The returned canonical/native identity must
-match exactly; project, machine and namespace filters still apply. Cold,
-read-only and ended history cannot become input owners. This exact lookup does
-not broaden default listings, scan history, resolve profile names or follow a
-successor.
+managed/native ID is absent from that projection, `bridge_inventory: 3` permits
+one retained-managed expansion of the existing inventory read. The coordinator
+keeps its authoritative SSH/machine normalization and the same project, machine,
+namespace and ambiguity checks. A writable idle owner remains eligible even
+when its carrier is unavailable or its summary says `at_rest`; that summary is
+not a read-only-history marker. Read-only and ended history cannot become input
+owners. A prior provider refuses unsupported expansion before mutation. This
+does not broaden default listings, hydrate native history, resolve profile names
+or follow a successor.
 
 For a managed conversation, `durable_managed_messages: 1` selects the existing
 `pending_prompts` queue through `BridgeClient.submit_managed_message`. The CLI

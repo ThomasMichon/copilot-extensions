@@ -453,7 +453,7 @@ def project_bridges(
         bridges.append(row)
     return {
         "version": 1,
-        "identity_version": 2,
+        "identity_version": 3 if include_retained_managed else 2,
         "bridges": bridges,
         "sources": sources,
         "complete": bool(sources)
