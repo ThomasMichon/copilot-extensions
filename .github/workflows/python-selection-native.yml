@@ -1279,6 +1279,38 @@ jobs:
       - *command-native-python
       - *command-native-uv
       - *command-native-interpreters
+      - name: Observe native macOS process-group admission prerequisites
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ctypes
+          import json
+          import os
+          import sys
+          sys.path.insert(0, "libs/agent-procutil/src")
+          from agent_procutil._darwin_caller_owned import GroupCensus, _BSDInfo
+          census = GroupCensus()
+          group = os.getpgrp()
+          pids = (ctypes.c_int * 1024)()
+          ctypes.set_errno(0)
+          count = census.list_pids(group, pids, ctypes.sizeof(pids))
+          print(json.dumps({"group_count": count, "errno": ctypes.get_errno()}), flush=True)
+          assert 0 <= count < len(pids)
+          for pid in pids[:count]:
+              data = _BSDInfo()
+              ctypes.set_errno(0)
+              returned = census.info(pid, 3, 0, ctypes.byref(data), ctypes.sizeof(data))
+              print(json.dumps({
+                  "self": pid == os.getpid(),
+                  "leader": pid == group,
+                  "returned": returned,
+                  "expected": ctypes.sizeof(data),
+                  "errno": ctypes.get_errno(),
+                  "same_pid": data.pid == pid,
+                  "same_group": data.pgid == group,
+              }), flush=True)
+          PY
       - name: Qualify raw and materialized prepared MCP foreground entry
         run: >-
           python tools/run-plugin-tests.py payload-invocation
