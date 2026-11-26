@@ -487,7 +487,37 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the still-unrepresented original local-execution binding and
+- [ ] Qualify all forty complete original local-context functions as one
+  coherent source slice: 38 context functions against local execution and
+  the two registry-only normalization functions against registry.
+  Preserve original objects, code/global origins, fixtures, typed parameter
+  values, module/function marks, IDs and order. Check original file/function
+  uniqueness and complete collection metadata before unchanged guarding.
+  Require actual owning-module call lines per case before exact admission.
+  Add only the two adapters and one shared original binding, with no new
+  coverage target, production edit, host observation, file load, OS patch,
+  process, native action or guard exception. Retain all inventory, hashes,
+  helpers, limits and prior refusals. Fresh review, full CI, normal merge
+  and independent persistent verification precede completion.
+  Complete collection confirms 232 original cases: 228 context cases through
+  38 functions and four registry-only cases through two functions. Original
+  file/function uniqueness, object/global origins, fixtures, typed parameter
+  values, module/function marks, IDs and order agree. First unchanged guarded
+  trials pass 228 in 3.17 pytest / 18.016 observation seconds and four in
+  0.97 pytest / 13.782 observation seconds, with all 696 phases passing,
+  zero prohibited effects and 25 bound reads per trial. Every case exercises
+  actual owner call lines. Complete phase/input/per-case witnesses are read
+  before admission. Only 232 nodes and three bindings are added:
+  11,035 nodes, 1,520 sources, unchanged 553 targets and 92 helper decisions,
+  300 seconds and 730,642 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass; review, full hosted CI, merge and persistence remain.
+  Pre-publication reconciliation preserves the complete #14707 Index peer:
+  fifteen cases, one adapter binding and two refreshed source hashes.
+  All 26 locally observed inputs remain exact without replay. The current
+  union is 11,050 nodes, 1,521 sources, unchanged 553 targets,
+  92 helpers, 300 seconds and 731,256 bytes. Fresh review and complete
+  hosted CI must qualify this union before normal merge and persistence.
+- [x] Qualify the still-unrepresented original local-execution binding and
   profile controls as one coherent source PR, only after checking original
   file/function admission uniqueness rather than new adapter node IDs.
   Preserve every complete function and parameter row, original code/global
@@ -519,6 +549,18 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   all 27 locally observed input hashes remain exact without replay.
   Inventory and limits are unchanged. Fresh current-head review and complete
   hosted CI must qualify this union before normal merge and persistence.
+  A second real conflict retains the complete #14705 exact-resume peer:
+  23 cases, one source/target and two refreshed bindings, with all 27
+  observed local inputs unchanged and no replay. Final inventory is
+  10,803 nodes, 1,517 sources, 553 targets, 92 helpers, 300 seconds
+  and 721,579 bytes.
+  Source #14708 merges at `870f49f60642e51fef9f32e09644c3943b5e0ca6`
+  after fresh approval and complete required CI; natural execution passes
+  all 10,803 units in 227.208 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, backup-retaining supported
+  alignment and managed sync, all seven owned reviewed/merged/working blobs,
+  exact candidate, all bindings/helpers and observed input hashes verify
+  without replay. Only this 188-case leaf is Done; the parent remains active.
 - [x] Disposition the proposed control-plane/identity expansion as duplicate,
   not new assurance. Review #14700 identifies that all 28 proposed cases
   already run through the admitted combined adapter from merged #14611.
