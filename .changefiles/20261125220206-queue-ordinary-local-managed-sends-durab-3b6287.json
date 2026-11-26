@@ -1,0 +1,9 @@
+{
+  "comment": "Queue ordinary local managed sends durably before runtime admission, preserving original target and operation receipts without implicit resume.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

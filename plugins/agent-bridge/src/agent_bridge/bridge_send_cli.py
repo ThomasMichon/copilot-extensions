@@ -66,7 +66,6 @@ def send(args: argparse.Namespace) -> None:
     from .session_targeting_cli import (
         _deliver_to_live_session,
         _resolve_prompt,
-        _submit_and_stream,
     )
 
     if (
@@ -101,16 +100,18 @@ def send(args: argparse.Namespace) -> None:
     except (BridgeClientError, BridgeConnectionError) as exc:
         _refuse(args, "bridge_selection_unavailable", str(exc))
     native = row.get("session_id")
-    if row.get("status") != "running" or not isinstance(native, str) or not native:
-        _refuse(args, "bridge_send_unavailable", "selected bridge has no running conversation")
+    if not isinstance(native, str) or not native:
+        _refuse(args, "bridge_send_unavailable", "selected bridge has no existing conversation")
     if host:
         from .bridge_remote_send_cli import send as send_remote
 
+        if row.get("status") != "running":
+            _refuse(args, "bridge_send_unavailable", "selected bridge has no running conversation")
         if (row.get("route") or {}).get("host") != host:
             _refuse(args, "bridge_selection_unavailable", "selected Bridge host changed")
         send_remote(client, args, row, prompt)
         return
-    managed = row.get("managed_session_id")
+    managed = row.get("managed_session_id") or row.get("retained_managed_session_id")
     bound = argparse.Namespace(**vars(args))
     owned = isinstance(managed, str) and bool(managed)
     if owned:
@@ -120,8 +121,6 @@ def send(args: argparse.Namespace) -> None:
                 "bridge_send_options",
                 "--sender and --reply-to require a registered-session inbox",
             )
-        bound.expected_native_session_id = native
-        bound.no_resume = True
     else:
         registered = row.get("registered_session_id")
         if not isinstance(registered, str) or registered != native:
@@ -137,14 +136,10 @@ def send(args: argparse.Namespace) -> None:
     }
     try:
         if owned:
+            from .managed_message_cli import send as send_managed
+
             assert isinstance(managed, str)
-            _submit_and_stream(
-                client,
-                bound,
-                managed,
-                prompt,
-                caller_id=core._caller_id_for(args),
-            )
+            send_managed(client, args, managed, native, prompt)
         else:
             _deliver_to_live_session(client, bound, native, prompt)
     except SendRefused as exc:

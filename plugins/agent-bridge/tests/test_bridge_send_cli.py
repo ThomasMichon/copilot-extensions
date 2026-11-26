@@ -58,7 +58,10 @@ def wire(
             return {
                 "protocol_version": HTTP_PROTOCOL_VERSION,
                 "min_protocol_version": 1,
-                "capabilities": {"live_exact_send": capability, "native_send_no_resume": 1},
+                "capabilities": {
+                    "live_exact_send": capability, "native_send_no_resume": 1,
+                    "durable_managed_messages": 1,
+                },
             }
         if method == "POST" and before_send:
             before_send()
@@ -148,14 +151,16 @@ def test_initial_health_failure_uses_real_client_factory_and_json_refusal(
 
 
 @pytest.mark.parametrize("selection", [[], ["--bridge"]])
+@pytest.mark.parametrize("status", ["running", "dormant", "retained"])
 def test_selected_registered_send_persists_exact_input_and_original_receipt(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     api: Any,
     tmp_db: Any,
     selection: list[str],
+    status: str,
 ) -> None:
-    calls = wire(monkeypatch, api)
+    calls = wire(monkeypatch, api, row_changes={"status": status})
     argv = ["--json", "send", "workspace-a", "work", *selection, "--idempotency-key", "original"]
     cli.main(argv)
     first = json.loads(capsys.readouterr().out)
@@ -272,7 +277,7 @@ def test_registered_provider_rollback_refuses_before_post(
 
 
 @pytest.mark.parametrize("fault", [None, "replaced", "stopped", "busy"])
-def test_selected_managed_send_uses_native_turn_lock_without_resume(
+def test_selected_managed_send_queues_before_native_turn_admission(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     session_manager: Any,
@@ -287,6 +292,8 @@ def test_selected_managed_send_uses_native_turn_lock_without_resume(
     from agent_bridge.routes.sessions import router
 
     session = prepare(session_manager, tmp_db, mock_acp_client)
+    mock_acp_client.is_running = False
+    tmp_db.execute_write("UPDATE sessions SET acp_session_id='native-a' WHERE id='bridge-a'")
     app = FastAPI()
     app.state.session_manager = session_manager
     app.include_router(router)
@@ -298,22 +305,23 @@ def test_selected_managed_send_uses_native_turn_lock_without_resume(
             session.status = SessionStatus.STOPPED if fault == "stopped" else SessionStatus.RUNNING
 
     calls = wire(monkeypatch, TestClient(app), represented=False, before_send=change)
-    argv = ["--json", "send", "workspace-a", "work", "--bridge", "--no-wait"]
-    if fault:
-        with pytest.raises(SystemExit) as exc:
-            cli.main(argv)
-        assert exc.value.code == (75 if fault == "busy" else 69)
-    else:
-        cli.main(argv)
-        result = json.loads(capsys.readouterr().out)
-        assert result["session_id"] == "bridge-a" and result["native_session_id"] == "native-a"
-        assert result["queued"] is False
+    argv = [
+        "--json", "send", "workspace-a", "work", "--bridge", "--no-wait",
+        "--idempotency-key", "original",
+    ]
+    cli.main(argv)
+    result = json.loads(capsys.readouterr().out)
+    assert result["session_id"] == "bridge-a" and result["native_session_id"] == "native-a"
+    assert result["queued"] is True and result["delivery_state"] == "queued"
     (post,) = [item for item in calls if item[0] == "POST"]
-    assert post[1].endswith("/bridge-a/turns/native-bound")
-    assert post[2]["expected_native_session_id"] == "native-a" and post[2]["no_resume"]
+    assert post[1].endswith("/bridge-a/messages")
+    assert post[2]["expected_native_session_id"] == "native-a"
+    assert post[2]["idempotency_key"] == "original"
     session_manager.resume_session.assert_not_awaited()
     session_manager.handoff_session.assert_not_awaited()
-    assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
+    assert session.turn_count == 0
+    (pending,) = tmp_db.execute_read("SELECT * FROM pending_prompts")
+    assert pending["id"] == result["queue_id"] and pending["prompt"] == "work"
 
 
 def test_admitted_selected_prompt_does_not_move_during_later_rollover(
@@ -335,8 +343,6 @@ def test_admitted_selected_prompt_does_not_move_during_later_rollover(
 @pytest.mark.parametrize(
     "changes",
     [
-        {"status": "dormant"},
-        {"status": "retained"},
         {"session_id": None},
         {"managed_session_id": None, "registered_session_id": None},
         {"registered_session_id": "other"},
@@ -480,6 +486,8 @@ def test_managed_invalid_admission_response_retains_unknown_selected_identity(
     from agent_bridge.routes.sessions import router
 
     session = prepare(session_manager, tmp_db, mock_acp_client)
+    mock_acp_client.is_running = False
+    tmp_db.execute_write("UPDATE sessions SET acp_session_id='native-a' WHERE id='bridge-a'")
     app = FastAPI()
     app.state.session_manager = session_manager
     app.include_router(router)
@@ -506,7 +514,8 @@ def test_managed_invalid_admission_response_retains_unknown_selected_identity(
         "registered_session_id": None,
     }
     assert len([item for item in calls if item[0] == "POST"]) == 1
-    assert session.turn_count == 1
+    assert session.turn_count == 0
+    assert len(tmp_db.list_pending_prompts("bridge-a")) == 1
     session_manager.resume_session.assert_not_awaited()
 
 
@@ -524,6 +533,8 @@ def test_unkeyed_managed_lost_response_cannot_retry_the_real_http_request(
     from agent_bridge.session_status import SessionStatus
 
     session = prepare(session_manager, tmp_db, mock_acp_client)
+    mock_acp_client.is_running = False
+    tmp_db.execute_write("UPDATE sessions SET acp_session_id='native-a' WHERE id='bridge-a'")
     app = FastAPI()
     app.state.session_manager = session_manager
     app.include_router(router)
@@ -551,7 +562,10 @@ def test_unkeyed_managed_lost_response_cannot_retry_the_real_http_request(
     assert result["outcome"] == "unknown" and result["bridge"]["session_id"] == "native-a"
     assert result["retryable"] is False
     assert len([item for item in calls if item[0] == "POST"]) == 1
-    assert session.turn_count == 1
+    assert session.turn_count == 0
+    (pending,) = tmp_db.list_pending_prompts("bridge-a")
+    assert pending["prompt"] == "work"
+    assert result["idempotency_key"]
     session_manager.resume_session.assert_not_awaited()
 
 
