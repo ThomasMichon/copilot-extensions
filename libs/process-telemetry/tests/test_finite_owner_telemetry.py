@@ -376,6 +376,37 @@ def test_retained_markers_do_not_count_as_freed_capacity(
     assert outcomes == ["unfinished", "unfinished"]
 
 
+def _failing_marker_read(monkeypatch: pytest.MonkeyPatch) -> Any:
+    real_read = Path.read_bytes
+
+    def unreadable(self: Path) -> bytes:
+        if self.suffix == ".start":
+            raise PermissionError("transient")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
+    return real_read
+
+
+def test_transient_marker_read_failure_never_replays_a_committed_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    real_unlink = _failing_marker_unlink(monkeypatch)
+    run.finish(outcome="success")
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    real_read = _failing_marker_read(monkeypatch)
+    # Neither drain nor recovery may treat the unreadable marker as record-free.
+    assert hook_journal.drain(tmp_path) == []
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert hook_journal.drain(tmp_path) == []
+    monkeypatch.setattr(Path, "read_bytes", real_read)
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["success"]
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    # Only the interim live run is recovered; the committed success is not replayed.
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"]
+
+
 def test_drain_retains_a_record_while_its_marker_cannot_be_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

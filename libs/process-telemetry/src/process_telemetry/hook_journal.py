@@ -172,12 +172,22 @@ def _pending_keys(directory: Path) -> set[tuple[Any, ...]]:
     return keys
 
 
+class MarkerUnreadable(OSError):
+    """A marker exists but its contents could not be read."""
+
+
 def _read_marker(path: Path) -> dict[str, Any] | None:
     try:
-        value = json.loads(path.read_bytes()[:4096])
+        data = path.read_bytes()[:4096]
     except FileNotFoundError:
         raise
-    except (OSError, ValueError):
+    except OSError as error:
+        # An unreadable marker may still carry a committed record, so callers
+        # must not mistake it for one without a record.
+        raise MarkerUnreadable from error
+    try:
+        value = json.loads(data)
+    except ValueError:
         return None
     return value if type(value) is dict else None
 
@@ -432,7 +442,9 @@ def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> set[tuple[Any, ...]]
             except FileNotFoundError:
                 continue
             except OSError:
-                state = None
+                # It may carry one of `keys`; leave every key pending.
+                _reclaim(scratch)
+                return set(keys)
             record = state.get("record") if state is not None else None
             key = _key(record) if type(record) is dict else None
             if key is None or key not in keys:
