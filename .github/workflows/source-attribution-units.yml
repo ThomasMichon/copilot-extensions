@@ -1,0 +1,39 @@
+name: Source attribution owner units
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/source-attribution-units.yml
+      - .github/actions/required-pr-attribution.cjs
+      - .github/actions/required-pr-attribution.test.cjs
+      - .github/actions/required-pr-attribution-visibility.test.cjs
+      - .github/actions/source-attribution-test-fixture.cjs
+      - .github/actions/source-refresh-budget.cjs
+      - .github/actions/package.json
+      - .github/actions/package-lock.json
+
+permissions:
+  contents: read
+
+jobs:
+  attribution-units:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install locked metadata parsers without lifecycle scripts
+        run: npm --prefix .github/actions ci --ignore-scripts --no-audit --no-fund
+      - name: Exercise the explicit in-memory attribution owner packet with coverage
+        run: >-
+          node --test --experimental-test-coverage
+          --test-coverage-include=.github/actions/required-pr-attribution.cjs
+          .github/actions/required-pr-attribution.test.cjs
+          .github/actions/required-pr-attribution-visibility.test.cjs
