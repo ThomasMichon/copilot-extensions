@@ -30,10 +30,10 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from . import activation_cli, capture_cli, dial_log_cli, launch_policy
 from . import claim_provider_cli
@@ -44,7 +44,8 @@ from . import pool as pool_mod
 from .allocation import intended_cores as _intended_cores
 from . import relay_launch
 from .codespace_config import CodespaceSource
-from .worktrees import ContextRefused, validate_context
+from ._peer_launch import ContextRefused
+from .worktrees import validate_context
 from .config import (
     CANONICAL_CONFIG_REL,
     CONFIG_FILE_IN_DIR,
@@ -82,7 +83,18 @@ from ._ssh_retry import exec_with_retry
 log = logging.getLogger("agent-codespaces")
 
 if TYPE_CHECKING:
-    from ssh_manager import SSHConfig, SupervisedRelayForward
+    from dropin_registry.model import Finding
+    from ssh_manager import (
+        CommandResult,
+        ConnectionManager,
+        SSHConfig,
+        SupervisedRelayForward,
+    )
+
+    from .cleanliness import GitCleanliness
+    from .config import CodespacesConfig
+    from .lifecycle import CodespaceInfo
+    from .pool import PoolMember
 
 # Patience budget for the SSH-to-CodeSpace stage -- a Shutdown CodeSpace boots
 # on connect, which can take well over a minute. Overridable via env.
@@ -201,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point; noted lifecycle stages are offered once it returns."""
     from . import consumer_telemetry
 
-    return consumer_telemetry.instrument(_main)(argv)
+    return cast(int, consumer_telemetry.instrument(_main)(argv))
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -996,7 +1008,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     try:
         if getattr(args, "func", None) is not None:
-            return args.func(args)
+            return cast(int, args.func(args))
         if args.command == "ssh":
             return _cmd_ssh(args)
         if args.command == "copilot":
@@ -1201,7 +1213,7 @@ def _build_launch_command(
     return f"bash -l -c {shlex.quote(inner)}"
 
 
-async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN001
+async def _preflight_copilot_platform(manager: ConnectionManager, name: str) -> None:
     """Ensure the CodeSpace's copilot has its platform binary before ACP launch.
 
     #111: a fresh CodeSpace can ship the ``@github/copilot`` loader stub without
@@ -1285,8 +1297,8 @@ def _ssh_session(
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     from .gh_account import credential_account_for_codespace
+    from ._peer_launch import ContextRefused
     from .lifecycle import account_for_codespace
-    from .worktrees import ContextRefused
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
     github_account = None if getattr(args, "no_relay", False) else credential_account_for_codespace(args.name)
@@ -1556,7 +1568,7 @@ def _ssh_session(
             await _provision_relay_helpers(manager, args.name)
 
         cs_plugin_dirs: list[str] = []
-        launch_context: dict = {}
+        launch_context: dict[str, Any] = {}
         if minimal_provision:
             tracker.started(
                 ConnectStage.TARGET_BINSTUB,
@@ -1681,9 +1693,18 @@ def _ssh_session(
         if remote_cmd:
             # Non-interactive command execution
             tracker.started(ConnectStage.LAUNCH_ACP, "remote command")
+            exec_started = getattr(args, "remote_exec_started", None)
+            if callable(exec_started):
+                try:
+                    exec_started()
+                except Exception:
+                    pass
             result = await manager.exec_command(
                 args.name, remote_cmd, timeout=args.timeout,
-                **({"input_bytes": remote_input_builder()} if remote_input_builder is not None else {}),
+                **cast(
+                    "dict[str, Any]",
+                    {"input_bytes": remote_input_builder()} if remote_input_builder is not None else {},
+                ),
             )
             tracker.reached(ConnectStage.LAUNCH_ACP)
             if result_sink is not None:
@@ -1787,7 +1808,7 @@ def _ssh_session(
 
 
 async def _settle_codespace_on_disconnect(
-    manager, name: str, holder_ref: str | None,
+    manager: ConnectionManager, name: str, holder_ref: str | None,
 ) -> bool:
     """Probe cleanliness + settle the CodeSpace obligation on disconnect.
 
@@ -1850,11 +1871,11 @@ async def _settle_codespace_on_disconnect(
 
 
 async def _stage_plugins(
-    manager,
+    manager: ConnectionManager,
     name: str,
     sources: list[str],
     *,
-    repo_roots=(),
+    repo_roots: Iterable[Path] = (),
 ) -> list[str]:
     """Stage related-repo plugin payloads onto the CodeSpace over SSH.
 
@@ -1901,7 +1922,7 @@ async def _stage_plugins(
 
 
 async def _check_cross_harness_fence(
-    manager, name: str, holder_ref: str | None, *, force: bool = False,
+    manager: ConnectionManager, name: str, holder_ref: str | None, *, force: bool = False,
 ) -> bool:
     """Cross-harness in-CodeSpace lockfile fence (git-ref-resource-leases Ph4).
 
@@ -1979,7 +2000,7 @@ async def _check_cross_harness_fence(
     return True
 
 
-async def _provision_relay_helpers(manager, name: str) -> None:
+async def _provision_relay_helpers(manager: ConnectionManager, name: str) -> None:
     """Deploy the CodeSpace-side relay helper scripts over SSH.
 
     Installs ``ado-auth-helper-relay`` and the smart ``ado-auth-helper``
@@ -2007,7 +2028,7 @@ async def _provision_relay_helpers(manager, name: str) -> None:
 
 
 async def _provision_dotfiles(
-    manager, name: str, config, *, relay_env: str = "",
+    manager: ConnectionManager, name: str, config: CodespacesConfig, *, relay_env: str = "",
 ) -> None:
     """Ensure the configured dotfiles repo is present + current on a CodeSpace.
 
@@ -2053,7 +2074,7 @@ async def _provision_dotfiles(
 
 
 async def _provision_harness(
-    manager, name: str, config, *, relay_env: str = "",
+    manager: ConnectionManager, name: str, config: CodespacesConfig, *, relay_env: str = "",
 ) -> None:
     """Ensure the configured control-plane *harness* checkout is present +
     current on a venue at ``/workspaces/<basename(harness_repo)>``.
@@ -2096,10 +2117,12 @@ async def _provision_harness(
 
 
 async def _register_codespace_plugins(
-    manager, name: str, repo: str | None, config, *, workspace: str | None = None,
-    sources=(), worktree_id: str | None = None, repo_roots=(),
+    manager: ConnectionManager, name: str, repo: str | None, config: CodespacesConfig, *,
+    workspace: str | None = None,
+    sources: Iterable[str] = (), worktree_id: str | None = None,
+    repo_roots: Iterable[Path] = (),
     prelude: str = "", relay_port: int | None = None,
-    prepared_context: dict | None = None,
+    prepared_context: dict[str, Any] | None = None,
     live_attachment: bool = False,
     hosting_required: bool = True,
     receiving_context: str | None = None,
@@ -2127,8 +2150,14 @@ async def _register_codespace_plugins(
             prelude=prelude, relay_port=relay_port,
             live_attachment=live_attachment,
             hosting_required=hosting_required,
-            **({"receiving_context": receiving_context} if receiving_context is not None else {}),
-            **({"prepared_context": prepared_context} if prepared_context is not None else {}),
+            **cast(
+                "dict[str, Any]",
+                {"receiving_context": receiving_context} if receiving_context is not None else {},
+            ),
+            **cast(
+                "dict[str, Any]",
+                {"prepared_context": prepared_context} if prepared_context is not None else {},
+            ),
         )
     except BaseException as exc:
         ct.note("plugin_preparation", "failure", ct.preparation_reason(exc), started=started)
@@ -2138,7 +2167,8 @@ async def _register_codespace_plugins(
 
 
 async def _verify_remote_auth(
-    manager, name: str, config, *, github_account: str | None = None,
+    manager: ConnectionManager, name: str, config: CodespacesConfig, *,
+    github_account: str | None = None,
 ) -> None:
     """Verify host-side auth for the CodeSpace's git remote domains.
 
@@ -2213,7 +2243,7 @@ def _is_ado_host(host: str) -> bool:
     return h.endswith(".visualstudio.com") or h == "dev.azure.com"
 
 
-async def _preflight_ado_rest_token(name: str, config) -> None:
+async def _preflight_ado_rest_token(name: str, config: CodespacesConfig) -> None:
     """#77: ensure the host can mint an ADO REST bearer for dispatched agents.
 
     A dispatched agent's ``ado-auth-helper get-access-token`` is served by the
@@ -2274,9 +2304,9 @@ def _should_warm_auth_cache(args: argparse.Namespace, minimal_provision: bool) -
 
 
 async def _warm_remote_auth_cache(
-    manager,
+    manager: ConnectionManager,
     name: str,
-    config,
+    config: CodespacesConfig,
     *,
     relay_env: str,
     timeout: float = 20.0,
@@ -2349,7 +2379,7 @@ def _lookup_codespace_repo(name: str) -> str | None:
 
 
 async def _provision_repo_hooks(
-    manager, name: str, config, repo: str | None, *,
+    manager: ConnectionManager, name: str, config: CodespacesConfig, repo: str | None, *,
     include_on_create: bool = False, relay_env: str = "",
 ) -> None:
     """Run repo-declared provision hooks for a CodeSpace over SSH.
@@ -2397,7 +2427,7 @@ async def _provision_repo_hooks(
         log.warning("Repo provision hooks on %s failed: %s", name, exc)
 
 
-def _emit_remote_cmd_result(result, timeout: float) -> int:  # noqa: ANN001
+def _emit_remote_cmd_result(result: CommandResult, timeout: float) -> int:
     """Print a remote command's output and return its exit code.
 
     Surfaces partial output and a loud, cause-hinting error when the command
@@ -2425,7 +2455,7 @@ def _emit_remote_cmd_result(result, timeout: float) -> int:  # noqa: ANN001
     return result.exit_code
 
 
-async def _pipe_stdio(proc) -> None:
+async def _pipe_stdio(proc: asyncio.subprocess.Process) -> None:
     """Pipe a subprocess's stdio through to our own stdin/stdout.
 
     Uses threads for the stdin/stdout relay instead of asyncio pipe
@@ -2484,7 +2514,7 @@ async def _pipe_stdio(proc) -> None:
                 # read1 is not available on asyncio streams; use the
                 # loop to schedule the async read from this thread.
                 fut = asyncio.run_coroutine_threadsafe(
-                    proc.stdout.read(4096), loop
+                    cast(asyncio.StreamReader, proc.stdout).read(4096), loop
                 )
                 data = fut.result()  # block until data or EOF -- no timeout
                 if not data:
@@ -2752,7 +2782,7 @@ def _resolve_repo_root() -> Path:
     return cwd
 
 
-def _list_codespaces_for_init() -> list[dict]:
+def _list_codespaces_for_init() -> list[dict[str, Any]]:
     """Return `gh codespace list` entries across all mapped accounts, or [].
 
     Cross-account like :func:`lifecycle.list_codespaces` (#195/#190): lists
@@ -2764,7 +2794,7 @@ def _list_codespaces_for_init() -> list[dict]:
 
     from . import gh_account
 
-    def _one(login: str | None) -> list[dict]:
+    def _one(login: str | None) -> list[dict[str, Any]]:
         env = gh_account.env_for_account(login) if login else None
         try:
             result = sp.run(
@@ -2790,7 +2820,7 @@ def _list_codespaces_for_init() -> list[dict]:
     accounts = gh_account.mapped_accounts()
     if not accounts:
         return _one(None)
-    merged: dict[str, dict] = {}
+    merged: dict[str, dict[str, Any]] = {}
     for login in (*accounts, None):
         for entry in _one(login):
             name = entry.get("name")
@@ -2799,7 +2829,7 @@ def _list_codespaces_for_init() -> list[dict]:
     return list(merged.values())
 
 
-def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str | None:
+def _discover_workspace_folder(codespaces: list[dict[str, Any]], repository: str) -> str | None:
     """Best-effort: read $WORKING_DIRECTORY from an already-Available CodeSpace.
 
     Only targets CodeSpaces already in the ``Available`` state so we never pay
@@ -2843,8 +2873,8 @@ def _discover_workspace_folder(codespaces: list[dict], repository: str) -> str |
 
 
 def _derive_codespaces_defaults(
-    codespaces: list[dict], from_codespace: str | None
-) -> dict | None:
+    codespaces: list[dict[str, Any]], from_codespace: str | None
+) -> dict[str, Any] | None:
     """Pick a representative CodeSpace and derive scaffold defaults.
 
     Returns a dict with keys: repository, machine_type, workspace_folder
@@ -2854,7 +2884,7 @@ def _derive_codespaces_defaults(
     if not codespaces:
         return None
 
-    chosen: dict | None = None
+    chosen: dict[str, Any] | None = None
     if from_codespace:
         chosen = next(
             (c for c in codespaces if c.get("name") == from_codespace), None
@@ -2880,7 +2910,7 @@ def _derive_codespaces_defaults(
         if m:
             machine_counts[m] = machine_counts.get(m, 0) + 1
     machine_type = (
-        max(machine_counts, key=machine_counts.get)
+        max(machine_counts, key=machine_counts.__getitem__)
         if machine_counts
         else "largePremiumLinux"
     )
@@ -2897,7 +2927,7 @@ def _derive_codespaces_defaults(
     }
 
 
-def _render_codespaces_yaml(defaults: dict | None) -> str:
+def _render_codespaces_yaml(defaults: dict[str, Any] | None) -> str:
     """Render a ``.copilot-extensions/agent-codespaces/config.yaml``.
 
     The file is **supplementary-only**: it carries just the CodeSpace-specific
@@ -2971,7 +3001,7 @@ def _parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return parse_gh_account_scopes(status_text)
 
 
-def _gh_auth_status(environment: dict | None = None) -> tuple[int, str]:
+def _gh_auth_status(environment: dict[str, Any] | None = None) -> tuple[int, str]:
     """Run ``gh auth status`` once -> ``(returncode, combined stdout+stderr)``.
 
     The single shared ``gh`` invocation behind both the multi-account
@@ -3002,7 +3032,7 @@ def _gh_auth_preflight() -> list[str]:
     return gh_auth_preflight(_gh_auth_status, _account_login_remedy)
 
 
-def _ambient_codespace_scope(environment: dict | None = None) -> tuple[bool, str]:
+def _ambient_codespace_scope(environment: dict[str, Any] | None = None) -> tuple[bool, str]:
     """``(ok, remedy)`` for the selected (default: ambient) token's ``codespace``
     scope. Focused (one credential only, unlike
     :func:`_gh_auth_preflight` which also checks each mapped account) so a
@@ -3027,7 +3057,7 @@ def _ambient_codespace_scope(environment: dict | None = None) -> tuple[bool, str
     return True, ""
 
 
-def _require_codespace_scope(op: str, *, environment: dict | None = None) -> int | None:
+def _require_codespace_scope(op: str, *, environment: dict[str, Any] | None = None) -> int | None:
     """Fail-fast gate before a mutating CodeSpace op (#980).
 
     When the selected gh token lacks the ``codespace`` scope, a ``gh codespace``
@@ -3097,13 +3127,13 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
         print("[OK] active plugin config declarations have no findings.")
     else:
         print("[plugin-manifests] declaration finding(s):", file=sys.stderr)
-        for finding in plugin_report.findings:
-            target = f" target={finding.target}" if finding.target else ""
-            detail = f" ({finding.detail})" if finding.detail else ""
+        for plugin_finding in plugin_report.findings:
+            target = f" target={plugin_finding.target}" if plugin_finding.target else ""
+            detail = f" ({plugin_finding.detail})" if plugin_finding.detail else ""
             print(
-                f"  - {finding.owner}: {finding.entry}: "
-                f"{finding.reason}{target}{detail}\n"
-                f"    Remedy: {finding.remedy}",
+                f"  - {plugin_finding.owner}: {plugin_finding.entry}: "
+                f"{plugin_finding.reason}{target}{detail}\n"
+                f"    Remedy: {plugin_finding.remedy}",
                 file=sys.stderr,
             )
 
@@ -3121,11 +3151,11 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
         print("[OK] config.d has no registry findings.")
     else:
         print("[config.d] registry finding(s):", file=sys.stderr)
-        for finding in config_report.findings:
-            target = f" target={finding.target}" if finding.target else ""
+        for config_finding in config_report.findings:
+            target = f" target={config_finding.target}" if config_finding.target else ""
             print(
-               f"  - {finding.entry}: {finding.reason}{target}\n"
-               f"    Remedy: {finding.remedy}",
+               f"  - {config_finding.entry}: {config_finding.reason}{target}\n"
+               f"    Remedy: {config_finding.remedy}",
                file=sys.stderr,
             )
     return 1 if has_findings else 0
@@ -3150,7 +3180,7 @@ def _account_login_remedy(login: str) -> str:
                 flow = (data.get("login_flow") or "").strip()
                 if flow:
                     return f"run: {flow}"
-    except worktrees.ContextRefused:
+    except ContextRefused:
         raise
     except Exception:
         pass
@@ -3541,9 +3571,9 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
     """
     from .status import STATE_RECOVERED, set_status
 
-    out = sys.__stdout__
+    out = cast(TextIO, sys.__stdout__)
 
-    def emit(obj: dict) -> None:
+    def emit(obj: dict[str, Any]) -> None:
         try:
             out.write(json.dumps(obj, default=str) + "\n")
             out.flush()
@@ -3646,7 +3676,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
     manager = ConnectionManager()
 
-    async def _run():
+    async def _run() -> GitCleanliness:
         try:
             await manager.ensure_connected(args.name, source, [])
             return await cleanliness.probe_cleanliness(
@@ -3867,7 +3897,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
 
 
 def _reclaim_for_quota(
-    err: str, *, account: str | None = None, environment: dict | None = None,
+    err: str, *, account: str | None = None, environment: dict[str, Any] | None = None,
     budget_cores: int | None = None,
 ) -> str | None:
     """On a CodeSpace-create quota error, attempt ONE safe reclaim so a retry
@@ -3907,7 +3937,7 @@ def _reclaim_for_quota(
         except RuntimeError:
             return None
 
-    def reclaim_identity(name):
+    def reclaim_identity(name: str) -> dict[str, Any] | None:
         if account is None:
             return {}
         from . import account_binding
@@ -4039,7 +4069,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         return rc
     print(f"Creating CodeSpace for {args.repo}...")
 
-    def _create():
+    def _create() -> CodespaceInfo:
         return create_codespace(
             args.repo, config, branch=args.branch,
             display_name=getattr(args, "display_name", None),
@@ -4282,7 +4312,7 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
     return 0
 
 
-def _annotate_pool_members(members) -> None:
+def _annotate_pool_members(members: Iterable[PoolMember]) -> None:
     owner, worktree = _self_claim_identity()
     if owner or worktree:
         for member in members:
@@ -4522,7 +4552,7 @@ def _cmd_installer_readiness() -> int:
         if contribution.owner
     }
 
-    def render_finding(finding) -> str:
+    def render_finding(finding: Finding) -> str:
         return (
             f"{finding.owner or finding.entry}: {finding.entry}: "
             f"{finding.reason}; target: {finding.target or 'none'}; "
@@ -4572,7 +4602,7 @@ def _cmd_version() -> int:
     from .source_build import effective_runtime_version
 
     try:
-        from ._build_info import BUILD_INFO
+        from ._build_info import BUILD_INFO  # type: ignore[import-not-found]
         ver = effective_runtime_version(BUILD_INFO.get("version", "0.0.0"))
         commit = BUILD_INFO.get("commit", "unknown")[:8]
         print(f"agent-codespaces {ver} ({commit})")

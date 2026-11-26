@@ -10,7 +10,9 @@ import sysconfig
 import time
 import types
 import venv
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -23,11 +25,11 @@ REPO = PLUGIN.parents[1]
 SOURCE = "1.2.3-dev4+source." + "a" * 40 + "." + "b" * 16 + ".profile." + "c" * 16
 
 
-def test_disabled_start_never_sets_up_or_launches_owner(monkeypatch):
+def test_disabled_start_never_sets_up_or_launches_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     resolved = CodespacesConfig()
     resolved.connection_owner.enabled = False
 
-    def read(*, include_cwd):
+    def read(*, include_cwd: bool) -> CodespacesConfig:
         assert include_cwd is False
         return resolved
 
@@ -44,8 +46,9 @@ def test_disabled_start_never_sets_up_or_launches_owner(monkeypatch):
     "missing-proof", "refused-selection", "legacy-binding",
 ])
 def test_start_admits_only_selected_installed_generation(
-    tmp_path, monkeypatch, capsys, nested, state,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    nested: bool, state: str,
+) -> None:
     from importlib import metadata
 
     resolved = CodespacesConfig()
@@ -63,7 +66,7 @@ def test_start_admits_only_selected_installed_generation(
     (root / "current-version").write_text(
         "different\n" if state == "unselected" else SOURCE + "\n", encoding="utf-8-sig",
     )
-    calls = []
+    calls: list[Any] = []
     from agent_codespaces import application_provider, connection_owner, source_build
 
     monkeypatch.setattr(application_provider, "register_installed_application",
@@ -79,8 +82,12 @@ def test_start_admits_only_selected_installed_generation(
     monkeypatch.setattr(connection_owner, "_PROCESS_SELECTION", (
         None if state == "legacy-binding" else selection
     ))
+    def ensure_owner_running(actual: Any) -> bool:
+        calls.append(actual)
+        return state == "ready"
+
     monkeypatch.setattr("agent_codespaces.connection_owner.ensure_owner_running",
-                        lambda actual: calls.append(actual) or state == "ready")
+                        ensure_owner_running)
     if state in {
         "unselected", "foreign-package", "missing-proof", "refused-selection", "legacy-binding",
     }:
@@ -98,11 +105,14 @@ def test_start_admits_only_selected_installed_generation(
         assert calls == [resolved]
 
 
-def test_stage_only_preserves_provider_selectors_and_live_records(tmp_path, monkeypatch):
+def test_stage_only_preserves_provider_selectors_and_live_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spec = importlib.util.spec_from_file_location(
         "_codespaces_application_install",
         REPO / "libs" / "installer-engine" / "runtime_application_install.py",
     )
+    assert spec is not None and spec.loader is not None
     installer = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, installer)
     spec.loader.exec_module(installer)
@@ -110,7 +120,7 @@ def test_stage_only_preserves_provider_selectors_and_live_records(tmp_path, monk
     prefix = slot / ".venv"
     prefix.mkdir(parents=True)
     (prefix / "pyvenv.cfg").write_text("fixture\n")
-    protected = {}
+    protected: dict[Path, tuple[bytes, int]] = {}
     for relative in (
         "runtime/current-version", "runtime/last-known-good",
         "runtime/connection-owner.holds.json", "runtime/connection-owner.local-forwards.json",
@@ -128,7 +138,9 @@ def test_stage_only_preserves_provider_selectors_and_live_records(tmp_path, monk
 
 
 @pytest.fixture(scope="module")
-def installed_application(tmp_path_factory):
+def installed_application(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[tuple[Path, Path, Path]]:
     root = tmp_path_factory.mktemp("copied-app")
     project = root / "source"
     project.mkdir()
@@ -174,8 +186,10 @@ def installed_application(tmp_path_factory):
 
 @pytest.mark.parametrize("bridge_first", [False, True])
 def test_copied_wheel_installed_setup_resources_and_discovery(
-    tmp_path, monkeypatch, installed_application, bridge_first, record_property,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    installed_application: tuple[Path, Path, Path], bridge_first: bool,
+    record_property: Any,
+) -> None:
     root, prefix, python = installed_application
     home = tmp_path / "home"
     home.mkdir()
@@ -194,7 +208,7 @@ def test_copied_wheel_installed_setup_resources_and_discovery(
     if bridge_first:
         bridge.mkdir()
         (bridge / "config.yaml").write_bytes(b"existing bridge configuration\n")
-    preserved = {}
+    preserved: dict[Path, tuple[bytes, int]] = {}
     for name in ("connection-owner.holds.json", "connection-owner.local-forwards.json"):
         path = Path(env["AGENT_CODESPACES_HOME"]) / name
         path.parent.mkdir(parents=True, exist_ok=True)

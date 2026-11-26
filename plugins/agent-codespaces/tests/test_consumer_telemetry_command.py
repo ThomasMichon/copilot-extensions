@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
 import sys
@@ -13,6 +14,21 @@ import pytest
 
 from agent_codespaces import config, consumer_telemetry as ct, copilot_detach, copilot_venue
 from process_telemetry.finite_owner import capability
+
+# The detached-launch seams (fixture and fake SSH session) are shared with the
+# launch tests rather than copied.
+def _load_launch_tests() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "_codespaces_launch_tests", Path(__file__).with_name("test_copilot_detach.py"),
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_launch_tests: Any = _load_launch_tests()
+seams = _launch_tests.seams
 
 _RECEIVER = """\
 import json, sys
@@ -238,3 +254,49 @@ def test_console_entry_is_instrumented(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_packaged_descriptor_names_only_the_codespaces_schema() -> None:
     path = Path(ct.__file__).parent / "metadata" / "consumer-telemetry-contract.json"
     assert json.loads(path.read_text(encoding="utf-8")) == capability([ct.SOURCE_SCHEMA])
+
+
+def _launch_shapes() -> list[tuple[Any, ...]]:
+    return [
+        (r["stage"], r["outcome"], r["reason"], r["attempt"], r.get("duration_ms"))
+        for r in ct._records if r["stage"] in ("ssh", "remote_embody")
+    ]
+
+
+def test_remote_embody_is_timed_around_the_remote_exec_only(
+    seams: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [0.0]
+    monkeypatch.setattr(ct, "_now", lambda: now[0])
+    inner = _launch_tests._ssh(seams, stdout=_launch_tests._CREATED)
+
+    def session(ns: Any, **kwargs: Any) -> int:
+        now[0] += 5.0  # connect and venue preparation precede the remote command
+        ns.remote_exec_started()
+        now[0] += 2.0  # the remote embody command itself
+        sink = kwargs["result_sink"]
+
+        def timed_sink(result: Any) -> int:
+            out = int(sink(result))
+            now[0] += 3.0  # teardown after the remote command returned
+            return out
+
+        return int(inner(ns, **{**kwargs, "result_sink": timed_sink}))
+
+    copilot_detach.cmd_detach(_launch_tests._args(), ssh_session=session)
+    assert [s for s in _launch_shapes() if s[0] == "remote_embody"] == [
+        ("remote_embody", "success", "none", 1, 2000),
+    ]
+
+
+def test_a_final_transport_failure_is_not_overwritten_by_an_embody_result(seams: Any) -> None:
+    ct.start_launch()
+    rc = copilot_detach.cmd_detach(_launch_tests._args(), ssh_session=_launch_tests._ssh(
+        seams, stderr="Connection reset by peer", code=255,
+    ))
+    assert rc == 1
+    assert [s[:4] for s in _launch_shapes()] == [
+        ("ssh", "retry", "transport_retry", 1),
+        ("ssh", "failure", "transport_failed", 2),
+    ]
+    assert ct._last_reason == "transport_failed"

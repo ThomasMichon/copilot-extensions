@@ -33,7 +33,7 @@ import shlex
 import sys
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from remote_login_shell import wrap_login_shell
 
@@ -46,13 +46,13 @@ from venue_copilot import (
     last_json,
     observe_commands,
     pending_seed_report,
-    read_seed,
+    read_seed as read_seed,
     reserve_with_retry,
     trust_folder_command,
     with_new_session,
 )
 
-from .model_launch import model_copilot_args
+from venue_copilot.models import model_copilot_args
 from . import copilot_detach_startup
 from .copilot_detach_startup import ssh_namespace as _ssh_namespace
 from venue_copilot.resume_claim import resume_target, settle_resumed_claim
@@ -468,7 +468,7 @@ def cmd_detach(
     from . import connection_owner as owner
     from .config import load_merged_config
     from .session_forwards import await_owner_bridge_forward
-    from .worktrees import ContextRefused
+    from ._peer_launch import ContextRefused
 
     config = load_merged_config()
     ct.start_launch()
@@ -590,7 +590,10 @@ def cmd_detach(
     prior_session = dict((held.sessions.get(plan["tenant"]) if held else None) or {}) or None
     pending = owner.get_pending_delivery(args.name, plan["tenant"])
     if pending:
-        return copilot_detach_startup.recover_pending_delivery(
+        recover_pending_delivery = cast(
+            "Callable[..., int]", copilot_detach_startup.recover_pending_delivery,
+        )
+        return recover_pending_delivery(
             args.name, plan, pending, owner,
             remote=_remote, release_cli_mode=release_cli_mode, busy_exit=_BUSY_EXIT,
             await_forward=await_owner_bridge_forward, bridge_path_ok=_bridge_path_ok,
@@ -606,8 +609,8 @@ def cmd_detach(
     owner.hold(
         args.name, plan["tenant"], daemon_port=daemon_port,
         mux_session=plan["mux_session"], fresh=True,
-        **({"reverse_forwards": reverse_forwards} if reverse_forwards else {}),
-        **({"local_forwards": local_forwards} if local_forwards else {}),
+        **cast("dict[str, Any]", {"reverse_forwards": reverse_forwards} if reverse_forwards else {}),
+        **cast("dict[str, Any]", {"local_forwards": local_forwards} if local_forwards else {}),
     )
     ok = False
     pending_delivery = False
@@ -654,15 +657,21 @@ def cmd_detach(
         seed_ready_timeout = max(args.register_timeout, 180.0)
 
         def builder(plugin_dirs: list[str]) -> str:
-            return copilot_detach_startup.build_owned_command(
+            build_owned_command = cast("Callable[..., str]", copilot_detach_startup.build_owned_command)
+            return build_owned_command(
                 plugin_dirs, captured=captured, plan=plan, args=args,
                 seed_ready_timeout=seed_ready_timeout, copilot_args=copilot_args,
                 reservation=reservation, seed=seed, build_command=build_copilot_remote_command,
                 tooling=_VENUE_TOOLING, trust_folder=trust_folder_command,
             )
 
+        def exec_started() -> None:
+            captured["exec_started"] = ct.clock()
+
         def sink(result: Any) -> int:
             captured["result"] = result
+            if "exec_started" in captured:
+                captured["exec_ms"] = ct.elapsed_ms(captured["exec_started"])
             return int(getattr(result, "exit_code", 1))
 
         _progress("launch", "venue prep + `agent-worktrees embody` (can take minutes on first use)")
@@ -671,13 +680,15 @@ def cmd_detach(
         uncertain = False
         ct.begin("ssh")
         for attempt in range(_LAUNCH_ATTEMPTS):
-            captured.pop("result", None)
+            for key in ("result", "exec_started", "exec_ms"):
+                captured.pop(key, None)
             captured["prepared_context"] = {}
             try:
                 ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
                 ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
                 ssh_args.plugin_prepared_context = captured["prepared_context"]
                 ssh_args.hosting_live_attachment = rejoining
+                ssh_args.remote_exec_started = exec_started
                 rc = ssh_session(
                     ssh_args,
                     remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=False,
@@ -714,13 +725,20 @@ def cmd_detach(
         stderr = getattr(result, "stderr", "") or ""
         embodied = _last_json(stdout)
         created = bool(embodied.get("created"))
-        if result is not None and _is_transient_result(result) and not embodied:
+        if result is None:
+            ct.fail("connect_failed")
+        elif _is_transient_result(result) and not embodied:
             ct.fail("transport_failed")
         else:
+            # The embody stage is the remote command itself, measured around
+            # its exec, not the connect and preparation that preceded it.
             ct.succeed()
-        ct.begin("remote_embody")
-        if not embodied.get("ok") or rc != 0:
-            ct.fail(embody_reason(stdout, stderr))
+            embody_ok = bool(embodied.get("ok")) and rc == 0
+            ct.note(
+                "remote_embody", "success" if embody_ok else "failure",
+                "none" if embody_ok else embody_reason(stdout, stderr),
+                attempt=attempt + 1, duration_ms=captured.get("exec_ms"),
+            )
         if "agent-worktrees: command not found" in stderr + stdout:
             return _fail(
                 "agent-worktrees is not installed on the CodeSpace and could not be "
@@ -812,8 +830,9 @@ def cmd_detach(
         # session was launched -- it may still be resuming -- so it always does.
         from venue_copilot import LIVE_SESSION_ALIAS_PROTOCOL
 
-        alias_floor = {"min_daemon_protocol": max(41, LIVE_SESSION_ALIAS_PROTOCOL)}
+        alias_floor: dict[str, Any] = {"min_daemon_protocol": max(41, LIVE_SESSION_ALIAS_PROTOCOL)}
         if seed_needs_bridge:
+            assert seed is not None  # seed_needs_bridge is bool(seed)
             from venue_copilot.refs import deliver_note, owned_result, owned_delivery_journal
             ledger = owned_delivery_journal(
                 session_id, seed, captured["plugin_context"], operation=operation, plan=plan,

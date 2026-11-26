@@ -57,6 +57,11 @@ def _elapsed(started: float) -> int:
     return max(0, int((_now() - started) * 1000))
 
 
+def elapsed_ms(started: float) -> int:
+    """Milliseconds since a `clock()` mark."""
+    return _elapsed(started)
+
+
 def _append(event: dict[str, Any]) -> None:
     if len(_records) < MAX_RECORDS and event.get("stage") in STAGES:
         _records.append(event)
@@ -119,6 +124,7 @@ def retry(reason: str = "transport_retry") -> None:
 def note(
     stage: str, outcome: str, reason: str, *,
     started: float | None = None, attempt: int = 1, limit_ms: int | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """Record one closed stage outside the open-stage sequence."""
     try:
@@ -128,7 +134,9 @@ def note(
         }
         if type(limit_ms) is int and limit_ms >= 0:
             event["limit_ms"] = limit_ms
-        if started is not None:
+        if type(duration_ms) is int and duration_ms >= 0:
+            event["duration_ms"] = duration_ms
+        elif started is not None:
             event["duration_ms"] = _elapsed(started)
         if outcome != "success":
             global _last_reason
