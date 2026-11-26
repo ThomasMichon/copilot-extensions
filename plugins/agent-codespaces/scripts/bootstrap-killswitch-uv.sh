@@ -16,11 +16,13 @@ _uv_runtime_posix_address() {
 }
 
 resolve_uv_runtime_python() (
-    local expected="${1:-}" uv_path python addressed="${1:-}" windows_bash=0
+    local expected="${1:-}" uv_path python addressed="${1:-}" lookup="${1:-}" windows_bash=0
     case "${OSTYPE:-}" in
         msys*|cygwin*)
             windows_bash=1
             expected="$(_uv_runtime_posix_address "$expected")" || return 1
+            # Native UV must not depend on MSYS's heuristic argv conversion.
+            lookup="$(cygpath -aw -- "$expected")" || return 1
             ;;
     esac
     [[ "$expected" == /* && "$expected" != *$'\n'* && "$expected" != *$'\r'* &&
@@ -48,7 +50,7 @@ resolve_uv_runtime_python() (
     unset UV_CONFIG_FILE
     export UV_NO_CONFIG=1
     python="$(invoke_uv_bootstrap_environment "$uv_path" python find --no-project --managed-python \
-        --no-python-downloads "$expected")" || return
+        --no-python-downloads "$lookup")" || return
     if [[ "$windows_bash" == 1 ]]; then
         python="$(_uv_runtime_posix_address "$python")" || return 1
     fi

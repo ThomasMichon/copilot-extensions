@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -196,12 +197,21 @@ def test_ready_command_admits_exact_prepared_application(
     descriptors = tmp_path / "inherited-fds"
     if host == "bash":
         env["FIXTURE_HOME"] = home.as_posix()
-        command = [
-            shell, "-c",
+        setup = (
             'export HOME="$(cd "$FIXTURE_HOME" && pwd)"\n'
             'getent() { printf "fixture:x:%s:0::%s:/bin/bash\\n" "$(id -u)" "$HOME"; }\n'
-            'export -f getent\nexec bash "$@"', "machines-fixture", *command[1:],
-        ]
+            'export -f getent\n'
+        )
+        if os.name == "nt":
+            harness = tmp_path / "invoke.sh"
+            harness.write_text(
+                setup + "exec bash " + shlex.join(command[1:]) + "\n", encoding="utf-8",
+            )
+            command = [shell, harness.as_posix()]
+        else:
+            command = [
+                shell, "-c", setup + 'exec bash "$@"', "machines-fixture", *command[1:],
+            ]
     else:
         harness = tmp_path / "invoke.ps1"
         quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments)
@@ -223,11 +233,6 @@ def test_ready_command_admits_exact_prepared_application(
         ]
     before_slot, before_payload = snapshot(slot), snapshot(payload)
     lookup_python = str(python)
-    if host == "bash" and os.name == "nt":
-        lookup_python = subprocess.check_output(
-            [shell, "-c", 'cygpath -au -- "$1"', "machines-address", python.as_posix()],
-            env=env, text=True, timeout=15, creationflags=HEADLESS,
-        ).strip()
     samples: list[float] = []
     missing = scenario.startswith("missing-")
     for cycle in range(1 if missing else 2):
