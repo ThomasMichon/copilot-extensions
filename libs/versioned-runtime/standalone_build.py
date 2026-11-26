@@ -49,7 +49,7 @@ APPLICATION_RESOURCES = {
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),
     "agent_worktrees": ("scripts/**/*",),
-    "agent_remote_driver_app": ("plugin.json", "extensions/**/*.mjs"),
+    "agent_remote_driver_app": ("plugin.json", "extensions/**/*.mjs", "extensions/**/native-connector.json"),
 }
 APPLICATION_METADATA_RESOURCES = {
     "agent_worktrees": (
@@ -69,6 +69,15 @@ APPLICATION_SOURCE_FALLBACKS = {
         ("extensions/agent-remote-driver",
          "../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
          ("sdk-compat.mjs", "native-connector.mjs")),
+        ("extensions/agent-remote-driver/core",
+         "../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
+         ("announce.mjs", "bridge-endpoint.mjs", "delivery.mjs", "delivery-state.mjs",
+          "extension.mjs", "machine-context.mjs", "metadata.mjs", "native-connector.mjs",
+          "plugin-readiness.mjs", "questions.mjs", "remote-driver.mjs",
+          "retained-delivery.mjs", "sdk-compat.mjs")),
+        ("extensions/agent-remote-driver/headed",
+         "../../libs/copilot-driver-core/src/agent_remote_driver/headed",
+         ("connection.mjs", "acp-adapter.mjs")),
     ),
     "worktree_manager": (
         ("scripts/runtime-source-tools/fleet_role_policy", "../fleet-manager/src/fleet_manager",

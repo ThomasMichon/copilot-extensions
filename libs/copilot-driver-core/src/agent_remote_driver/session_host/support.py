@@ -48,7 +48,7 @@ def support_info(
         "startup_admission": ["live-owner-v1"],
         "headed_process_receipts": ["native-child-v1"] if headed_available else [],
         "headed_receivers": ["explicit-inprocess-v1"] if headed_available else [],
-        "headed_connectors": ["driver-native-v1"] if headed_available else [],
+        "headed_connectors": ["driver-native-v1", "driver-global-v1"] if headed_available else [],
         "headed_client": ["native-send-v1"] if headed_available else [],
         "headed_recovery_intents": recovery_intents,
         "mux_creation": ["posix-private-create-v1"] if not legacy and sys.platform != "win32" else [],

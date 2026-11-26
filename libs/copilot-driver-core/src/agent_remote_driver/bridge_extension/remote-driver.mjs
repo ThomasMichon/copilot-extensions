@@ -13,11 +13,12 @@ function selectedContextError(reason, message, plugin) {
   });
 }
 
-function selectedIdentityObservation(owner, expectedPid) {
+function selectedIdentityObservation(owner, expectedPid, expectedName) {
+  const expectedId = `plugin:${expectedName}:${expectedName}`;
   return {
-    id: owner.id === "plugin:copilot-driver-headed:copilot-driver-headed" ? "match"
+    id: owner.id === expectedId ? "match"
       : typeof owner.id === "string" && owner.id ? "other" : "missing",
-    name: owner.name === "copilot-driver-headed" ? "directory"
+    name: owner.name === expectedName ? "directory"
       : typeof owner.name !== "string" || !owner.name ? "missing"
       : owner.name === owner.id ? "qualified" : "other",
     source: ["project", "user", "plugin", "session"].includes(owner.source) ? owner.source : "unknown",
@@ -96,24 +97,27 @@ export async function selectedLoadout(native, {
     }
     const invalid = (reason, role) => selectedContextError(reason,
       "The launch-bound native connector has another or unavailable executing owner", role);
-    const owners = loadout.extensions.filter((extension) =>
-      extension?.name === "copilot-driver-headed"
-      || typeof extension?.id === "string" && extension.id.startsWith("plugin:copilot-driver-headed:"));
+    const globalOwner = nativeConnector?.contract === "driver-global-v1";
+    const name = globalOwner ? "agent-remote-driver" : "copilot-driver-headed";
+    const owns = (extension, name) => extension?.name === name ||
+      typeof extension?.id === "string" && extension.id.startsWith(`plugin:${name}:`);
+    const owners = loadout.extensions.filter((extension) => owns(extension, name));
     if (owners.length !== 1) {
       throw invalid(owners.length === 0 ? "plugin-missing" : "plugin-duplicated", "connector");
     }
     const owner = owners[0];
-    if (owner.id !== "plugin:copilot-driver-headed:copilot-driver-headed"
+    if (owner.id !== `plugin:${name}:${name}`
         || typeof owner.name !== "string" || !owner.name || owner.source !== "plugin") {
       throw Object.assign(invalid("extension-identity-mismatch", "connector"), {
-        selectedContextIdentity: selectedIdentityObservation(owner, extensionPid),
+        selectedContextIdentity: selectedIdentityObservation(owner, extensionPid, name),
       });
     }
     if (owner.status !== "running") throw invalid("extension-not-running", "connector");
     if (owner.pid !== extensionPid) throw invalid("extension-process-mismatch", "connector");
-    for (const [name, role] of [["agent-bridge", "bridge"], ["agent-remote-driver", "driver"]]) {
-      const peers = loadout.extensions.filter((extension) =>
-        extension?.name === name || typeof extension?.id === "string" && extension.id.startsWith(`plugin:${name}:`));
+    for (const [name, role] of [
+      ["agent-bridge", "bridge"], ["agent-remote-driver", "driver"], ["copilot-driver-headed", "connector"],
+    ]) {
+      const peers = loadout.extensions.filter((extension) => extension !== owner && owns(extension, name));
       if (peers.some((extension) => !["disabled", "failed"].includes(extension.status))) {
         throw invalid("extension-competing", role);
       }

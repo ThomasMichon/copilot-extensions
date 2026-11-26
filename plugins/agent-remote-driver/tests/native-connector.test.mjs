@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import test from "node:test";
@@ -119,6 +119,60 @@ function executingSelection() {
   f.native.rpc.plugins.list = () => assert.fail("Configuration metadata is not executing-module evidence");
   return f;
 }
+
+function globalSelection() {
+  const f = executingSelection();
+  f.options.nativeConnector = {
+    ...selected, contract: "driver-global-v1", connectorPluginRoot: driverRoot,
+  };
+  f.options.extensionPluginRoot = driverRoot;
+  f.extensions[0].id = "plugin:agent-remote-driver:agent-remote-driver";
+  f.extensions[0].name = "agent-remote-driver";
+  return f;
+}
+
+test("global composition selects the actual Driver module and never a staged connector", () => {
+  const selection = globalSelection().options.nativeConnector;
+  assert.deepEqual(selectedNativeConnector({
+    pluginRoot: driverRoot, role: "driver", env: selectionEnv(selection), cwd: root,
+  }), selection);
+  for (const [role, pluginRoot, change] of [
+    ["driver", connectorRoot, {}],
+    ["connector", driverRoot, {}],
+    ["driver", driverRoot, { connectorPluginRoot: connectorRoot }],
+  ]) {
+    assert.throws(() => selectedNativeConnector({
+      pluginRoot, role, env: selectionEnv({ ...selection, ...change }), cwd: root,
+    }), /explicit launch selection/);
+  }
+});
+
+test("the selected global Driver is the sole live sender independently of configured plugins", async () => {
+  const f = globalSelection();
+  f.plugins.push({ name: "agent-remote-driver", enabled: true });
+  await selectedLoadout(f.native, f.options);
+  f.extensions[0].name = "runtime-discovery-label";
+  await selectedLoadout(f.native, f.options);
+});
+
+test("global execution still rejects another process, module, or concurrent sender", async () => {
+  for (const [change, reason] of [
+    [(f) => { f.extensions[0].pid++; }, "extension-process-mismatch"],
+    [(f) => { f.options.extensionPluginRoot = connectorRoot; }, "selection-root-mismatch"],
+    [(f) => { f.extensions.push({ ...f.extensions[0], pid: process.pid + 1 }); }, "plugin-duplicated"],
+    ...["agent-bridge", "copilot-driver-headed"].map((name) => [
+      (f) => { f.extensions.push({
+        id: `plugin:${name}:${name}`, name, source: "plugin", status: "starting", pid: process.pid + 1,
+      }); },
+      "extension-competing",
+    ]),
+  ]) {
+    const f = globalSelection();
+    change(f);
+    await assert.rejects(selectedLoadout(f.native, f.options), (error) =>
+      error.selectedContextReason === reason);
+  }
+});
 
 test("the launch-bound executing connector needs no installer origin or configuration deduplication", async () => {
   const f = executingSelection();
@@ -458,7 +512,9 @@ test("composed delivery waits for the one launch seed and shares auth-wait refus
   } finally { adapter.close(); }
 });
 
-async function entrypoint(relative, { env = selectionEnv(), failJoin = false, failActivation = false } = {}) {
+async function entrypoint(relative, {
+  env = selectionEnv(), failJoin = false, failActivation = false, incompleteGlobal = false,
+} = {}) {
   const entry = resolve(root, relative), f = nativeFixture();
   const calls = [];
   let adapter;
@@ -468,7 +524,10 @@ async function entrypoint(relative, { env = selectionEnv(), failJoin = false, fa
     return f.native;
   };
   const dependencies = {
-    "node:fs": { existsSync: () => false },
+    "node:fs": {
+      existsSync: (url) => incompleteGlobal && url.href.endsWith("/sdk-compat.mjs"), realpathSync,
+    },
+    "node:path": { isAbsolute },
     "node:url": { fileURLToPath },
     "./core/native-connector.mjs": { selectedNativeConnector: (options) =>
       selectedNativeConnector({ ...options, env, cwd: root }) },
@@ -497,18 +556,32 @@ async function entrypoint(relative, { env = selectionEnv(), failJoin = false, fa
       relative.endsWith("connector-extension.mjs")
         ? resolve(connectorRoot, "extensions/copilot-driver-headed/extension.mjs") : entry,
     ).href,
-    process: { env: { ...env, COPILOT_DRIVER_HEADED_BINDING: JSON.stringify({
+    process: { pid: process.pid, env: { ...env, COPILOT_DRIVER_HEADED_BINDING: JSON.stringify({
       version: 1, sessionId, port: 12345, nonce: "fixture-".repeat(8),
     }) } },
     __import: async (specifier) => {
       if (specifier.endsWith("/native-connector.mjs")) return dependencies["./core/native-connector.mjs"];
+      for (const [suffix, module] of [
+        ["/connection.mjs", "./connection.mjs"], ["/sdk-compat.mjs", "./sdk-compat.mjs"],
+        ["/remote-driver.mjs", "./core/remote-driver.mjs"], ["/extension.mjs", "./core/extension.mjs"],
+      ]) {
+        if (specifier.endsWith(suffix)) return dependencies[module];
+      }
       throw new Error(`unexpected dynamic import: ${specifier}`);
     },
   });
-  const source = readFileSync(entry, "utf8").replace(
+  const transform = (source) => source.replace(
     /^import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["'];/gm,
     (_statement, names, name) => `const {${names}} = __dependencies[${JSON.stringify(name)}];`,
-  ).replaceAll("import.meta.url", "__url").replaceAll("await import(", "await __import(");
+  ).replaceAll("import.meta.url", "__url").replaceAll("import(", "__import(");
+  const helper = transform(readFileSync(resolve(root,
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/native-connector.mjs"), "utf8"))
+    .replaceAll("export ", "");
+  const activation = new vm.Script(`(() => {${helper}\nreturn {
+    activateNativeConnector, GLOBAL_CONNECTOR_CONTRACT,
+  };})()`).runInContext(context);
+  Object.assign(dependencies["./core/native-connector.mjs"], activation);
+  const source = transform(readFileSync(entry, "utf8"));
   try {
     await new vm.Script(`(async () => {${source}\n})()`).runInContext(context);
     return { calls, ...f };
@@ -530,24 +603,39 @@ for (const relative of [
   });
 }
 
-test("the actual Driver entrypoint owns one join and passes that native object to both consumers", async () => {
-  const f = await entrypoint("libs/copilot-driver-core/src/agent_remote_driver/headed/connector-extension.mjs");
-  assert.deepEqual(f.calls.map(([name]) => name), ["sdk", "activate", "join", "connect"]);
-  const config = f.calls.find(([name]) => name === "join")[1];
-  assert.deepEqual(Object.keys(config.hooks).sort(), ["onPostToolUse", "onPostToolUseFailure"]);
-  assert.equal(config.commands[0].name, "peer");
-  assert.equal(f.calls.find(([name]) => name === "connect")[1], f.native);
-  assert.equal(f.sends.length, 1);
+test("an incomplete global payload refuses before SDK acquisition instead of importing itself", async () => {
+  await assert.rejects(entrypoint(
+    "plugins/agent-remote-driver/extensions/agent-remote-driver/extension.mjs", {
+      env: selectionEnv(globalSelection().options.nativeConnector), incompleteGlobal: true,
+    },
+  ), (error) => {
+    assert.match(error.message, /connector resources are incomplete/);
+    assert.deepEqual(error.calls, []);
+    return true;
+  });
 });
 
-for (const failure of ["failJoin", "failActivation"]) {
-  test(`${failure} never falls back to another join and closes only its adapter`, async () => {
-    await assert.rejects(entrypoint(
-      "libs/copilot-driver-core/src/agent_remote_driver/headed/connector-extension.mjs", { [failure]: true },
-    ), (error) => {
-      assert.equal(error.calls.filter(([name]) => name === "join").length, 1);
-      assert.equal(error.calls.filter(([name]) => name === "close").length, failure === "failActivation" ? 1 : 0);
-      return true;
-    });
+for (const globalOwner of [false, true]) {
+  const relative = globalOwner
+    ? "plugins/agent-remote-driver/extensions/agent-remote-driver/extension.mjs"
+    : "libs/copilot-driver-core/src/agent_remote_driver/headed/connector-extension.mjs";
+  const env = selectionEnv(globalOwner ? globalSelection().options.nativeConnector : selected);
+  test(`the ${globalOwner ? "global" : "staged"} Driver entrypoint joins once for both consumers`, async () => {
+    const f = await entrypoint(relative, { env });
+    assert.deepEqual(f.calls.map(([name]) => name), ["sdk", "activate", "join", "connect"]);
+    const config = f.calls.find(([name]) => name === "join")[1];
+    assert.deepEqual(Object.keys(config.hooks).sort(), ["onPostToolUse", "onPostToolUseFailure"]);
+    assert.equal(config.commands[0].name, "peer");
+    assert.equal(f.calls.find(([name]) => name === "connect")[1], f.native);
+    assert.equal(f.sends.length, 1);
   });
+  for (const failure of ["failJoin", "failActivation"]) {
+    test(`${globalOwner ? "global" : "staged"} ${failure} never rejoins and closes only its adapter`, async () => {
+      await assert.rejects(entrypoint(relative, { [failure]: true, env }), (error) => {
+        assert.equal(error.calls.filter(([name]) => name === "join").length, 1);
+        assert.equal(error.calls.filter(([name]) => name === "close").length, failure === "failActivation" ? 1 : 0);
+        return true;
+      });
+    });
+  }
 }

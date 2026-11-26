@@ -11,6 +11,7 @@ import tempfile
 
 CONNECTOR_ENV = "COPILOT_DRIVER_NATIVE_CONNECTOR"
 CONNECTOR_CONTRACT = "driver-native-v1"
+GLOBAL_CONNECTOR_CONTRACT = "driver-global-v1"
 
 
 def connector_selection(
@@ -27,7 +28,7 @@ def connector_selection(
                 "contract", "version", "sessionId", "cwd", "scopeId", "attempt",
                 "bridgePluginRoot", "driverPluginRoot",
             }
-            or selected["contract"] != CONNECTOR_CONTRACT
+            or selected["contract"] not in (CONNECTOR_CONTRACT, GLOBAL_CONNECTOR_CONTRACT)
             or type(selected["version"]) is not int or selected["version"] != 1
             or selected["sessionId"] != session_id or selected["cwd"] != cwd
             or selected["sessionId"] != env.get("AGENT_BRIDGE_NATIVE_SESSION_ID")
@@ -97,6 +98,20 @@ def selected_connector_roots(
         index += 1
     if found != expected:
         raise ValueError("Selected native plugin roots are missing from the original command")
+    if selected.get("contract") == GLOBAL_CONNECTOR_CONTRACT:
+        try:
+            support = json.loads((
+                expected["agent-remote-driver"] / "extensions" / "agent-remote-driver" / "native-connector.json"
+            ).read_text(encoding="utf-8"))
+            if (
+                not isinstance(support, dict) or support.get("schema") != "copilot-driver.native-connectors"
+                or type(support.get("version")) is not int or support["version"] != 1
+                or not isinstance(support.get("contracts"), list)
+                or GLOBAL_CONNECTOR_CONTRACT not in support["contracts"]
+            ):
+                raise ValueError("unsupported global connector")
+        except (OSError, ValueError, TypeError) as error:
+            raise ValueError("Selected global Driver does not support driver-global-v1") from error
     return [argument for index, argument in enumerate(argv) if index not in support_arguments]
 
 

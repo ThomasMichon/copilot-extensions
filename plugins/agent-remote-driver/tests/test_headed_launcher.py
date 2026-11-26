@@ -106,6 +106,59 @@ async def test_selected_root_mismatch_refuses_before_staging_or_native_birth(
     assert not (tmp_path / "attempt").exists()
 
 
+@pytest.mark.asyncio
+async def test_global_command_uses_only_the_selected_global_owner_and_original_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roots = {}
+    for name in ("agent-bridge", "agent-remote-driver"):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
+        roots[name] = str(root)
+    capability = Path(roots["agent-remote-driver"]) / "extensions" / "agent-remote-driver"
+    capability.mkdir(parents=True)
+    (capability / "native-connector.json").write_text(json.dumps({
+        "schema": "copilot-driver.native-connectors", "version": 1, "contracts": ["driver-global-v1"],
+    }), encoding="utf-8")
+    selected = {
+        "contract": "driver-global-v1", "version": 1, "sessionId": "chosen",
+        "cwd": str(tmp_path.resolve()), "scopeId": "scope", "attempt": "attempt",
+        "bridgePluginRoot": roots["agent-bridge"], "driverPluginRoot": roots["agent-remote-driver"],
+    }
+    seed = 'literal\n"quotes" & $value'
+    base = ["fixture-native", "--session-id", "chosen", "-i", seed]
+    original = [*base, *[value for root in roots.values() for value in ("--plugin-dir", root)]]
+    env = {
+        CONNECTOR_ENV: json.dumps(selected), "AGENT_BRIDGE_NATIVE_SESSION_ID": "chosen",
+        "AGENT_BRIDGE_SCOPE_ID": "scope", "AGENT_BRIDGE_PORTABLE_ATTEMPT": "attempt",
+        "AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT": roots["agent-bridge"],
+        "AGENT_BRIDGE_REMOTE_DRIVER_ROOT": roots["agent-remote-driver"], CONTEXT_ENV: "original-admission",
+    }
+    startup, birth = Mock(), Mock(side_effect=RuntimeError("captured before native birth"))
+    monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
+    monkeypatch.setattr(launcher, "StartupAdmissionClient", lambda _context: startup)
+    monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
+    monkeypatch.setattr(launcher._PaneChild, "launch", birth)
+    with pytest.raises(RuntimeError, match="captured before native birth"):
+        await launcher.run_headed(
+            original, session_id="chosen", cwd=str(tmp_path), env=env,
+            attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
+        )
+    startup.check.assert_called_once_with(original, str(tmp_path.resolve()), "chosen", {**os.environ, **env})
+    startup.close.assert_called_once()
+    birth.assert_called_once()
+    command = birth.call_args.args[0]
+    assert command[1:] == [*base[1:], "--experimental"]
+    assert "--plugin-dir" not in command and command.count(seed) == 1
+    environment = birth.call_args.kwargs["env"]
+    declaration = json.loads(environment[CONNECTOR_ENV])
+    assert declaration["connectorPluginRoot"] == roots["agent-remote-driver"]
+    client = json.loads(environment[launcher.CLIENT_ENV])
+    assert Path(client["client"]).is_file()
+    assert not (tmp_path / "state.json").exists()
+
+
 @pytest.fixture
 def headed_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -386,7 +439,7 @@ async def test_broker_failure_after_creation_does_not_kill_or_relaunch_native(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("publication", ["published", "locator-write-failed"])
+@pytest.mark.parametrize("publication", ["published", "global", "locator-write-failed"])
 async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_loss(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publication: str,
 ) -> None:
@@ -437,7 +490,7 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
     native_argv = list(argv)
     launch_env: dict[str, str] = {}
     startup = Mock()
-    if publication == "published":
+    if publication != "locator-write-failed":
         roots = {}
         for name in ("agent-bridge", "agent-remote-driver"):
             root = tmp_path / name
@@ -445,8 +498,16 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
             (root / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
             roots[name] = str(root)
             argv += ["--plugin-dir", str(root)]
+        if publication == "global":
+            declaration = Path(roots["agent-remote-driver"]) / "extensions" / "agent-remote-driver"
+            declaration.mkdir(parents=True)
+            (declaration / "native-connector.json").write_text(json.dumps({
+                "schema": "copilot-driver.native-connectors", "version": 1,
+                "contracts": ["driver-global-v1"],
+            }), encoding="utf-8")
         selected = {
-            "contract": "driver-native-v1", "version": 1, "sessionId": "chosen",
+            "contract": "driver-global-v1" if publication == "global" else "driver-native-v1",
+            "version": 1, "sessionId": "chosen",
             "cwd": str(tmp_path.resolve()), "scopeId": "scope", "attempt": "attempt",
             "bridgePluginRoot": roots["agent-bridge"], "driverPluginRoot": roots["agent-remote-driver"],
         }
@@ -480,14 +541,17 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
         starting = await state_named("native_starting")
         assert "port" not in starting
         assert calls[0][:len(native_argv)] == native_argv and calls[0].count(seed) == 1
-        assert calls[0].count("--plugin-dir") == 1
-        if publication == "published":
+        assert calls[0].count("--plugin-dir") == (0 if publication == "global" else 1)
+        if publication != "locator-write-failed":
             assert startup.check.call_args.args[0] == argv
             assert len(argv) == len(native_argv) + 4
         assert "--experimental" in calls[0]
-        assert Path(calls[0][calls[0].index("--plugin-dir") + 1]).is_dir()
+        if publication != "global":
+            assert Path(calls[0][calls[0].index("--plugin-dir") + 1]).is_dir()
         assert policy.call_count == 2
         assert environment is not None
+        if publication == "global":
+            assert json.loads(environment[CONNECTOR_ENV])["connectorPluginRoot"] == roots["agent-remote-driver"]
         binding = json.loads(environment[launcher.BINDING_ENV])
         assert binding["startupPrompt"] == seed
         reader, writer = await asyncio.open_connection("127.0.0.1", binding["port"])

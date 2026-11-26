@@ -1,0 +1,13 @@
+{
+  "comment": "Support an explicitly selected global Driver as the sole native SDK connector.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}
