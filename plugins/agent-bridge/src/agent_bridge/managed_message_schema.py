@@ -22,6 +22,15 @@ def _declarations() -> dict[str, tuple[str, str, str]]:
         "CREATE INDEX IF NOT EXISTS idx_managed_message_pending "
         "ON managed_message_receipts(session_id,queue_id) WHERE state='queued'",
     )
+    declarations["managed_messages_session_ended"] = (
+        "trigger", "sessions",
+        "CREATE TRIGGER IF NOT EXISTS managed_messages_session_ended "
+        "AFTER UPDATE OF status ON sessions WHEN NEW.status='ended' "
+        "BEGIN UPDATE managed_message_receipts SET state='removed' "
+        "WHERE session_id=NEW.id AND state='queued'; "
+        "DELETE FROM pending_prompts WHERE session_id=NEW.id AND id IN "
+        "(SELECT queue_id FROM managed_message_receipts WHERE session_id=NEW.id AND state='removed'); END",
+    )
     for operation in ("DELETE", "UPDATE"):
         name = f"pending_managed_message_{operation.lower()}"
         condition = " AND state='queued'" if operation == "DELETE" else ""

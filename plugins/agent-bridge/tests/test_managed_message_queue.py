@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,6 +22,9 @@ from agent_bridge.session_status import SessionStatus
 from agent_bridge.transport import SpawnTarget
 from test_session_manager import _patch_acp as _patch_acp, _patch_spawn as _patch_spawn
 from test_retained_turn_durability import observing_commits
+from test_remote_relationships import (
+    create as create_remote, managed as managed, remote_manager as remote_manager,
+)
 
 
 def _client(manager: SessionManager) -> httpx.AsyncClient:
@@ -252,6 +256,45 @@ async def test_failed_write_rolls_back_input_and_original_key_together(
         accepted = await client.post(path, json=payload)
         assert accepted.status_code == 202 and accepted.json()["duplicate"] is False
         mock_acp_client.send_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remote_retirement_settles_input_accepted_during_shutdown(
+    managed: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _, _, _ = managed
+    result = await cast(Callable[..., Awaitable[Any]], create_remote)(manager)
+    session = manager.get_session(result.session_id)
+    assert session is not None and session.client is not None
+    paused, release = asyncio.Event(), asyncio.Event()
+    shutdown = session.client.shutdown
+
+    async def suspended_shutdown() -> None:
+        paused.set()
+        await release.wait()
+        await shutdown()
+
+    monkeypatch.setattr(session.client, "shutdown", suspended_shutdown)
+    monkeypatch.setattr(manager, "_kick_pending_drain", AsyncMock())
+    ending = asyncio.create_task(manager.end_session(session.session_id))
+    payload = {"prompt": "accepted during retirement", "idempotency_key": "retirement-race"}
+    path = f"/api/v1/sessions/{session.session_id}/messages"
+    try:
+        await asyncio.wait_for(paused.wait(), 2)
+        async with _client(manager) as client:
+            original = await client.post(path, json=payload)
+            assert original.status_code == 202
+            release.set()
+            await asyncio.wait_for(ending, 2)
+            assert manager.db.get_session(session.session_id)["status"] == "ended"
+            recovered = await client.post(path, json=payload)
+            assert recovered.status_code == 202
+            assert recovered.json()["queue_id"] == original.json()["queue_id"]
+            assert recovered.json()["delivery_state"] == "removed"
+            assert manager.db.list_pending_prompts(session.session_id) == []
+    finally:
+        release.set()
+        await asyncio.wait_for(ending, 2)
 
 
 @pytest.mark.asyncio
