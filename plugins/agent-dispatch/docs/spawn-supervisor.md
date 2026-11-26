@@ -1294,7 +1294,8 @@ Three properties define it:
   on the supervisor's (origin's) coordinator, so at-most-once is **fleet-wide**,
   not per-pool-host. Only the *body* runs remotely; it drives the origin task's
   lifecycle (`claim`/`start`/`progress`/`complete`) **back to the origin over the
-  existing bidirectional SSH mesh** — `ssh <origin> agent-dispatch <verb> …`,
+  existing bidirectional SSH mesh** — `ssh -n <origin> agent-dispatch <verb> …`
+  (`-n` so a headless body's open stdin cannot hang the call),
   under a supervisor-assigned **synthetic owner** (the body's own worktree can't
   identify it to the origin). Because `ssh <origin>` would resolve the origin's
   machine identity, the body passes `--machine <pool-host>` on `claim` and
@@ -1363,7 +1364,9 @@ refuses the lane at registration or startup; nothing runs.
 **Protocol (version 1).** stdin is `{"version": 1, "candidates": [...]}` with
 the full managed host set; stdout must be `{"version": 1, "ordered": [...]}`,
 a duplicate-free ordered subset of the candidates. A managed host that is not
-in `ordered` takes no work this cycle.
+in `ordered` takes no work this cycle. An optional `"scores": {host: number}`
+map (known candidates, finite numbers) is recorded for audit only; it never
+changes the order.
 
 **Ordering.** Before liveness and before any reservation, unmanaged hosts keep
 their configured positions and the managed positions are refilled in provider
@@ -1380,6 +1383,37 @@ order. Pool `[W1, CDE, W2]` with `ordered: [W2, W1]` tries `[W2, CDE, W1]`.
 - **Hard pins.** A pin to an unmanaged host never calls the provider. A pin to a
   managed host uses this cycle's single result: it starts only when the host is
   in `ordered` and live; otherwise it defers and never moves to another host.
+- **Audit.** A reserved placement can append one task event whose note starts
+  with `fleet placement: ` followed by JSON: `decision_id`, `reservation`,
+  `candidates_sent`, `provider_ordered` (and `provider_scores` /
+  `provider_error`), `task_candidates`, `merged_order`, liveness `probes`,
+  `selected`, `selected_provider_rank`, `spawn_ok` and `skipped` (each
+  higher-ranked host passed over, with `excluded_by_task`, `not_live` or
+  `not_reached`). Read it with `agent-dispatch events <task-id>`.
+- **Audit delivery is best-effort diagnostics.** After the reservation's
+  bookkeeping settles, the supervisor submits the decision to a bounded
+  (32 records), single-writer, nonblocking outbox. One background thread posts
+  it to the coordinator with a 2-second request timeout, so the sink never
+  delays the cycle or spawn settlement. A decision can be missing from the task
+  events, and is not retried, when:
+  - the outbox is full: the new record is dropped;
+  - a transport error occurs (unreachable coordinator, timeout): the writer
+    backs off for 60 seconds, and records submitted or dequeued during the
+    backoff are dropped;
+  - the coordinator does not support the route (404 `Not Found` or 405): the
+    outbox is disabled for the rest of the supervisor process, and every later
+    record is dropped;
+  - the coordinator refuses one record for another reason (for example 422, or
+    404 for an unknown reservation): only that record is lost;
+  - the supervisor shuts down: shutdown does not wait for the writer, so
+    records still queued can be lost.
+
+  Records omitted by the queue (full, disabled or in backoff) are counted
+  in-process in `dropped` (with `submitted` and `delivered`) and logged at
+  debug level; a failed delivery attempt is logged as a warning. These counts
+  are not exported as metrics. A missing `fleet placement:` event therefore
+  does not mean that the placement did not happen: the reservation's own
+  bookkeeping stays authoritative.
 - A lane without `placement_provider` never calls a provider and behaves as
   before. The legacy environment-variable lane path does not support it.
 

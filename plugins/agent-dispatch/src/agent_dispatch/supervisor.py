@@ -48,6 +48,7 @@ from .client import DispatchClient
 from .client_errors import DispatchError
 from .client_cleanup_recovery import HostBoundConclusionClient
 from .loop_governance import LoopGovernance
+from .placement_audit_outbox import PlacementAuditOutbox
 from .queue_records import SpawnState, Status
 from .spawn_factories import (  # noqa: F401 -- re-exported for existing call sites/tests
     _FLEET_BODY_PREFIX,
@@ -391,6 +392,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             "agent-dispatch:" + hashlib.sha256(self.supervisor_id.encode()).hexdigest()[:24]
         )
         self.event_wake = event_wake or (SupervisorEventWake() if self.reactive else None)
+        #: Lazily created nonblocking owner of optional placement-decision audits.
+        self.placement_audit: PlacementAuditOutbox | None = None
         #: Maximum age of this supervisor's own handle-less ``reserving`` row.
         #: Spawn is synchronous, so reconciliation cannot observe a live local
         #: allocation from the same process; after restart, a row older than this
@@ -3808,5 +3811,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     except KeyboardInterrupt:
                         return
             finally:
+                if self.placement_audit is not None:
+                    self.placement_audit.close()
                 if event_wake is not None:
                     event_wake.close_and_wait()

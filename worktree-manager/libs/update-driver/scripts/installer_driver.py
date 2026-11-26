@@ -382,7 +382,7 @@ def admit_broker_removal(
 
     profile = args.payload / "scripts" / "uninstall-profile.json"
     options: _CleanupOptions = {}
-    if args.plugin == "agent-vault":
+    if controller_custody is not None:
         options["controller_custody"] = controller_custody
     cleanup(
         args.payload, args.plugin, args.root, str(args.shell),

@@ -1220,6 +1220,33 @@ def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch: pytest.MonkeyPat
     assert "--caller fleet-t1-abc" in remote_cmd
 
 
+def test_fleet_headless_carrier_create_uses_cold_host_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cold Windows pool host can take minutes to start a session; the
+    default remote-create deadline must outlast that instead of 120 s."""
+    from agent_dispatch import bridge_remote
+
+    seen: dict[str, Any] = {}
+
+    class _Client:
+        def create_session(self, host: str, **kwargs: Any) -> dict[str, str]:
+            seen.update(kwargs)
+            return {"session_id": "s1"}
+
+    monkeypatch.setattr(bridge_remote, "LocalBridgeRemoteClient", _Client)
+
+    result = embody.spawn_fleet_headless_worker(
+        "pool-a", "t1", origin="coord", owner="fleet-t1-abc", worker_id="fleet-t1-abc",
+    )
+    assert result.returncode == 0
+    assert seen["timeout"] == embody.FLEET_HEADLESS_CREATE_TIMEOUT == 600.0
+
+    embody.spawn_fleet_headless_worker(
+        "pool-a", "t1", origin="coord", owner="fleet-t1-abc", worker_id="fleet-t1-abc",
+        timeout=45.0,
+    )
+    assert seen["timeout"] == 45.0
+
+
 def test_fleet_headless_falls_back_to_ssh_on_far_side_426(monkeypatch: pytest.MonkeyPatch) -> None:
     """A far-side carrier still on the old REMOTE_OPERATION_VERSION rejects a
     chartered request with 426 unsupported_version, even though the LOCAL

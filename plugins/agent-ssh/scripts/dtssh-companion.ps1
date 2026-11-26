@@ -2,6 +2,15 @@
 <#
 .SYNOPSIS
     Dispatch-supervised lifecycle for the durable dtssh host launcher.
+
+.DESCRIPTION
+    agent-dispatch runs this file from the identity-verified plugin payload it
+    registered, so the selected installation always runs its own companion
+    logic and a payload update reaches it through Dispatch's companion
+    generation cutover. A healthy host started by another owner (for example
+    restore-host) is adopted rather than restarted. `stop` releases such an
+    adoption without stopping the host, so a generation cutover keeps the
+    live transport and its relayed sessions; the next generation adopts it.
 #>
 param(
     [Parameter(Position = 0)]
@@ -109,7 +118,9 @@ function Invoke-InstallHost {
     if ($Capture) {
         return @(& $pwsh @argv *>&1) | Out-String
     }
-    & $pwsh @argv
+    # Child output must not join the returned exit code (it would make a
+    # successful 'stop' look like a failure and skip the following 'start').
+    & $pwsh @argv | Out-Host
     return $LASTEXITCODE
 }
 
@@ -134,9 +145,136 @@ function Test-HealthyStatusText {
     return $Output -notmatch 'tunnel .*:\s*0 host connection\(s\)'
 }
 
+function Get-StatusProcessIds {
+    param(
+        [AllowEmptyString()][string]$Output,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $pattern = '(?im)^\s*' + [regex]::Escape($Label) + ':\s*([0-9][0-9,\s]*)$'
+    $match = [regex]::Match([string]$Output, $pattern)
+    if (-not $match.Success) { return @() }
+    return @(
+        $match.Groups[1].Value -split '[,\s]+' |
+            Where-Object { $_ -match '^[0-9]+$' } |
+            ForEach-Object { [int]$_ }
+    )
+}
+
+function Get-AdoptionPath {
+    param([Parameter(Mandatory)]$Config)
+    return Join-Path $Config.InstallRoot 'dispatch-companion.adoption.json'
+}
+
+function Get-ProcessStartTicks {
+    param([Parameter(Mandatory)][int]$ProcessId)
+    try {
+        return [string](Get-Process -Id $ProcessId -ErrorAction Stop).StartTime.ToUniversalTime().Ticks
+    } catch {
+        return $null
+    }
+}
+
+function Read-Adoption {
+    param([Parameter(Mandatory)]$Config)
+    $path = Get-AdoptionPath $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $record = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    } catch {
+        return $null
+    }
+    if ($record.schema_version -ne 1 -or ($record.companion_pid -as [int]) -le 0) { return $null }
+    return $record
+}
+
+function Test-OwnAdoption {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$StartTicks)
+    $record = Read-Adoption $Config
+    return $null -ne $record -and
+        [int]$record.companion_pid -eq $PID -and
+        [string]$record.companion_start -ceq $StartTicks
+}
+
+function Write-Adoption {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][int[]]$ProcessIds, [Parameter(Mandatory)][string]$StartTicks)
+    $path = Get-AdoptionPath $Config
+    $temporary = "$path.$PID.tmp"
+    [ordered]@{
+        schema_version = 1
+        companion_pid = $PID
+        companion_start = $StartTicks
+        adopted_pids = @($ProcessIds)
+    } | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporary -Encoding utf8NoBOM
+    Move-Item -LiteralPath $temporary -Destination $path -Force
+}
+
+function Wait-AdoptedHost {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][int[]]$ProcessIds)
+
+    $interval = 2
+    if ($env:AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS) {
+        $interval = [Math]::Max(0.1, [double]$env:AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS)
+    }
+    $startTicks = Get-ProcessStartTicks $PID
+    Write-Adoption -Config $Config -ProcessIds $ProcessIds -StartTicks $startTicks
+    try {
+        # Wait while the adopted host lives and this generation still holds the
+        # adoption; `stop` releases it so a cutover never stops the host.
+        while (
+            @(Get-Process -Id $ProcessIds -ErrorAction SilentlyContinue).Count -gt 0 -and
+            (Test-OwnAdoption -Config $Config -StartTicks $startTicks)
+        ) {
+            Start-Sleep -Milliseconds ([int]($interval * 1000))
+        }
+    } finally {
+        if (Test-OwnAdoption -Config $Config -StartTicks $startTicks) {
+            Remove-Item -LiteralPath (Get-AdoptionPath $Config) -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Invoke-ReleaseAdoption {
+    param([Parameter(Mandatory)]$Config)
+    # Returns $true when a live adopting companion was released. A stale record
+    # (its companion is gone or the PID was reused) is discarded instead.
+    $record = Read-Adoption $Config
+    $path = Get-AdoptionPath $Config
+    if ($null -eq $record) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    $companionPid = [int]$record.companion_pid
+    $live = (Get-ProcessStartTicks $companionPid) -ceq [string]$record.companion_start
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $live) { return $false }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline -and $null -ne (Get-ProcessStartTicks $companionPid)) {
+        Start-Sleep -Milliseconds 100
+    }
+    [Console]::Out.WriteLine(
+        "released adopted dtssh host ($(@($record.adopted_pids) -join ',')); host left running"
+    )
+    return $true
+}
+
 switch ($Action) {
     'start' {
         $install = Get-InstallHostScript
+        # A healthy host (for example one restored by restore-host) is adopted,
+        # not restarted: restarting it drops live relayed sessions and the
+        # replacement can come up unable to serve them. Stay running while the
+        # adopted watchdog/host lives so the supervisor revives us when it ends.
+        $status = Invoke-InstallHost -Install $install -Verb 'status' -Capture
+        if (Test-HealthyStatusText $status) {
+            $adopted = @(Get-StatusProcessIds $status 'watchdog running')
+            if (-not $adopted) { $adopted = @(Get-StatusProcessIds $status 'host running') }
+            if ($adopted) {
+                [Console]::Out.WriteLine("adopted healthy dtssh host ($($adopted -join ','))")
+                Wait-AdoptedHost -Config $install.Config -ProcessIds $adopted
+                exit 0
+            }
+        }
         $stopCode = Invoke-InstallHost -Install $install -Verb 'stop'
         if ($stopCode -ne 0) { exit $stopCode }
         # Win32 OpenSSH re-exec descriptors belong to the old SSH process chain,
@@ -149,6 +287,9 @@ switch ($Action) {
     }
     'stop' {
         $install = Get-InstallHostScript
+        # The companion never stops a host it adopted: releasing the adoption
+        # ends this generation and leaves the live transport for the next one.
+        if (Invoke-ReleaseAdoption $install.Config) { exit 0 }
         exit (Invoke-InstallHost -Install $install -Verb 'stop')
     }
     'health' {
@@ -169,3 +310,4 @@ switch ($Action) {
         )
     }
 }
+exit 0

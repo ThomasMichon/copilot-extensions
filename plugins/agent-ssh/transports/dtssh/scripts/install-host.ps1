@@ -534,6 +534,54 @@ function Get-DevTunnelExe {
     return $null
 }
 
+function Install-ShimFreeDevTunnel {
+    <#
+      Put a real devtunnel.exe beside dtssh.exe when devtunnel otherwise only
+      resolves through a reparse point (the WinGet Links symlink). Windows
+      RedirectionGuard on hardened hosts (for example Dev Box) refuses to start
+      such a link from a non-interactive SSH or service logon ("untrusted mount
+      point"), which breaks every `ssh <alias>` ProxyCommand on the machine.
+      dtssh resolves devtunnel from PATH and the dtssh bin dir is on the User
+      PATH, so the sibling copy wins. Returns the sibling path when it is
+      current, otherwise $null. Never throws: a locked or missing target warns.
+    #>
+    param([Parameter(Mandatory)][string]$BinDir)
+    $sibling = Join-Path $BinDir 'devtunnel.exe'
+    $existing = if (Test-Path -LiteralPath $sibling) { $sibling } else { $null }
+    $other = @(Get-Command devtunnel -CommandType Application -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -and -not [string]::Equals($_.Source, $sibling, [StringComparison]::OrdinalIgnoreCase) }) |
+        Select-Object -First 1
+    if (-not $other) { return $existing }
+    $item = Get-Item -LiteralPath $other.Source -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $existing }
+    # Follow the link text hop by hop: resolving the final target in one call
+    # traverses the link, which RedirectionGuard refuses as well.
+    $target = $item
+    for ($hop = 0; $target -and ($target.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $hop -lt 8; $hop++) {
+        $text = $target.LinkTarget
+        if (-not $text) { $target = $null; break }
+        if (-not [IO.Path]::IsPathRooted($text)) { $text = Join-Path (Split-Path -Parent $target.FullName) $text }
+        $target = Get-Item -LiteralPath $text -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $target -or -not $target.Exists -or ($target.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Write-Warning "devtunnel resolves only through the link $($item.FullName) and its real binary was not found; over-SSH dtssh connections can fail with 'untrusted mount point'."
+        return $existing
+    }
+    try {
+        # Hashing reads both files, so it stays inside the recoverable boundary:
+        # a failure warns and keeps the existing copy instead of aborting.
+        if ($existing -and (Get-FileHash -LiteralPath $sibling -ErrorAction Stop).Hash -eq (Get-FileHash -LiteralPath $target.FullName -ErrorAction Stop).Hash) {
+            return $sibling
+        }
+        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+        Copy-Item -LiteralPath $target.FullName -Destination $sibling -Force
+        Write-Host "Copied devtunnel.exe beside dtssh.exe from $($target.FullName) so it does not run through a WinGet Links link."
+        return $sibling
+    } catch {
+        Write-Warning "Could not refresh devtunnel.exe at ${sibling}: $($_.Exception.Message)"
+        return $existing
+    }
+}
 function Test-DevTunnelLogin {
     # dtssh has no `login --status` subcommand; query the bundled devtunnel CLI.
     param([Parameter(Mandatory)][string]$DtsshPath)
@@ -906,6 +954,7 @@ switch ($Action) {
         }
         Install-Dtssh -Force:($Action -eq 'update')
         Install-OpenSSHBinaries
+        Install-ShimFreeDevTunnel -BinDir $DtsshDir | Out-Null
         Assert-Login
         Install-Shortcut
         Write-DispatchCompanionConfig

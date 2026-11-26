@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from .client_errors import DispatchError
 from .action_controls import action_inhibited
 from .admission_holds import supervisor_inhibited
+from .placement_audit_outbox import PlacementAuditOutbox
 from .spawn_diagnostics import SpawnDiagnostics, diagnostic_text
 
 if TYPE_CHECKING:
@@ -296,8 +297,29 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         except DispatchError as exc:
             log.error("bookkeeping failed for reservation %s: %s", key,
                       diagnostic_text(str(exc), task_trace.secrets))
+        # Optional audit runs only after authoritative settlement, so it can never gate it.
+        record_placement_decision(self, task["id"], key, ok, handle)
     if self.event_wake is not None:
         with trace.stage("event_acknowledge"):
             self.event_wake.acknowledge()
     call("_sync_event_subscriptions")
     return spawned
+
+
+def record_placement_decision(
+    self: Supervisor, task_id: str, key: str, ok: bool, handle: dict[str, object],
+) -> None:
+    """Best-effort: hand the fleet spawn fn's placement decision to the
+    nonblocking audit outbox, which appends it as a task event off the cycle."""
+    take = getattr(self.spawn_fn, "take_placement_decision", None)
+    record = getattr(self.client, "record_placement_decision", None)
+    decision = take(task_id) if callable(take) else None
+    if not isinstance(decision, dict) or not callable(record):
+        return
+    decision = {**decision, "spawn_ok": bool(ok), "spawned_on": handle.get("machine")}
+    outbox = self.placement_audit
+    if outbox is None:
+        outbox = self.placement_audit = PlacementAuditOutbox(record)
+    if not outbox.submit(key, decision):
+        log.debug("placement decision for task %s (%s) omitted (audit sink unavailable or full)",
+                  task_id, key)

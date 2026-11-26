@@ -519,7 +519,76 @@ function New-SignedVenv {
     $arguments = @('--python', $PythonVersion, '--managed-python')
     if ($AllowExisting) { $arguments += '--allow-existing' }
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $arguments -UvCommand $UvCommand
+    if ($result.ExitCode -ne 0 -and (Test-IsUntrustedMountPointRefusal ($result.Output | Out-String))) {
+        # Windows RedirectionGuard (e.g. Microsoft Dev Box) refuses uv's
+        # minor-version junction, so a bare X.Y request cannot be resolved even
+        # though the patch interpreter it links to is installed. Retry once with
+        # that exact managed patch version, which uv resolves without the junction.
+        $exact = Resolve-UvManagedPatchVersion -PythonVersion $PythonVersion -UvCommand $UvCommand
+        if ($exact) {
+            Write-Warn "uv refused the managed Python $PythonVersion link (os error 448) -- retrying with the installed $exact interpreter"
+            $arguments[1] = $exact
+            $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $arguments -UvCommand $UvCommand
+        }
+    }
     return ($result.ExitCode -eq 0 -and (Test-Path $VenvPython) -and (Test-Path $cfgPath))
+}
+
+function Test-IsUntrustedMountPointRefusal {
+    param([string]$Text)
+    return ($Text -match '\(os error 448\)' -or $Text -match 'untrusted mount point')
+}
+
+function Resolve-UvManagedPatchVersion {
+    param(
+        [Parameter(Mandatory)][string]$PythonVersion,
+        [string]$UvCommand = 'uv'
+    )
+    if ($env:OS -ne 'Windows_NT') { return $null }
+    if ($PythonVersion -notmatch '^(?:cpython@)?([0-9]+)\.([0-9]+)$') { return $null }
+    $major = [int]$Matches[1]
+    $minorNumber = [int]$Matches[2]
+    # Ask uv itself for the exact patch versions it knows for this minor (its
+    # bundled download metadata; no network), then
+    # confirm each through uv's own exact managed lookup. Neither call resolves
+    # the minor-version junction, so the selection never depends on uv's
+    # on-disk directory naming.
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $listing = (& $UvCommand python list "$major.$minorNumber" --managed-python --all-versions --output-format json 2>$null | Out-String).Trim()
+        $listExit = $LASTEXITCODE
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    if ($listExit -ne 0 -or -not $listing) { return $null }
+    # Some uv wrappers merge diagnostics into the output stream; keep only the
+    # JSON array uv printed.
+    $lines = @($listing -split '\r?\n')
+    $first = [array]::FindIndex($lines, [Predicate[string]]{ param($l) $l.TrimStart().StartsWith('[') })
+    $last = [array]::FindLastIndex($lines, [Predicate[string]]{ param($l) $l.TrimEnd().EndsWith(']') })
+    if ($first -lt 0 -or $last -lt $first) { return $null }
+    # Windows PowerShell 5.1 does not enumerate a parsed JSON array, so assign it first.
+    try { $parsed = ConvertFrom-Json -InputObject ($lines[$first..$last] -join "`n") -ErrorAction Stop } catch { return $null }
+    $entries = @($parsed)
+    $patches = @(
+        foreach ($entry in $entries) {
+            if ($entry.implementation -ne 'cpython') { continue }
+            if ($entry.variant -and $entry.variant -ne 'default') { continue }
+            $parts = $entry.version_parts
+            if ($null -eq $parts -or [int]$parts.major -ne $major -or [int]$parts.minor -ne $minorNumber) { continue }
+            if ("$($entry.version)" -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { continue }
+            [int]$parts.patch
+        }
+    ) | Sort-Object -Descending -Unique
+    foreach ($patch in $patches) {
+        $exact = "$major.$minorNumber.$patch"
+        $found = Invoke-NativeCapture { & $UvCommand python find --managed-python --no-project --system --no-python-downloads $exact }
+        if ($found.ExitCode -eq 0) { return $exact }
+    }
+    return $null
 }
 
 function Write-DeployManifest {
