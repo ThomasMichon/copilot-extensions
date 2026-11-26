@@ -126,6 +126,29 @@ def test_full_observer_refuses_an_unknown_sampling_mode(monkeypatch: pytest.Monk
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("enabled", [False, True])
+def test_notification_observer_registration_requires_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool,
+) -> None:
+    import hook_native_portfolio as full
+
+    monkeypatch.delenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", raising=False)
+    if enabled:
+        monkeypatch.setenv("AGENT_WORKTREES_NOTIFICATION_DIAGNOSTIC", "1")
+    else:
+        monkeypatch.delenv("AGENT_WORKTREES_NOTIFICATION_DIAGNOSTIC", raising=False)
+    names: list[str] = []
+    config = cast(pytest.Config, SimpleNamespace(pluginmanager=SimpleNamespace(
+        register=lambda plugin, *, name: names.append(name),
+    )))
+    full.register(config)
+    assert names == [
+        "full-native-child-observer", "full-native-receiver-observer",
+        *(["full-native-notification-observer"] if enabled else []),
+    ]
+
+
+@pytest.mark.guard
 def test_code_mode_requires_a_runner_owned_claim(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "code-stack")
     monkeypatch.delenv("AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM", raising=False)

@@ -16,7 +16,7 @@ from hook_child_observer import (
     ChildObserver, PostExitChildObserver, Sample, is_native_subprocess, observed_subprocess,
 )
 from test_hook_packet_receiver_diagnostics import NativeChildPacketObserver
-from test_post_tool_sender_diagnostics import ReceiverPacketObserver
+from test_post_tool_sender_diagnostics import NotificationPacketObserver, ReceiverPacketObserver
 
 
 class Reporter(Protocol):
@@ -281,3 +281,7 @@ class FullNativeChildObserver(NativeChildPacketObserver):
 def register(config: pytest.Config) -> None:
     config.pluginmanager.register(FullNativeChildObserver(), name="full-native-child-observer")
     config.pluginmanager.register(ReceiverPacketObserver(), name="full-native-receiver-observer")
+    if os.environ.get("AGENT_WORKTREES_NOTIFICATION_DIAGNOSTIC") == "1":
+        config.pluginmanager.register(
+            NotificationPacketObserver(), name="full-native-notification-observer",
+        )

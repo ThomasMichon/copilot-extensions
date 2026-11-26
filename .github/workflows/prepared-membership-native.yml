@@ -11,6 +11,10 @@ on:
         description: "Observe the full original native portfolio; always diagnostic failure, not acceptance"
         type: boolean
         default: false
+      notification_diagnostics:
+        description: "Full non-report-only diagnostics: bounded original post-tool sender/receiver classifications"
+        type: boolean
+        default: false
       runner_owner_diagnostics:
         description: "Sample owned Windows Job CPU/exit/wait metadata; always diagnostic failure, not acceptance"
         type: boolean
@@ -211,6 +215,20 @@ jobs:
           -k "rpc_phase_diagnostics or buffered_rpc_phase_source_contract or native_launch_timeout_reports_captured_context or native_pretool_reuses_decoded_event"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
 
+      - name: Check bounded notification diagnostics after the original packets
+        if: ${{ !cancelled() && matrix.packet == 'write-name-policy' }}
+        env:
+          COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ""
+          PYTEST_PLUGINS: ""
+          AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ""
+          AGENT_WORKTREES_NOTIFICATION_DIAGNOSTIC: ""
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_post_tool_sender_diagnostics.py
+          -k "notification"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
   prepared-membership-windows:
     name: Prepared cell membership (Windows)
     runs-on: windows-latest
@@ -219,6 +237,7 @@ jobs:
       COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ${{ inputs.runner_owner_diagnostics && '1' || '' }}
       PYTEST_PLUGINS: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode == 'report-only' && '_native_failure_report_pytest' || '_native_portfolio_pytest') || '' }}
       AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode || 'late') || '' }}
+      AGENT_WORKTREES_NOTIFICATION_DIAGNOSTIC: ${{ inputs.full_native_diagnostics && inputs.notification_diagnostics && inputs.native_observation_mode != 'report-only' && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
