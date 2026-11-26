@@ -69,7 +69,7 @@ def test_legacy_body_exposure_keeps_original_delivery_ownership_after_enrollment
         db.execute_write("UPDATE live_messages SET claimed_at=NULL WHERE id=?", (message_id,))
     next_input = client.post(MESSAGES, json={**PAYLOAD, "idempotency_key": "next-input"})
     assert next_input.status_code == 200
-    row = poll(client, body)
+    row = poll(client, {**body, "limit": 1})
     assert row["id"] == next_input.json()["message_id"]
     assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": True}
     original, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (message_id,))

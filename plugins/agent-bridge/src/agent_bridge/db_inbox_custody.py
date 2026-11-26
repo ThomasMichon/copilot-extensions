@@ -234,14 +234,13 @@ class _InboxCustodyMixin(DatabaseOperations):
             rows = conn.execute(
                 "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
                 "AND disposition_json IS NULL "
+                "AND NOT (producer_target_json IS NOT NULL AND handoff_json IS NULL AND claimed_at IS NOT NULL) "
                 "AND kind NOT LIKE 'control:%' ORDER BY id" + (" LIMIT ?" if limit is not None else ""),
                 (consumer.session_id, limit) if limit is not None else (consumer.session_id,),
             ).fetchall()
             result = []
             for row in rows:
                 producer_queued = row["producer_target_json"] is not None
-                if producer_queued and row["handoff_json"] is None and row["claimed_at"] is not None:
-                    continue
                 if row["runtime_custody_json"] is None and not producer_queued:
                     if consumer.message_base == 1 and all(row[name] is None for name in (
                         "claimed_at", "handoff_started_at", "delivered_at", "consumed_at", "outcome",
