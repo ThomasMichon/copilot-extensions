@@ -487,7 +487,29 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the whole original invalid-marketplace-identity refusal
+- [ ] Qualify only the whole original invalid-workspace refusal function
+  with its original tmp-path fixture and both missing-path/file-path checks.
+  Complete metadata and unchanged guarding must establish eligibility before
+  admission; require actual workspace-validation calls without policy reads
+  or parent discovery. Preserve original objects/globals/fixtures/assertions,
+  typed values, all marks, IDs, order and every existing admission/limit.
+  Exclude every other whole function in that module. In particular, the
+  nested-checkout freshness function writes a synthetic `.git` file and is
+  excluded before execution because the unchanged guard refuses every such
+  open. Do not rewrite that fixture, redirect the marker or alter a guard.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete collection confirms 41 original cases and exactly one adapted
+  whole function, preserving its original object/globals, tmp-path fixture,
+  typed values, all marks, IDs and order. The other fifteen whole functions
+  remain excluded. First unchanged guarded qualification passes one in
+  1.36 pytest / 21.390 observation seconds: all three phases pass, zero
+  prohibited effects, sixteen bound reads, both workspace-validation refusal
+  branches and no parent traversal, policy presence checks or policy reads.
+  The full observation is read before admission. Only one node and one
+  adapter binding are added: 11,179 nodes, 1,543 sources, unchanged 563
+  targets, 92 helpers, 300 seconds and 739,114 bytes.
+  Fresh review/full CI, normal merge and persistence remain before Done.
+- [x] Qualify the whole original invalid-marketplace-identity refusal
   function without discovering a repository or reading policy.
   Preserve all seven original rows, the original tmp-path fixture, marks,
   objects/globals, IDs and order. Compare complete original/adapted metadata
@@ -521,6 +543,15 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   The peer-preserving union is 11,178 nodes, 1,542 sources, 563 targets,
   unchanged 92 helpers, 300 seconds and 738,845 bytes.
   Fresh exact-head review and complete required CI must pass again.
+  Source #14732 merges at `4f07fcdd1c0a0561bfbfb3973cf1a16146a72cfa`
+  after fresh approval and complete required CI. Both natural current-head
+  runs execute all 11,178 units; neither is a reuse hit.
+  Independent merged/open-parent readback and managed sync complete.
+  All five owned reviewed/merged/working blobs, the exact peer-preserving
+  candidate, 1,542 bindings, 92 helpers and sixteen observed inputs verify
+  without replay. Thirteen unrelated concurrent peer files remain intact;
+  whole-tree identity is not claimed. Actual parent Goal, own Plan and
+  whole Validation are reread before only this seven-case leaf is Done.
 - [x] Qualify all four original hosting-result parser functions as one
   coherent source slice, preserving complete parameter rows, objects,
   globals, fixtures, typed values, marks, IDs and order.
