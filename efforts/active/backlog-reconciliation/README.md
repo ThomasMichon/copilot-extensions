@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [further publication and installed-TTY proposal](journal/2026/11.26-further-publication-and-tty-evidence.md)
+retains two distinct publication-boundary cases for existing #7378 and
+fourteen TTY case keys for existing #11966. #13550's separately qualified
+automated recurrence retains a second failed execution under its original
+key, not a shared-cause claim. Human diagnostic requests #13414/#13427 and
+distinct verifier #13405 / unsigned-build #13551 remain separately OPEN.
+All sixteen proposed source tokens remain OPEN pending review, whole actual
+receiving, separate disposition audits, a complete census and factual
+outcome; every incumbent parent Plan/Validation state remains unchanged.
+
 The [checkout-policy completion and nine-case TTY outcome](journal/2026/11.26-checkout-policy-completion-and-nine-tty-cases.md)
 records independently acknowledged #13264 source completion through #13265,
 without claiming whole installed-TTY qualification. After reviewed #14750,
@@ -531,7 +541,7 @@ All seventy-eight registered technical rows and ten human comments remain;
 the six source-input gaps, #13263's specifically discussed generation,
 assigned #13268/#13269 and #13260's distinct module-health request stay OPEN.
 Two equal complete censuses measure 686 whole OPEN: 293 original-cohort and
-393 inflow, 43 below fixed 729. The factual outcome still owes publication;
+393 inflow, 43 below fixed 729. The factual outcome merged in #14751;
 no incumbent parent Plan/Validation item is resolved by this slice.
 
 The [six further occurrence outcome](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
