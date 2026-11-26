@@ -476,6 +476,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
                             "audience": related.effective_audience(e),
                             "ai_attribution": related.effective_ai_attribution(e),
                             "provenance": related.entry_provenance(e),
+                            "plugins": e.plugins,
                             **({"state_root": related.state_root_policy(e)}
                                if e.bound_state_root else {}),
                             "locus": {
@@ -536,6 +537,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
                     "audience_explicit": e.audience,
                     "ai_attribution": related.effective_ai_attribution(e),
                     "provenance": related.entry_provenance(e),
+                    "plugins": e.plugins,
                     **({"state_root": related.state_root_policy(e)}
                        if e.bound_state_root else {}),
                     "locus": {

@@ -64,6 +64,15 @@ def _isolate_runtime_dirs(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(runtime))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_layered_related_view(monkeypatch):
+    """Never read the machine's live agent-worktrees related view in unit tests.
+
+    Tests that cover the layered lane patch ``_read_layered_related`` themselves.
+    """
+    monkeypatch.setattr("agent_bridge.related_plugins._read_layered_related", lambda anchor: None)
+
+
 @pytest.fixture
 def tmp_db(tmp_path: Path) -> Iterator[Database]:
     """Create a temporary SQLite database."""

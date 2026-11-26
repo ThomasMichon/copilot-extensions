@@ -224,3 +224,84 @@ def test_control_plane_anchors_registry_fallback(tmp_path, monkeypatch):
     )
     anchors = rp.control_plane_anchors()
     assert canonical in anchors
+
+
+# --- Layered lane (agent-worktrees grafted ``related list --json``) ---------
+
+_real_read_layered_related = rp._read_layered_related
+
+_LAYERED_ROWS = [
+    {"name": "other", "locus": {"container": {"repo": "elsewhere"}},
+     "plugins": [{"source": "other@synthetic", "enable": True}]},
+    {"name": "product", "locus": {"container": {"repo": "example-org/product-venue"}},
+     "provenance": {"layer": "plugin"},
+     "plugins": [
+         {"source": "dev-locally@synthetic", "enable": True},
+         {"source": "product-harness@synthetic", "enable": True},
+     ]},
+]
+
+
+def test_layered_view_supplies_plugins_when_checkout_declares_nothing(tmp_path, monkeypatch):
+    """Harness case: ``related: {}`` in the checkout, plugins only in a grafted layer."""
+    _write_related(tmp_path, "related: {}\n")
+    seen = []
+    monkeypatch.setattr(rp, "_read_layered_related", lambda a: seen.append(a) or _LAYERED_ROWS)
+    for repo in ("product", "EXAMPLE-ORG/product-venue"):
+        assert rp.declared_related_plugins(repo, [tmp_path]) == [PluginRef("dev-locally@synthetic")]
+    assert seen == [tmp_path, tmp_path]
+
+
+def test_layered_view_outranks_legacy_file(tmp_path, monkeypatch):
+    _write_related(tmp_path, "related:\n  product:\n    plugins:\n      - { source: stale@synthetic }\n")
+    monkeypatch.setattr(rp, "_read_layered_related", lambda a: _LAYERED_ROWS)
+    assert rp.declared_related_plugins("product", [tmp_path]) == [PluginRef("dev-locally@synthetic")]
+
+
+@pytest.mark.parametrize("rows", [None, [], [{"name": "product", "locus": {}}]])
+def test_legacy_file_used_when_layered_view_unavailable_or_older(tmp_path, monkeypatch, rows):
+    """No owner, empty view, or an owner that predates the ``plugins`` field."""
+    _write_related(tmp_path, "related:\n  product:\n    plugins:\n      - { source: legacy@synthetic }\n")
+    monkeypatch.setattr(rp, "_read_layered_related", lambda a: rows)
+    assert rp.declared_related_plugins("product", [tmp_path]) == [PluginRef("legacy@synthetic")]
+
+
+def test_layered_view_checks_anchors_in_order(tmp_path, monkeypatch):
+    first, second = tmp_path / "first", tmp_path / "second"
+    views = {first: [{"name": "product", "plugins": []}], second: _LAYERED_ROWS}
+    monkeypatch.setattr(rp, "_read_layered_related", lambda a: views[a])
+    assert rp.declared_related_plugins("product", [first, second]) == [PluginRef("dev-locally@synthetic")]
+
+
+def _fake_owner(tmp_path: Path, body: str) -> list[str]:
+    import sys
+
+    script = tmp_path / "fake_owner.py"
+    script.write_text(body, encoding="utf-8")
+    return [sys.executable, str(script)]
+
+
+def test_layered_reader_invokes_owner_related_list(tmp_path, monkeypatch):
+    prefix = _fake_owner(tmp_path, (
+        "import json, sys\n"
+        "print(json.dumps({'related': [{'name': 'argv', 'plugins': sys.argv[1:]}, 'junk']}))\n"
+    ))
+    monkeypatch.setattr("agent_bridge.session_lifecycle_cli._agent_worktrees_launch_prefix", lambda: prefix)
+    rows = _real_read_layered_related(tmp_path)
+    assert rows == [{"name": "argv", "plugins": ["related", "list", "--json", "--repo", str(tmp_path)]}]
+
+
+@pytest.mark.parametrize("body", [
+    "import sys\nsys.exit(3)\n",
+    "print('not json')\n",
+    "print('{\"related\": {}}')\n",
+])
+def test_layered_reader_fails_safe(tmp_path, monkeypatch, body):
+    prefix = _fake_owner(tmp_path, body)
+    monkeypatch.setattr("agent_bridge.session_lifecycle_cli._agent_worktrees_launch_prefix", lambda: prefix)
+    assert _real_read_layered_related(tmp_path) is None
+
+
+def test_layered_reader_without_owner_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_bridge.session_lifecycle_cli._agent_worktrees_launch_prefix", lambda: None)
+    assert _real_read_layered_related(tmp_path) is None
