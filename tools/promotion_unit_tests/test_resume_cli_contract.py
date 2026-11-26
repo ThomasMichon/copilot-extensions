@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import http.client
 import importlib.util
 import io
@@ -376,6 +377,88 @@ def test_bridge_resume_health_deadline_remains_structured_without_post_or_retry(
         assert result["native_session_id"] == "native-123"
     assert health_checks == stage
     assert all(call[0] == "GET" for call in boundary.calls)
+
+
+@pytest.mark.parametrize("stage", ["health", "inventory", "exact-health"])
+@pytest.mark.parametrize("fault", ["timeout", "truncated"])
+def test_bridge_resume_real_response_read_failure_is_json_without_resume_or_retry(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch, capsys: Any, stage: str, fault: str,
+) -> None:
+    path = ROOT / "plugins/agent-bridge/src/agent_bridge/__main__.py"
+    node = next(
+        node for node in ast.parse(path.read_bytes()).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_get_client"
+    )
+    scope: dict[str, Any] = {
+        "__package__": PACKAGE, "BridgeClient": boundary.errors.BridgeClient,
+        "_ensure_daemon": unavailable,
+    }
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
+    monkeypatch.setattr(sys.modules[f"{PACKAGE}.__main__"], "_get_client", scope["_get_client"])
+    monkeypatch.setattr(
+        boundary.errors.BridgeClient, "from_config",
+        classmethod(lambda cls: boundary.client),
+    )
+    requests: list[tuple[str, str]] = []
+    failed_reads = 0
+    health_checks = 0
+
+    def urlopen(request: Any, *, timeout: float) -> io.BytesIO:
+        nonlocal health_checks
+        inventory = "/api/v1/bridges" in request.full_url
+        if not inventory:
+            health_checks += 1
+        requests.append((request.get_method(), request.full_url))
+        assert request.get_method() == "GET"
+        value = bridge_resume if inventory else boundary.health
+        stalled = (
+            stage == "health" and health_checks == 1
+            or stage == "inventory" and inventory
+            or stage == "exact-health" and not inventory and health_checks == 3
+        )
+
+        class Response(io.BytesIO):
+            status = 200
+
+            def read(self, size: Any = -1) -> bytes:
+                nonlocal failed_reads
+                if stalled:
+                    failed_reads += 1
+                    if fault == "timeout":
+                        raise TimeoutError("response body timed out")
+                    raise http.client.IncompleteRead(b"partial", 12)
+                return super().read(size)
+
+        return Response(json.dumps(value).encode())
+
+    monkeypatch.setattr(boundary.errors.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(
+        boundary.errors.urllib.request, "build_opener",
+        lambda *args, **kwargs: SimpleNamespace(open=urlopen),
+    )
+    monkeypatch.setattr(
+        boundary.client, "_request",
+        boundary.errors.BridgeClient._request.__get__(boundary.client),
+    )
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["reason"] == "bridge_resume_unavailable"
+    assert result["requested_target"] == "worktree-123"
+    expected_error = (
+        "protocol check" if fault == "timeout" and stage == "exact-health"
+        else "response body timed out" if fault == "timeout" else "IncompleteRead"
+    )
+    assert expected_error in result["error"]
+    if stage == "exact-health":
+        assert result["native_session_id"] == "native-123"
+        assert result["worktree_id"] == "worktree-123"
+    else:
+        assert "native_session_id" not in result
+    assert failed_reads == 1
+    assert len(requests) == {"health": 1, "inventory": 3, "exact-health": 4}[stage]
 
 
 @pytest.mark.parametrize("cli", [False, True], ids=["acp", "cli"])

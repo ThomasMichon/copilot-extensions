@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from http.client import HTTPException
 import sys
 from typing import Any, NoReturn
 
@@ -79,7 +80,7 @@ def resume(args: argparse.Namespace, target: str, *, worktree_only: bool) -> Non
             if isinstance(detail, dict) else None
         )
         fail(reason or "bridge_resume_unavailable", detail)
-    except (BridgeConnectionError, ReadDeadlineExpired) as exc:
+    except (BridgeConnectionError, ReadDeadlineExpired, OSError, HTTPException) as exc:
         fail("bridge_resume_unavailable", str(exc))
     except ValueError as exc:
         fail("bridge_resume_unavailable", str(exc))
