@@ -727,7 +727,9 @@ def cmd_detach(
         embodied = _last_json(stdout)
         created = bool(embodied.get("created"))
         if result is None:
-            ct.fail("connect_failed")
+            # A relay refusal or an exhausted connect deadline already noted
+            # its own cause; keep it rather than a generic connect failure.
+            ct.fail_with_cause("connect_failed")
         elif _is_transient_result(result) and not embodied:
             ct.fail("transport_failed")
         else:

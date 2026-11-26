@@ -415,6 +415,24 @@ def test_a_refused_claim_closes_the_ssh_session_as_that_failure(seams: Any) -> N
     assert shapes[-1] == ("launch", "failure", "claim_busy")
 
 
+@pytest.mark.parametrize(("stage", "reason"), [
+    ("credential_relay", "relay_not_listening"), ("ssh", "transport_failed"),
+])
+def test_a_session_without_a_result_keeps_its_recorded_cause(
+    seams: Any, stage: str, reason: str,
+) -> None:
+    def unreachable(ns: Any, **kwargs: Any) -> int:
+        ct.note(stage, "failure", reason)
+        return 1
+
+    ct.start_launch()
+    rc = copilot_detach.cmd_detach(_launch_tests._args(), ssh_session=unreachable)
+    assert rc == 1
+    shapes = [_shape(e)[:3] for e in ct.finish(rc)]
+    assert ("ssh", "failure", "connect_failed") not in shapes
+    assert shapes[-1] == ("launch", "failure", reason)
+
+
 def _portable_stage(stage: str) -> list[tuple[Any, Any]]:
     return [(r["outcome"], r["reason"]) for r in ct._records if r["stage"] == stage]
 
