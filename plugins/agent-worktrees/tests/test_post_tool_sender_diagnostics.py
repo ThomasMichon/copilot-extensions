@@ -362,7 +362,8 @@ def test_notification_receiver_bounds_classifications_without_retaining_frames()
     assert decoded["frames"][0]["kind"] == "mixedToolBatchMutation"
     assert "private" not in body
     assert all(type(member) is dict for member in observation.frames)
-    observation.accepted = observation.read_errors = observation.handler_errors = 2**31 - 1
+    observation.accepted = observation.handler_started = 2**31 - 1
+    observation.read_errors = observation.handler_errors = 2**31 - 1
     observation.dispatch_calls = observation.dispatch_errors = 2**31 - 1
     assert len(observation.encode().encode("utf-8")) <= 4096
 
@@ -432,7 +433,8 @@ def test_notification_reader_preserves_original_bytes_errors_and_restoration(
     assert caught.value is failure
     assert cast(object, handler.rfile) is reader
     assert sizes == [65536, 32]
-    assert observation.accepted == observation.read_errors == observation.handler_errors == 1
+    assert observation.accepted == 0
+    assert observation.handler_started == observation.read_errors == observation.handler_errors == 1
     assert observation.frames == [classify_frame(raw, "private-token")]
     assert "private" not in observation.encode()
 
@@ -480,6 +482,7 @@ def test_notification_packet_preserves_original_delivery(
     assert len(sender) <= 16
     assert sender["reason"] == (2 if case == "old-provider" else 10)
     assert receiver["accepted"] == (0 if case == "old-provider" else 1)
+    assert receiver["handler_started"] == receiver["accepted"]
     if case != "old-provider":
         assert sender["write_complete"] is True
         assert receiver["dispatch_calls"] == 1
@@ -577,6 +580,7 @@ def instrument_notification_sender(source: str) -> str:
 @dataclass
 class NotificationReceiverObservation:
     accepted: int = 0
+    handler_started: int = 0
     read_errors: int = 0
     handler_errors: int = 0
     dispatch_calls: int = 0
@@ -607,6 +611,7 @@ class NotificationReceiverObservation:
 
         observation = self
         original_handle = hook_ipc._Handler.handle
+        original_accept = hook_ipc.HookIpcServer._on_request_accepted
 
         class Reader:
             def __init__(self, original: FrameReader, token: str) -> None:
@@ -621,8 +626,12 @@ class NotificationReceiverObservation:
                 observation.record(raw, self.token)
                 return raw
 
-        def handle(handler: hook_ipc._Handler) -> None:
+        def accepted(server: hook_ipc.HookIpcServer) -> None:
             self.increment("accepted")
+            original_accept(server)
+
+        def handle(handler: hook_ipc._Handler) -> None:
+            self.increment("handler_started")
             original_reader = handler.rfile
             handler.rfile = cast(BufferedIOBase, Reader(original_reader, handler.server.token))
             try:
@@ -646,6 +655,7 @@ class NotificationReceiverObservation:
             return dispatch
 
         monkeypatch.setattr(hook_ipc._Handler, "handle", handle)
+        monkeypatch.setattr(hook_ipc.HookIpcServer, "_on_request_accepted", accepted)
         for name in ("_on_read_demand", "_on_native_mutation"):
             monkeypatch.setattr(
                 hook_ipc.HookIpcServer, name,

@@ -90,6 +90,9 @@ completion nor callback entry proves policy admission. These adapters add
 unaccepted diagnostic overhead and leave the original arrival assertions,
 receiver lock, RPC and child/test/runner/job deadlines unchanged. A passing
 instrumented case is not normal qualification or a historical diagnosis.
+The `accepted` count records the original owner's accept callback; the
+separate `handler_started` count records handler entry. Zero observations
+do not prove that a socket was never accepted by the operating system.
 The pre-tool resident request reuses the complete event already decoded for
 native checks; raw-only transport callers retain their existing decoder.
 `test_native_pretool_reuses_decoded_event` rejects a second decode at that
