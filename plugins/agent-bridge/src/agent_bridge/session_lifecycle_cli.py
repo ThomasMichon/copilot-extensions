@@ -126,12 +126,14 @@ def _cmd_end(args: argparse.Namespace) -> None:
 
 
 def _cmd_resume(args: argparse.Namespace) -> None:
+    from . import bridge_resume_cli
     from .resume_handoff_cli import run_resume
     from .hosting_admission_cli import configure_client
     from .resume_cli_contract import resume_target
 
     try:
         target, worktree_only = resume_target(args)
+        bridge = bridge_resume_cli.selected(args)
         writer_path = getattr(args, "worktree_writer_file", None)
         recovery_path = getattr(args, "retained_recovery_file", None)
         if (writer_path is not None or recovery_path is not None) and (
@@ -146,6 +148,9 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     except argparse.ArgumentTypeError as error:
         print(f"[FAIL] {error}", file=sys.stderr)
         raise SystemExit(2) from error
+    if bridge:
+        bridge_resume_cli.resume(args, target, worktree_only=worktree_only)
+        return
     from .workspace_creation_cli import read_writer_requirement
 
     writer = read_writer_requirement(writer_path) if writer_path is not None else None
@@ -664,6 +669,8 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction[argparse
     resume_p.add_argument("--worktree-writer-file", metavar="PATH", help="Original keyed writer JSON for strict exact-session ACP resume; - reads stdin")
     resume_p.add_argument("--retained-recovery-file", metavar="PATH", help="Once-only retained resume request including its writer; requires --strict; - reads stdin")
     resume_p.add_argument("--cli", action="store_true", help="Resume the exact native head in a headed/muxed CLI instead of headless ACP")
+    from .bridge_resume_cli import register as register_bridge_resume
+    register_bridge_resume(resume_p)
     resume_p.set_defaults(func=_cmd_resume)
 
     from . import restart_worktree_cli

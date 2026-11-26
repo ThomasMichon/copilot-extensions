@@ -243,6 +243,14 @@ def _guard_project_scope(parser: argparse.ArgumentParser, args: argparse.Namespa
 
         if selected(args):
             return
+    if command == "resume":
+        from .bridge_resume_cli import selected as resume_selected
+
+        try:
+            if resume_selected(args):
+                return
+        except argparse.ArgumentTypeError as error:
+            parser.error(str(error))
     parser.error(
         f"--project {args.project!r} is not meaningful for '{command or '(no command)'}': "
         f"it scopes only the project-addressed verbs ({'/'.join(sorted(_PROJECT_CONSUMING_VERBS))}). Remove --project, or use one of those verbs."

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -164,6 +165,81 @@ async def test_actual_http_route_preserves_selected_native(
     value = response.json()
     assert value["acp_session_id"] == value["durable_session_id"] == "native-original"
     assert value["mode"] == mode and value["worktree_id"] == "wt-example"
+
+
+@pytest.mark.parametrize("cli_mode", [False, True], ids=["acp", "cli"])
+@pytest.mark.parametrize("changed_head", [False, True], ids=["original", "head-race"])
+def test_root_cli_selector_reaches_the_existing_resume_owner_without_identity_substitution(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: Any,  # noqa: F811
+    cli_mode: bool, changed_head: bool,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from agent_bridge import __main__ as cli
+    from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
+
+    app = FastAPI()
+    app.include_router(exact.router)
+    app.state = boundary.request.app.state
+    client = BridgeClient("http://fixture", token="fixture")
+    calls: list[tuple[str, str, Any]] = []
+    with TestClient(app) as api:
+        def request(method: str, path: str, body: Any = None, **kwargs: Any) -> Any:
+            calls.append((method, path, body))
+            if path == "/health":
+                return {
+                    "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+                    "capabilities": {"bridge_inventory": 2, "worktree_exact_resume": 1},
+                }
+            if path == "/api/v1/bridges":
+                assert kwargs["params"] == {"project": "example", "local_only": "true"}
+                return {
+                    "version": 1, "complete": True, "sources": {},
+                    "bridges": [{
+                        "handle": "wt-example", "worktree_id": "wt-example",
+                        "session_id": "native-original", "status": "dormant",
+                        "control": "unavailable",
+                    }],
+                }
+            if changed_head:
+                boundary.state["head"]["head_session"] = "native-newer"
+            response = api.request(method, path, json=body)
+            if response.status_code >= 400:
+                raise BridgeClientError(response.status_code, response.json().get("detail"))
+            return response.json()
+
+        def get_client(**kwargs: Any) -> BridgeClient:
+            assert kwargs == {"ensure": False, "propagate_errors": True}
+            return client
+
+        monkeypatch.setattr(cli, "_get_client", get_client)
+        monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
+        monkeypatch.setattr(cli, "_PROJECT_ROUTED", False)
+        monkeypatch.setattr(client, "_request", request)
+        monkeypatch.setattr(cli, "_ensure_daemon", lambda: pytest.fail("must not ensure"))
+        monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
+        argv = ["--json", "--project", "example", "resume", "native-original", "--bridge"]
+        argv += ["--cli"] if cli_mode else []
+        if changed_head:
+            with pytest.raises(SystemExit) as refused:
+                cli.main(argv)
+            assert refused.value.code == 1
+        else:
+            cli.main(argv)
+    result = json.loads(capsys.readouterr().out)
+    if changed_head:
+        assert result["reason"] == "native_identity_changed"
+        assert result["native_session_id"] == "native-original"
+        assert not boundary.manager.list_sessions()
+        assert not boundary.state["launched"]
+    else:
+        assert result["acp_session_id"] == result["durable_session_id"] == "native-original"
+        assert result["mode"] == ("cli" if cli_mode else "acp")
+    assert [call for call in calls if call[0] == "POST"] == [(
+        "POST", f"/api/v1/worktrees/wt-example/resume/{'cli' if cli_mode else 'acp'}/exact",
+        {"native_session_id": "native-original"},
+    )]
+    boundary.manager.start_session.assert_not_called()
 
 
 @pytest.mark.parametrize("mode", ["acp", "cli"])

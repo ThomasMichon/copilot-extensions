@@ -23,6 +23,7 @@ PROTOCOL = "agent-worktrees.pr-snapshot-batch/v1"
 VERSION_FIELD = "github_snapshot_batches_version"
 STATE_FIELD = "github_snapshot_batches"
 MAX_SCOPES = 64
+SCOPE_FIELDS = {"key", "pending", "primary_until", "secondary_until", "observed_at"}
 Document = dict[str, Any]
 _T = TypeVar("_T")
 
@@ -48,40 +49,46 @@ def _instant(value: object) -> bool:
     )
 
 
-def validate(value: object) -> None:
-    if not isinstance(value, dict) or set(value) != {"scopes"} or (
+def _identity(value: object, size: int) -> bool:
+    return isinstance(value, str) and len(value) == size and re.fullmatch(r"[a-f0-9]+", value) is not None
+
+
+def validate(value: object, *, version: int = 1) -> None:
+    """Validate the selected historical or recovery-aware batch layout."""
+    if version not in (1, 2):
+        raise ValueError("unsupported snapshot batch state revision")
+    fields = {"scopes"} if version == 1 else {"scopes", "recoveries"}
+    if not isinstance(value, dict) or set(value) != fields or (
         not isinstance(value["scopes"], list) or len(value["scopes"]) > MAX_SCOPES
     ):
         raise ValueError("invalid bounded snapshot batch state")
-    keys: set[str] = set()
+    scopes: dict[str, Document] = {}
     for row in value["scopes"]:
-        if not isinstance(row, dict) or set(row) != {
-            "key", "pending", "primary_until", "secondary_until", "observed_at",
-        } or (
-            not isinstance(row["key"], str) or re.fullmatch(r"[a-f0-9]{64}", row["key"]) is None
-            or row["key"] in keys
-            or row["pending"] is not None and (
-                not isinstance(row["pending"], str)
-                or re.fullmatch(r"[a-f0-9]{32}", row["pending"]) is None
-            )
+        if not isinstance(row, dict) or set(row) != SCOPE_FIELDS or (
+            not _identity(row["key"], 64) or row["key"] in scopes
+            or row["pending"] is not None and not _identity(row["pending"], 32)
             or any(not _instant(row[name]) for name in (
                 "primary_until", "secondary_until", "observed_at",
             ))
         ):
             raise ValueError("invalid snapshot batch admission")
-        keys.add(row["key"])
+        scopes[row["key"]] = row
+    if version == 2:
+        from .snapshot_batch_recovery import validate_records
+        validate_records(value["recoveries"], scopes)
 
 
 def validate_extension(document: Document, *, selected: bool) -> set[str]:
     from .watch_replay_store import ReplayStoreInvalid
     present = VERSION_FIELD in document
-    if present != selected or present and (
-        type(document[VERSION_FIELD]) is not int or document[VERSION_FIELD] != 1
-    ):
+    version = document.get(VERSION_FIELD)
+    if present != selected:
         raise ReplayStoreInvalid("snapshot batch reader unavailable for adopted owner")
     if not present:
         return set()
-    validate(document.get(STATE_FIELD))
+    if type(version) is not int or version not in (1, 2):
+        raise ReplayStoreInvalid("snapshot batch reader unavailable for adopted owner")
+    validate(document.get(STATE_FIELD), version=version)
     return {VERSION_FIELD, STATE_FIELD}
 
 
