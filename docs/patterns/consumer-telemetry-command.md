@@ -50,6 +50,7 @@ Source links name the actual record owner, not a catalog of desired hooks.
 | `tools/performance/manager_native_probe.py` | Explicit native validation uses signal/OTLP APIs | Validation-only; remains with #7935/#5900, not a production command consumer |
 | `tools/reproducer-lab/initial_case*.py` | Diagnostic-log type/fixture and local tests | Validation-only; not another production lifecycle producer |
 | [QoS/Engagement](telemetry-qos-engagement.md) and [event catalog](../telemetry-event-catalog.md) | Proposed normalized semantics/catalog; not the existing lifecycle wire schema or evidence of installed hooks | Not a second payload schema to implement in U1 |
+| [Finite-owner stage, PR and hook projections](../../libs/process-telemetry/src/process_telemetry/stage_projection.py) | Shared closed schemas, `finite_owner` admission and the `hook_journal` for short-lived tool owners | Registered for agent-worktrees, agent-codespaces and agent-containers; each provider adopts in its own PR and descriptor, so registration alone is not adoption |
 
 Bridge and Dispatch currently load their convention-located `telemetry.json`
 factory or spool selection and expose synchronous callable sinks. Their
@@ -212,8 +213,8 @@ Required envelope fields, with no others in v1:
 |---|---|
 | `contract` | Literal `consumer-telemetry-command` |
 | `version` | Integer `1` |
-| `source` | Registered producer name: `agent-bridge` or `agent-dispatch` |
-| `source_schema` | `bridge.lifecycle.v1` or `dispatch.lifecycle.v1`, paired with that producer |
+| `source` | Registered producer name: `agent-bridge`, `agent-dispatch`, `agent-worktrees`, `agent-codespaces` or `agent-containers` |
+| `source_schema` | Paired with that producer by the shared registry: `bridge.lifecycle.v1`; `dispatch.lifecycle.v1`; `worktrees.lifecycle.v1` or `hook.lifecycle.v1`; `codespaces.lifecycle.v1`; `containers.lifecycle.v1` |
 | `source_instance` | Random UUID for this producer lifetime; not a native session, user or machine ID |
 | `route_generation` | Admitted route UUID from section 3 |
 | `sequence` | Positive integer, at most `2^53-1`, increasing per source instance before queue admission; gaps may indicate loss; stop this source on exhaustion |
@@ -331,6 +332,102 @@ source cursors retain their meaning but need not uniquely identify multiple
 reducer transitions from one native event. No automatic replay/retry occurs.
 There is no invented trace/span/parent context. A future real tracing schema
 must preserve actual trace context, not derive it from these IDs.
+
+### Finite-owner stage projections
+
+`process_telemetry.stage_projection` owns three closed **stage** schemas for
+short-lived tool owners: `worktrees.lifecycle.v1` (source `agent-worktrees`),
+`codespaces.lifecycle.v1` (`agent-codespaces`) and `containers.lifecycle.v1`
+(`agent-containers`). The shared registry pairs each schema with exactly one
+source; a route configured for one never accepts another's records. Each
+provider adopts its schema in its own reviewed PR with its own descriptor.
+
+A stage record requires `kind: "stage"`, `stage`, `outcome` (`success`,
+`failure`, `timeout`, `retry`) and `reason`. `reason` is `none` exactly when
+the outcome is `success`, except that `force_claimed` may accompany a
+successful claim. Optional bounded integers are `duration_ms` (monotonic,
+`0..2^53-1`), `attempt` (`1..65536`, the source's actual attempt count) and
+`limit_ms` (the configured limit a `timeout` was measured against).
+
+| Schema | Admitted `stage` values |
+|---|---|
+| `worktrees.lifecycle.v1` | `account_resolution`, `claim`, `lease`, `worktree_create`, `session_bind` |
+| `codespaces.lifecycle.v1` | `launch`, `seed_validation`, `plugin_preparation`, `credential_relay`, `bridge_payload`, `remote_embody`, `claim`, `account_resolution`, `bridge_registration`, `codespace_lookup`, `codespace_connect`, `ssh` |
+| `containers.lifecycle.v1` | the CodeSpace venue stages except the last three, plus `container_lookup`, `container_start`, `container_connect`, `exec` |
+
+Reasons common to every stage schema are `none`, `interrupted`, `other`,
+`claim_busy`, `lease_conflict`, `force_claimed`, `snapshot_timeout` and
+`account_unresolved`. The venue schemas add `seed_too_long`, `seed_invalid`,
+`marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`,
+`relay_not_listening`, `credential_fill_failed`, `payload_install_failed`,
+`installer_unavailable`, `bootstrap_python_unavailable`, `listing_failed`,
+`not_found`, `connect_failed`, `transport_retry`, `transport_failed`,
+`session_unregistered` and `session_unrepresented`; containers additionally
+admit `engine_unavailable`, `image_unavailable`, `not_running` and
+`start_failed`. A lookup reports the listing failure itself
+(`listing_failed`), never a masking `not_found`.
+
+`worktrees.lifecycle.v1` also admits PR-activity records: `kind: "pr"`,
+`action` (`create`, `push`, `label`, `merge`, `abandon`), `outcome`
+(no `retry`), `reason` (`none`, `interrupted`, `other`, `auth_failed`,
+`provider_rejected`, `conflict`, `checks_pending`, `review_required`,
+`gate_refused`, `nothing_to_publish`, `unavailable`), optional
+`label_result` (`applied`, `already_present`, `repaired`, `not_requested`,
+`unsupported`, `failed`) and `duration_ms`.
+
+No stage or PR record carries names, paths, repositories, PR numbers, URLs,
+branches, accounts, hosts, command lines, seeds or error text. Unknown fields
+are omitted before snapshotting; unknown enum values, inconsistent
+outcome/reason pairs and out-of-range integers drop the record with accounting.
+
+### Hook projection: `hook.lifecycle.v1`
+
+`hook.lifecycle.v1` describes `sessionStart` hook entries. A record requires
+`kind: "hook"`, `plugin` (`agent-worktrees`, `budget-guidance`,
+`agent-vault`, `context-handoff`, `agent-pull-requests`), `entry`
+(`sessionStart`), `outcome` (`success`, `failure`, `timeout`, `unfinished`)
+and `failure_category` (`none`, `nonzero_exit`, `timeout`, `exception`,
+`unavailable_runtime`, `unfinished_prior_run`, `other`). `none` pairs exactly
+with `success` and `unfinished_prior_run` exactly with `unfinished`.
+Optional fields are `exit_code` (int32), `duration_ms`, `run_sequence`
+(a best-effort, per-plugin local counter starting at 1, not a unique ID) and
+`started_at` (UTC RFC3339 with milliseconds).
+
+Hooks are latency-sensitive callbacks and never launch a receiver (section 5).
+`process_telemetry.hook_journal` writes a start marker before any product
+work and replaces it with a completion record on return. The runtime may stop
+a timed-out hook before it reports, so the next run converts a marker older
+than its stale threshold into one `unfinished` record. Every transition --
+the start's capacity check and marker publish, completion, recovery and
+drain -- holds one advisory journal lock. A run commits by writing its final
+record into its own marker before appending it, then removes the marker; a
+holder stopped before the append leaves a committed marker that the next start
+reports with its real outcome, and one stopped after the append leaves a
+marker that recovery or the next drain matches to the already-pending record,
+so each run is recorded at most once. Delivery is at most once too: `drain`
+removes the records it returns, so a drainer that then fails to offer them
+loses them rather than risk a duplicate. Pending records, live markers, abandoned scratch files
+and per-start recovery work are all bounded; a start that would exceed a
+bound goes unobserved rather than grow storage. Bounds apply to the whole
+shared journal: markers are capped across every plugin and entry, only the
+admitted plugin/entry vocabulary creates files, any start recovers every
+admitted entry's stalled markers, and each start and drain reclaims scratch
+(written only under the lock), so total occupancy fits the one complete scan
+each start and drain performs. The journal is content-free;
+a separate finite owner of the registered
+source later drains it into its own admitted route. Only the executing
+provider's adopted hooks write the journal; listing a plugin in the enum is
+not evidence that its hook is instrumented.
+
+### Finite-owner admission
+
+A finite tool owner (`process_telemetry.finite_owner`) reads exactly one
+owner-local policy file, `consumer-telemetry.json` beside the installed
+runtime: `{"schema_version":1,"root":"<absolute path>"}`. Its absence keeps
+legacy behavior; any other shape refuses the optional route. The admitted root
+then selects its command through section 2 unchanged. The owner never infers a
+root from the working directory, environment or a repository argument, and
+closes within the section 5 shutdown budget before the command exits.
 
 ## 5. Process, queue and time bounds
 

@@ -127,6 +127,28 @@ test("the launch-bound executing connector needs no installer origin or configur
   await selectedLoadout(f.native, f.options);
 });
 
+test("executing identity is independent of valid discovery-name spelling", async () => {
+  for (const name of ["runtime-discovery-label", "plugin:copilot-driver-headed:copilot-driver-headed"]) {
+    const f = executingSelection();
+    f.extensions[0].name = name;
+    await selectedLoadout(f.native, f.options);
+  }
+});
+
+test("discovery-name metadata cannot compensate for another identity, source, state or process", async () => {
+  for (const [change, reason] of [
+    [{ id: "plugin:copilot-driver-headed:another" }, "extension-identity-mismatch"],
+    [{ source: "user" }, "extension-identity-mismatch"],
+    [{ status: "starting" }, "extension-not-running"],
+    [{ pid: process.pid + 1 }, "extension-process-mismatch"],
+  ]) {
+    const f = executingSelection();
+    Object.assign(f.extensions[0], { name: "runtime-discovery-label", ...change });
+    await assert.rejects(selectedLoadout(f.native, f.options), (error) =>
+      error.selectedContextReason === reason);
+  }
+});
+
 test("live-owner validation retains the module root check independently of the observed PID", async () => {
   const f = executingSelection();
   f.options.extensionPluginRoot = bridgeRoot;
@@ -229,6 +251,12 @@ for (const [label, change, reason, plugin] of [
     "plugin-duplicated", "connector"],
   ["another connector process", (f) => { f.extensions[0].pid++; }, "extension-process-mismatch", "connector"],
   ["a non-plugin connector", (f) => { f.extensions[0].source = "user"; },
+    "extension-identity-mismatch", "connector"],
+  ["missing discovery-name metadata", (f) => { delete f.extensions[0].name; },
+    "extension-identity-mismatch", "connector"],
+  ["empty discovery-name metadata", (f) => { f.extensions[0].name = ""; },
+    "extension-identity-mismatch", "connector"],
+  ["invalid discovery-name metadata", (f) => { f.extensions[0].name = 1; },
     "extension-identity-mismatch", "connector"],
   ["another connector identity", (f) => { f.extensions[0].id = "plugin:another:copilot-driver-headed"; },
     "extension-identity-mismatch", "connector"],
