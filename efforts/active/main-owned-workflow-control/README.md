@@ -513,6 +513,14 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   300 seconds and 736,500 bytes. Fatal Ruff and strict Linux/Windows
   whole-file typing pass. Fresh review/full CI, merge and persistence
   remain before this finite leaf is complete.
+  Final merge fencing finds a new base conflict after the first clean review
+  and successful 11,141-case CI. Preserve the reviewed head, all concurrent
+  37 case additions, six bindings, five targets and three hash refreshes,
+  then rebase without dropping any prior admission.
+  All sixteen original observed inputs remain unchanged.
+  The peer-preserving union is 11,178 nodes, 1,542 sources, 563 targets,
+  unchanged 92 helpers, 300 seconds and 738,845 bytes.
+  Fresh exact-head review and complete required CI must pass again.
 - [x] Qualify all four original hosting-result parser functions as one
   coherent source slice, preserving complete parameter rows, objects,
   globals, fixtures, typed values, marks, IDs and order.
