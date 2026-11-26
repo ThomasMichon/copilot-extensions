@@ -487,7 +487,41 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify all four original hosting-result parser functions as one
+- [ ] Qualify the whole original invalid-marketplace-identity refusal
+  function without discovering a repository or reading policy.
+  Preserve all seven original rows, the original tmp-path fixture, marks,
+  objects/globals, IDs and order. Compare complete original/adapted metadata
+  and admission uniqueness before unchanged guarding.
+  Exclude every other whole function in that module before execution;
+  policy discovery/reader and subprocess consumers remain outside this slice.
+  Require actual early-validation call lines and no discovery/reader calls
+  for every case before admission. Do not patch environment, policy,
+  fixtures, original assertions or guards to obtain eligibility.
+  Retain every prior node/hash/target/helper/limit and refusal.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete collection confirms 41 original cases and exactly seven adapted
+  rows through the same whole function, preserving original objects/globals,
+  tmp-path fixture, typed values, all marks, IDs and order.
+  All other fifteen whole functions/thirty-four cases remain excluded.
+  First unchanged guarded qualification passes seven in 1.54 pytest /
+  22.594 observation seconds: all 21 phases pass, zero prohibited effects,
+  sixteen bound reads and actual early-validation call lines per case.
+  Every trace avoids repository discovery, policy reads and the loader's
+  post-validation body. The complete observation is read before admission.
+  Only seven nodes and two adapter/original bindings are added:
+  11,141 nodes, 1,536 sources, unchanged 558 targets, 92 helpers,
+  300 seconds and 736,500 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass. Fresh review/full CI, merge and persistence
+  remain before this finite leaf is complete.
+  Final merge fencing finds a new base conflict after the first clean review
+  and successful 11,141-case CI. Preserve the reviewed head, all concurrent
+  37 case additions, six bindings, five targets and three hash refreshes,
+  then rebase without dropping any prior admission.
+  All sixteen original observed inputs remain unchanged.
+  The peer-preserving union is 11,178 nodes, 1,542 sources, 563 targets,
+  unchanged 92 helpers, 300 seconds and 738,845 bytes.
+  Fresh exact-head review and complete required CI must pass again.
+- [x] Qualify all four original hosting-result parser functions as one
   coherent source slice, preserving complete parameter rows, objects,
   globals, fixtures, typed values, marks, IDs and order.
   Compare original file/function admission uniqueness and full metadata
@@ -510,6 +544,14 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   unchanged 92 helpers, 300 seconds and 736,046 bytes.
   Fatal Ruff and strict Linux/Windows whole-file typing pass.
   Fresh review/full hosted CI, normal merge and persistence remain.
+  Source #14726 merges at `752163ee0902080ae4dca4d7b143355bee637085`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,134 units in 156.474 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, managed sync, all five owned
+  reviewed/merged/working blobs, exact peer-preserving candidate, all current
+  bindings/helpers and sixteen observed inputs verify without replay.
+  Actual parent Goal, own Plan and whole Validation are reread.
+  Only this 34-case leaf is Done; the parent stays active.
 - [x] Qualify the original explicit-clock startup controls and whole
   diagnostic outer-frame refusal function as one coherent source slice.
   Preserve all four startup functions and all fifteen invalid-budget rows,
