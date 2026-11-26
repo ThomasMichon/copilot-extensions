@@ -162,7 +162,9 @@ print(json.dumps(report))
         report = json.loads(result.stdout)
         assert report["bootstrap"] == [3, 11, 18]
         assert report["caller_unchanged"]
-        assert report["status"] == ("created" if scenario == "prepared" else "refused"), report
+        assert report["status"] == ("created" if scenario == "prepared" else "refused"), (
+            report, result.stderr[-4000:],
+        )
         assert len(report["calls"]) == (0 if scenario in {"missing-uv", "missing-support"} else 1)
         if report["calls"]:
             assert Path(report["calls"][0]["shell"]).resolve() == Path(shell).resolve()
@@ -174,6 +176,8 @@ print(json.dumps(report))
             assert Path(app["base_executable"]).resolve() == application_python
         else:
             assert not (slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).exists()
+            if scenario == "failed-request":
+                assert request in result.stderr, result.stderr[-4000:]
         assert receipt.read_bytes() == b'{"fixture":"retained ownership"}\n'
         assert not Path(env["AMBIENT_MARKER"]).exists()
     calls = [

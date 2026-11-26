@@ -173,13 +173,17 @@ def construct_runtime(
         if not shell:
             raise error_type("PowerShell is required for canonical runtime construction")
         quoted = ",".join(quote(argument) for argument in arguments)
+        # Modern Core preserves empty values; null overrides must remove provider entries.
         body = (
             "$ErrorActionPreference='Stop'; "
             f". {quote(str(engine))}; . {quote(str(bootstrap))}; "
             "function Write-Warn($message) { [Console]::Error.WriteLine($message) }; "
             "foreach ($entry in (Get-UvBootstrapEnvironment).GetEnumerator()) { "
-            "[Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,'Process') }; "
-            "[Environment]::SetEnvironmentVariable('UV_CONFIG_FILE',$null,'Process'); "
+            "if ($null -eq $entry.Value) { "
+            "Remove-Item -LiteralPath ('Env:'+[string]$entry.Key) -ErrorAction SilentlyContinue "
+            "} else { "
+            "[Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,'Process') } }; "
+            "Remove-Item -LiteralPath Env:UV_CONFIG_FILE -ErrorAction SilentlyContinue; "
             "[Environment]::SetEnvironmentVariable('UV_NO_CONFIG','1','Process'); "
             f"$cellUv={quote(uv)}; "
             "function Invoke-CellConstructionUv { "
