@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import locale
 import os
 from pathlib import PurePosixPath
 import shlex
+import shutil
 import signal
 from typing import Any, cast
 
@@ -71,8 +73,8 @@ class NativeReceiverConfig(ServiceConfig):
 
 
 def _transport(config: NativeReceiverConfig, ingress: Document) -> Any:
-    from agent_ssh import gateway_authorization, gateway_profile, gateway_sshd
-    from ssh_manager.config_sources import SSHConfig, SSHProfileSource
+    from agent_ssh import gateway_authorization, gateway_sshd
+    from ssh_manager.config_sources import SSHProfileSource
 
     selected = config.to_dict()["transport"]
     profile = absolute(selected["ssh_config"])
@@ -81,6 +83,20 @@ def _transport(config: NativeReceiverConfig, ingress: Document) -> Any:
         selected["host_alias"], config_file=str(profile), resolve_timeout=10,
         resolve_cwd=config.to_dict()["data_dir"],
     ).get_ssh_config()
+    transport, public = _frozen_transport(config, ingress, source)
+    gateway_sshd._host_key({
+        "host_key_file": absolute(transport.identity_file), "ssh_keygen": ingress["ssh_keygen"],
+    }, public)
+    return transport
+
+
+def _frozen_transport(
+    config: NativeReceiverConfig, ingress: Document, source: Any,
+) -> tuple[Any, str]:
+    from agent_ssh import gateway_authorization, gateway_profile
+    from ssh_manager.config_sources import SSHConfig
+
+    selected = config.to_dict()["transport"]
     options: dict[str, list[str]] = {}
     for key, value in source.effective_config:
         options.setdefault(key.casefold(), []).append(value)
@@ -106,13 +122,10 @@ def _transport(config: NativeReceiverConfig, ingress: Document) -> Any:
     public = gateway_profile._public_key(
         gateway_profile._read_owned_file(ingress["public_key_file"]).strip(),
     )
-    gateway_sshd._host_key({
-        "host_key_file": identity, "ssh_keygen": ingress["ssh_keygen"],
-    }, public)
     # Freeze the selected routing/authentication inputs instead of rereading a
     # mutable profile on every reconnect. The provider owns any ProxyCommand.
     frozen = {
-        "Hostname": one("hostname"), "UserKnownHostsFile": str(known_hosts),
+        "Hostname": one("hostname"), "UserKnownHostsFile": gateway_profile._quote(known_hosts),
         "GlobalKnownHostsFile": "none", "HostKeyAlias": alias,
         "StrictHostKeyChecking": "yes", "IdentitiesOnly": "yes",
         "IdentityAgent": "none", "BatchMode": "yes", "PasswordAuthentication": "no",
@@ -131,7 +144,115 @@ def _transport(config: NativeReceiverConfig, ingress: Document) -> Any:
     return SSHConfig(
         host_alias=selected["host_alias"], user=descriptor["gateway_user"],
         port=int(port), identity_file=str(identity), config_file="none", extra_options=frozen,
+    ), public
+
+
+async def _transport_probe(arguments: list[str], cwd: str) -> bytes:
+    from agent_procutil import spawn_in_kill_on_close_job
+    from agent_ssh import gateway_sshd
+    from agent_ssh.gateway_receiver import _settle
+    from ssh_manager.process import (
+        redirected_ssh_env, ssh_subprocess_kwargs, terminate_ssh_process_tree,
     )
+    from ssh_manager.proxy import _track_owner_job
+
+    spawning = asyncio.create_task(spawn_in_kill_on_close_job(
+        *arguments, require_job=True, cwd=cwd,
+        env=redirected_ssh_env(gateway_sshd._process_environment(), windows=os.name == "nt"),
+        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, **ssh_subprocess_kwargs(),
+    ))
+    process = None
+    tasks: list[asyncio.Task[Any]] = []
+
+    async def bounded(stream: asyncio.StreamReader) -> bytes:
+        result = bytearray()
+        while True:
+            part = await stream.read(min(65536, 65537 - len(result)))
+            if not part:
+                return bytes(result)
+            result.extend(part)
+            check(len(result) <= 65536, "native-transport-probe-output-limit")
+
+    try:
+        try:
+            spawned, job = await asyncio.shield(spawning)
+        except asyncio.CancelledError:
+            spawned, job = await _settle(spawning)
+            process = spawned
+            _track_owner_job(process, job)
+            raise
+        process = spawned
+        _track_owner_job(process, job)
+        assert process.stdout is not None and process.stderr is not None
+        tasks = [asyncio.create_task(bounded(process.stdout)),
+                 asyncio.create_task(bounded(process.stderr)),
+                 asyncio.create_task(process.wait())]
+        output, _, code = await asyncio.wait_for(asyncio.gather(*tasks), 10)
+        check(code == 0, "native-transport-probe-unavailable")
+        return bytes(output)
+    finally:
+        if process is not None:
+            await _settle(asyncio.create_task(terminate_ssh_process_tree(process, grace=0)))
+            await _settle(asyncio.create_task(process.wait()))
+        for task in tasks:
+            task.cancel()
+        await _settle(asyncio.ensure_future(asyncio.gather(*tasks, return_exceptions=True)))
+
+
+async def _resolve_transport(config: NativeReceiverConfig, ingress: Document) -> Any:
+    from agent_ssh import gateway_authorization, gateway_sshd
+    from ssh_manager.config_sources import SSHConfig
+
+    selected = config.to_dict()["transport"]
+    profile = absolute(selected["ssh_config"])
+    gateway_authorization._private(profile, directory=False)
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        raise ValueError("native-receiver-ssh-unavailable")
+    output = await _transport_probe(
+        [ssh, "-G", "-F", str(profile), selected["host_alias"]], config.to_dict()["data_dir"],
+    )
+    effective = []
+    for line in output.decode(locale.getpreferredencoding(False)).splitlines():
+        name, separator, value = line.partition(" ")
+        if separator and name.casefold() != "host":
+            effective.append((name.casefold(), value.strip()))
+    source = SSHConfig(host_alias=selected["host_alias"], effective_config=tuple(effective))
+    transport, public = _frozen_transport(config, ingress, source)
+    identity = absolute(transport.identity_file)
+    gateway_authorization._private(identity, directory=False)
+    gateway_sshd._executable(ingress["ssh_keygen"])
+    actual = await _transport_probe(
+        [str(ingress["ssh_keygen"]), "-y", "-P", "", "-f", str(identity)],
+        config.to_dict()["data_dir"],
+    )
+    check(len(actual) <= 4096 and " ".join(actual.decode("ascii").split()[:2]) == public,
+          "native-receiver-client-key-mismatch")
+    return transport
+
+
+async def _activation_transport(
+    config: NativeReceiverConfig, ingress: Document, stop: asyncio.Event,
+) -> Any:
+    from agent_ssh.gateway_receiver import _settle
+
+    resolving = asyncio.create_task(_resolve_transport(config, ingress))
+    stopping = asyncio.create_task(stop.wait())
+    try:
+        await asyncio.wait({resolving, stopping}, return_when=asyncio.FIRST_COMPLETED)
+        if stop.is_set():
+            return None
+        return await resolving
+    finally:
+        resolving.cancel()
+        stopping.cancel()
+        results = await _settle(asyncio.ensure_future(asyncio.gather(
+            resolving, stopping, return_exceptions=True,
+        )))
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
 
 
 class PublicObserver:
@@ -217,7 +338,7 @@ def preflight(config: NativeReceiverConfig) -> None:
 async def run(config: NativeReceiverConfig, *, lifecycle: Any = None,
               stop: asyncio.Event | None = None) -> None:
     """Keep the original service lease/control alive until native cleanup settles."""
-    from agent_ssh.gateway_receiver import NativeReceiver, _local
+    from agent_ssh.gateway_receiver import NativeReceiver
     from fleet_manager.private_state import create_private_file, windows_private
 
     stop = stop if stop is not None else asyncio.Event()
@@ -249,7 +370,9 @@ async def run(config: NativeReceiverConfig, *, lifecycle: Any = None,
         lease.acquire()
         acquired = True
         ingress = config.ingress()
-        transport = await _local(_transport, config, ingress)
+        transport = await _activation_transport(config, ingress, stop)
+        if stop.is_set():
+            return
         receiver = NativeReceiver(
             ingress, transport, observe=PublicObserver(
                 transport, config.to_dict()["transport"]["gateway_command"],

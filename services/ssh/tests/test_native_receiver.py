@@ -2,6 +2,8 @@
 import asyncio
 import os
 import subprocess
+import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, TYPE_CHECKING
@@ -172,6 +174,34 @@ def test_receiver_freezes_strict_profile_and_matches_local_client_key(
     }, key(1))
 
 
+@pytest.mark.parametrize("operation", ["observe", "forward"])
+def test_frozen_known_hosts_space_survives_actual_openssh_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from ssh_manager.forward import build_forward_ssh_args, build_remote_exec_args
+    from agent_procutil import no_window_kwargs
+
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        pytest.skip("OpenSSH is unavailable")
+    home = tmp_path / ("u " * 64 + "user")
+    selected, ingress, options, _ = transport_fixture(home, monkeypatch)
+    transport = native_receiver._transport(selected, ingress)
+    arguments = (
+        build_remote_exec_args(transport, "true") if operation == "observe"
+        else build_forward_ssh_args(transport, None, None, reverse_forwards=["24001:127.0.0.1:22"])
+    )
+    result = subprocess.run(
+        [ssh, "-G", *arguments[1:]], capture_output=True, text=True, timeout=10,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    pins = [line.partition(" ")[2] for line in result.stdout.splitlines()
+            if line.startswith("userknownhostsfile ")]
+    assert len(pins) == 1
+    assert pins[0].strip('"') == str(home / "known_hosts")
+
+
 @pytest.mark.parametrize("name,value", [
     ("stricthostkeychecking", "accept-new"), ("identityagent", "ambient"),
     ("user", "foreign"), ("identityfile", "relative"), ("port", "0"),
@@ -285,10 +315,10 @@ def test_service_owns_receiver_lease_through_cleanup_reconciliation(
         release=lambda: events.append("lease-release"),
     ))
     monkeypatch.setattr(type(selected), "ingress", lambda _: {"native_gateway": {}})
-    def transport(*_: Any) -> object:
+    async def transport(*_: Any) -> object:
         events.append("transport")
         return object()
-    monkeypatch.setattr(native_receiver, "_transport", transport)
+    monkeypatch.setattr(native_receiver, "_resolve_transport", transport)
 
     class Receiver:
         running = False
@@ -325,6 +355,66 @@ def test_service_owns_receiver_lease_through_cleanup_reconciliation(
     assert events == [
         "lease-acquire", "transport", "receiver", "serve", "cleanup", "cleanup", "lease-release",
     ]
+
+
+@pytest.mark.parametrize("blocked", ["profile", "key"])
+def test_stop_joins_blocked_transport_probe_before_releasing_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocked: str,
+) -> None:
+    import agent_procutil
+    from agent_ssh import gateway_sshd
+
+    selected, ingress, options, _ = transport_fixture(tmp_path, monkeypatch)
+    ingress["ssh_keygen"] = Path(sys.executable)
+    monkeypatch.setattr(gateway_sshd, "_executable", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _: sys.executable)
+    monkeypatch.setattr(type(selected), "ingress", lambda _: ingress)
+    monkeypatch.setattr(native_receiver, "os", SimpleNamespace(name="posix"))
+    events: list[str] = []
+    monkeypatch.setattr(native_receiver, "private_directory", lambda _: None)
+    monkeypatch.setattr(native_receiver, "SingleInstance", lambda *a, **k: SimpleNamespace(
+        acquire=lambda: events.append("lease-acquire"),
+        release=lambda: events.append("lease-release"),
+    ))
+    original_probe = native_receiver._transport_probe
+    original_spawn = agent_procutil.spawn_in_kill_on_close_job
+    processes: list[asyncio.subprocess.Process] = []
+
+    async def exercise() -> None:
+        started = asyncio.Event()
+        stop = asyncio.Event()
+
+        async def spawn(*args: Any, **kwargs: Any) -> Any:
+            process, job = await original_spawn(*args, **kwargs)
+            processes.append(process)
+            started.set()
+            return process, job
+
+        async def probe(arguments: list[str], cwd: str) -> bytes:
+            profile = arguments[1] == "-G"
+            if (blocked == "profile") == profile:
+                return await original_probe(
+                    [sys.executable, "-c", "import time;time.sleep(60)"], str(tmp_path),
+                )
+            return (
+                "\n".join(name + " " + value for name, value in options).encode()
+                if profile else key(1).encode()
+            )
+
+        monkeypatch.setattr(agent_procutil, "spawn_in_kill_on_close_job", spawn)
+        monkeypatch.setattr(native_receiver, "_transport_probe", probe)
+        running = asyncio.create_task(native_receiver.run(selected, stop=stop))
+        try:
+            await asyncio.wait_for(started.wait(), 10)
+            stop.set()
+            await asyncio.wait_for(running, 10)
+            assert processes and all(process.returncode is not None for process in processes)
+        finally:
+            stop.set()
+            await running
+
+    asyncio.run(exercise())
+    assert events == ["lease-acquire", "lease-release"]
 
 
 def test_public_observer_uses_only_read_commands_and_existing_adapter(

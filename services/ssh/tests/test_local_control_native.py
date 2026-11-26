@@ -263,7 +263,9 @@ binding=SimpleNamespace(root=slot.parent.parent,slot=slot,
     identity=SimpleNamespace(document=lambda:{'fixture':'service-source'}))
 source_start.ensure_selected=lambda _:None
 native_receiver.NativeReceiverConfig.ingress=lambda _:{'native_gateway':{}}
-native_receiver._transport=lambda *args:None
+async def transport(*args):
+    return None
+native_receiver._resolve_transport=transport
 class Receiver:
     def __init__(self,*args,**kwargs):
         self.started=asyncio.Event()
