@@ -703,7 +703,7 @@ def cmd_detach(
                     _progress("launch-retry", f"transient connection failure: {str(exc)[:200]}")
                     time.sleep(10.0)
                     continue
-                ct.fail("transport_failed" if _transient(str(exc)) else "connect_failed")
+                ct.fail_with_cause("transport_failed" if _transient(str(exc)) else "connect_failed")
                 return _fail(f"could not connect to the CodeSpace ({exc}); retry the same command", plan)
             result = captured.get("result")
             if (

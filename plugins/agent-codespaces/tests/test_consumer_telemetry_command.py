@@ -300,3 +300,64 @@ def test_a_final_transport_failure_is_not_overwritten_by_an_embody_result(seams:
         ("ssh", "failure", "transport_failed", 2),
     ]
     assert ct._last_reason == "transport_failed"
+
+
+def test_a_zero_exit_malformed_snapshot_is_not_a_resolved_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_codespaces import gh_account, worktrees
+
+    def malformed(*args: Any, **kwargs: Any) -> Any:
+        return subprocess.CompletedProcess(list(args), 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(worktrees, "explicit_context", lambda: True)
+    monkeypatch.setattr(worktrees, "run", malformed)
+    with pytest.raises(gh_account.AccountInventoryError):
+        gh_account._account_inventory()
+    assert [_shape(e)[:3] for e in ct.finish(1)] == [
+        ("account_resolution", "failure", "account_unresolved"),
+    ]
+
+
+def test_shared_preparation_notes_attached_and_detached_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from agent_codespaces import plugin_preparation
+
+    async def refused(*args: Any, **kwargs: Any) -> list[str]:
+        raise RuntimeError("Required target plugin preparation failed: secret-plugin")
+
+    monkeypatch.setattr(plugin_preparation, "_prepare_plugins", refused)
+    with pytest.raises(RuntimeError):
+        asyncio.run(plugin_preparation.prepare_plugins(
+            object(), "secret-codespace", None, object(), "/workspaces/secret",
+        ))
+    assert [_shape(e)[:3] for e in ct.finish(1)] == [
+        ("plugin_preparation", "failure", "plugin_install_failed"),
+    ]
+
+
+def test_a_preparation_failure_inside_the_launch_keeps_its_cause(seams: Any) -> None:
+    def session(ns: Any, **kwargs: Any) -> int:
+        ct.note("plugin_preparation", "failure", "plugin_install_failed")
+        raise RuntimeError("Required target plugin preparation failed: secret-plugin")
+
+    ct.start_launch()
+    rc = copilot_detach.cmd_detach(_launch_tests._args(), ssh_session=session)
+    assert rc == 1
+    shapes = [_shape(e)[:3] for e in ct.finish(rc)]
+    assert ("ssh", "failure", "plugin_install_failed") in shapes
+    assert shapes[-1] == ("launch", "failure", "plugin_install_failed")
+
+
+def test_an_enclosing_stage_closed_by_exit_keeps_the_inner_cause() -> None:
+    ct.start_launch()
+    ct.begin("ssh")
+    ct.note("plugin_preparation", "failure", "clone_auth_failed")
+    assert [_shape(e)[:3] for e in ct.finish(1)] == [
+        ("plugin_preparation", "failure", "clone_auth_failed"),
+        ("ssh", "failure", "clone_auth_failed"),
+        ("launch", "failure", "clone_auth_failed"),
+    ]

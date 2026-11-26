@@ -108,6 +108,20 @@ def fail(reason: str = "other", *, outcome: str = "failure", limit_ms: int | Non
         pass
 
 
+def fail_with_cause(default: str = "other") -> None:
+    """Fail the open stage with the cause an inner stage noted, else `default`.
+
+    An enclosing stage (the launch's SSH session, say) that catches a failure
+    already recorded by a nested stage keeps that recorded cause instead of
+    replacing it with its own generic reason.
+    """
+    try:
+        cause = _open.get("cause") if _open is not None else None
+        fail(cause if type(cause) is str else default)
+    except Exception:
+        pass
+
+
 def retry(reason: str = "transport_retry") -> None:
     """Record a retry of the open stage and reopen it as the next attempt."""
     try:
@@ -141,6 +155,8 @@ def note(
         if outcome != "success":
             global _last_reason
             _last_reason = reason
+            if _open is not None:
+                _open["cause"] = reason
         _append(event)
     except Exception:
         pass
@@ -201,7 +217,7 @@ def finish(code: int, *, interrupted: bool = False) -> list[dict[str, Any]]:
     elif code == 0:
         succeed()
     else:
-        fail("other")
+        fail_with_cause(_last_reason)
     if _launch is not None:
         if interrupted or code == 130:
             outcome, reason = "failure", "interrupted"

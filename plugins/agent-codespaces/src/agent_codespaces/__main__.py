@@ -2140,30 +2140,21 @@ async def _register_codespace_plugins(
     repo = repo or host_repository
     if not workspace:
         raise RuntimeError("Plugin preparation requires the execution checkout")
-    from . import consumer_telemetry as ct
-
-    started = ct.clock()
-    try:
-        prepared = await prepare_plugins(
-            manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
-            repo_roots=repo_roots,
-            prelude=prelude, relay_port=relay_port,
-            live_attachment=live_attachment,
-            hosting_required=hosting_required,
-            **cast(
-                "dict[str, Any]",
-                {"receiving_context": receiving_context} if receiving_context is not None else {},
-            ),
-            **cast(
-                "dict[str, Any]",
-                {"prepared_context": prepared_context} if prepared_context is not None else {},
-            ),
-        )
-    except BaseException as exc:
-        ct.note("plugin_preparation", "failure", ct.preparation_reason(exc), started=started)
-        raise
-    ct.note("plugin_preparation", "success", "none", started=started)
-    return prepared
+    return await prepare_plugins(
+        manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
+        repo_roots=repo_roots,
+        prelude=prelude, relay_port=relay_port,
+        live_attachment=live_attachment,
+        hosting_required=hosting_required,
+        **cast(
+            "dict[str, Any]",
+            {"receiving_context": receiving_context} if receiving_context is not None else {},
+        ),
+        **cast(
+            "dict[str, Any]",
+            {"prepared_context": prepared_context} if prepared_context is not None else {},
+        ),
+    )
 
 
 async def _verify_remote_auth(

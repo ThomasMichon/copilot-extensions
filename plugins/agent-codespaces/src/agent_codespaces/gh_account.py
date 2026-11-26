@@ -339,11 +339,11 @@ def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str
                 [aw, *args], capture_output=True, text=True, timeout=timeout,
                 creationflags=_creation_flags(),
             )
-        if strict:
-            ct.note("account_resolution", *(
-                ("success", "none") if getattr(result, "returncode", 1) == 0
-                else ("failure", "account_unresolved")
-            ), started=started, limit_ms=timeout * 1000)
+        if strict and getattr(result, "returncode", 1) != 0:
+            ct.note(
+                "account_resolution", "failure", "account_unresolved",
+                started=started, limit_ms=timeout * 1000,
+            )
         return result
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
@@ -383,6 +383,9 @@ def _mapped_accounts() -> tuple[str, ...]:
 
 
 def _account_inventory() -> AccountInventory:
+    from . import consumer_telemetry as ct
+
+    started = ct.clock()
     result = _lookup("repos", "account", "list", "--json", "--with-resolutions", strict=True)
     if result is None:
         return AccountInventory()
@@ -391,6 +394,21 @@ def _account_inventory() -> AccountInventory:
             "agent-worktrees could not read its account resolution snapshot "
             f"(exit status {result.returncode})",
         )
+    # A zero exit is resolved only once the snapshot itself validates.
+    limit_ms = _SNAPSHOT_TIMEOUT_SECONDS * 1000
+    try:
+        inventory = _parse_account_inventory(result)
+    except AccountInventoryError:
+        ct.note(
+            "account_resolution", "failure", "account_unresolved",
+            started=started, limit_ms=limit_ms,
+        )
+        raise
+    ct.note("account_resolution", "success", "none", started=started, limit_ms=limit_ms)
+    return inventory
+
+
+def _parse_account_inventory(result: subprocess.CompletedProcess[str]) -> AccountInventory:
     try:
         data = json.loads(result.stdout)
     except (ValueError, TypeError) as exc:
