@@ -393,7 +393,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
-                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
+                 "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py", "hook_telemetry.py",
                  "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                  "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
                  "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
