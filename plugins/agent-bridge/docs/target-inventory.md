@@ -209,6 +209,74 @@ change its parent environment or add syntax that an older CLI would reject.
 This compatibility choice affects
 selection only, not ownership checks, hosting fences or native recovery.
 
+### Identity-pinned local managed stop provider
+
+The optional `managed_exact_stop: 1` health capability adds
+`POST /api/v1/sessions/{managed_session_id}/stop/exact`. Its strict JSON body is
+`{"native_session_id": "<selected native ID>"}`. This provider-first expansion
+does not change ordinary `stop`/`end` selectors, add a CLI caller, or deprecate
+the existing managed stop endpoint. A caller must negotiate support with the
+executing daemon before using this route. An older or downgraded daemon cannot
+apply the request through the legacy route.
+
+The provider accepts the exact managed record ID, not a name, prefix, workspace
+handle or native alias. Its existing local ACP owner checks the same in-memory
+object, persisted native identity and live client's native identity under the
+turn and lifecycle locks before writing stop intent or shutting down its client.
+It rechecks after awaited teardown steps before acting on the client again.
+Unsupported remote owners and
+changed identities refuse. Background work still blocks stop. This operation
+does not send a cooperative notice, drain or clear pending prompts, resume,
+create, force-stop, reclaim a Host or finalize even an unused worktree.
+
+A confirmed response binds `session_id` and `native_session_id` and reports
+`status: "stopped", host_reclaimed: false`. The managed conversation, its target,
+history and pending prompts remain retained for resume. Releasing the existing
+active-control lease is not ending the conversation or releasing its durable
+placement. Atomic placement admission remains a separate lifecycle gate.
+A missing managed record is a refusal, never an already-stopped confirmation.
+Transport loss, interrupted teardown or an unconfirmed response requires
+inspection of the original operation, not automatic retry or a legacy fallback.
+Failed cancel or shutdown retains an unknown outcome rather than returning a
+stopped confirmation.
+For a running locally owned native prompt, exact cancellation stays attached
+and waits for the original RPC to settle before frontend teardown.
+Failed connection closure, Host-stream closure or unconfirmed classic-process
+exit retains the unresolved client handles. These strict outcomes are opt-in;
+the existing best-effort client shutdown remains available to legacy callers.
+One ten-second budget bounds asynchronous exact-stop admission and teardown,
+including cancellation submission. Lock contention before admission returns
+`native_stop_lifecycle_busy` without writing stop intent. Native settlement
+requires an attached, active local RPC or a successful RPC observed on the
+same current client. Cached `idle` or `stopped` status, completion flags alone,
+and a missing client do not establish native quiescence. These cases return
+`native_stop_settlement_unavailable` before effects, including a repeated stop
+after its client was closed. A later native `running` event invalidates the
+observed completion; a heuristic `idle` event cannot restore it.
+The current Session Host owner offers only best-effort detach, which suppresses
+failed writes. Host-backed exact stop therefore returns
+`native_stop_detach_unavailable` before stop intent, cancellation or cleanup.
+It must not claim a non-reclaiming detach until that owner supplies a confirmed
+contract. Classic local ACP teardown remains supported; legacy Host stop is
+unchanged and is not an automatic fallback.
+Once exact stop is admitted, its durable intent fences ordinary prompt
+admission, implicit resume, handoff and queued-turn drain. An unconfirmed stop
+cannot consume retained pending rows. An explicit manual resume can cross only
+the stop token captured by its existing task-bound admission and clears that
+token through the existing compare-and-clear owner. The token is an admission
+fence, never proof that native work stopped. An admitted timeout remains
+unconfirmed and retains the original operation's state.
+The matching manual-recovery task can pass the hosting fence despite the old
+transient wind-down flag. A newer stop token or notice still refuses recovery.
+That transient flag clears only after successful recovery and confirmed token
+consumption; repository-policy refusal does not release the original fence.
+Prompt admission blocked by this intent returns `exact_stop_requires_resume`,
+not `session_stopped`. An unconfirmed exact stop can leave an active session;
+cooperative stop must not interpret that refusal as an already-stopped success.
+Ordinary send retains the distinct pre-admission refusal instead of reporting
+unknown prompt admission.
+Logical stop does not prove that every independent Host resource was reclaimed.
+
 ### Ordinary selector defaults and legacy support
 
 The CLI contract `bridge-cli/ordinary-selectors/v2` makes plain `send ID PROMPT`,

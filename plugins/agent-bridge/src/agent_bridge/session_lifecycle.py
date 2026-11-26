@@ -5,19 +5,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from typing import Any
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Any, cast
 
-from .models import SessionStatus
+from .session_status import SessionStatus
+from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 from .session_manager import (
     RemoteHostRecoveryPendingError,
     Session,
     SessionBusyError,
-    _REQUEST_OVERRIDES_KEY,
     _cleanup_worktree,
     _codespace_claim_key,
     _container_claim_key,
     log,
 )
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
 
 
 def _core() -> Any:
@@ -31,6 +35,8 @@ class _SessionLifecycleMixin:
 
     async def _quiesce_session(
         self, session: Session, *, cancel_turn: bool = True, preserve_host: bool = False,
+        preserve_workspace: bool = False,
+        expected_native_session_id: str | None = None,
     ) -> None:
         """Best-effort teardown of a session's in-flight prompt + ACP client.
 
@@ -47,25 +53,69 @@ class _SessionLifecycleMixin:
         prompt task + ACP client are torn down. Explicit stop/end keep the
         default so an operator stop still cancels.
         """
+        self = cast("SessionManager", self)
+
+        def require_exact_client() -> None:
+            if expected_native_session_id is not None:
+                from .managed_exact_stop import require_holder
+
+                require_holder(self, session.session_id, session, expected_native_session_id)
+                if session.has_active_background_tasks:
+                    raise SessionBusyError(session.session_id, session.active_background_tasks)
+
+        require_exact_client()
         # A recoverable frontend detach must retain even an idle Host.
         # Explicit stops still send the current reapable state before cancel.
-        await self._detach_host(session, preserve_host=preserve_host)
+        if expected_native_session_id is None:
+            await self._detach_host(session, preserve_host=preserve_host)
+        require_exact_client()
         task = session._prompt_task
-        if task and not task.done():
+        active_task = task is not None and not task.done()
+        if active_task or (
+            expected_native_session_id is not None and session.client is not None
+            and session.client._prompt_in_flight
+        ):
             if session.client and cancel_turn:
-                with contextlib.suppress(Exception):
-                    await session.client.cancel_prompt()
-            task.cancel()
-            with contextlib.suppress(BaseException):
-                await task
+                try:
+                    if expected_native_session_id is not None:
+                        from .acp_shutdown import cancel_and_settle
+
+                        await cancel_and_settle(session.client)
+                    else:
+                        await session.client.cancel_prompt()
+                except Exception:
+                    if expected_native_session_id is not None:
+                        raise
+            require_exact_client()
+            if task is not None:
+                task.cancel()
+                if expected_native_session_id is not None:
+                    outcome = (await asyncio.shield(asyncio.gather(task, return_exceptions=True)))[0]
+                    if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
+                        raise RuntimeError("Native frontend stop is unconfirmed") from outcome
+                else:
+                    with contextlib.suppress(BaseException):
+                        await task
+        if expected_native_session_id is not None:
+            require_exact_client()
+            await self._detach_host(session, preserve_host=True)
+        require_exact_client()
         if session.client:
             from .remote_relationships import client_quiescent, owned
             client = session.client
             accepted_sid = client.acp_session_id if session.target.type == "remote-acp" else None
             shutdown_failed = False
             try:
-                await client.shutdown()
+                if expected_native_session_id is not None:
+                    from .acp_client import _terminate_process_tree
+                    from .acp_shutdown import shutdown_exact
+
+                    await shutdown_exact(client, _terminate_process_tree)
+                else:
+                    await client.shutdown()
             except Exception:
+                if expected_native_session_id is not None:
+                    raise
                 shutdown_failed = True
                 log.warning(
                     "ACP client shutdown failed while tearing down session %s",
@@ -77,7 +127,8 @@ class _SessionLifecycleMixin:
                     if accepted_sid:
                         session.acp_session_id = accepted_sid
                         self._db.update_session_acp_id(session.session_id, accepted_sid)
-                        session.event_log.set_telemetry_identity(acp_session_id=accepted_sid)
+                        if session.event_log is not None:
+                            session.event_log.set_telemetry_identity(acp_session_id=accepted_sid)
                 if not owned(session) or not shutdown_failed and client_quiescent(client):
                     session.client = None
                 else:
@@ -87,7 +138,8 @@ class _SessionLifecycleMixin:
                     )
         # Clean up unused worktrees (0-turn sessions from crash-loops)
         try:
-            await _cleanup_worktree(session.target, session.turn_count)
+            if not preserve_workspace:
+                await _cleanup_worktree(session.target, session.turn_count)
         except Exception:
             log.warning(
                 "worktree cleanup failed while tearing down session %s",
@@ -108,6 +160,7 @@ class _SessionLifecycleMixin:
         session IDLE with a terminal ``session_state_changed`` (the Phase-1
         guarantee), which flows to every consumer over the event stream.
         """
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -161,6 +214,7 @@ class _SessionLifecycleMixin:
         none was (already answered/withdrawn). Raises ``KeyError`` if the
         session is unknown and ``ValueError`` if it has no live ACP client.
         """
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -178,6 +232,7 @@ class _SessionLifecycleMixin:
         self, session_id: str, request_id: str, option_id: str
     ) -> bool:
         """Resolve a correlated permission request on a live session."""
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -193,6 +248,7 @@ class _SessionLifecycleMixin:
         cancel_turn: bool = True,
         allow_background_recovery: bool | None = None,
         _automatic_reap: bool = False,
+        expected_native_session_id: str | None = None,
     ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
@@ -224,11 +280,46 @@ class _SessionLifecycleMixin:
         Internal automatic reaping requires the caller's turn lock and current
         unassociated idle custody, rechecked after lifecycle scheduling and
         immediately before Host retirement. Explicit operator stops are separate.
+
+        ``expected_native_session_id`` selects the additive local managed
+        contract: exact IDs, shared turn/lifecycle locks, no workspace cleanup,
+        and no force, recreation, cooperative notice or Host reclamation.
         """
-        session_id = self._resolve_ref(session_id) or session_id
+        self = cast("SessionManager", self)
+        exact = expected_native_session_id is not None
+        deadline = asyncio.get_running_loop().time() + 10.0 if exact else None
+
+        async def before_deadline(operation: Awaitable[object]) -> object:
+            if deadline is None:
+                return await operation
+            return await asyncio.wait_for(
+                operation, timeout=max(0.0, deadline - asyncio.get_running_loop().time()),
+            )
+
+        if not exact:
+            session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+
+        def require_exact_stop(*, before_teardown: bool = False) -> None:
+            if not exact:
+                return
+            from .managed_exact_stop import require_holder
+
+            require_holder(self, session_id, session, expected_native_session_id)
+            if force or reap_host or not cancel_turn or allow_background_recovery or _automatic_reap:
+                raise ValueError("native_stop_options_unsupported")
+            if before_teardown:
+                from .managed_stop_state import settlement_available
+
+                if not settlement_available(session.client):
+                    raise ValueError("native_stop_settlement_unavailable")
+                # The current Host owner exposes only best-effort detach.
+                if self._session_host_client(session) is not None:
+                    raise ValueError("native_stop_detach_unavailable")
+
+        require_exact_stop(before_teardown=True)
 
         def require_automatic_reap() -> None:
             if _automatic_reap:
@@ -242,20 +333,35 @@ class _SessionLifecycleMixin:
 
         require_automatic_reap()
         if not force and session.has_active_background_tasks:
-            session._stop_requested = False  # the stop a notice announced isn't happening
+            if not exact:
+                session._stop_requested = False  # the stop a notice announced isn't happening
             raise SessionBusyError(session_id, session.active_background_tasks)
 
         if allow_background_recovery is None:
             allow_background_recovery = not cancel_turn
 
-        if not allow_background_recovery:
+        if not allow_background_recovery and not exact:
             self._db.request_cold_recovery_stop(session_id)
             session.background_recovery_enabled = False
 
         # Resume takes lifecycle before Codespace ownership. Fresh Codespace
         # admission takes only ownership; owned SSH startup is a disjoint path.
         async with contextlib.AsyncExitStack() as locks:
-            await locks.enter_async_context(session._lifecycle_lock)
+            try:
+                if exact:
+                    await before_deadline(locks.enter_async_context(session._turn_start_lock))
+                await before_deadline(locks.enter_async_context(session._lifecycle_lock))
+            except (TimeoutError, asyncio.TimeoutError) as exc:
+                if exact:
+                    raise ValueError("native_stop_lifecycle_busy") from exc
+                raise
+            require_exact_stop(before_teardown=True)
+            if exact:
+                if session.has_active_background_tasks:
+                    raise SessionBusyError(session_id, session.active_background_tasks)
+                self._db.request_cold_recovery_stop(session_id, exact_stop=True)
+                session.background_recovery_enabled = False
+                session._stop_requested = True
             if self._is_codespace_target(session.target):
                 await locks.enter_async_context(session._codespace_ownership_lock)
                 if self._sessions.get(session_id) is not session:
@@ -271,17 +377,39 @@ class _SessionLifecycleMixin:
                     "Remote Session Host retirement has no verifiable Host record; "
                     f"retained session {session_id} and target ownership"
                 )
-            await self._quiesce_session(
-                session, cancel_turn=cancel_turn,
-                preserve_host=allow_background_recovery and not reap_host,
-            )
+            try:
+                if exact:
+                    await before_deadline(self._quiesce_session(
+                        session, preserve_workspace=True,
+                        expected_native_session_id=expected_native_session_id,
+                    ))
+                else:
+                    await self._quiesce_session(
+                        session, cancel_turn=cancel_turn,
+                        preserve_host=allow_background_recovery and not reap_host,
+                    )
+            except Exception as exc:
+                if exact:
+                    raise RuntimeError("native_stop_unconfirmed") from exc
+                raise
+            if exact:
+                try:
+                    require_exact_stop()
+                except ValueError as exc:
+                    raise RuntimeError("native_stop_unconfirmed") from exc
             # An explicit (dormant) stop has no turn left that needs the
             # credential relay; retire its supervisor so it cannot re-wake a
             # stopped CodeSpace. A resume re-supervises it from the endpoint.
             # Redeploy detaches keep it: their turn survives for reattach.
             if not allow_background_recovery:
-                with contextlib.suppress(Exception):
-                    await self._stop_relays(session_id)
+                if exact:
+                    try:
+                        await before_deadline(self._stop_relays(session_id))
+                    except Exception as exc:
+                        raise RuntimeError("native_stop_unconfirmed") from exc
+                else:
+                    with contextlib.suppress(Exception):
+                        await self._stop_relays(session_id)
 
             if reap_host and rec is not None:
                 require_automatic_reap()
@@ -335,6 +463,7 @@ class _SessionLifecycleMixin:
         force: bool = False,
     ) -> None:
         """End only if no turn can start between the idle check and teardown."""
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -359,6 +488,7 @@ class _SessionLifecycleMixin:
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """Serialize deletion with native recovery and Codespace admission/release."""
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if session is None:
@@ -421,6 +551,7 @@ class _SessionLifecycleMixin:
         gating it would self-deadlock a redeploy (the operator could not clear
         the very sessions blocking the drain).
         """
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:

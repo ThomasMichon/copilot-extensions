@@ -241,10 +241,14 @@ class _SessionsMixin:
         )
         return enabled and cursor.rowcount == 1
 
-    def request_cold_recovery_stop(self, session_id: str) -> str:
+    def request_cold_recovery_stop(self, session_id: str, *, exact_stop: bool = False) -> str:
         """Persist fresh stop intent before teardown can yield to recovery."""
         self = cast("Database", self)
         token = uuid.uuid4().hex
+        if exact_stop:
+            from .managed_stop_state import TOKEN_PREFIX
+
+            token = TOKEN_PREFIX + token
         cursor = self.execute_write(
             "UPDATE sessions SET cold_recovery_stop_token=?, "
             "background_recovery_enabled=0 WHERE id=?",

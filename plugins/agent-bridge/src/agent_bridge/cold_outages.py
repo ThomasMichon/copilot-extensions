@@ -14,12 +14,12 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from single_instance_lease import OperationLock
 from zdd import diagnostics, process_exit
 
-from .models import SessionStatus
+from .session_status import SessionStatus
 
 if TYPE_CHECKING:
     from .session_manager import Session, SessionManager
@@ -32,7 +32,11 @@ class ColdRecoveryStoppedError(ValueError):
     """A durable stop superseded automatic or previously admitted recovery."""
 
 
-def _confirmed(row: dict[str, Any]) -> bool:
+class _ReadableRow(Protocol):
+    def __getitem__(self, key: str, /) -> Any: ...
+
+
+def _confirmed(row: _ReadableRow) -> bool:
     if row["state"] != "reconnected" or not row["reconnect_evidence_json"]:
         return False
     evidence = json.loads(row["reconnect_evidence_json"])
@@ -68,6 +72,7 @@ class _RecoveryAdmission:
     automatic: bool
     active: bool = True
     manual_admitted: bool = False
+    stop_notices: int = 0
 
 
 _recovery_admission: ContextVar[_RecoveryAdmission | None] = ContextVar(
@@ -92,7 +97,16 @@ def _stop_token(manager: SessionManager, session_id: str) -> str | None:
     row = manager.db.get_session(session_id)
     if row is None:
         raise KeyError(session_id)
-    return row["cold_recovery_stop_token"]
+    return cast(str | None, row["cold_recovery_stop_token"])
+
+
+def _exact_notice_current(held: _RecoveryAdmission) -> bool:
+    from .managed_stop_state import TOKEN_FAMILY
+
+    if held.stop_token is None or not held.stop_token.startswith(TOKEN_FAMILY):
+        return True
+    session = held.manager.get_session(held.session_id)
+    return bool(session is not None and session._stop_notices == held.stop_notices)
 
 
 def _assert_recovery_current(manager: SessionManager, session_id: str) -> _RecoveryAdmission:
@@ -104,7 +118,7 @@ def _assert_recovery_current(manager: SessionManager, session_id: str) -> _Recov
         raise ValueError("cold recovery requires its task-bound admission")
     if _stop_token(manager, session_id) != held.stop_token or (
         held.automatic and held.stop_token is not None
-    ):
+    ) or not _exact_notice_current(held):
         raise ColdRecoveryStoppedError("Durable stop superseded cold recovery admission")
     return held
 
@@ -115,7 +129,7 @@ def manual_recovery_stop_token(manager: SessionManager, session_id: str) -> str 
     if (
         held is not None and held.active and held.manager is manager
         and held.session_id == session_id and held.task is asyncio.current_task()
-        and not held.automatic
+        and not held.automatic and _exact_notice_current(held)
     ):
         return held.stop_token
     return None
@@ -151,6 +165,7 @@ def recovery_admission(
         raise ColdRecoveryStoppedError("Automatic cold recovery is durably stopped")
     held = _RecoveryAdmission(
         manager, session_id, asyncio.current_task(), stop_token, automatic,
+        stop_notices=getattr(manager.get_session(session_id), "_stop_notices", 0),
     )
     token = _recovery_admission.set(held)
     manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
@@ -160,8 +175,15 @@ def recovery_admission(
             _assert_recovery_current(manager, session_id)
             if not manager.db.clear_cold_recovery_stop(session_id, held.stop_token):
                 raise ColdRecoveryStoppedError("A newer stop superseded manual recovery")
-            row = latest(manager.db, session_id)
             session = manager.get_session(session_id)
+            from .managed_stop_state import TOKEN_FAMILY
+
+            if (
+                session is not None and held.stop_token is not None
+                and held.stop_token.startswith(TOKEN_FAMILY)
+            ):
+                session._stop_requested = False
+            row = latest(manager.db, session_id)
             if row is not None and _confirmed(row) and session is not None:
                 session.background_recovery_enabled = manager.db.update_session_background_recovery(
                     session_id, True,
@@ -273,7 +295,7 @@ def _unconfirmed_reconnect(manager: SessionManager, row: dict[str, Any]) -> bool
     )
 
 
-def _record(manager: SessionManager, session: Session, row: dict[str, Any]) -> dict | None:
+def _record(manager: SessionManager, session: Session, row: dict[str, Any]) -> dict[str, Any] | None:
     """Reconcile a registered replacement, including a registration/claim crash."""
     manager._host_index.refresh()
     rec = manager._host_index.get(session.session_id)
@@ -358,7 +380,7 @@ def _record(manager: SessionManager, session: Session, row: dict[str, Any]) -> d
     return {
         "execution": execution,
         "nonce_sha256": nonce,
-        "record_owner": owner or saved["record_owner"],
+        "record_owner": owner or cast(dict[str, Any], saved)["record_owner"],
         "child_exited": child_exited,
     }
 
@@ -368,7 +390,7 @@ async def settle_partial_replacement(manager: SessionManager, session: Session) 
     require_custody(manager, session.session_id)
     if not session._lifecycle_lock.locked():
         raise ValueError("partial host settlement requires lifecycle custody")
-    row = latest(manager.db, session.session_id)
+    row = cast(dict[str, Any], latest(manager.db, session.session_id))
     saved = json.loads(row["replacement_json"]) if row["replacement_json"] else None
     if not saved or not process_exit.observe_original_exit(
         saved["execution"]["child"]["pid"],
@@ -401,7 +423,7 @@ async def settle_partial_replacement(manager: SessionManager, session: Session) 
 def claim(manager: SessionManager, session: Session) -> dict[str, Any]:
     """Persist generation/process ownership before any replacement launch."""
     require_custody(manager, session.session_id)
-    row = latest(manager.db, session.session_id)
+    row = cast(dict[str, Any], latest(manager.db, session.session_id))
     if row is None:
         raise ValueError("cold outage disappeared")
     if (
@@ -438,7 +460,7 @@ def claim(manager: SessionManager, session: Session) -> dict[str, Any]:
             "reconnect_unknown",
             "reconnected disposition has no provider response evidence",
         )
-        row = latest(manager.db, session.session_id)
+        row = cast(dict[str, Any], latest(manager.db, session.session_id))
     if row["state"] in {"prepared", "failed"}:
         if not _exited(json.loads(row["execution_json"])):
             raise ValueError("cold drain outcome is uncertain; original execution remains live")
@@ -452,7 +474,7 @@ def claim(manager: SessionManager, session: Session) -> dict[str, Any]:
             manager.db.update_turn(
                 session.session_id, index, stop_reason="interrupted", completed_at=time.time()
             )
-        row = latest(manager.db, session.session_id)
+        row = cast(dict[str, Any], latest(manager.db, session.session_id))
     if row["state"] not in {
         "interrupted",
         "reconnect_admitted",
@@ -484,13 +506,13 @@ def claim(manager: SessionManager, session: Session) -> dict[str, Any]:
             owner_pid=owner["pid"],
             pid_alive=lambda pid: not process_exit.observe_original_exit(pid, prior["start_time"]),
         )
-    return latest(manager.db, session.session_id)
+    return cast(dict[str, Any], latest(manager.db, session.session_id))
 
 
 def launching(manager: SessionManager, session: Session) -> None:
     require_custody(manager, session.session_id)
     _assert_recovery_current(manager, session.session_id)
-    row = latest(manager.db, session.session_id)
+    row = cast(dict[str, Any], latest(manager.db, session.session_id))
     if row["recovery_phase"] != "reserved":
         raise ValueError("registered/uncertain replacement must be reconciled, not relaunched")
     manager.db.execute_write(
@@ -695,7 +717,7 @@ async def reconnect(manager: SessionManager, session: Session, row: dict[str, An
     """Admit one new reconnect turn, never replay an interrupted tool/request."""
     delivery = "cold-outage:" + row["outage_id"]
     require_custody(manager, session.session_id)
-    if latest(manager.db, session.session_id)["recovery_phase"] != "registered":
+    if cast(dict[str, Any], latest(manager.db, session.session_id))["recovery_phase"] != "registered":
         raise ValueError("reconnect requires a registered owned replacement")
     async with session._turn_start_lock:
         _assert_recovery_current(manager, session.session_id)
@@ -711,7 +733,7 @@ async def reconnect(manager: SessionManager, session: Session, row: dict[str, An
                 or saved[0]["prompt"] != RECONNECT_PROMPT
             ):
                 raise ValueError("cold reconnect delivery identity conflict")
-            current = latest(manager.db, session.session_id)
+            current = cast(dict[str, Any], latest(manager.db, session.session_id))
             if current["state"] == "reconnected" and current["reconnect_evidence_json"]:
                 evidence = json.loads(current["reconnect_evidence_json"])
                 if (
@@ -745,7 +767,7 @@ async def reconnect(manager: SessionManager, session: Session, row: dict[str, An
                     "WHERE outage_id=? AND state!='reconnected'",
                     (row["outage_id"],),
                 )
-                if not _confirmed(latest(manager.db, session.session_id)):
+                if not _confirmed(cast(_ReadableRow, latest(manager.db, session.session_id))):
                     manager._set_background_recovery_enabled(session, False)
                 raise
         manager.db.execute_write(
@@ -753,7 +775,7 @@ async def reconnect(manager: SessionManager, session: Session, row: dict[str, An
             "WHERE outage_id=? AND state='interrupted'",
             (row["outage_id"],),
         )
-        if not _confirmed(latest(manager.db, session.session_id)):
+        if not _confirmed(cast(_ReadableRow, latest(manager.db, session.session_id))):
             manager._set_background_recovery_enabled(session, False)
     log.info(
         "Cold outage %s reconnect admitted; provider delivery is not yet confirmed",
@@ -792,7 +814,7 @@ def provider_result(
                 "kind": "provider-prompt-response",
                 "native_session_id": session.acp_session_id,
                 "turn_index": turn_index,
-                "stop_reason": result["stop_reason"],
+                "stop_reason": cast(dict[str, Any], result)["stop_reason"],
             }
         )
         if confirmed
@@ -841,7 +863,9 @@ async def recover(
             continue
         if _stop_token(manager, session.session_id) is not None:
             continue
-        if manager._generation_id == latest(manager.db, session.session_id)["owner_generation"]:
+        if manager._generation_id == cast(
+            dict[str, Any], latest(manager.db, session.session_id),
+        )["owner_generation"]:
             continue
         if row["state"] == "nonresumable" or (
             _confirmed(row) and not session.background_recovery_enabled
