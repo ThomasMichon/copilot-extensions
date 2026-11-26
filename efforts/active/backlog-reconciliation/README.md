@@ -5618,15 +5618,19 @@ Exactly seventeen campaign departures are offset by two metadata-only
 arrivals; no unrelated closure is credited. The independent #11506/#11560
 research refinements and all thirteen retained study issues remain OPEN.
 
-The [next forty-case installed-TTY receiving proposal](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md)
+The [accepted forty-case installed-TTY outcome and fixed checkpoint](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md)
 retains forty independently OPEN execution cases in existing #11966,
 preserving its whole original, four earlier rows, ten human comments and
 attributed diagnostic distinctions. Six explicit ownership/diagnostic,
 discussion or module keepers and four later studied cases remain OPEN.
-Four new local delivery gates are unresolved; no new tracker effect,
-technical completion, custody transfer or parent checkbox change is claimed.
-The preceding factual outcome is merged in #14686. Its complete census
-remains 763 whole open, 34 above fixed 729; a later 764 hint is not a census.
+Reviewed #14692 was followed by forty separately audited `NOT_PLANNED`
+leaf-tracking retirements, not technical completions. The complete census
+at 20:51:53 PST is 725 whole open, 293 original-cohort and 432 inflow:
+observed net reduction 733, four below fixed 729. Forty campaign departures,
+three metadata-only arrivals and one unrelated departure are distinguished.
+Only four new local gates and independent checkpoint verification resolve;
+all other incumbent parent/global states remain. Further intake is stopped
+pending the original operator threshold guidance, not a new campaign stretch.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
@@ -5746,12 +5750,20 @@ remains 763 whole open, 34 above fixed 729; a later 764 hint is not a census.
 
 ### Phase 3 - Threshold guidance
 
-- [ ] Re-query the provider, reconcile new inflow and unrelated closures, and
+- [x] Re-query the provider, reconcile new inflow and unrelated closures, and
   independently confirm the fixed checkpoint.
 - [ ] Report the evidence-backed reduction and retained work to the operator;
   request guidance before another campaign stretch.
 - [ ] Resolve campaign documentation and coordination obligations through the
   normal publication flow.
+
+The [complete checkpoint observation](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md#independently-verified-fixed-checkpoint)
+independently confirms 725 whole open against fixed 729, with inflow and
+unrelated departures reconciled. Further intake is stopped. Report the
+observed reduction and retained work, finish the current factual-outcome
+publication, and obtain the original operator guidance before another
+stretch. This verification does not resolve other parent/global gates or
+declare the Active effort complete.
 
 ## Validation Plan
 
