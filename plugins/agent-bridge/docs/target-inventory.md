@@ -194,12 +194,19 @@ to replay. `--force`/`--reclaim`, `--worktree-writer-file` and
 default. Combining them with explicit `--bridge` is rejected before input files,
 stdin or discovery.
 
+Existing `--strict` and `--require-agent-hosting` resume forms retain their
+original selectors by default. This also supports older or still-running
+Dispatch producers that do not supply the child compatibility environment.
+Explicit `--bridge` selects the common exact owner with either compatible
+option; it does not weaken strictness or the hosting fence.
+
 Programmatic retained-resume producers can set
 `AGENT_BRIDGE_LEGACY_RESUME=1` in the child invocation's environment when no
 selector flag is supplied. Explicit `--bridge` overrides that compatibility
-choice. Dispatch uses this for its existing retained-worktree and ordinary
-control restoration paths; it does not change the parent environment or add
-syntax that an older CLI would reject. This compatibility choice affects
+choice. No Dispatch update is required: the retained argument forms above
+already preserve its original selectors. A child-scoped setting does not
+change its parent environment or add syntax that an older CLI would reject.
+This compatibility choice affects
 selection only, not ownership checks, hosting fences or native recovery.
 
 ### Ordinary selector defaults and legacy support

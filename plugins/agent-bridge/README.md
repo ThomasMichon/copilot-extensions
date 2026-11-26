@@ -1494,8 +1494,9 @@ and pins its native identity through the released exact-resume operation.
 It preserves the existing ACP default and explicit `--cli` choice, never ensures
 a daemon and never falls back to another selector. `--bridge` explicitly
 selects this default; `--legacy-selector` selects the original session/profile
-contract. Original writer/recovery and takeover controls retain their existing
-specialized paths. See
+contract. Original strict, hosting-fenced, writer/recovery and takeover controls
+retain their existing specialized paths. Explicit `--bridge` still supports
+the compatible strict and hosting options. See
 [exact workspace resume](docs/target-inventory.md#exact-workspace-resume).
 Retained `complete`, `completed` and `finalized` checkouts may resume the same
 owner-asserted head; those lifecycle labels do not imply a changed directory.

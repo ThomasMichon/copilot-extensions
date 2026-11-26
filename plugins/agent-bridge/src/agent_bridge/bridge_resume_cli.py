@@ -14,9 +14,12 @@ def selected(args: argparse.Namespace) -> bool:
         getattr(args, name, None) is not None
         for name in ("worktree_writer_file", "retained_recovery_file")
     )
+    retained = specialized or any(
+        getattr(args, name, False) for name in ("strict", "require_agent_hosting")
+    )
     choice = getattr(args, "bridge", False)
     enabled = (
-        not specialized and os.environ.get("AGENT_BRIDGE_LEGACY_RESUME") != "1"
+        not retained and os.environ.get("AGENT_BRIDGE_LEGACY_RESUME") != "1"
         if choice is None else bool(choice)
     )
     if not enabled and any(

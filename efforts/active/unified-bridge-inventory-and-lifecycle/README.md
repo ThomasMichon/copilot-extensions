@@ -211,25 +211,17 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   valid owned source bindings and the 300-second budget. The opt-in caller
   is source-released. Stop/end selectors, default lifecycle migration,
   full-flow qualification and installed adoption are not complete.
-  The ordinary resume default follow-up now passes 259 actor-free controls,
-  65 contained Bridge cases and 32 contained Dispatch cases. The root parser
-  reaches the real exact provider in both hosting modes and refuses a changed
-  head. Existing retained Dispatch producers keep their original selection
-  through child-scoped compatibility configuration, without new peer syntax.
-  All eight changed Python files pass whole-file strict checks on Linux and
-  Windows. The focused real source-effect guard, changed documentation links,
-  module-size limits and install contract pass. Publication and release of
-  this follow-up remain open.
-  Its initial published head passes required CI and both native OS jobs,
-  but review finds a missing restricted-provider resume compatibility setting.
-  The requested local review also finds a generated singleton-profile hint
-  without legacy selection. Both corrections pass the real-selector controls:
-  the focused source-effect packet now has 261 passing cases. Targeted
-  restricted recovery and singleton consumer checks pass; the full restricted
-  file exceeds its 180-second local limit and is not passing evidence.
-  Whole-file strict admission of the newly touched legacy files now passes
-  for Linux and Windows, completing qualification of all eleven changed
-  Python files. Review-correction publication and final hosted gates remain open.
+  The ordinary resume default follow-up uses the common selector in both
+  hosting modes and refuses a changed head. Its publication, qualification
+  and release gates remain open.
+  Existing strict and hosting-fenced forms keep their original selectors
+  without a Dispatch update or new child environment. This preserves running,
+  older and rolled-back producers while unqualified ordinary resume uses the
+  common selector. Explicit exact selection retains compatible fences, and
+  generated singleton-profile recovery hints select legacy matching.
+  All 267 focused source-effect controls pass without forbidden effects.
+  The five Python files in the reduced final diff pass whole-file strict
+  checks for Linux and Windows. Publication and final hosted gates remain open.
 - **Return:** finish the remaining selector, guarded lifecycle, qualification
   and release gates below, then return the driving worktree to its retained
   earlier objectives. Do not equate this source slice with receiving recovery.

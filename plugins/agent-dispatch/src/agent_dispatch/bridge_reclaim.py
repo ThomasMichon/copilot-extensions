@@ -114,8 +114,6 @@ def _resume(
     record or a failed resume each refuse (409) instead of silently
     starting a fresh replacement conversation.
     """
-    from .bridge_continuation_cli import resume_environment
-
     resume_cmd = [*exe, "--json", "resume", worktree_id, "--require-agent-hosting"]
     if force:
         resume_cmd.append("--force")
@@ -123,7 +121,7 @@ def _resume(
         resume_cmd.append("--strict")
     resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         resume_cmd, check=False, capture_output=True, text=True, timeout=timeout,
-        env=resume_environment(), **no_window_kwargs(),
+        **no_window_kwargs(),
     )
     if resumed.returncode != 0:
         return resumed, None

@@ -461,8 +461,9 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> resume <native-or-managed-id|worktree-handle>
 <agent-bridge catalog argv[0]> resume <worktree-handle> --cli
 
-# Require exactly one managed worktree ID.
+# Retained strict form: use the original exact native-head owner.
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --strict
+# Common selector: require exactly one managed worktree ID.
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --cli
 
 # Explicit alias for the default exact selection.
@@ -488,6 +489,9 @@ input or discovery. It never ensures the service, falls back to a profile,
 or retries a refused or unknown operation. `--legacy-selector`, the invocation
 environment `AGENT_BRIDGE_LEGACY_RESUME=1`, and the specialized contracts below
 retain their original selectors. Explicit `--bridge` wins over the environment.
+Existing `--strict` and `--require-agent-hosting` forms also keep their original
+selection when no selector flag is supplied, so older Dispatch processes remain
+compatible. Explicit `--bridge` supports either option without weakening its fence.
 See
 [exact workspace resume](../../../docs/target-inventory.md#exact-workspace-resume)
 for identity checks and rollback.

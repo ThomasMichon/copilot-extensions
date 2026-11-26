@@ -8,12 +8,10 @@ import math
 import re
 import subprocess
 import time
-from collections.abc import Callable
-from typing import Any, Protocol, cast
 
 import httpx
 
-from .bridge import BridgeUnavailable as BridgeUnavailable
+from .bridge import BridgeUnavailable
 from .client import DispatchError
 from .client_transport import validate_task_url
 from .ordinary_bridge import _json_result
@@ -22,24 +20,8 @@ from .restricted_delivery import DRIVER
 
 log = logging.getLogger(__name__)
 
-Json = dict[str, Any]
 
-
-class _RestrictedRenew(Protocol):
-    def __call__(
-        self, client: Any, reservation: Json, task: Json, native: str, *, heartbeat: bool = False,
-    ) -> None: ...
-
-
-class _RestrictedSpawn(Protocol):
-    restricted_bridge_for: Callable[[Json], bool]
-    renew_restricted: _RestrictedRenew
-    requires_reusable_worktree: bool
-
-    def __call__(self, task: Json) -> tuple[bool, Json]: ...
-
-
-def configuration(value: object) -> Json:
+def configuration(value: object) -> dict:
     if isinstance(value, str):
         value = json.loads(value)
     if (
@@ -58,7 +40,7 @@ def configuration(value: object) -> Json:
     return {**value, "command": list(value["command"])}
 
 
-def validate_lane(spec: Json) -> None:
+def validate_lane(spec: dict) -> None:
     configuration(spec["restricted_worker"])
     if (
         not spec.get("labels") or spec.get("embody_backend", "headless") != "headless"
@@ -71,16 +53,11 @@ def validate_lane(spec: Json) -> None:
         raise ValueError("restricted_worker requires an explicit label-gated, single-container headless lane")
 
 
-def _run(
-    command: list[str], payload: str | None = None, *, env: dict[str, str] | None = None,
-) -> Json:
-    options: dict[str, Any] = {**no_window_kwargs()}
-    if env is not None:
-        options["env"] = env
+def _run(command: list[str], payload: str | None = None) -> dict:
     try:
         result = subprocess.run(
             command, input=payload, capture_output=True, text=True, check=False,
-            timeout=180, **options,
+            timeout=180, **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         # Provider input can contain a grant. Never include subprocess arguments
@@ -91,18 +68,18 @@ def _run(
     return _json_result(result)
 
 
-def _provider(spec: Json, action: str, body: Json) -> Json:
+def _provider(spec: dict, action: str, body: dict) -> dict:
     return _run([
         *spec["command"], action, spec["name"],
         "--expected-container-id", spec["instance_id"],
     ], json.dumps(body))
 
 
-def _save(client: Any, key: str, info: Json) -> None:
+def _save(client, key: str, info: dict) -> None:
     client.record_restricted_delivery(key, info)
 
 
-def _same_task(task: Json, info: Json) -> bool:
+def _same_task(task: dict, info: dict) -> bool:
     return (
         task.get("status") in {"claimed", "started"}
         and not task.get("hold_reason")
@@ -112,7 +89,7 @@ def _same_task(task: Json, info: Json) -> bool:
     )
 
 
-def _grant(client: Any, task_id: str, info: Json) -> Json:
+def _grant(client, task_id: str, info: dict) -> dict:
     grant = client.task_grant(
         task_id, info["worker_id"], info["native_session_id"],
         expected_generation=info["task_generation"], expected_epoch=info["coordinator_epoch"],
@@ -132,7 +109,7 @@ def _grant(client: Any, task_id: str, info: Json) -> Json:
     return grant
 
 
-def _project(spec: Json, client: Any, task_id: str, info: Json) -> Json:
+def _project(spec: dict, client, task_id: str, info: dict) -> dict:
     grant = _grant(client, task_id, info)
     projected = _provider(spec, "dispatch-project", {
         "binding_id": info["binding_id"], "owner_session_id": info["native_session_id"],
@@ -149,9 +126,7 @@ def _project(spec: Json, client: Any, task_id: str, info: Json) -> Json:
     return grant
 
 
-def _native_create(
-    prefix: list[str], key: str, agent: str, spec: Json, charter: str | None,
-) -> tuple[Json, bool]:
+def _native_create(prefix: list[str], key: str, agent: str, spec: dict, charter: str | None) -> tuple[dict, bool]:
     argv = [*prefix, "--json", "create", agent, "--provider-instance", "--creation-key", key]
     if charter:
         argv += ["--charter", charter]
@@ -177,9 +152,7 @@ def _native_create(
     }, created["ready"]
 
 
-def _resume_unprompted(prefix: list[str], info: Json) -> None:
-    from .bridge_continuation_cli import resume_environment
-
+def _resume_unprompted(prefix: list[str], info: dict) -> None:
     status = _run([*prefix, "--json", "status", info["session_id"]])
     if (
         status.get("session_id") != info["session_id"]
@@ -188,15 +161,12 @@ def _resume_unprompted(prefix: list[str], info: Json) -> None:
     ):
         raise BridgeUnavailable("restricted original conversation is not provably unprompted")
     if status["status"] == "stopped":
-        resumed = _run(
-            [*prefix, "--json", "resume", info["session_id"], "--strict"],
-            env=resume_environment(),
-        )
+        resumed = _run([*prefix, "--json", "resume", info["session_id"], "--strict"])
         if resumed.get("session_id") != info["session_id"] or resumed.get("status") != "idle":
             raise BridgeUnavailable("restricted strict resume did not retain the original bridge handle")
 
 
-def start(task: Json, *, spec: Json, charter: str | None = None) -> Json:
+def start(task: dict, *, spec: dict, charter: str | None = None) -> dict:
     client, key = task["_spawn_client"], task["spawn_reservation_key"]
     prefix = agent_bridge_launch_prefix()
     if not prefix:
@@ -324,19 +294,17 @@ def start(task: Json, *, spec: Json, charter: str | None = None) -> Json:
     return {"session": f"local-body:{info['session_id']}"}
 
 
-def make_spawn(value: object, *, charter: str | None = None) -> _RestrictedSpawn:
+def make_spawn(value: object, *, charter: str | None = None):
     spec = configuration(value)
 
-    def spawn(task: Json) -> tuple[bool, Json]:
+    def spawn(task: dict) -> tuple[bool, dict]:
         try:
             handle = start(task, spec=spec, charter=charter)
             return not handle.get("deferred"), handle
         except (DispatchError, BridgeUnavailable, httpx.HTTPError) as exc:
             return False, {"error": str(exc), "retained": True}
 
-    def renew(
-        client: Any, reservation: Json, task: Json, native: str, *, heartbeat: bool = False,
-    ) -> None:
+    def renew(client, reservation: dict, task: dict, native: str, *, heartbeat: bool = False) -> None:
         info = reservation.get("agent_info") or {}
         if (
             info.get("kind") != DRIVER or not info.get("delivered")
@@ -350,8 +318,7 @@ def make_spawn(value: object, *, charter: str | None = None) -> _RestrictedSpawn
         if heartbeat:
             client.scoped_heartbeat(task["id"], info["worker_id"], grant["task_token"])
 
-    result = cast(_RestrictedSpawn, spawn)
-    result.restricted_bridge_for = lambda _task: True
-    result.renew_restricted = renew
-    result.requires_reusable_worktree = False
-    return result
+    spawn.restricted_bridge_for = lambda _task: True
+    spawn.renew_restricted = renew
+    spawn.requires_reusable_worktree = False
+    return spawn

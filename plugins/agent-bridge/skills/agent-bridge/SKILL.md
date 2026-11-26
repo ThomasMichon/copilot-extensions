@@ -289,6 +289,11 @@ session, singleton or agent/profile contract. Standalone and remote
 Bridge-host lifecycle selection need their own providers. See
 [exact workspace resume](../../docs/target-inventory.md#exact-workspace-resume).
 
+Existing strict and hosting-fenced resume forms keep their original selectors
+by default, including calls from older or still-running producers. Add
+`--bridge` explicitly to combine exact selection with `--strict` or
+`--require-agent-hosting`; the hosting fence remains enforced.
+
 Use `read ID` for one bounded, cursor-neutral result snapshot of an
 exact local conversation, or `wait ID --json` to observe that same
 conversation until idle, terminal state, identity change or command timeout.

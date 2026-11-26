@@ -8,6 +8,7 @@ import http.client
 import importlib.util
 import io
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -1067,12 +1068,8 @@ def test_explicit_bridge_resume_overrides_the_retained_caller_environment(
 
 def test_restricted_stopped_provider_resume_crosses_the_real_selector_without_workspace(
     boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch,
-    source_code: Callable[[Path], CodeType],
 ) -> None:
     root = ROOT / "plugins/agent-dispatch/src/agent_dispatch"
-    helper = ModuleType(f"{PACKAGE}.bridge_continuation_cli")
-    monkeypatch.setitem(sys.modules, helper.__name__, helper)
-    exec(source_code(root / "bridge_continuation_cli.py"), helper.__dict__)
     monkeypatch.setenv("AGENT_BRIDGE_LEGACY_RESUME", "parent-value")
     boundary.response.update(worktree_id=None, target_dir=None, status="stopped")
     monkeypatch.setattr(
@@ -1123,13 +1120,13 @@ def test_restricted_stopped_provider_resume_crosses_the_real_selector_without_wo
     namespace["_resume_unprompted"](["synthetic-bridge"], {"session_id": "owned-123"})
     assert invocations == [
         (["synthetic-bridge", "--json", "status", "owned-123"], None),
-        (["synthetic-bridge", "--json", "resume", "owned-123", "--strict"], "1"),
+        (["synthetic-bridge", "--json", "resume", "owned-123", "--strict"], None),
     ]
     assert [path for method, path, _ in boundary.calls if method == "POST"] == [
         "/api/v1/sessions/owned-123/resume",
     ]
     assert all(path != "/api/v1/bridges" for _, path, _ in boundary.calls)
-    assert helper.__dict__["os"].environ["AGENT_BRIDGE_LEGACY_RESUME"] == "parent-value"
+    assert os.environ["AGENT_BRIDGE_LEGACY_RESUME"] == "parent-value"
 
 
 def test_singleton_create_recovery_hint_uses_the_real_legacy_profile_selector(
@@ -1161,3 +1158,48 @@ def test_singleton_create_recovery_hint_uses_the_real_legacy_profile_selector(
         "/api/v1/sessions/worker-profile/resume",
         "/api/v1/worktrees/example@anchor/resume/acp",
     ]
+
+
+@pytest.mark.parametrize("worktree,options", [
+    (False, ["--strict"]),
+    (True, ["--require-agent-hosting"]),
+    (True, ["--strict", "--require-agent-hosting"]),
+], ids=["strict-session", "hosting-worktree", "strict-hosting-worktree"])
+def test_prior_retained_resume_inputs_keep_the_original_owner_without_new_environment(
+    boundary: ResumeBoundary, capsys: Any, worktree: bool, options: list[str],
+) -> None:
+    target = ["--worktree-id", "worktree-123"] if worktree else ["owned-123"]
+    boundary.invoke("--json", "resume", *target, *options)
+    assert json.loads(capsys.readouterr().out)["acp_session_id"] == "native-123"
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/worktrees/worktree-123/resume/acp" if worktree
+        else "/api/v1/sessions/owned-123/resume",
+    ]
+    assert all(path != "/api/v1/bridges" for _, path, _ in boundary.calls)
+
+
+@pytest.mark.parametrize("option", ["--strict", "--require-agent-hosting"])
+def test_explicit_bridge_selection_keeps_compatible_retained_options(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any, option: str,
+) -> None:
+    boundary.health["capabilities"]["repository_agent_hosting"] = 1
+    boundary.invoke("--json", "resume", "native-123", "--bridge", option)
+    assert json.loads(capsys.readouterr().out)["acp_session_id"] == "native-123"
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/worktrees/worktree-123/resume/acp/exact",
+    ]
+
+
+def test_prior_hosting_fenced_positional_worktree_resume_preserves_original_fallback(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    monkeypatch.setattr(boundary.resume, "find_singleton_repo", lambda target: None)
+    monkeypatch.setattr(boundary.client, "list_agents", lambda: [])
+    boundary.failures.append(boundary.errors.BridgeClientError(404, "not owned"))
+    boundary.invoke("--json", "resume", "worktree-123", "--require-agent-hosting")
+    assert json.loads(capsys.readouterr().out)["worktree_id"] == "worktree-123"
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/sessions/worktree-123/resume",
+        "/api/v1/worktrees/worktree-123/resume/acp",
+    ]
+    assert all(path != "/api/v1/bridges" for _, path, _ in boundary.calls)
