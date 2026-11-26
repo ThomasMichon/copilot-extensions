@@ -11,11 +11,14 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from typing import Any, cast
 
 from plugin_resolve.reflection import selection_spec, selection_json
 
+from . import consumer_telemetry as ct
 
-def add_plugin_selection_arguments(parser) -> None:
+
+def add_plugin_selection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json, default=[],
     )
@@ -27,7 +30,7 @@ def add_plugin_selection_arguments(parser) -> None:
     )
 
 
-def add_copilot_subparser(sub) -> None:
+def add_copilot_subparser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``copilot`` subcommand on the shared subparsers group."""
     copilot_p = sub.add_parser(
         "copilot",
@@ -180,7 +183,13 @@ def cmd_copilot(
     from .config import load_config
     from .ssh_transport import build_ssh_command, prepare_ssh_config
 
-    target = resolve_live_exec_target(args.name, config=load_config())
+    lookup_started = ct.clock()
+    try:
+        target = resolve_live_exec_target(args.name, config=load_config())
+    except BaseException as exc:
+        ct.note("container_lookup", "failure", ct.lookup_reason(exc), started=lookup_started)
+        raise
+    ct.note("container_lookup", "success", "none", started=lookup_started)
     if target.actual_profile == RESTRICTED_PROFILE:
         print(
             f"[FAIL] '{args.name}' is a {RESTRICTED_PROFILE} container -- the "
@@ -206,11 +215,15 @@ def cmd_copilot(
     from ssh_manager import TargetBusyError, TargetLock
 
     target_lock = TargetLock(f"container:{args.name}", op="copilot")
+    forced = bool(getattr(args, "force", False))
+    claim_started = ct.clock()
     try:
-        target_lock.acquire(force=getattr(args, "force", False))
+        target_lock.acquire(force=forced)
     except TargetBusyError as busy:
+        ct.note("claim", "failure", "claim_busy", started=claim_started)
         print(busy.user_message(), file=sys.stderr)
         return busy_exit
+    ct.note("claim", "success", "force_claimed" if forced else "none", started=claim_started)
 
     from .runtime_drivers import pin_incarnation, unpin
 
@@ -229,8 +242,14 @@ def cmd_copilot(
             target.fleet, args.name, relay_enabled, require_ssh=True,
         ).agent_relay
         if not args.no_relay and relay_enabled:
-            host_relay_port = require_live_relay_port()
+            relay_started = ct.clock()
+            try:
+                host_relay_port = require_live_relay_port()
+            except RuntimeError:
+                ct.note("credential_relay", "failure", "relay_not_listening", started=relay_started)
+                raise
             if not relay_healthy(host_relay_port):
+                ct.note("credential_relay", "failure", "relay_not_listening", started=relay_started)
                 raise RuntimeError(
                     "Published credential relay at "
                     f"127.0.0.1:{host_relay_port} failed its ping probe; "
@@ -243,6 +262,7 @@ def cmd_copilot(
             from .relay_provider import token_for
             from .container_shims import deploy, git_credential_environment
             deploy(args.name, ado=True)
+            ct.note("credential_relay", "success", "none", started=relay_started)
             relay_port = config.relay_port
 
             relay_env = {
@@ -277,7 +297,13 @@ def cmd_copilot(
                 values = {**container_environment(args.name, user), **relay_env}
                 forward, _ = config.credentials_for(target.fleet)
                 if forward:
+                    account_started = ct.clock()
                     git_token = host_gh_token()
+                    ct.note(
+                        "account_resolution",
+                        *(("success", "none") if git_token else ("failure", "account_unresolved")),
+                        started=account_started,
+                    )
                     if not git_token:
                         raise RuntimeError("forward_gh_token requires the independent gh login")
                     values["GH_TOKEN"] = git_token
@@ -286,13 +312,22 @@ def cmd_copilot(
                     config=config, fleet=target.fleet,
                 )
                 from .plugin_preparation import attached_launch_command, stage_for_attached_launch
-                prepared_context = {}
-                preparation = stage_for_attached_launch(
-                    args, target, remote_env=remote_env, relay_port=relay_port,
-                    prepared_context=prepared_context,
-                )
+                prepared_context: dict[str, Any] = {}
+                preparation_started = ct.clock()
+                try:
+                    preparation = stage_for_attached_launch(
+                        args, target, remote_env=remote_env, relay_port=relay_port,
+                        prepared_context=prepared_context,
+                    )
+                except BaseException as exc:
+                    ct.note(
+                        "plugin_preparation", "failure", ct.preparation_reason(exc),
+                        started=preparation_started,
+                    )
+                    raise
+                ct.note("plugin_preparation", "success", "none", started=preparation_started)
                 remote_command = attached_launch_command(
-                    remote_command, prepared_context.get("workspace"),
+                    remote_command, cast(str, prepared_context.get("workspace")),
                 )
                 if auth_env:
                     remote_command = auth.wrap_manager_shell(remote_command, auth_env, remote_env)
@@ -306,9 +341,17 @@ def cmd_copilot(
                 )
                 env = auth.without_inference_token({**os.environ, **relay_env})
                 inputs_safe_to_cleanup = auth_env is None
+                connect_started = ct.clock()
                 rc = subprocess.run(
                     spawn_cmd, env=env, creationflags=creation_flags()
                 ).returncode
+                # The interactive session's own exit status is not a connect
+                # failure; only OpenSSH's reserved transport status is.
+                ct.note(
+                    "container_connect",
+                    *(("failure", "connect_failed") if rc == ct.SSH_TRANSPORT_EXIT else ("success", "none")),
+                    started=connect_started,
+                )
                 if auth_env:
                     if auth.attached_created_child(args.name, user, auth_env):
                         auth.wait_for_consumption(args.name, user, auth_env)

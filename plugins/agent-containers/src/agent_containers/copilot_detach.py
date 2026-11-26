@@ -9,7 +9,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from agent_procutil import no_window_flags
 from venue_copilot import read_seed
@@ -17,6 +17,8 @@ from venue_copilot.detached import launch_detached, public_plan, stop_detached
 from venue_copilot.models import model_copilot_args
 from venue_copilot.supervisor import with_supervisor
 from venue_copilot.refs import upload_for
+
+from . import consumer_telemetry as ct
 
 _BUSY_EXIT = 75
 _RESERVATION_TTL = 900.0
@@ -156,7 +158,12 @@ def _launch_env(
     if forward:
         from .resolver import host_gh_token
 
+        account_started = ct.clock()
         github_token = host_gh_token()
+        ct.note(
+            "account_resolution", *(("success", "none") if github_token else ("failure", "account_unresolved")),
+            started=account_started,
+        )
         if not github_token:
             raise RuntimeError(
                 "forward_gh_token is enabled but `gh auth token` returned nothing; "
@@ -173,7 +180,17 @@ def _launch_env(
     from .container_shims import git_credential_environment
     from .relay_provider import token_for
 
-    ensure_agent_worktrees(args.name, user=target.user)
+    payload_started = ct.clock()
+    try:
+        ensure_agent_worktrees(args.name, user=target.user)
+    except BaseException as exc:
+        ct.note(
+            "bridge_payload", "failure",
+            "interrupted" if isinstance(exc, KeyboardInterrupt) else "payload_install_failed",
+            started=payload_started,
+        )
+        raise
+    ct.note("bridge_payload", "success", "none", started=payload_started)
     if getattr(target, "workspace_folder", ""):
         ensure_agent_worktrees_workspace_registered(
             args.name,
@@ -182,13 +199,20 @@ def _launch_env(
         )
     if getattr(args, "no_relay", False) or not relay_enabled:
         return env, None, None
-    host_relay_port = require_live_relay_port()
+    relay_started = ct.clock()
+    try:
+        host_relay_port = require_live_relay_port()
+    except RuntimeError:
+        ct.note("credential_relay", "failure", "relay_not_listening", started=relay_started)
+        raise
     if not relay_healthy(host_relay_port):
+        ct.note("credential_relay", "failure", "relay_not_listening", started=relay_started)
         raise RuntimeError(
             "Published credential relay at "
             f"127.0.0.1:{host_relay_port} failed its ping probe; "
             "restart agent-bridge or set relay.enabled: false in containers.yaml"
         )
+    ct.note("credential_relay", "success", "none", started=relay_started)
     deploy_shims(args.name, ado=True)
     env.update(
         {
@@ -252,11 +276,13 @@ class _ContainerAdapter:
         self.target = target
         self.inputs_safe_to_cleanup = True
         self._hold_updated_at: float | None = None
-        self.plugin_args = None
+        self.plugin_args: argparse.Namespace | None = None
         self._plugins_prepared = False
         self.pending_delivery = False
 
-    def record_pending_delivery(self, plan, pending):
+    def record_pending_delivery(
+        self, plan: dict[str, Any], pending: dict[str, Any] | None,
+    ) -> None:
         from . import forward_keeper
         if pending is not None:
             pending = {
@@ -266,16 +292,22 @@ class _ContainerAdapter:
         forward_keeper.record_pending_delivery(self.name, self.hold_id, pending)
         self.pending_delivery = pending is not None
 
-    def prepare(self, plan):
+    def prepare(self, plan: dict[str, Any]) -> dict[str, Any]:
         from .plugin_preparation import prepare_plugins
         from venue_copilot.refs import require_cli_context
-        context = {}
-        prepare_plugins(
-            self.plugin_args, self.target, run_input=self.run_input,
-            remote_env=self.remote_env, relay_port=self.relay_port, prepared_context=context,
-        )
+        context: dict[str, Any] = {}
+        started = ct.clock()
+        try:
+            prepare_plugins(
+                self.plugin_args, self.target, run_input=self.run_input,
+                remote_env=self.remote_env, relay_port=self.relay_port, prepared_context=context,
+            )
+        except BaseException as exc:
+            ct.note("plugin_preparation", "failure", ct.preparation_reason(exc), started=started)
+            raise
+        ct.note("plugin_preparation", "success", "none", started=started)
         self._plugins_prepared = True
-        return require_cli_context(context.get("plugin_context"))
+        return require_cli_context(cast(dict[str, Any], context.get("plugin_context")))
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)
@@ -303,15 +335,22 @@ class _ContainerAdapter:
             remote_command = build_remote_command(command, self.remote_env)
             ssh_command = build_ssh_command(self.ssh_config, remote_command, pty=False)
             self.inputs_safe_to_cleanup = auth_env is None
-            proc = subprocess.run(
-                ssh_command,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                creationflags=no_window_flags(),
-                env=without_inference_token(dict(os.environ)),
-            )
+            exec_started = ct.clock()
+            try:
+                proc = subprocess.run(
+                    ssh_command,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    creationflags=no_window_flags(),
+                    env=without_inference_token(dict(os.environ)),
+                )
+            except subprocess.TimeoutExpired:
+                ct.note("exec", "timeout", "transport_failed", started=exec_started,
+                        limit_ms=int(timeout * 1000))
+                raise
+            _note_launch_exec(proc.returncode, proc.stdout or "", proc.stderr or "", exec_started)
             if self.target is not None and auth_env:
                 try:
                     result = json.loads(proc.stdout)
@@ -365,6 +404,40 @@ class _ContainerAdapter:
         return f"agent-containers copilot {self.name} --stop"
 
 
+def _note_launch_exec(rc: int, stdout: str, stderr: str, started: float) -> None:
+    """Note the launch exec and the embody it ran; content is never offered."""
+    duration = ct.elapsed_ms(started)
+    if rc == ct.SSH_TRANSPORT_EXIT:
+        ct.note("exec", "failure", "transport_failed", duration_ms=duration)
+        return
+    ct.note("exec", "success", "none", duration_ms=duration)
+    from venue_copilot import last_json
+
+    embodied = last_json(stdout)
+    if rc == 0 and embodied.get("ok"):
+        ct.note("remote_embody", "success", "none", duration_ms=duration)
+    else:
+        ct.note("remote_embody", "failure", ct.embody_reason(stdout, stderr), duration_ms=duration)
+
+
+def _registration_progress(stage: str, detail: str = "") -> None:
+    """`_progress`, also opening and closing the bridge-registration stage."""
+    if stage == "register":
+        ct.begin("bridge_registration")
+    elif stage == "seed-bridge" and ct.is_open("bridge_registration"):
+        ct.succeed()
+    _progress(stage, detail)
+
+
+def _note_registration(payload: dict[str, Any]) -> None:
+    if not ct.is_open("bridge_registration"):
+        return
+    if payload.get("session_id"):
+        ct.succeed()
+    else:
+        ct.fail(ct.registration_reason(payload.get("error")))
+
+
 def cmd_detach(
     args: argparse.Namespace,
     *,
@@ -376,17 +449,24 @@ def cmd_detach(
 
     from .ssh_transport import cleanup_remote_env, prepare_ssh_config
 
+    ct.start_launch()
+    ct.begin("container_lookup")
     try:
         target = _resolve_target(args)
     except RuntimeError as exc:
+        ct.fail(ct.lookup_reason(exc))
         return _fail(str(exc))
+    ct.succeed()
     plan = plan_for(args, target)
     plan["venue"] = with_supervisor(plan["venue"])  # successor can find this worker
+    ct.begin("seed_validation")
     try:
         seed = read_seed(args)
         refs = upload_for(list(getattr(args, "ref_files", None) or []), plan["scope_id"])
     except (OSError, ValueError) as exc:
+        ct.fail(ct.seed_reason(exc))
         return _fail(str(exc), plan)
+    ct.succeed()
     if getattr(args, "dry_run", False):
         print(
             json.dumps(
@@ -418,11 +498,15 @@ def cmd_detach(
     except RuntimeError as exc:
         return _fail(str(exc), plan)
     target_lock = TargetLock(f"container:{args.name}", op="copilot")
+    forced = bool(getattr(args, "force", False))
+    claim_started = ct.clock()
     try:
-        target_lock.acquire(force=getattr(args, "force", False))
+        target_lock.acquire(force=forced)
     except TargetBusyError as busy:
+        ct.note("claim", "failure", "claim_busy", started=claim_started)
         print(busy.user_message(), file=sys.stderr)
         return busy_exit
+    ct.note("claim", "success", "force_claimed" if forced else "none", started=claim_started)
 
     from .runtime_drivers import pin_incarnation, unpin
 
@@ -459,7 +543,7 @@ def cmd_detach(
                         "session_id": pending["session_id"], "error": str(exc),
                     })
             result = reconcile_owned_delivery(pending)
-            def settle(command, stdin):
+            def settle(command: str, stdin: bytes) -> tuple[int, str, str]:
                 return _remote_input(
                     ssh_config, command, stdin, timeout=60,
                 )
@@ -516,9 +600,10 @@ def cmd_detach(
             copilot_args=_with_caller_model(list(getattr(args, "copilot_args", None) or [])),
             ensure_mux=bool(args.ensure_mux),
             register_timeout=float(args.register_timeout),
-            progress=_progress,
+            progress=_registration_progress,
             refs=refs,
         )
+        _note_registration(payload)
         return _emit(rc, payload)
     finally:
         if remote_env and (adapter is None or (
