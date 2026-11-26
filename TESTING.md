@@ -10022,6 +10022,19 @@ removing its construction directory and stages both connector variants from
 that archive, so source-checkout resources cannot hide a missing export member.
 These controls do not establish native CLI plugin precedence or installed
 extension migration.
+The optional `driver-global-v1` controls additionally require the selected
+global generation's contract declaration before launch, reject legacy or
+missing support, and preserve the original admission command without adding a
+staged connector argument. The Node packet exercises global and staged
+entrypoints through their shared activation owner, including failed joins,
+activation cleanup, incomplete global resources, module/PID mismatch and
+competing senders. `test_sdk_compat.py` imports the materialized global
+entrypoint against a synthetic SDK and loopback Host.
+`test_packaged_connector.py` builds an sdist, removes its construction tree,
+builds the wheel from that sdist and executes the wheel's global entrypoint;
+positive and wrong-PID controls require exactly one SDK join and no fallback.
+These are explicit integration controls, not additions to the required
+unit-only packet. They do not qualify real CLI lifecycle or installed adoption.
 The watch-transition controls exercise the actual prepared and Windows sealed
 receivers with inert storage and lease owners: complete version-1 origin
 preservation, current writer admission, physical-topology refusal,

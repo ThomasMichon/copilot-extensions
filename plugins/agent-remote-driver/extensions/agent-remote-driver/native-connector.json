@@ -1,0 +1,5 @@
+{
+  "schema": "copilot-driver.native-connectors",
+  "version": 1,
+  "contracts": ["driver-global-v1"]
+}

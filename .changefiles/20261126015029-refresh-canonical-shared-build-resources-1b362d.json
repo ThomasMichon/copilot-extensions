@@ -1,0 +1,17 @@
+{
+  "comment": "Refresh canonical shared build resources for explicit global Driver connector support.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

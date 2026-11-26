@@ -88,8 +88,13 @@ print(json.dumps({"legacy":str(legacy),"selected":str(selected)}))
     assert (Path(staged["selected"]) / "extensions/copilot-driver-headed/core/native-connector.mjs").is_file()
 
 
-@pytest.mark.parametrize("mode", ["selected", "wrong-loadout"])
-def test_staged_connector_and_actual_support_facades_join_once_without_suite_services(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("owner,mode", [
+    ("staged", "selected"), ("staged", "wrong-loadout"),
+    ("global", "selected"), ("global", "wrong-loadout"), ("global", "competing-staged"),
+])
+def test_staged_connector_and_actual_support_facades_join_once_without_suite_services(
+    tmp_path: Path, owner: str, mode: str,
+) -> None:
     from agent_procutil.owned_process import run_caller_owned
     from agent_remote_driver.bridge_extension import extension_sources
 
@@ -107,6 +112,15 @@ def test_staged_connector_and_actual_support_facades_join_once_without_suite_ser
         for asset, body in extension_sources():
             if name == "agent-bridge" or asset in {"sdk-compat.mjs", "native-connector.mjs"}:
                 (resources / asset).write_bytes(body)
+        if name == "agent-remote-driver" and owner == "global":
+            (extension / "core").mkdir()
+            for asset, body in extension_sources():
+                (extension / "core" / asset).write_bytes(body)
+            (extension / "headed").mkdir()
+            for asset in ("connection.mjs", "acp-adapter.mjs"):
+                (extension / "headed" / asset).write_bytes(
+                    files("agent_remote_driver.headed").joinpath(asset).read_bytes(),
+                )
         roots[name] = plugin
     sdk = tmp_path / "node_modules" / "@microsoft" / "copilot-sdk"
     sdk.mkdir(parents=True)
@@ -123,8 +137,11 @@ def test_staged_connector_and_actual_support_facades_join_once_without_suite_ser
     assert node, "staged connector controls require Node"
     result = run_caller_owned([
         node, str(Path(__file__).parent / "fixtures" / "native-connector-entry.mjs"),
-        str(selected), str(roots["agent-bridge"]), str(roots["agent-remote-driver"]), str(config), mode,
+        str(roots["agent-remote-driver"] if owner == "global" else selected),
+        str(roots["agent-bridge"]), str(roots["agent-remote-driver"]), str(config), mode, owner,
     ], cwd=tmp_path, timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024)
     assert result.returncode == 0, result.stdout + result.stderr
-    expected = "wrong loadout refused before native input" if mode == "wrong-loadout" else "one staged Driver join"
+    expected = f"one {owner} Driver join" if mode == "selected" else (
+        mode.replace("-", " ") + " refused before native input"
+    )
     assert expected in result.stdout

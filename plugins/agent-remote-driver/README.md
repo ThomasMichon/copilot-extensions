@@ -591,6 +591,15 @@ directory this process can create and write to.
   its original support root and remains passive without creating another SDK
   client, listener or service ensure. The optional portable preference defaults
   off and does not retire installed extensions.
+  The separate explicit `driver-global-v1` contract makes this globally enabled
+  entrypoint the actual sole SDK connector instead: it supplies Core's existing
+  hooks and `/peer` through one join and binds the same native object to the
+  headed adapter, without activating a staged extension. The selected global
+  generation advertises support in `native-connector.json`; missing support
+  refuses before native creation. Module root, live identity/PID, session/CWD
+  and competing-sender checks remain mandatory. A failed join or lost binding
+  never falls back or reconnects. Ordinary receiving does not select this
+  optional contract automatically.
 - [`extensions/agent-remote-driver/driver-server.mjs`](extensions/agent-remote-driver/driver-server.mjs) --
   the dependency-free HTTP server (health/events/send/steer/abort, with a
   bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly

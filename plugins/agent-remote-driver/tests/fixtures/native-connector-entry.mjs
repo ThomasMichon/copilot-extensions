@@ -3,9 +3,11 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [connectorRoot, bridgeRoot, driverRoot, config, mode] = process.argv.slice(2);
+const [connectorRoot, bridgeRoot, driverRoot, config, mode, owner = "staged"] = process.argv.slice(2);
+const globalOwner = owner === "global";
 const sessionId = "11111111-1111-4111-8111-111111111111";
-const connectorId = "plugin:copilot-driver-headed:copilot-driver-headed";
+const connectorName = globalOwner ? "agent-remote-driver" : "copilot-driver-headed";
+const connectorId = `plugin:${connectorName}:${connectorName}`;
 const nonce = "fixture-".repeat(8), handlers = new Set(), sends = [];
 let joins = 0, peer, handshake, reply;
 let bound, answered;
@@ -33,7 +35,8 @@ const timer = setTimeout(() => { throw new Error("Bounded synthetic connector ti
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const selected = {
-    contract: "driver-native-v1", version: 1, sessionId, cwd: process.cwd(),
+    contract: globalOwner ? "driver-global-v1" : "driver-native-v1",
+    version: 1, sessionId, cwd: process.cwd(),
     scopeId: "fixture-scope", attempt: "22222222-2222-4222-8222-222222222222",
     bridgePluginRoot: bridgeRoot, driverPluginRoot: driverRoot, connectorPluginRoot: connectorRoot,
   };
@@ -60,7 +63,7 @@ try {
         plugins: { list: () => assert.fail("Installer records cannot establish executing origins") },
         extensions: mode === "missing-observer" ? {} : { list: async () => ({ extensions: [
           { id: connectorId,
-            name: mode === "discovery-name" ? "runtime-discovery-label" : "copilot-driver-headed",
+            name: mode === "discovery-name" ? "runtime-discovery-label" : connectorName,
             source: "plugin", status: "running",
             pid: mode === "missing-origin" ? undefined : mode === "wrong-loadout" ? process.pid + 1 : process.pid,
             ...(mode === "identity-observation" ? {
@@ -69,6 +72,10 @@ try {
           },
           ...(mode === "competing-driver" ? [{
             id: "plugin:agent-remote-driver:agent-remote-driver", name: "agent-remote-driver",
+            source: "plugin", status: "running", pid: process.pid + 2,
+          }] : []),
+          ...(mode === "competing-staged" ? [{
+            id: "plugin:copilot-driver-headed:copilot-driver-headed", name: "copilot-driver-headed",
             source: "plugin", status: "running", pid: process.pid + 2,
           }] : []),
         ] }) },
@@ -87,11 +94,13 @@ try {
       },
     };
   };
-  for (const [root, name] of [[bridgeRoot, "agent-bridge"], [driverRoot, "agent-remote-driver"]]) {
+  for (const [root, name] of [
+    [bridgeRoot, "agent-bridge"], ...(!globalOwner ? [[driverRoot, "agent-remote-driver"]] : []),
+  ]) {
     await import(pathToFileURL(resolve(root, "extensions", name, "extension.mjs")).href);
   }
   assert.equal(joins, 0, "selected support facades must not join");
-  await import(pathToFileURL(resolve(connectorRoot, "extensions/copilot-driver-headed/extension.mjs")).href);
+  await import(pathToFileURL(resolve(connectorRoot, "extensions", connectorName, "extension.mjs")).href);
   await binding;
   assert.equal(joins, 1);
   assert.equal(handlers.size, 2, "one headed observer and one coordination observer");
@@ -106,7 +115,8 @@ try {
     "wrong-loadout": "extension-process-mismatch:connector",
     "missing-origin": "extension-process-mismatch:connector",
     "missing-observer": "extensions-list-unsupported",
-    "competing-driver": "extension-competing:driver",
+    "competing-driver": globalOwner ? "plugin-duplicated:connector" : "extension-competing:driver",
+    "competing-staged": "extension-competing:connector",
     "identity-observation": "extension-identity-mismatch:connector",
   }[mode];
   if (refusal) {
@@ -122,7 +132,7 @@ try {
     assert.equal(reply.result.messageId, "native-message");
     assert.equal(sends.length, 1);
     assert.equal(sends[0].prompt, 'literal\n"quote" & $value');
-    console.log("one staged Driver join; passive support facades; original native adapter; no suite service");
+    console.log(`one ${owner} Driver join; passive support facades; original native adapter; no suite service`);
   }
 } finally {
   clearTimeout(timer);

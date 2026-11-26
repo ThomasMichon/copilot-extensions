@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import runpy
 import shutil
@@ -33,13 +34,13 @@ def test_sdist_builds_complete_connector_wheel_without_checkout(tmp_path: Path) 
     canonical = project.parents[1] / "libs/versioned-runtime/standalone_build.py"
     canonical.parent.mkdir(parents=True)
     shutil.copyfile(helper, canonical)
-    compatibility = project.parents[1] / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension"
-    compatibility.mkdir(parents=True)
-    for name in ("sdk-compat.mjs", "native-connector.mjs"):
-        shutil.copyfile(
-            ROOT / "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension" / name,
-            compatibility / name,
-        )
+    for path in selected.values():
+        assert path is not None
+        path = path.resolve()
+        if path.is_relative_to(ROOT / "libs/copilot-driver-core"):
+            target = project.parents[1] / path.relative_to(ROOT)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
     output = tmp_path / "artifacts"
     output.mkdir()
     deadline = time.monotonic() + 60
@@ -85,3 +86,35 @@ def test_sdist_builds_complete_connector_wheel_without_checkout(tmp_path: Path) 
             if name.startswith("agent_remote_driver_app/_runtime_assets/")
         }
     assert assets == expected
+    installed = tmp_path / "installed-driver"
+    for name, body in assets.items():
+        target = installed / name.removeprefix("_runtime_assets/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+    from agent_remote_driver.bridge_extension import extension_sources
+
+    bridge = tmp_path / "bridge"
+    extension = bridge / "extensions/agent-bridge"
+    (extension / "core").mkdir(parents=True)
+    shutil.copyfile(ROOT / "plugins/agent-bridge/extensions/agent-bridge/extension.mjs", extension / "extension.mjs")
+    for name, body in extension_sources():
+        (extension / "core" / name).write_bytes(body)
+    sdk = tmp_path / "node_modules/@microsoft/copilot-sdk"
+    sdk.mkdir(parents=True)
+    (sdk / "package.json").write_text(json.dumps({
+        "type": "module", "exports": {".": "./index.mjs", "./extension": "./extension.mjs"},
+    }), encoding="utf-8")
+    (sdk / "index.mjs").write_text("export const approveAll = () => { throw Error('forbidden'); };",
+                                  encoding="utf-8")
+    (sdk / "extension.mjs").write_text("export const joinSession = (...args) => globalThis.__joinSession(...args);",
+                                      encoding="utf-8")
+    config = tmp_path / "config"
+    config.mkdir()
+    node = shutil.which("node")
+    assert node, "closed global connector controls require Node"
+    for mode in ("selected", "wrong-loadout"):
+        result = run_caller_owned([
+            node, str(Path(__file__).parent / "fixtures/native-connector-entry.mjs"),
+            str(installed), str(bridge), str(installed), str(config), mode, "global",
+        ], cwd=tmp_path, timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024)
+        assert result.returncode == 0, result.stdout + result.stderr

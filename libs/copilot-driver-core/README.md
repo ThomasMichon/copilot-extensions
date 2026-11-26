@@ -51,6 +51,31 @@ A preferred launch whose retained selection is missing also refuses; missing
 launch state is not a legacy capability advertisement.
 No new CLI option, installed setting or global plugin migration is involved.
 
+Core additionally accepts the explicit `driver-global-v1` contract for a
+globally enabled Driver that is itself the sole SDK connector. The selected
+global generation must advertise that contract in its retained
+`extensions/agent-remote-driver/native-connector.json`; missing or unsupported
+metadata refuses before staging or native creation. The declaration's Driver
+root names that actual global generation, not a separate portable facade.
+Its connector root must be the same root. Core validates and removes the
+original support plugin arguments, but adds no staged connector argument.
+Retained headed helpers remain private implementation resources, not another
+activated SDK owner. The global entrypoint joins once with the same Core
+contributions and binds that native object to the existing headed adapter.
+The live observer must report the global Driver's source-qualified ID and
+actual PID; only that exact executing entry is excluded from competing-sender
+checks. A second Driver, Bridge or staged connector still refuses input.
+An incomplete global payload, failed join or lost Host binding never selects
+the staged path or reconnects another SDK owner.
+
+This is provider-first optional support, not an ordinary receiving default.
+Older callers retain `driver-native-v1` and its staged owner. A caller selecting
+the global contract must discover support from both the executing Core's
+`headed_connectors` and the selected global generation's declaration.
+No existing launch is silently migrated, disabled or replayed on rollback.
+Native installation precedence and lifecycle qualification remain separate
+from synthetic SDK and closed-package evidence.
+
 For that selected launch, Core validates the real Bridge and floor Driver support
 roots in the original command, then omits only their support-only plugin arguments
 from the native child command. Their assets remain retained, but do not start

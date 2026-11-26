@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 from agent_procutil import contained_test_mode, no_window_kwargs
 
 from .backend import HeadedBackend
-from .staging import CONNECTOR_ENV, connector_selection, selected_connector_roots, stage_extension
+from .staging import (
+    CONNECTOR_ENV, GLOBAL_CONNECTOR_CONTRACT, connector_selection, selected_connector_roots, stage_extension,
+)
 from .receipt import PROCESS_RECEIPT
 from ..native_arguments import VALUE_OPTIONS
 from ..session_host.host import ChildProcess, SessionHost
@@ -115,7 +117,7 @@ def _native_request(argv: list[str], session_id: str) -> str | None:
     return prompts[0] if prompts else None
 
 
-def _extension_command(argv: list[str], plugin: Path) -> list[str]:
+def _extension_command(argv: list[str], plugin: Path | None) -> list[str]:
     index = 1
     experimental = False
     while index < len(argv):
@@ -124,7 +126,7 @@ def _extension_command(argv: list[str], plugin: Path) -> list[str]:
             break
         experimental = experimental or argument == "--experimental"
         index += 2 if argument in VALUE_OPTIONS | {"-C", "--resume"} else 1
-    additions = ["--plugin-dir", str(plugin)]
+    additions = ["--plugin-dir", str(plugin)] if plugin is not None else []
     if not experimental:
         additions.append("--experimental")
     return [*argv[:index], *additions, *argv[index:]]
@@ -338,6 +340,7 @@ async def _run_headed_once(
     nonce = nonce or (env or {}).get(_NONCE_ENV) or os.environ.get(_NONCE_ENV) or secrets.token_hex(32)
     child_env = {**os.environ, **(env or {})}
     connector = connector_selection(child_env, session_id=session_id, cwd=cwd)
+    global_connector = connector is not None and connector["contract"] == GLOBAL_CONNECTOR_CONTRACT
     native_argv = child_argv
     if connector is not None:
         native_argv = selected_connector_roots(connector, child_argv, value_options=VALUE_OPTIONS)
@@ -345,7 +348,9 @@ async def _run_headed_once(
         Path(attempt_directory), **({"native_connector": True} if connector is not None else {}),
     )
     if connector is not None:
-        child_env[CONNECTOR_ENV] = json.dumps({**connector, "connectorPluginRoot": str(plugin)})
+        child_env[CONNECTOR_ENV] = json.dumps({
+            **connector, "connectorPluginRoot": connector["driverPluginRoot"] if global_connector else str(plugin),
+        })
     startup_context = None if auth_resume else child_env.get(_STARTUP_ENV)
     if not auth_resume and child_env.get(_ACQUISITION_ENV) is not None and before_exec is None:
         raise ValueError("Original launch context requires its receiving owner")
@@ -380,7 +385,9 @@ async def _run_headed_once(
             "nonce": nonce, "hostPid": os.getpid(),
             "client": str(plugin / "extensions" / "copilot-driver-headed" / "host-client.mjs"),
         })
-        argv = _extension_command(_resolve_child_exe(native_argv, child_env.get("PATH")), plugin)
+        argv = _extension_command(
+            _resolve_child_exe(native_argv, child_env.get("PATH")), None if global_connector else plugin,
+        )
         _require_receiving_policy(cwd, policy_context)
         if startup is not None:
             startup.check(child_argv, cwd, session_id, {**os.environ, **(env or {})})

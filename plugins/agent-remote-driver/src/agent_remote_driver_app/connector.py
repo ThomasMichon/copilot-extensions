@@ -87,7 +87,7 @@ def _assets(source: Path) -> dict[str, bytes]:
             continue
         _ordinary(path)
         name = path.relative_to(source).as_posix()
-        if name != "plugin.json" and not (
+        if name not in {"plugin.json", "extensions/agent-remote-driver/native-connector.json"} and not (
             name.startswith("extensions/agent-remote-driver/") and path.suffix == ".mjs"
         ):
             raise ValueError("unexpected packaged Driver connector resource")

@@ -22,7 +22,7 @@ def _owner(relative: str) -> SimpleNamespace:
     return SimpleNamespace(**runpy.run_path(str(ROOT / relative)))
 
 
-def _command_controls(tmp_path: Path) -> None:
+def _command_controls(tmp_path: Path, contract: str = CONTRACT) -> None:
     owner = _owner(STAGING)
     options = _owner("libs/copilot-driver-core/src/agent_remote_driver/native_arguments.py").VALUE_OPTIONS
     roots = {}
@@ -34,12 +34,25 @@ def _command_controls(tmp_path: Path) -> None:
         }), encoding="utf-8")
         roots[name] = str(root)
     selected = {
+        "contract": contract,
         "bridgePluginRoot": roots["agent-bridge"], "driverPluginRoot": roots["agent-remote-driver"],
     }
     driver = ["--plugin-dir=" + roots["agent-remote-driver"]]
     bridge = ["--plugin-dir", roots["agent-bridge"]]
     base = ["copilot", "--session-id", SESSION]
     original = [*base, *driver, *bridge]
+    if contract == "driver-global-v1":
+        capability = Path(roots["agent-remote-driver"]) / "extensions" / "agent-remote-driver"
+        capability.mkdir(parents=True)
+        declaration = capability / "native-connector.json"
+        for contents in (None, {}, {"schema": "copilot-driver.native-connectors", "version": 1, "contracts": []}):
+            if contents is not None:
+                declaration.write_text(json.dumps(contents), encoding="utf-8")
+            with pytest.raises(ValueError, match="does not support driver-global-v1"):
+                owner.selected_connector_roots(selected, original, value_options=options)
+        declaration.write_text(json.dumps({
+            "schema": "copilot-driver.native-connectors", "version": 1, "contracts": [contract],
+        }), encoding="utf-8")
     assert owner.selected_connector_roots(selected, original, value_options=options) == base
     assert original == [*base, *driver, *bridge]
     for retained in (
@@ -84,6 +97,14 @@ def test_original_headed_selection_is_legacy_without_a_scoped_declaration(tmp_pa
     env[owner.CONNECTOR_ENV] = json.dumps(selected)
     assert owner.connector_selection(env, session_id=SESSION, cwd=str(ROOT)) == selected
     _command_controls(tmp_path)
+
+def test_global_selection_requires_support_from_the_addressed_driver(tmp_path: Path) -> None:
+    owner = _owner(STAGING)
+    selected, env = _selection()
+    selected["contract"] = "driver-global-v1"
+    env[owner.CONNECTOR_ENV] = json.dumps(selected)
+    assert owner.connector_selection(env, session_id=SESSION, cwd=str(ROOT)) == selected
+    _command_controls(tmp_path, "driver-global-v1")
 
 
 @pytest.mark.parametrize("field,value", [
