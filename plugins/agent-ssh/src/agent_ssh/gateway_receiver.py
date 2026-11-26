@@ -33,11 +33,17 @@ async def _settle(task: asyncio.Future[T]) -> T:
     return task.result()
 
 
-async def _local(call: Callable[..., T], *args: Any) -> T:
-    task = asyncio.create_task(asyncio.to_thread(call, *args))
+async def _local(
+    call: Callable[..., T], *args: Any,
+    preparation: gateway_sshd.Preparation | None = None,
+) -> T:
+    options = {} if preparation is None else {"preparation": preparation}
+    task = asyncio.create_task(asyncio.to_thread(call, *args, **options))
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:
+        if preparation is not None:
+            preparation.cancelled.set()
         try:
             await _settle(task)
         except Exception:
@@ -90,6 +96,7 @@ class NativeReceiver:
         self.running = False
         self._serving = False
         self._closing = False
+        self._preparation = gateway_sshd.Preparation()
 
     async def _observation(self) -> gateway_native.Observation:
         result = await asyncio.wait_for(self.observe(), self.observation_timeout)
@@ -103,15 +110,18 @@ class NativeReceiver:
 
     async def _start_listener(self, initial: gateway_native.Observation) -> None:
         task = asyncio.create_task(asyncio.to_thread(
-            gateway_sshd.start, self.config, update=initial,
+            gateway_sshd.start, self.config, update=initial, preparation=self._preparation,
         ))
         try:
             self.listener = await asyncio.shield(task)
         except asyncio.CancelledError:
             # A native spawn already in progress must return custody before
             # cancellation can enter the common retirement path.
-            listener = await _settle(task)
-            self.listener = listener
+            self._preparation.cancelled.set()
+            try:
+                self.listener = await _settle(task)
+            except gateway_sshd.PreparationCancelled:
+                pass
             raise
 
     async def _serve(self) -> None:
@@ -144,7 +154,10 @@ class NativeReceiver:
             if asyncio.get_running_loop().time() >= next_refresh:
                 try:
                     update = await self._observation()
-                    await _local(gateway_sshd.prepare_update, self.config, update)
+                    await _local(
+                        gateway_sshd.prepare_update, self.config, update,
+                        preparation=self._preparation,
+                    )
                 except (OSError, ValueError, RuntimeError, TimeoutError,
                         asyncio.TimeoutError, subprocess.TimeoutExpired):
                     self.membership_current = False
@@ -155,11 +168,14 @@ class NativeReceiver:
 
     async def _close(self) -> None:
         try:
-            await self.forward.stop()
+            await _local(self._preparation.close)
         finally:
-            if self.listener is not None:
-                await _local(self.listener.close)
-                self.listener = None
+            try:
+                await self.forward.stop()
+            finally:
+                if self.listener is not None:
+                    await _local(self.listener.close)
+                    self.listener = None
 
     async def close(self) -> None:
         """Reconcile retained cleanup after failure; stop an active run via its event."""
@@ -179,6 +195,7 @@ class NativeReceiver:
         if stop.is_set():
             return
         self.running = True
+        self._preparation = gateway_sshd.Preparation()
         self._serving = True
         self.started.clear()
         self.membership_current = False

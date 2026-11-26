@@ -174,9 +174,19 @@ def test_concurrent_offer_is_nonblocking_and_preserves_wire_sequence(
     owner = SinkSlot().configure_commands()
     monkeypatch.setattr(owner, "_offered_fields", filter_event)
     binding = owner.admit(str(tmp_path))
+    assert owner.writer is not None
+    writer_ready, writer_release = threading.Event(), threading.Event()
+
+    def idle_writer() -> None:
+        writer_ready.set()
+        assert writer_release.wait(2)
+
+    # Isolate producer contention from the buffer's independent dequeue/drop seam.
+    monkeypatch.setattr(owner.writer, "_on_iteration", idle_writer)
     event = {"kind": "event", "name": "session_health", "event": "context_warning"}
     producer = threading.Thread(target=binding.offer, args=(event,))
     try:
+        assert writer_ready.wait(2)
         producer.start()
         assert entered.wait(2)
         before = time.monotonic()
@@ -186,9 +196,15 @@ def test_concurrent_offer_is_nonblocking_and_preserves_wire_sequence(
         producer.join(2)
         assert not producer.is_alive()
         binding.offer(event)
+        writer_release.set()
+        deadline = time.monotonic() + 2
+        while len(records) < 2 and time.monotonic() < deadline:
+            time.sleep(.005)
     finally:
         release.set()
-        producer.join(2)
+        writer_release.set()
+        if producer.ident is not None:
+            producer.join(2)
         owner.close()
     assert [row["sequence"] for row in records] == [1, 3]
     assert owner.stats()["dropped_full"] == 1

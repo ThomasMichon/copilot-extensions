@@ -18,6 +18,8 @@ import socket
 import stat
 import subprocess
 import sys
+import threading
+import time
 from typing import Any
 
 from agent_procutil import JobHandle, no_window_kwargs, spawn_sync_in_kill_on_close_job
@@ -31,6 +33,73 @@ DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"
 FOREGROUND_CAPABILITY = "gateway-native-ingress-foreground-v1"
 NATIVE_MEMBERSHIP_CAPABILITY = "gateway-native-ingress-membership-v1"
 Document = dict[str, Any]
+
+
+class PreparationCancelled(RuntimeError):
+    """The embedding stopped preparation before authorization publication."""
+
+
+class Preparation:
+    """Cancellation and retained native probe custody for one receiving run."""
+
+    def __init__(self) -> None:
+        self.cancelled = threading.Event()
+        self.process: subprocess.Popen[bytes] | None = None
+        self.job: JobHandle | None = None
+
+    def check(self) -> None:
+        if self.cancelled.is_set():
+            raise PreparationCancelled("Native ingress preparation was cancelled")
+
+    def close(self) -> None:
+        if self.job is not None:
+            self.job.terminate_and_wait(2.0)
+            self.job = None
+        if self.process is not None:
+            self.process.communicate(timeout=2.0)
+            self.process = None
+
+    def run(self, arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
+        require_foreground_support()
+        self.check()
+        if self.process is not None or self.job is not None:
+            raise RuntimeError("Native ingress probe cleanup is still pending")
+        self.process, self.job = spawn_sync_in_kill_on_close_job(
+            arguments, require_job=True, allow_breakaway=False,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=_process_environment(), **no_window_kwargs(),
+        )
+        assert self.job is not None
+        deadline = time.monotonic() + 10
+        try:
+            while True:
+                self.check()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(arguments, 10)
+                try:
+                    stdout, stderr = self.process.communicate(timeout=min(0.05, remaining))
+                except subprocess.TimeoutExpired:
+                    continue
+                self.check()
+                assert self.process.returncode is not None
+                return subprocess.CompletedProcess(
+                    arguments, self.process.returncode, stdout, stderr,
+                )
+        finally:
+            self.close()
+
+
+def _probe(
+    arguments: list[str], preparation: Preparation | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    if preparation is not None:
+        return preparation.run(arguments)
+    return subprocess.run(
+        arguments, stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
+        check=False, env=_process_environment(), **no_window_kwargs(),
+    )
+
 
 _FIELDS = {
     "schema", "version", "policy", "directory", "machine", "environment",
@@ -141,13 +210,14 @@ def _executable(path: Path) -> None:
         raise ValueError("Selected native OpenSSH executable is unavailable")
 
 
-def _host_key(config: Document, expected: str) -> None:
+def _host_key(
+    config: Document, expected: str, preparation: Preparation | None = None,
+) -> None:
     authorization._private(config["host_key_file"], directory=False)
     _executable(config["ssh_keygen"])
-    result = subprocess.run(
+    result = _probe(
         [str(config["ssh_keygen"]), "-y", "-P", "", "-f", str(config["host_key_file"])],
-        stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
-        check=False, env=_process_environment(), **no_window_kwargs(),
+        preparation,
     )
     if result.returncode != 0 or len(result.stdout) > 4096:
         raise ValueError("Selected native SSH host key is unavailable or encrypted")
@@ -208,7 +278,7 @@ def _check_endpoint(config: Document) -> None:
             raise OSError("Selected native loopback endpoint is already bound or unavailable") from exc
 
 
-def prepare(config: Document) -> Path:
+def prepare(config: Document, *, preparation: Preparation | None = None) -> Path:
     """Verify native target bindings, then converge the dedicated ingress files."""
     if config["version"] == 2:
         raise ValueError("Native ingress requires a current authenticated Gateway observation")
@@ -216,10 +286,12 @@ def prepare(config: Document) -> Path:
         config["policy"], config["directory"], machine=config["machine"],
         environment=config["environment"], public_key_file=config["public_key_file"],
     )
-    return _prepare(config, value)
+    return _prepare(config, value, preparation)
 
 
-def prepare_update(config: Document, update: object) -> Path:
+def prepare_update(
+    config: Document, update: object, *, preparation: Preparation | None = None,
+) -> Path:
     """Converge authenticated inbound membership without staging outbound profiles."""
     if config["version"] == 2:
         value = authorization.projection_from_native(
@@ -231,10 +303,12 @@ def prepare_update(config: Document, update: object) -> Path:
             update, policy_path=config["policy"], machine=config["machine"],
             environment=config["environment"], public_key_file=config["public_key_file"],
         )
-    return _prepare(config, value)
+    return _prepare(config, value, preparation)
 
 
-def validate_bindings(config: Document, value: Document) -> tuple[str, str]:
+def validate_bindings(
+    config: Document, value: Document, preparation: Preparation | None = None,
+) -> tuple[str, str]:
     """Check incoming local identity and executables without changing listener state."""
     account = _account()
     matches = account.casefold() == value["user"].casefold() if os.name == "nt" else account == value["user"]
@@ -244,7 +318,7 @@ def validate_bindings(config: Document, value: Document) -> tuple[str, str]:
     if not isinstance(value["host_key"], str):
         raise ValueError("Native Gateway ingress requires an admitted host pin")
     _executable(config["sshd"])
-    _host_key(config, value["host_key"])
+    _host_key(config, value["host_key"], preparation)
     return account, principal
 
 
@@ -291,8 +365,10 @@ def validate_preparation(config: Document, value: Document) -> None:
     _retained_state(config, value, account, principal)
 
 
-def _prepare(config: Document, value: Document) -> Path:
-    account, principal = validate_bindings(config, value)
+def _prepare(
+    config: Document, value: Document, preparation: Preparation | None = None,
+) -> Path:
+    account, principal = validate_bindings(config, value, preparation)
     root, owner, content = _retained_state(config, value, account, principal)
     if not root.exists():
         if os.name == "nt":
@@ -316,14 +392,15 @@ def _prepare(config: Document, value: Document) -> Path:
                 raise ValueError("Native sshd configuration differs from its owner; preserve it")
         else:
             atomic_write_text(target, content)
-        result = subprocess.run(
+        result = _probe(
             [str(config["sshd"]), "-t", "-f", str(target)],
-            stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
-            check=False, env=_process_environment(), **no_window_kwargs(),
+            preparation,
         )
         if result.returncode:
             raise ValueError("Native sshd configuration validation failed: " + result.stderr[:2048].decode("utf-8", errors="replace").strip())
         # Native syntax/identity validation precedes changing the login key set.
+        if preparation is not None:
+            preparation.check()
         authorization.apply_projection(value, root / "authorization")
     return target
 
@@ -363,7 +440,10 @@ def require_foreground_support() -> None:
         raise OSError("Owned native ingress currently requires Windows; POSIX CLI remains exec-based")
 
 
-def start(config: Document, *, update: object | None = None) -> ForegroundIngress:
+def start(
+    config: Document, *, update: object | None = None,
+    preparation: Preparation | None = None,
+) -> ForegroundIngress:
     """Give the selected Windows lifetime owner custody of its foreground sshd.
 
     The embedding owns reconnect policy, directory refresh and durable startup.
@@ -371,7 +451,10 @@ def start(config: Document, *, update: object | None = None) -> ForegroundIngres
     """
     require_foreground_support()
     _check_endpoint(config)
-    target = prepare(config) if update is None else prepare_update(config, update)
+    options = {} if preparation is None else {"preparation": preparation}
+    target = prepare(config, **options) if update is None else prepare_update(config, update, **options)
+    if preparation is not None:
+        preparation.check()
     process, job = spawn_sync_in_kill_on_close_job(
         [str(config["sshd"]), "-D", "-e", "-f", str(target)],
         require_job=True, allow_breakaway=False, cwd=config["state_dir"],

@@ -274,7 +274,11 @@ inside the receiving role, including bounded native validation timeouts.
 Authenticated local stop remains responsive while activation is pending; the
 control worker retains bounded pending replies instead of blocking on readiness.
 Stopping during reverse-forward startup cancels and joins that startup's
-cleanup before retiring the listener. This source integration does not itself prepare
+cleanup before retiring the listener. Startup and membership-refresh keygen
+and syntax probes also honor stop, with their original native Job retained
+until whole-tree settlement. An authorization transaction already in progress
+is joined before listener retirement; cancellation does not abandon its write.
+This source integration does not itself prepare
 a synchronized handoff, install a provider, register logon activation, admit
 a machine or prove the complete one-command fresh-machine flow.
 

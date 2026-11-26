@@ -535,6 +535,30 @@ def test_foreground_cleanup_failure_retains_the_original_custody() -> None:
     process.wait.assert_called_once_with(timeout=5.0)
 
 
+def test_cancelled_preparation_retains_unconfirmed_probe_cleanup_until_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preparation = ingress.Preparation()
+    process, job = Mock(), Mock()
+    process.communicate.side_effect = subprocess.TimeoutExpired("probe", 0.05)
+    job.terminate_and_wait.side_effect = [OSError("cleanup unconfirmed"), None]
+    monkeypatch.setattr(ingress, "require_foreground_support", Mock())
+
+    def spawn(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        preparation.cancelled.set()
+        return process, job
+
+    monkeypatch.setattr(ingress, "spawn_sync_in_kill_on_close_job", spawn)
+    with pytest.raises(OSError, match="cleanup unconfirmed"):
+        preparation.run(["selected-probe"])
+    assert preparation.process is process and preparation.job is job
+    process.communicate.side_effect = None
+    preparation.close()
+    assert preparation.process is None and preparation.job is None
+    with pytest.raises(ingress.PreparationCancelled):
+        preparation.run(["must-not-start"])
+
+
 @pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("sshd", 5), KeyboardInterrupt()])
 def test_foreground_cleanup_resumes_child_wait_after_the_job_is_settled(
     failure: BaseException,
