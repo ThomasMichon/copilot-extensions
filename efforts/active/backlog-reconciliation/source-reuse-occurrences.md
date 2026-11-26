@@ -211,7 +211,7 @@ gate remain; the preceding eight local tracker gates were not reset or replayed.
 The preceding twenty-nine technical cases, twenty-eight tracking retirements
 and twelve resolved local gates are settled. The
 [new whole-original study](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
-proposes six further independent OPEN cases, not a repair or a shared-cause
+records six further independent OPEN cases, not a repair or a shared-cause
 finding. Actual provider metadata identifies the same source-reuse job and
 original-success/source-byte verification step. Every complete excerpt again
 contains exit one and cleanup without its causal diagnostic.
@@ -225,10 +225,10 @@ contains exit one and cleanup without its causal diagnostic.
 | #8496 | Signature: 240b770cb479 | `36a272dd65a6bccabdd69fd099ab00ce42c164bd` | [40067990236 / 120796097202](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40067990236/job/120796097202) | OPEN |
 | #8629 | Signature: c3f7e9019a1e | `6936e89e8f02f5cc504160722616a184b7ef182c` | [40115471812 / 120936951403](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40115471812/job/120936951403) | OPEN |
 
-After review, append these six rows and their complete conditions to the
-immediate qualified whole #7872 body; preserve its entire twenty-nine-case
+After reviewed #14657, the whole actual #7872 body independently retained
+these six rows and their complete conditions, its entire twenty-nine-case
 incumbent, original report, disclosure, discussions, metadata and custodians.
-Independently read back the whole actual receiver before any source effect.
+The whole actual receiver was read before any new source effect.
 All thirty-five technical cases remain independently OPEN. Preserve each
 literal reported source without repairing its spelling, every run/job,
 unknown cause and required evidence-backed technical disposition.
@@ -247,10 +247,15 @@ a per-signature cadence or new multi-case fix-worker claim.
 
 ### Six-case delivery gates
 
-- [ ] The six-case proposal passes review and required CI and merges.
-- [ ] Whole actual receiving preserves the incumbent and independently
+- [x] The six-case proposal passes review and required CI and merges.
+- [x] Whole actual receiving preserves the incumbent and independently
   retains all thirty-five technical cases OPEN.
-- [ ] Each new source passes its separate qualification, exact routing,
+- [x] Each new source passes its separate qualification, exact routing,
   disclosed acknowledgment and independent disposition/original audits.
-- [ ] A new complete census separates actual effects and inflow from
+- [x] A new complete census separates actual effects and inflow from
   technical completion without resetting prior local or parent gates.
+
+The [actual six-source outcome](journal/2026/11.25-coverage-bound-and-further-occurrences.md#actual-receiving-and-seven-tracking-retirements)
+records all independent `NOT_PLANNED` audits and #8489's qualified routing
+continuation without effect replay. These four new tracker gates alone are
+resolved. Neither a technical case nor an incumbent parent gate is closed.
