@@ -718,7 +718,8 @@ def cmd_detach(
                 continue
             break
         if rc in (_BUSY_EXIT, _COORDINATION_EXIT) and "result" not in captured:
-            ct.succeed()
+            # A refused claim ends the SSH session without a remote command.
+            ct.fail_with_cause("connect_failed")
             return rc
         result = captured.get("result")
         stdout = getattr(result, "stdout", "") or ""

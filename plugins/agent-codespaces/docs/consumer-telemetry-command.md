@@ -21,8 +21,10 @@ Use a native absolute path on Windows. The approved root supplies the shared
 The shared contract owns the policy grammar and the refusal semantics.
 
 Without the file the run is unchanged: only that one path is read and no
-child starts. A run that noted no stage (listing, status, `--help`) never
-looks it up. A present invalid file refuses export for the run; it never
+child starts. A run that noted no stage (`--help`, or a command that never
+resolves an account or launches a worker) never looks it up. Any command that
+runs account discovery, including `list` and CodeSpace lookup, notes an
+`account_resolution` record and so offers it to a configured receiver. A present invalid file refuses export for the run; it never
 borrows another route. No CLI argument, environment variable, repository or
 current directory selects a root or a command.
 

@@ -389,6 +389,32 @@ def test_a_recovered_retry_does_not_become_a_later_failure_cause() -> None:
     ]
 
 
+def test_a_recovered_relay_does_not_explain_a_later_transport_failure() -> None:
+    ct.start_launch()
+    ct.begin("ssh")
+    ct.note("credential_relay", "failure", "relay_not_listening")
+    ct.note("credential_relay", "success", "none")
+    ct.fail_with_cause("transport_failed")
+    events = ct.finish(1)
+    assert [(e["stage"], e["outcome"], e["reason"]) for e in events if e["stage"] != "credential_relay"] == [
+        ("ssh", "failure", "transport_failed"), ("launch", "failure", "transport_failed"),
+    ]
+
+
+def test_a_refused_claim_closes_the_ssh_session_as_that_failure(seams: Any) -> None:
+    def refused(ns: Any, **kwargs: Any) -> int:
+        ct.note("claim", "failure", "claim_busy")
+        return copilot_detach._BUSY_EXIT
+
+    ct.start_launch()
+    rc = copilot_detach.cmd_detach(_launch_tests._args(), ssh_session=refused)
+    assert rc == copilot_detach._BUSY_EXIT
+    shapes = [_shape(e)[:3] for e in ct.finish(rc)]
+    assert ("ssh", "failure", "claim_busy") in shapes
+    assert ("ssh", "success", "none") not in shapes
+    assert shapes[-1] == ("launch", "failure", "claim_busy")
+
+
 def _portable_stage(stage: str) -> list[tuple[Any, Any]]:
     return [(r["outcome"], r["reason"]) for r in ct._records if r["stage"] == stage]
 

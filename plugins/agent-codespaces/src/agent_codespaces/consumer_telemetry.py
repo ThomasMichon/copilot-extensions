@@ -42,6 +42,8 @@ _records: list[dict[str, Any]] = []
 _open: dict[str, Any] | None = None
 _launch: dict[str, Any] | None = None
 _last_reason = "other"
+# The stage whose failure supplied `_last_reason`; its later success clears it.
+_last_reason_stage: str | None = None
 
 
 def _now() -> float:
@@ -75,12 +77,12 @@ def _append(event: dict[str, Any]) -> None:
 
 
 def _close(outcome: str, reason: str, **extra: Any) -> None:
-    global _open, _last_reason
+    global _open, _last_reason, _last_reason_stage
     current, _open = _open, None
     if current is None:
         return
     if outcome in _TERMINAL:
-        _last_reason = reason
+        _last_reason, _last_reason_stage = reason, current["stage"]
     _append({
         "kind": "stage", "stage": current["stage"], "outcome": outcome,
         "reason": reason, "duration_ms": _elapsed(current["started"]),
@@ -124,7 +126,7 @@ def fail_with_cause(default: str = "other") -> None:
     """
     try:
         cause = _open.get("cause") if _open is not None else None
-        fail(cause if type(cause) is str else default)
+        fail(cause[1] if type(cause) is tuple else default)
     except Exception:
         pass
 
@@ -159,11 +161,17 @@ def note(
             event["duration_ms"] = duration_ms
         elif started is not None:
             event["duration_ms"] = _elapsed(started)
+        global _last_reason, _last_reason_stage
         if outcome in _TERMINAL:
-            global _last_reason
-            _last_reason = reason
+            _last_reason, _last_reason_stage = reason, stage
             if _open is not None:
-                _open["cause"] = reason
+                _open["cause"] = (stage, reason)
+        elif outcome == "success":
+            # A stage that recovers no longer explains a later failure.
+            if _last_reason_stage == stage:
+                _last_reason, _last_reason_stage = "other", None
+            if _open is not None and _open.get("cause", ("",))[0] == stage:
+                del _open["cause"]
         _append(event)
     except Exception:
         pass
@@ -210,11 +218,12 @@ def start_launch() -> None:
 
 def reset() -> None:
     """Forget every noted record (tests and repeated in-process runs)."""
-    global _open, _launch, _last_reason
+    global _open, _launch, _last_reason, _last_reason_stage
     _records.clear()
     _open = None
     _launch = None
     _last_reason = "other"
+    _last_reason_stage = None
 
 
 def finish(code: int, *, interrupted: bool = False) -> list[dict[str, Any]]:
