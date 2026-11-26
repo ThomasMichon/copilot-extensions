@@ -254,6 +254,11 @@ try {
             result["-bootstrappython"] = str(python)
         return result
 
+    def _same_windows_path(left: str, right: str) -> bool:
+        import ntpath
+
+        return ntpath.isabs(left) and ntpath.normcase(ntpath.normpath(left)) == ntpath.normcase(ntpath.normpath(right))
+
     def _controller_python(row: dict[str, Any], root: Path) -> list[str]:
         arguments = _windows_argv(row["command"])
         image = Path(row["image"])
@@ -542,6 +547,11 @@ try {
                         raise UninstallRefused("Unexpected native Vault controller argument")
                 index += 1
             source = Path(cast(str, options.pop("--payload", "")))
+            # The foreground host forwards its own launch spelling of these Windows
+            # paths (e.g. a lower-cased PATH entry); identity is case-insensitive.
+            for flag, value in (("--root", str(root)), ("--shell", shell)):
+                if flag in options and _same_windows_path(cast(str, options[flag]), value):
+                    options[flag] = value
             expected: dict[str, str | bool] = {
                 "--root": str(root), "--shell": shell, "--plugin": plugin, "--action": "uninstall",
             }

@@ -412,6 +412,7 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     "witness-mismatch", "reused-native", "foreign-controller", "additional-consumer",
     "late-source", "late-request", "missing-native-check", "missing-isolation",
     "default-original", "relative-original", "command-original", "interactive-original", "foreign-original",
+    "launch-case-host", "foreign-host-shell",
 ))
 @pytest.mark.parametrize("plugin", ("agent-vault", "agent-dispatch"))
 def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation, plugin):
@@ -544,6 +545,15 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
         actors[-1][1][:] = [shell, "-NoLogo"]
     elif mutation == "foreign-original":
         actors[-1][1][:] = [sys.executable, "-c", "pass"]
+    elif mutation == "launch-case-host":
+        # A host launched through a lower-cased PATH entry reports that spelling as its image.
+        foreground = actors[-2][1]
+        foreground[foreground.index("--shell") + 1] = shell.lower()
+        foreground[foreground.index("--root") + 1] = str(root).upper()
+        actors[-1][1][0] = shell.lower()
+    elif mutation == "foreign-host-shell":
+        foreground = actors[-2][1]
+        foreground[foreground.index("--shell") + 1] = str(home / "pwsh.exe")
     rows = [
         {"pid": pid, "ppid": actors[index + 1][0] if index + 1 < len(actors) else 0,
          "image": argv[0], "command": subprocess.list2cmdline(argv),
@@ -580,6 +590,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     if mutation in {
         "none", "finite-callback", "self-stage", "sparse-census", "cache",
         "default-original", "relative-original", "command-original", "interactive-original",
+        "launch-case-host",
     }:
         MODULE.refuse_consumers(payload, plugin, root, shell, profile, controller_custody=custody)
         assert checks == ["owner", "owner"]
