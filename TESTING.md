@@ -1,5 +1,20 @@
 # Testing copilot-extensions
 
+Bridge's `tests/test_installer_watchdog.py` exercises the shared PowerShell
+self-stage block in fresh synthetic homes under both Windows shell hosts.
+The contained selection is `tools/run-tests.ps1 agent-bridge --test-file
+tests/test_installer_watchdog.py`. It scales the default allowance in the
+fixture, not the installed policy. Controls cover partial-line progress on
+each output channel, quiet stalls, explicit deadlines, disabled limits, exit
+codes, byte fidelity and a retained native handle proving grandchild exit.
+Four undrained-output controls cover both hosts, both channels and default or
+explicit deadlines under strict, non-breakaway caller-owned Jobs.
+Four root-exit controls preserve exit code and buffered bytes while a live
+descendant retains inherited output handles, with default or disabled deadlines.
+Eight controls execute the Worktrees and Dispatch preambles under both hosts,
+distinguishing built-in inactivity budgets from explicit elapsed-time overrides.
+These are native integration controls, not installed-service qualification.
+
 The closed-wheel Source controls in `tools/test_local_install_closed_wheels.py`
 check ordinary and configuration-disabled application preparation followed by
 the actual offline `uv lock --check` with normal project discovery. The retained

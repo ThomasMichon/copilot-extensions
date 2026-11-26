@@ -10,13 +10,17 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
+from agent_procutil import no_window_flags
 from update_driver import core
-from update_driver.participant import ENVIRONMENT_KEY, ParticipantError, borrowed_custody, participant
+from update_driver.participant import (
+    ENVIRONMENT_KEY, BorrowedCustody, ParticipantError, borrowed_custody, participant,
+)
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 REPO = SCRIPTS.parents[2]
@@ -24,9 +28,10 @@ pytestmark = pytest.mark.guard
 
 
 @pytest.fixture
-def adapter(tmp_path, monkeypatch):
+def adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(SCRIPTS))
     spec = importlib.util.spec_from_file_location("_native_installer_driver_test", SCRIPTS / "installer_driver.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(core, "default_root", lambda: tmp_path / "driver")
@@ -34,7 +39,7 @@ def adapter(tmp_path, monkeypatch):
     return module
 
 
-def arguments(tmp_path, **values):
+def arguments(tmp_path: Path, **values: object) -> SimpleNamespace:
     return SimpleNamespace(**{
         "payload": SCRIPTS.parent, "root": tmp_path / "runtime", "plugin": "agent-bridge",
         "shell": tmp_path / "powershell.exe", "action": "install", "options": [],
@@ -42,15 +47,28 @@ def arguments(tmp_path, **values):
     })
 
 
-def test_cold_native_entry_uses_the_existing_finite_driver(adapter, tmp_path, monkeypatch):
+def _foreground_driver(
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]], *,
+    code: int = 0, request_id: str = "request",
+) -> SimpleNamespace:
+    def enqueue(spec: core.RequestSpec, *, runner: core.TrustedRunner) -> SimpleNamespace:
+        queued.append((spec, runner))
+        return SimpleNamespace(id=request_id)
+
+    return SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=enqueue, drain=Mock(),
+        wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=code)),
+    )
+
+
+def test_cold_native_entry_uses_the_existing_finite_driver(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(adapter, "source_digest", lambda payload: "a" * 64)
     args = arguments(tmp_path, options=["NonInteractive"])
-    queued = []
-    driver = SimpleNamespace(
-        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
-        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=7)),
-    )
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
+    driver = _foreground_driver(queued, code=7)
     assert adapter.foreground(args, driver) == 7
     spec, runner = queued[0]
     assert spec.backend == "plugin-native-install"
@@ -70,7 +88,9 @@ def test_cold_native_entry_uses_the_existing_finite_driver(adapter, tmp_path, mo
 @pytest.mark.parametrize("ticket", [
     "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
 ])
-def test_driver_admission_precedes_publication_custody(adapter, tmp_path, monkeypatch, ticket):
+def test_driver_admission_precedes_publication_custody(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ticket: str,
+) -> None:
     monkeypatch.setenv(ticket, "not-journaled")
     driver = SimpleNamespace(enqueue=Mock())
     with pytest.raises(RuntimeError, match="precede publication custody"):
@@ -79,7 +99,9 @@ def test_driver_admission_precedes_publication_custody(adapter, tmp_path, monkey
 
 
 @pytest.mark.parametrize("options", [{}, ["Command"], ["NonInteractive", "NonInteractive"], [[]], [1]])
-def test_native_recipe_does_not_accept_an_arbitrary_argument_vector(adapter, tmp_path, options):
+def test_native_recipe_does_not_accept_an_arbitrary_argument_vector(
+    adapter: ModuleType, tmp_path: Path, options: object,
+) -> None:
     with pytest.raises(ValueError, match="Unsupported"):
         adapter.native_arguments(arguments(tmp_path, options=options))
 
@@ -88,7 +110,9 @@ def test_native_recipe_does_not_accept_an_arbitrary_argument_vector(adapter, tmp
     ("agent-mcp", "update"), ("agent-mcp", "uninstall"),
     ("agent-bridge", "init"), ("agent-vault", "broker-remove"),
 ])
-def test_native_recipe_refuses_another_consumers_action(adapter, tmp_path, plugin, action):
+def test_native_recipe_refuses_another_consumers_action(
+    adapter: ModuleType, tmp_path: Path, plugin: str, action: str,
+) -> None:
     with pytest.raises(ValueError, match="Unsupported native installer action"):
         adapter.native_arguments(arguments(tmp_path, plugin=plugin, action=action))
 
@@ -100,7 +124,10 @@ def test_native_recipe_refuses_another_consumers_action(adapter, tmp_path, plugi
     ("agent-mcp", "AGENT_MCP_HOME"),
     ("agent-index", "AGENT_INDEX_ENGINE_HOME"),
 ])
-def test_remaining_native_recipes_preserve_exact_options_and_context(adapter, tmp_path, monkeypatch, plugin, root_key):
+def test_remaining_native_recipes_preserve_exact_options_and_context(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    plugin: str, root_key: str,
+) -> None:
     source_options = set(adapter.RECIPES[plugin]) & {"Repair", "Serve"}
     for option in source_options:
         with pytest.raises(ValueError, match="explicit installation source"):
@@ -108,12 +135,8 @@ def test_remaining_native_recipes_preserve_exact_options_and_context(adapter, tm
     options = sorted(set(adapter.RECIPES[plugin]) - source_options)
     args = arguments(tmp_path, plugin=plugin, options=options)
     monkeypatch.setenv(root_key, str(tmp_path / "consumer"))
-    queued = []
-    driver = SimpleNamespace(
-        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
-        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
-    )
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
+    driver = _foreground_driver(queued)
     monkeypatch.setattr(adapter, "source_digest", lambda payload: "a" * 64)
     assert adapter.foreground(args, driver) == 0
     spec, runner = queued[0]
@@ -130,21 +153,25 @@ def test_remaining_native_recipes_preserve_exact_options_and_context(adapter, tm
 @pytest.mark.parametrize("backend", ["engine", "engine-launch-update"])
 @pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize("check", [False, True])
-def test_native_handoff_keeps_the_same_owner(adapter, tmp_path, monkeypatch, scoped, check, backend):
+def test_native_handoff_keeps_the_same_owner(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    scoped: bool, check: bool, backend: str,
+) -> None:
     args = arguments(tmp_path, check_native=check)
     request = core.enqueue(
         core.RequestSpec(backend),
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
-    calls = []
+    calls: list[list[str]] = []
 
-    def spawn(command, **options):
+    def spawn(command: list[str], **options: object) -> SimpleNamespace:
         assert command[-4:] == ["-Action", "install", "-InstallDir", str(args.root)]
-        assert options["creationflags"] == subprocess.CREATE_NO_WINDOW
+        assert options["creationflags"] == no_window_flags()
         assert options["stdout"] is sys.stdout and options["stderr"] is sys.stderr
         assert ENVIRONMENT_KEY not in os.environ
-        assert options["env"][adapter.NATIVE_ENV] == "agent-bridge"
-        with participant(root=core.default_root(), witness=options["env"][ENVIRONMENT_KEY]) as child:
+        environment = cast(dict[str, str], options["env"])
+        assert environment[adapter.NATIVE_ENV] == "agent-bridge"
+        with participant(root=core.default_root(), witness=environment[ENVIRONMENT_KEY]) as child:
             child.assert_owned()
         calls.append(command)
         return SimpleNamespace(wait=lambda: 0)
@@ -152,12 +179,14 @@ def test_native_handoff_keeps_the_same_owner(adapter, tmp_path, monkeypatch, sco
     monkeypatch.setattr(adapter.subprocess, "Popen", spawn)
     monkeypatch.setattr(adapter, "source_digest", lambda payload: pytest.fail("nested submission"))
 
-    def execute(transaction):
+    def execute(transaction: core.Transaction) -> int:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
         if scoped:
-            with borrowed_custody(root=core.default_root()):
-                return adapter.execute(args)
-        return adapter.execute(args)
+            owner = borrowed_custody(root=core.default_root())
+            assert owner is not None
+            with owner:
+                return cast(int, adapter.execute(args))
+        return cast(int, adapter.execute(args))
 
     assert core.drain(executor=execute) == 0
     assert core.status(request.id).state == "completed"
@@ -165,7 +194,10 @@ def test_native_handoff_keeps_the_same_owner(adapter, tmp_path, monkeypatch, sco
 
 
 @pytest.mark.parametrize("changed", ["source", "root", "arguments", "backend", None])
-def test_native_participant_checks_exact_admission(adapter, tmp_path, monkeypatch, changed):
+def test_native_participant_checks_exact_admission(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    changed: str | None,
+) -> None:
     args = arguments(tmp_path, check_native=True)
     monkeypatch.setattr(adapter, "source_digest", lambda payload: "a" * 64)
     request = core.enqueue(
@@ -178,9 +210,9 @@ def test_native_participant_checks_exact_admission(adapter, tmp_path, monkeypatc
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
 
-    def execute(transaction):
+    def execute(transaction: core.Transaction) -> int:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
-        return adapter.execute(args)
+        return cast(int, adapter.execute(args))
 
     if changed:
         with pytest.raises(RuntimeError, match="unclosed participants"):
@@ -191,7 +223,9 @@ def test_native_participant_checks_exact_admission(adapter, tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("change", ["malformed", "oversized", "missing-root", "foreign-root"])
-def test_native_custody_refuses_unverified_execution_root(adapter, tmp_path, monkeypatch, change):
+def test_native_custody_refuses_unverified_execution_root(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     root = tmp_path / "addressed-driver"
     foreign = tmp_path / "foreign-driver"
     request = core.enqueue(
@@ -200,7 +234,7 @@ def test_native_custody_refuses_unverified_execution_root(adapter, tmp_path, mon
         root=root,
     )
 
-    def execute(transaction):
+    def execute(transaction: core.Transaction) -> int:
         body = json.loads(transaction.participant_env()[ENVIRONMENT_KEY])
         if change == "missing-root":
             body.pop("root")
@@ -218,7 +252,9 @@ def test_native_custody_refuses_unverified_execution_root(adapter, tmp_path, mon
     assert not foreign.exists()
 
 
-def test_restore_identity_binds_bytes_not_the_helpers_private_record_path(adapter, tmp_path):
+def test_restore_identity_binds_bytes_not_the_helpers_private_record_path(
+    adapter: ModuleType, tmp_path: Path,
+) -> None:
     record = tmp_path / "record.json"
     record.write_bytes(b'{"version":1}\n')
     args = arguments(tmp_path, plugin="agent-dispatch", action="restore", retained_runtime=record)
@@ -240,7 +276,9 @@ def test_restore_identity_binds_bytes_not_the_helpers_private_record_path(adapte
 
 
 @pytest.mark.parametrize("case", ["missing", "large", "foreign-action", "foreign-plugin"])
-def test_restore_recipe_refuses_unbound_input(adapter, tmp_path, case):
+def test_restore_recipe_refuses_unbound_input(
+    adapter: ModuleType, tmp_path: Path, case: str,
+) -> None:
     record = tmp_path / "record.json"
     record.write_bytes(b"x" * (1048577 if case == "large" else 1))
     args = arguments(
@@ -252,16 +290,14 @@ def test_restore_recipe_refuses_unbound_input(adapter, tmp_path, case):
         adapter.native_arguments(args)
 
 
-def test_restore_foreground_pins_record_hash_in_the_default_runner(adapter, tmp_path, monkeypatch):
+def test_restore_foreground_pins_record_hash_in_the_default_runner(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     record = tmp_path / "record.json"
     record.write_bytes(b"exact retained input")
     args = arguments(tmp_path, plugin="agent-dispatch", action="restore", retained_runtime=record)
-    queued = []
-    driver = SimpleNamespace(
-        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="restore"),
-        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
-    )
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
+    driver = _foreground_driver(queued, request_id="restore")
     monkeypatch.setattr(adapter, "source_digest", lambda payload: "a" * 64)
     assert adapter.foreground(args, driver) == 0
     spec, runner = queued[0]
@@ -271,7 +307,7 @@ def test_restore_foreground_pins_record_hash_in_the_default_runner(adapter, tmp_
     assert spec.backend == "plugin-native-install"
 
 
-def cell_arguments(tmp_path):
+def cell_arguments(tmp_path: Path) -> SimpleNamespace:
     return arguments(
         tmp_path, plugin="agent-pull-requests",
         cell_context=str(tmp_path / "runtime" / "install.json"),
@@ -281,7 +317,9 @@ def cell_arguments(tmp_path):
     )
 
 
-def test_cell_recipe_binds_exact_context_and_generations(adapter, tmp_path):
+def test_cell_recipe_binds_exact_context_and_generations(
+    adapter: ModuleType, tmp_path: Path,
+) -> None:
     args = cell_arguments(tmp_path)
     command = adapter.native_arguments(args)
     assert command[:3] == ["install", "--context", args.cell_context]
@@ -301,21 +339,21 @@ def test_cell_recipe_binds_exact_context_and_generations(adapter, tmp_path):
     ("cell_namespace_generation", None), ("cell_install_generation", True),
     ("cell_install_generation", -1), ("options", ["Force"]),
 ])
-def test_cell_recipe_refuses_foreign_or_unbound_scope(adapter, tmp_path, field, value):
+def test_cell_recipe_refuses_foreign_or_unbound_scope(
+    adapter: ModuleType, tmp_path: Path, field: str, value: object,
+) -> None:
     args = cell_arguments(tmp_path)
     setattr(args, field, value)
     with pytest.raises(ValueError):
         adapter.native_arguments(args)
 
 
-def test_cell_foreground_uses_the_existing_finite_driver(adapter, tmp_path, monkeypatch):
+def test_cell_foreground_uses_the_existing_finite_driver(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     args = cell_arguments(tmp_path)
-    queued = []
-    driver = SimpleNamespace(
-        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="cell"),
-        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
-    )
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
+    driver = _foreground_driver(queued, request_id="cell")
     monkeypatch.setattr(adapter, "source_digest", lambda payload: "a" * 64)
     assert adapter.foreground(args, driver) == 0
     spec, runner = queued[0]
@@ -328,19 +366,26 @@ def test_cell_foreground_uses_the_existing_finite_driver(adapter, tmp_path, monk
     driver.drain.assert_called_once_with()
 
 
-def test_reentry_marker_is_not_installation_authority(adapter, tmp_path, monkeypatch):
+def test_reentry_marker_is_not_installation_authority(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv(adapter.NATIVE_ENV, "agent-bridge")
     with pytest.raises(RuntimeError, match="live driver custody"):
         adapter.execute(arguments(tmp_path, check_native=True))
     assert not core.default_root().exists()
 
 
-def test_broker_removal_uses_the_canonical_consumer_admission_api(adapter, tmp_path, monkeypatch):
+def test_broker_removal_uses_the_canonical_consumer_admission_api(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import installer_engine_uninstall as finite
 
-    calls = []
+    calls: list[tuple[Path, str, Path, str, str | None]] = []
 
-    def cleanup(payload_root, plugin_id, root, shell, *, profile, check_consumers):
+    def cleanup(
+        payload_root: Path, plugin_id: str, root: Path, shell: str, *,
+        profile: str | None, check_consumers: bool,
+    ) -> dict[str, str]:
         assert check_consumers is True
         calls.append((payload_root, plugin_id, root, shell, profile))
         return {"status": "ready"}
@@ -356,14 +401,15 @@ def test_broker_removal_uses_the_canonical_consumer_admission_api(adapter, tmp_p
 ])
 @pytest.mark.parametrize("admitted", [False, True])
 def test_uninstall_removes_only_the_component_under_the_current_owner(
-    adapter, tmp_path, monkeypatch, plugin, action, admitted,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    plugin: str, action: str, admitted: bool,
+) -> None:
     from update_driver import windows_broker
 
     args = arguments(tmp_path, plugin=plugin, action=action, remove_broker=True)
     remove = Mock()
     monkeypatch.setattr(windows_broker, "remove", remove)
-    def admit(_args, *, controller_custody):
+    def admit(_args: SimpleNamespace, *, controller_custody: BorrowedCustody) -> None:
         controller_custody.assert_owned()
         if not admitted:
             raise RuntimeError("live consumer")
@@ -376,9 +422,9 @@ def test_uninstall_removes_only_the_component_under_the_current_owner(
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
 
-    def execute(transaction):
+    def execute(transaction: core.Transaction) -> int:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
-        return adapter.execute(args)
+        return cast(int, adapter.execute(args))
 
     if admitted:
         assert core.drain(executor=execute) == 0
@@ -393,7 +439,7 @@ def test_uninstall_removes_only_the_component_under_the_current_owner(
     assert admission.call_args.kwargs["controller_custody"].request_id == request.id
 
 
-def test_bridge_retains_completion_before_publication_without_broker_adoption():
+def test_bridge_retains_completion_before_publication_without_broker_adoption() -> None:
     source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     assert source.index("-Plugin 'agent-bridge'") < source.index("# === install-contract:v4 self-stage")
     completion = source.split("function Invoke-VersionedMarkComplete {", 1)[1].split("\nfunction ", 1)[0]
@@ -411,7 +457,7 @@ def test_bridge_retains_completion_before_publication_without_broker_adoption():
     assert "-not ($Action -eq 'uninstall' -and $DryRun)" in source
 
 
-def test_codespaces_completes_before_activation_and_preserves_numbered_action_during_dev():
+def test_codespaces_completes_before_activation_and_preserves_numbered_action_during_dev() -> None:
     source = (REPO / "plugins/agent-codespaces/scripts/install.ps1").read_text(encoding="utf-8")
     assert source.index("-Plugin 'agent-codespaces'") < source.index("# === install-contract:v4 self-stage")
     completion = source.split("function Invoke-VersionedMarkComplete {", 1)[1].split("\nfunction ", 1)[0]
@@ -462,7 +508,10 @@ def test_codespaces_completes_before_activation_and_preserves_numbered_action_du
     ("agent-mcp", "init", "Force"),
     ("agent-mcp", "provision", "Force"),
 ])
-def test_copied_no_install_shell_uses_the_real_default_executor(adapter, tmp_path, monkeypatch, plugin, action, option):
+def test_copied_no_install_shell_uses_the_real_default_executor(
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    plugin: str, action: str, option: str,
+) -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     shell = shutil.which("powershell.exe")
@@ -472,6 +521,9 @@ def test_copied_no_install_shell_uses_the_real_default_executor(adapter, tmp_pat
     profile.mkdir()
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
+    prepared_python = Path(getattr(sys, "_base_executable", sys.executable)).resolve()
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(prepared_python.parent.parent))
+    monkeypatch.setenv("UV_OFFLINE", "1")
     minimal = tmp_path / "minimal"
     scripts = minimal / "scripts"
     scripts.mkdir(parents=True)
@@ -480,7 +532,16 @@ def test_copied_no_install_shell_uses_the_real_default_executor(adapter, tmp_pat
             shutil.copyfile(source, scripts / source.name)
     for name in ("versioned_runtime_native.ps1", "installer-human-output.ps1"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
+    for name in (
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        "installer-instance-python-version.txt",
+    ):
+        shutil.copyfile(REPO / "libs" / "installer-engine" / name, scripts / name)
     source_scripts = REPO / "plugins" / plugin / "scripts"
+    for name in ("resolve-bootstrap-python.ps1", "bootstrap-python-version.txt"):
+        source = source_scripts / name
+        if source.is_file():
+            shutil.copyfile(source, scripts / name)
     for name in ("runtime-activation.ps1", "runtime-activation.py"):
         activation = source_scripts / name
         if activation.is_file():
