@@ -1,0 +1,9 @@
+{
+  "comment": "Admit cell dependency policy through the selected managed interpreter and bind native executables before CWD changes",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

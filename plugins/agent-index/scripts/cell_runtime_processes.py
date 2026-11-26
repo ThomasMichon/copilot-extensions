@@ -124,11 +124,25 @@ def install_dependency(
     if not engine.is_file():
         engine = payload_root.parent.parent / "libs" / "installer-engine" / engine.name
     validate_file(engine, "canonical installer engine")
-    arguments = ["--python", str(interpreter), str(source), "--quiet"]
+    shell = (
+        shutil.which("pwsh") or shutil.which("powershell")
+        if os.name == "nt" else shutil.which("bash")
+    )
+    if not shell:
+        raise error_type("A native shell is required for the canonical dependency wrapper")
+    uv = str(Path(uv).absolute())
+    try:
+        managed, _owner = _prepared_process_helpers()
+        selected = managed.resolve_runtime_python(interpreter, uv=uv)
+    except (ImportError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if cleanup_pending(exc):
+            raise
+        raise error_type(
+            f"dependency runtime admission failed ({type(exc).__name__}); "
+            "use explicit installation management"
+        ) from exc
+    arguments = ["--python", selected, str(source), "--quiet"]
     if os.name == "nt":
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if not shell:
-            raise error_type("PowerShell is required for the canonical dependency wrapper")
         quoted = ",".join(quote(argument) for argument in arguments)
         body = (
             "$ErrorActionPreference='Stop'; "
@@ -136,16 +150,17 @@ def install_dependency(
             "function Write-Warn($message) { [Console]::Error.WriteLine($message) }; "
             f"$result=Invoke-UvPipInstallResilient -UvCommand {quote(uv)} "
             f"-Arguments @({quoted}); "
-            "[Console]::WriteLine($result.Output); exit $result.ExitCode"
+            "[Console]::Error.WriteLine($result.Output); exit $result.ExitCode"
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-Command", body]
     else:
         command = [
-            "bash", "-c",
+            shell, "-c",
             'source "$1"; shift; _warn() { printf "%s\\n" "$*" >&2; }; '
-            'invoke_uv_pip_install_resilient "$@"',
+            'invoke_uv_pip_install_resilient "$@" >&2',
             "cell-dependency", str(engine), uv, *arguments,
         ]
+    command[0] = str(Path(command[0]).absolute())
     execute(command, environment=isolated_environment(), cwd=cwd)
 
 
