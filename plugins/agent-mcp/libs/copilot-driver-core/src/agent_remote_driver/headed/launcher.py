@@ -338,8 +338,9 @@ async def _run_headed_once(
     nonce = nonce or (env or {}).get(_NONCE_ENV) or os.environ.get(_NONCE_ENV) or secrets.token_hex(32)
     child_env = {**os.environ, **(env or {})}
     connector = connector_selection(child_env, session_id=session_id, cwd=cwd)
+    native_argv = child_argv
     if connector is not None:
-        selected_connector_roots(connector, child_argv, value_options=VALUE_OPTIONS)
+        native_argv = selected_connector_roots(connector, child_argv, value_options=VALUE_OPTIONS)
     plugin = stage_extension(
         Path(attempt_directory), **({"native_connector": True} if connector is not None else {}),
     )
@@ -379,7 +380,7 @@ async def _run_headed_once(
             "nonce": nonce, "hostPid": os.getpid(),
             "client": str(plugin / "extensions" / "copilot-driver-headed" / "host-client.mjs"),
         })
-        argv = _extension_command(_resolve_child_exe(child_argv, child_env.get("PATH")), plugin)
+        argv = _extension_command(_resolve_child_exe(native_argv, child_env.get("PATH")), plugin)
         _require_receiving_policy(cwd, policy_context)
         if startup is not None:
             startup.check(child_argv, cwd, session_id, {**os.environ, **(env or {})})

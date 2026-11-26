@@ -26,7 +26,7 @@ def _command_controls(tmp_path: Path) -> None:
     owner = _owner(STAGING)
     options = _owner("libs/copilot-driver-core/src/agent_remote_driver/native_arguments.py").VALUE_OPTIONS
     roots = {}
-    for name in ("agent-bridge", "agent-remote-driver", "other"):
+    for name in ("agent-bridge", "agent-remote-driver", "other", "independent"):
         root = tmp_path / name
         root.mkdir()
         (root / "plugin.json").write_text(json.dumps({
@@ -39,7 +39,17 @@ def _command_controls(tmp_path: Path) -> None:
     driver = ["--plugin-dir=" + roots["agent-remote-driver"]]
     bridge = ["--plugin-dir", roots["agent-bridge"]]
     base = ["copilot", "--session-id", SESSION]
-    owner.selected_connector_roots(selected, [*base, *driver, *bridge], value_options=options)
+    original = [*base, *driver, *bridge]
+    assert owner.selected_connector_roots(selected, original, value_options=options) == base
+    assert original == [*base, *driver, *bridge]
+    for retained in (
+        ["--plugin-dir", roots["independent"]],
+        ["--plugin-dir=" + roots["independent"]],
+        ["--interactive", "--plugin-dir", "--", *bridge],
+    ):
+        assert owner.selected_connector_roots(
+            selected, [*base, *driver, *bridge, *retained], value_options=options,
+        ) == [*base, *retained]
     for argv in (
         [*base, *driver],
         [*base, *driver, *bridge, *bridge],

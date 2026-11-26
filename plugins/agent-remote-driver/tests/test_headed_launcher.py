@@ -65,7 +65,13 @@ def test_selected_connector_binds_facade_roots_to_the_original_native_command(
         argv += ["--plugin-dir", roots["other"]]
     if change == "matching":
         assert connector_selection(env, session_id="chosen", cwd=str(tmp_path)) == selected
-        selected_connector_roots(selected, argv, value_options=VALUE_OPTIONS)
+        original = list(argv)
+        assert selected_connector_roots(selected, argv, value_options=VALUE_OPTIONS) == argv[:3]
+        assert argv == original
+        suffix = ["--interactive", "--plugin-dir", "--", *bridge]
+        assert selected_connector_roots(selected, [*argv, *suffix], value_options=VALUE_OPTIONS) == [
+            *argv[:3], *suffix,
+        ]
     else:
         with pytest.raises(ValueError):
             selected_connector_roots(selected, argv, value_options=VALUE_OPTIONS)
@@ -428,9 +434,33 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
     state_file = tmp_path / "private-state" / "caller-selected.data"
     seed = 'literal\n"quotes" & $value'
     argv = ["fixture-native", "--session-id", "chosen", "-i", seed]
+    native_argv = list(argv)
+    launch_env: dict[str, str] = {}
+    startup = Mock()
+    if publication == "published":
+        roots = {}
+        for name in ("agent-bridge", "agent-remote-driver"):
+            root = tmp_path / name
+            root.mkdir()
+            (root / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
+            roots[name] = str(root)
+            argv += ["--plugin-dir", str(root)]
+        selected = {
+            "contract": "driver-native-v1", "version": 1, "sessionId": "chosen",
+            "cwd": str(tmp_path.resolve()), "scopeId": "scope", "attempt": "attempt",
+            "bridgePluginRoot": roots["agent-bridge"], "driverPluginRoot": roots["agent-remote-driver"],
+        }
+        launch_env = {
+            CONNECTOR_ENV: json.dumps(selected), "AGENT_BRIDGE_NATIVE_SESSION_ID": "chosen",
+            "AGENT_BRIDGE_SCOPE_ID": "scope", "AGENT_BRIDGE_PORTABLE_ATTEMPT": "attempt",
+            "AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT": roots["agent-bridge"],
+            "AGENT_BRIDGE_REMOTE_DRIVER_ROOT": roots["agent-remote-driver"],
+            CONTEXT_ENV: "original-private-channel",
+        }
+        monkeypatch.setattr(launcher, "StartupAdmissionClient", lambda _context: startup)
     coordinator = asyncio.create_task(launcher.run_headed(
         argv, session_id="chosen", attempt_directory=tmp_path / "attempt",
-        state_file=state_file, nonce="front-private",
+        state_file=state_file, nonce="front-private", env=launch_env, cwd=str(tmp_path),
     ))
     writer, client = None, None
 
@@ -449,7 +479,11 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
     try:
         starting = await state_named("native_starting")
         assert "port" not in starting
-        assert calls[0][:len(argv)] == argv and calls[0].count(seed) == 1
+        assert calls[0][:len(native_argv)] == native_argv and calls[0].count(seed) == 1
+        assert calls[0].count("--plugin-dir") == 1
+        if publication == "published":
+            assert startup.check.call_args.args[0] == argv
+            assert len(argv) == len(native_argv) + 4
         assert "--experimental" in calls[0]
         assert Path(calls[0][calls[0].index("--plugin-dir") + 1]).is_dir()
         assert policy.call_count == 2
