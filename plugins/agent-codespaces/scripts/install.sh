@@ -356,6 +356,12 @@ UPDATE_DRIVER_DIR="$PLUGIN_DIR/libs/update-driver"
 if [[ ! -f "$UPDATE_DRIVER_DIR/pyproject.toml" ]]; then
     UPDATE_DRIVER_DIR="$REPO_ROOT/libs/update-driver"
 fi
+# process-telemetry dir (optional consumer-telemetry command route): plugin-
+# vendored in a materialized release payload, repo-root in a dev checkout.
+PROCESS_TELEMETRY_DIR="$PLUGIN_DIR/libs/process-telemetry"
+if [[ ! -f "$PROCESS_TELEMETRY_DIR/pyproject.toml" ]]; then
+    PROCESS_TELEMETRY_DIR="$REPO_ROOT/libs/process-telemetry"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -541,12 +547,16 @@ _install_package_into() {
         _fail "update-driver source not found at $UPDATE_DRIVER_DIR"
         return 1
     fi
+    if [[ ! -f "$PROCESS_TELEMETRY_DIR/pyproject.toml" ]]; then
+        _fail "process-telemetry source not found at $PROCESS_TELEMETRY_DIR"
+        return 1
+    fi
     local packages=(agent-ssh-manager agent-credential-relay agent-config-migrate
         agent-zdd agent-venue-copilot agent-session-liveness-probe
-        agent-single-instance-lease agent-remote-login-shell agent-update-driver agent-codespaces)
+        agent-single-instance-lease agent-remote-login-shell agent-update-driver agent-process-telemetry agent-codespaces)
     local sources=("$SSH_MGR_DIR" "$CRED_RELAY_DIR" "$CFG_MIGRATE_DIR"
         "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
-        "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$UPDATE_DRIVER_DIR" "$PLUGIN_DIR")
+        "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$UPDATE_DRIVER_DIR" "$PROCESS_TELEMETRY_DIR" "$PLUGIN_DIR")
     local i output install_args=(--python "$py")
     for i in "${!packages[@]}"; do
         install_args+=(--reinstall-package "${packages[$i]}" "${sources[$i]}")

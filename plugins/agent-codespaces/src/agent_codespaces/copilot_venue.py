@@ -12,13 +12,18 @@ import argparse
 import os
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, cast
 
 from remote_login_shell import wrap_login_shell
 
 from ._ssh_retry import exec_with_retry
 from .launch_memory import DEFAULT_DRIVER as _DEFAULT_DRIVER
+
+if TYPE_CHECKING:
+    from .auth_preflight import GithubCredentialPreflight
+    from .config import CodespacesConfig
 
 # Mirrors __main__._BUSY_EXIT / __main__._COORDINATION_EXIT exactly (kept as a
 # separate copy, not an import, to preserve this module's existing no-
@@ -28,7 +33,7 @@ _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
 
 
-def add_copilot_subparser(sub) -> None:
+def add_copilot_subparser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``copilot`` subcommand on the shared subparsers group."""
     copilot_parser = sub.add_parser(
         "copilot",
@@ -186,7 +191,7 @@ def add_copilot_subparser(sub) -> None:
     )
 
 
-def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
+def _resolve_anchor_identity(name: str, config: CodespacesConfig) -> str:
     """Synthesize the CLI-mode reservation identity for anchor mode:
     ``anchor-<repo_name>``, where ``repo_name`` is the basename of this
     CodeSpace's resolved workspace folder (the same ``/workspaces/<repo>``
@@ -247,8 +252,11 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
     """
     import asyncio
 
+    from . import consumer_telemetry as ct
     from . import venue_check
     from .lifecycle import account_for_codespace
+
+    started = ct.clock()
 
     async def _probe_and_fix() -> None:
         from ssh_manager import ConnectionManager
@@ -282,8 +290,10 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                     manager.exec_command, name, readiness,
                 )
                 if "install agent-bridge plugin" in remediation.succeeded:
+                    ct.note("bridge_payload", "success", "none", started=started)
                     print("[PREP] agent-bridge plugin installed.", file=sys.stderr)
                 else:
+                    ct.note("bridge_payload", "failure", "payload_install_failed", started=started)
                     print(
                         "[PREP] Could not install agent-bridge plugin "
                         f"automatically -- CLI-mode registration may not "
@@ -302,8 +312,10 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                     manager.exec_command, name, readiness, bridge_version=host_version,
                 )
                 if "update agent-bridge plugin" in remediation.succeeded:
+                    ct.note("bridge_payload", "success", "none", started=started)
                     print("[PREP] agent-bridge plugin updated.", file=sys.stderr)
                 else:
+                    ct.note("bridge_payload", "failure", "payload_install_failed", started=started)
                     print(
                         "[PREP] Could not update the agent-bridge plugin -- an old "
                         "venue CLI can strand this session's registration. Run "
@@ -335,6 +347,7 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
     try:
         asyncio.run(_probe_and_fix())
     except Exception as exc:  # noqa: BLE001 -- best-effort, never fatal
+        ct.note("bridge_payload", "failure", "other", started=started)
         print(
             f"[PREP] agent-bridge preflight probe failed ({exc}) -- "
             "continuing anyway.",
@@ -352,21 +365,25 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
     is for a rejoin of a running worker, which launches nothing; its caller
     asks the policy itself should the rejoin create a session after all.
     """
+    from . import consumer_telemetry as ct
     from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
     from .launch_policy import refused_exit_code
-    from .worktrees import ContextRefused
+    from ._peer_launch import ContextRefused
 
     # The host's launch policy first, before any claim is taken or touched.
     refused = refused_exit_code(args.name) if launch_policy else None
     if refused is not None:
         return refused
+    started = ct.clock()
+    forced = bool(getattr(args, "force_claim", False))
     try:
         claim_for_connect(
             args.name,
-            force=getattr(args, "force_claim", False),
+            force=forced,
             effort=getattr(args, "effort", None),
         )
     except ClaimConflict as exc:
+        ct.note("claim", "failure", "claim_busy", started=started)
         print(
             f"[BUSY] {exc}\n"
             f"       A CodeSpace is fronted by a single bridge, so a second "
@@ -379,6 +396,9 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
         )
         return _BUSY_EXIT
     except (CoordinationRejected, ContextRefused) as exc:
+        ct.note("claim", "failure",
+                "lease_conflict" if isinstance(exc, CoordinationRejected) else "other",
+                started=started)
         print(
             f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
             file=sys.stderr,
@@ -386,11 +406,14 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
         return _COORDINATION_EXIT
     except RuntimeError as exc:
         # Never let a claim-bookkeeping error block a connect.
+        ct.note("claim", "failure", "other", started=started)
         print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
+        return None
+    ct.note("claim", "success", "force_claimed" if forced else "none", started=started)
     return None
 
 
-def github_credential_preflight(name: str):
+def github_credential_preflight(name: str) -> GithubCredentialPreflight:
     """Run the host github.com credential relay preflight for ``name``."""
     import asyncio
 
@@ -495,7 +518,7 @@ def cmd_copilot(
     from .copilot_detach import plan_for
     from .hosting_policy import require_codespace_hosting
 
-    plan = (
+    plan: dict[str, Any] = (
         {"scope_id": f"{args.worktree_id}@{args.name}", "workspace_folder": None}
         if args.worktree_id else plan_for(args, load_merged_config())
     )
@@ -620,7 +643,7 @@ def _cmd_copilot_connect(
 
     def connect(remote_command: str) -> int:
         from .plugin_preparation import attached_launch_command
-        prepared_context = {}
+        prepared_context: dict[str, Any] = {}
         with _attached_preparation(args, config, prepared_context=prepared_context) as relay_ready:
             forwards = [
                 spec for spec in reverse_forwards
@@ -630,7 +653,7 @@ def _cmd_copilot_connect(
                 args.name, forwards,
                 relay_port=relay_port, relay_token=relay_token,
                 remote_command=attached_launch_command(
-                    remote_command, prepared_context.get("workspace"),
+                    remote_command, cast(str, prepared_context.get("workspace")),
                 ),
             )
 
@@ -653,32 +676,35 @@ def _cmd_copilot_connect(
 
 
 @contextmanager
-def _attached_preparation(args, config, *, prepared_context=None):
+def _attached_preparation(
+    args: argparse.Namespace, config: CodespacesConfig, *, prepared_context: dict[str, Any] | None = None,
+) -> Iterator[Any]:
     """Keep async relay supervision alive while SSH owns the main thread/TTY."""
     import asyncio
     from .plugin_preparation import prepare_attached
 
     ready = threading.Event()
     stop_requested = threading.Event()
-    state = {}
+    state: dict[str, Any] = {}
 
-    def worker():
-        async def run():
+    def worker() -> None:
+        async def run() -> None:
             stopped = asyncio.Event()
             loop = asyncio.get_running_loop()
             task = asyncio.current_task()
 
-            def stop():
+            def stop() -> None:
                 if state.get("prepared"):
                     stopped.set()
                 else:
+                    assert task is not None  # always set inside asyncio.run()
                     task.cancel()
 
             state["stop"] = lambda: loop.call_soon_threadsafe(stop)
             if stop_requested.is_set():
                 stop()
 
-            def prepared(relay_ready):
+            def prepared(relay_ready: Any) -> None:
                 state["prepared"] = True
                 state["relay_ready"] = relay_ready
                 ready.set()
