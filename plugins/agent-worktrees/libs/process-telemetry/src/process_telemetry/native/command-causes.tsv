@@ -1,0 +1,9 @@
+python-unavailable	The selected Python interpreter is unavailable
+uv-unavailable	The required uv executable is unavailable
+entrypoint-unavailable	The declared application entrypoint is unavailable
+runtime-selection-failed	The runtime selector failed
+bootstrap-failed	Runtime bootstrap failed
+invalid-arguments	The command rejected its arguments
+native-command-failed	The native command returned a failing result
+explicit-error	The command explicitly reported an error
+interrupted	The native command was interrupted

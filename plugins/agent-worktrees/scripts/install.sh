@@ -2404,6 +2404,18 @@ deploy_package() {
         fi
     fi
 
+    # Vendored process-telemetry lib (agent-process-telemetry / module
+    # process_telemetry). Optional consumer-telemetry command route; inert
+    # without its local admission file. Same materialized-release guard.
+    local process_telemetry_dir="$PLUGIN_DIR/libs/process-telemetry"
+    if [[ -f "$process_telemetry_dir/pyproject.toml" ]]; then
+        if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-process-telemetry \
+                "$process_telemetry_dir" --quiet; then
+            err "process-telemetry library install failed"
+            return 1
+        fi
+    fi
+
     # Shared PR filter semantics must resolve locally, never from an index.
     local pr_filters_dir="$PLUGIN_DIR/libs/pr-filters"
     if [[ ! -f "$pr_filters_dir/pyproject.toml" ]]; then

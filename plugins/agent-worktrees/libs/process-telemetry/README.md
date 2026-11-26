@@ -1,0 +1,744 @@
+# process-telemetry
+
+`agent-process-telemetry` is the shared callable seam used by Bridge and
+Dispatch. It has no telemetry SDK dependency; optional policy composition uses
+the dependency-free `agent-configuration-layers` library. It is diagnostic
+only: sampled/dropped events never replace
+durable update, recovery, delivery, approval or process-membership facts.
+
+## Existing consumers
+
+The optional [hourly service contribution protocol](hourly-reporting.md)
+provides a closed summary schema and bounded read-only reduction primitives.
+Dispatch supplies the first native exporter; Machines conditionally collects
+qualified selected-runtime contributions. This does not start capture or
+establish installed-host adoption.
+
+Manager's explicit [source observation](../../worktree-manager/docs/source-observation.md)
+consumer also uses this schema/exporter, through its **existing frame-health
+writer**, not a second buffer or exporter worker. Its `source_entry`,
+`first_refresh`, `input_ack`, `fixture_rows` and `ui_stop` stages intentionally
+do not claim headed paint, installed startup or production row authority.
+
+Both plugins retain `set_telemetry_sink`, `clear_telemetry_sink`, `has_sink`,
+`emit`, existing factory/config discovery and JSONL spool functions. Their
+lifecycle reducers remain plugin-owned. `SinkSlot` extracts their per-consumer
+registration and fail-open call, without a new registry or event bus.
+Legacy sinks remain **synchronous**. Register a bounded adapter explicitly for
+latency-sensitive producers; this release does not silently change existing
+sink delivery or automatically configure a collector.
+
+The legacy JSONL spools encode a complete record and newline before one native
+append write: POSIX `O_APPEND`, Windows `FILE_APPEND_DATA` without
+`FILE_WRITE_DATA`. This preserves record boundaries among concurrent threads
+and processes writing a local file, without a server, queue, or dropping policy.
+Fields, emit-time `ts` defaults and existing timestamps are unchanged; parent
+directories are not created. The callbacks remain synchronous and fail-open.
+This is not bounded-latency delivery, an `fsync`/durability promise, or a
+network-filesystem guarantee. A failed/short write may leave a partial record;
+the helper reports failure without retrying a suffix that could interleave.
+The callbacks log that uncertainty at debug level, not a successful delivery.
+Existing partial tails, rotation/truncation coordination, and writes by older
+seek-then-write implementations are not repaired or fenced by this fix.
+
+```python
+from agent_bridge import telemetry
+
+# Initialization belongs to the existing long-lived owner, never a hook.
+writer = telemetry.set_buffered_telemetry_sink(
+    telemetry.make_spool_sink(configured_local_file)
+)
+# Existing lifecycle producers now enqueue through the same public emit API.
+# At owner shutdown:
+telemetry.clear_telemetry_sink()  # closes owned buffer, no flush or wait
+```
+
+One daemon writer drains batches; no per-event process/thread, file write,
+JSON serialization, network or sink callback runs on the producer. Bounds are
+128 queued records by default plus at most one 32-record drain batch.
+The record copier bounds primitive nesting, entry/string lengths and a
+conservative serialization-size estimate (4 KiB default). It is not an exact
+Python heap-size claim. Contention, overflow, invalid data, inactive writes,
+sink exceptions and abandoned records have counters. Snapshot counters need not
+be mutually consistent. A permanently stuck sink owns at most this one daemon
+thread; no automatic replacements, shutdown joins or retries are introduced.
+`join(timeout)` is an optional off-path wait capped at five seconds, not a flush.
+Reconfiguration cannot start another owned writer until the previous one has
+stopped, including a closed writer still blocked inside a sink.
+`delivered` counts successful callback returns, not durable persistence: an
+existing spool callback can swallow its own I/O error. Receive-to-persist
+qualification requires an independent receiver readback.
+
+The buffer copies primitives but is **not a generic redactor**. Existing
+lifecycle reducers retain their own privacy policy. Use `measurement.begin`
+for content-free performance events; do not enqueue raw logs or payloads through
+the lifecycle/performance telemetry seam. The separately owned application
+adapter below admits only its explicitly shaped local logging fields.
+
+## Optional bound command telemetry
+
+The optional `command` extra supplies the shared
+[`consumer-telemetry-command` v1 route](../../docs/patterns/consumer-telemetry-command.md).
+Bridge is its first real adapter; see its
+[admission, receiver and validation reference](../../plugins/agent-bridge/docs/consumer-telemetry-command.md).
+Dispatch also adopts the same parser/runner through its
+[coordinator admission and producer reference](../../plugins/agent-dispatch/docs/consumer-telemetry-command.md),
+with the independent closed `dispatch.lifecycle.v1` projection.
+`SinkSlot.configure_commands()` retains a separate explicitly bound path beside
+the unchanged synchronous legacy sink. A binding never falls back to that sink.
+The owner may select `source="agent-dispatch"`; the default remains Bridge.
+Both pre-snapshot filtering and off-path projection are selected from these
+registered source adapters, never from event fields, commands or import strings.
+Each provider advertises only its own source schema; shared-library presence
+does not establish another provider's support.
+`BufferedSink.offer()` adds explicit admission accounting; `drain()` is a
+separate off-path, at-most-250-ms seal/wait. `close()` remains nonflushing.
+The command route reuses that one writer and the native process owner.
+It does not enroll other record families or import a receiver package.
+
+`process_telemetry.command.SOURCES` is the closed registry pairing each source
+with its schemas: Bridge and Dispatch as above, `agent-worktrees`
+(`worktrees.lifecycle.v1`, `hook.lifecycle.v1`), `agent-codespaces`
+(`codespaces.lifecycle.v1`) and `agent-containers` (`containers.lifecycle.v1`).
+`configure_commands(source=..., source_schema=...)` defaults to a source's first
+schema and refuses an unregistered pair. `stage_projection` owns the closed
+stage, PR-activity and hook projections. `finite_owner.FiniteOwner` gives a
+short CLI one route lifetime admitted by an owner-local
+`consumer-telemetry.json` (`{"schema_version":1,"root":"<absolute>"}`); absence
+is legacy and nothing starts. `hook_journal.HookRun.begin()/finish()` lets a
+latency-sensitive hook record a bounded, content-free observation without
+launching a receiver, and `hook_journal.drain()` hands it to a finite owner.
+Registration is not adoption: each provider ships its own descriptor.
+
+```python
+from process_telemetry import hook_journal
+from process_telemetry.finite_owner import FiniteOwner
+
+run = hook_journal.HookRun.begin(journal_dir, "agent-worktrees", "sessionStart")
+# ... hook work ...
+run.finish(outcome="success")
+
+with FiniteOwner.from_directory(install_dir, source="agent-worktrees",
+                                source_schema="hook.lifecycle.v1") as owner:
+    for event in hook_journal.drain(journal_dir):
+        owner.emit(event)
+```
+
+## Composed telemetry policy
+
+The optional policy reader composes a harness-owned sink catalog with
+owner-supplied repository, bound-knowledge, machine and exact-repository+machine
+layers through `configuration_layers`. It does not discover roots, parse owner
+files, bind a knowledge repository or start a receiver. Callers must supply the
+already-qualified context and native layers.
+
+Policy schema version 2 uses one closed `telemetry` object. The harness
+repository can declare named sinks, defaults and a bounded origin scope:
+
+```json
+{
+  "telemetry": {
+    "schema_version": 2,
+    "sinks": {
+      "local": {
+        "transport": "command-jsonl-v1",
+        "argv": ["python", "tools/receive.py"],
+        "source_schemas": ["bridge.lifecycle.v1"]
+      }
+    },
+    "defaults": {"lifecycle": "local"},
+    "scopes": {
+      "lifecycle": {
+        "repositories": ["registered-repository-id"],
+        "worktrees": ["registered-worktree-id"]
+      }
+    }
+  }
+}
+```
+
+Knowledge and machine layers may set `usages`, narrow `scopes`, add
+`exclusions`, and set per-usage `opt_out`; they cannot declare or replace sinks
+or harness defaults. Usage mappings use normal layer precedence, and explicit
+`null` disables that usage. Scope lists intersect across layers; exclusions
+accumulate; any `opt_out: true` remains effective across all layers. Empty scope
+lists deny that scope. Duplicate sink names, unknown fields, unsupported
+transports/sources, missing harness scope and malformed explicit sources refuse
+composition. Ordinary values retain winning-field provenance; intersected
+scopes, accumulated exclusions and monotonic opt-outs retain every contributing
+layer's source provenance.
+
+`PolicySnapshot.resolve()` requires a separately admitted driving origin and
+the exact selected provider's `ProviderCapabilities`. Its origin argument is
+data from the existing admission owner, not proof of origin by itself. A provider
+must explicitly add `policy_versions` to its
+`consumer-telemetry-contract.json`; an older descriptor without that field is
+unsupported, not silently treated as compatible. A provider rollback that
+removes the declaration is therefore refused for policy version 2; no implicit
+fallback selects a legacy sink. The existing command schema and its legacy
+reader remain unchanged. Resolving policy is not producer enrollment, receiver
+installation, OTLP support or delivery evidence.
+
+## Optional retained application diagnostics
+
+### Command error evidence
+
+The optional `command-errors` extra supplies
+`process_telemetry.command_errors.CommandErrorRecorder(command, source, *,
+directory=None, correlation_id=None)`. Its `record(code, message, *, phase,
+exit_code, completeness, observed_at=None)` method accepts a **producer-shaped safe cause**, not
+raw stderr, argv, stdin, prompts, arbitrary request bodies or exception values.
+It returns a write observation; failure never replaces the command's result.
+`current_recorder()` exposes the active same-process entry recorder to explicit
+application reports, including an error followed by exit zero. The process-entry
+recorder remains available to non-daemon threads and interpreter exit hooks;
+nested activation uses a shared context variable and restores its enclosing scope.
+An off-path adapter may supply a finite Unix observation time through
+`observed_at`; the retained UTC timestamp then describes the error, not the
+later writer callback.
+
+The default namespace is the current user's
+`.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already
+qualified directory instead. Private directory and file creation/validation
+reuse Procutil's native permission owner, including the current-user owner SID
+when a Windows launcher has an administrator TokenOwner. Appends, rotation and elapsed-age
+maintenance reuse `DiagnosticLog` and operation custody. The entry calls
+`maintain()` at startup against **existing** storage, with one cross-process
+claim per minute. Each claim inventories at most 256 entries and applies the
+existing retention policy to one segment of at most 5 MB plus 64 KiB, selected
+round-robin by a private filename cursor. Larger/incomplete inventories and
+oversized segments degrade visibly without discarding evidence. Ordinary record
+emission and read-only discovery do no history scan. A fresh recorder can
+maintain existing logs without first emitting an error. Explicit owner maintenance
+can use `maintain(force=True)` for the full history and abandoned prune copies.
+Retention therefore progresses across due command startups, not during periods
+with no owner process; this adapter introduces no idle worker. Work bounds do
+not guarantee wall-clock storage latency; existing custody has a two-second
+acquisition budget per operation. The reader emits ASCII-escaped JSON so Unicode
+causes remain readable on redirected non-UTF-8 consoles.
+Calls sharing one recorder serialize writer state and result inspection so a
+following successful append cannot hide an earlier failed call. Synchronization
+is process-scoped: forked children do not wait on another parent thread's lock.
+
+`recent_errors(directory=None, *, limit=20, max_bytes=262144, max_files=16)`
+reads the active file directly and bounded archive tails, reports unavailable/truncated evidence and never creates
+an absent root, takes a lock or provisions a runtime. Discovery does not prove
+write health. If the bounded name inventory is incomplete, it omits archives
+rather than presenting an arbitrary directory prefix as the latest history.
+Unsupported/private-path checks fail closed for the evidence
+write while preserving the original operation.
+
+Invocation packages the same owners as `scripts/command-errors.pyz`; see its
+[entry contract](../payload-invocation/README.md#command-error-entry-support).
+The isolated archive does not shadow the application's installed packages.
+On Windows, the archive also observes stdlib `ArgumentParser.error`, error-level
+`Logger.callHandlers` reports (after logger filtering, including nonpropagating
+loggers), `threading.excepthook` and `sys.unraisablehook`. It delegates to their
+original owners and retains only fixed classifications, not parser messages,
+logger names/format arguments, exception values or object representations.
+Warnings and logger-filtered records do not become command errors.
+Custom/shadowed parsers and subsequently replaced hooks are not automatically
+covered; an overridden stdlib parser produces an explicit unavailable record.
+
+Automatic callbacks offer bounded primitive snapshots to the existing
+`BufferedSink`. One explicitly initialized writer performs storage and custody
+off the callback; queued routing directories are never persisted as fields.
+Observation time and the emitting recorder's command/source/correlation/parent
+are captured before returning to the original owner. Accepted is not persisted:
+full/contended/invalid/inactive offers and failed or abandoned writes are
+incomplete evidence. Final drain and join are each bounded to 250 ms, with a
+fixed incomplete diagnostic on loss or an unsettled writer. A blocked or failed
+writer is not replaced to evade its bound. Discovery still cannot prove write
+health.
+
+On that platform, ordinary application exit hooks and logging shutdown run before the final
+drain. If logging was loaded before archive initialization, the earlier shutdown
+ordering cannot be promised: an explicit `report-shutdown-unavailable` record
+marks that partial coverage. Rejected offers latch incomplete coverage until
+explicit owner completion/shutdown warns off-callback.
+These lifecycle operations are separate from report callbacks; hard kills,
+`os._exit` and arbitrary replacement of the observed owners remain outside
+automatic completion guarantees.
+
+POSIX automatic report activation remains open under #14336. This slice starts
+no POSIX report worker, installs no POSIX stdlib observers, and does not wrap
+`os.fork` or change signal handlers/masks. Existing nonzero-exit, uncaught-exception
+and explicit producer evidence remains available there. Native fork, signal and
+caught-cancellation qualification must pass before changing that baseline.
+
+The archive's read-only `recent` response adds
+`automatic_reports: {"supported": <boolean>, "scope": "reader-platform"}`.
+This declares the executing reader's platform capability, not another process's
+activation, complete coverage or write health. Missing metadata from an older
+reader means unknown support; existing discovery fields and the library's
+`recent_errors()` API are unchanged.
+
+Automatic unshaped exceptions and nonzero exits retain metadata only, explicitly
+not a full cause: the actual producer must supply a safe report for causal
+coverage. Uncaught exceptions and interruptions leave the final exit code
+unknown (`null`); only an observing process owner can supply that final result.
+Native pre-interpreter errors, actual producer-shaped parser/logging causes and
+cross-process context remain separate integration work.
+
+### Native error-only support
+
+The optional `agent-process-telemetry[command-errors]` provider exposes the
+build-time locator `process_telemetry.command_errors_assets.native_support_files()`.
+It returns five named byte assets: `command-errors.sh`, `command-errors.ps1`,
+`private-paths.sh`, `private-paths.ps1`, and `command-causes.tsv`. A generator
+materializes the complete set together in its own protected, versioned asset
+directory and embeds the resulting absolute helper path. No installed-plugin
+root guessing, application Python, uv, receiver flag or new runtime is involved
+at command entry. Use a provider from the actual containing suite release;
+the presence of an older distribution with the same project name is not
+proof that it supplies this capability.
+
+```bash
+# In the existing owner's failed Python-preflight branch:
+original_result=$?
+source "<owned-assets>/command-errors.sh"
+command_error_write example-command example-source python-unavailable "$original_result"
+exit "$original_result"
+```
+
+```powershell
+# In the existing owner's failed Python-preflight branch:
+$originalResult = $LASTEXITCODE
+. '<owned-assets>\command-errors.ps1'
+Write-CommandErrorEvidence -Command example-command -Source example-source `
+    -Cause python-unavailable -ExitCode $originalResult
+exit $originalResult
+```
+
+Bash accepts `COMMAND SOURCE CAUSE RESULT [DIRECTORY]`, using literal `null`
+when the final result is unknown. PowerShell's nullable `-ExitCode` defaults to
+unknown; `-Directory` is optional. Directory overrides must already be
+owner-qualified local absolute paths. Defaults match the Python SDK's private
+user-local store. The Bash binding requires Linux, Bash with `BASHPID`, GNU `stat`/`date`,
+`flock`, `mkdir`, `mv`, `tail` and `/proc`; Windows uses existing PowerShell
+5.1/Core and native .NET filesystem/security APIs. Unsupported prerequisites
+produce a fixed unavailable-evidence warning, not interpreter acquisition.
+
+Both helpers are best-effort, emit no stdout, and do not replace the primary
+command status. Bash deliberately returns zero so diagnostic degradation does
+not trigger `set -e`; callers must save and explicitly return their original
+result. PowerShell starts no child process and leaves `$LASTEXITCODE` intact.
+Neither helper wraps the application, consumes stdin, changes TTY descriptors,
+installs traps, captures streams, or takes custody of descendants.
+
+The cause catalog is a closed producer-safe vocabulary, not an arbitrary
+message API. Initial causes cover missing Python/uv/entrypoint, selection,
+bootstrap, arguments, explicit error, native failure and interruption.
+Command/source identities remain fixed producer declarations. Raw arguments,
+environment values, paths, exception text and prompts are not accepted as
+cause text. Generic causes do not establish richer causal coverage.
+
+Native writers use `command-error.v1`, fresh per-report correlation IDs, the
+same lock path and kernel custody (Linux flock / Windows byte at 1 GiB), native
+private-path checks, UTF-8 JSONL and SDK-compatible UTC timestamps. Writes
+rotate at the existing 5 MB/day boundary and preserve interrupted tails under
+the existing archive naming scheme. They do not scan/prune history: elapsed-age
+retention remains the existing SDK maintenance owner's work when available.
+There is no maintenance daemon, cross-process invocation-context propagation,
+fsync/power-loss promise or hard-kill completion inference.
+
+Native source integration is separate from availability of these assets.
+Existing generated dispatchers and adopter commands are not automatically
+adopted by this provider API.
+
+
+`process_telemetry.diagnostic_logs` is an optional stdlib-only implementation of
+the existing Dispatch JSONL handler, now shared by the actual Bridge and Dispatch
+application adapters. Importing the base package still discovers no configuration,
+starts no writer and creates no files. Consumers inject their resolved directory,
+service/component attribution, timestamp decoder and existing custody context.
+The library does not import a plugin or `single_instance_lease`.
+
+The shared writer compares each aware record timestamp with UTC now minus 30
+elapsed days, retaining equality and future records. It maintains active and
+UTC/unique archived segments, preserves malformed evidence with degraded status,
+reclaims recognized interrupted prune copies under custody, and caches validated
+unchanged-segment expiry information. It never applies policy to a legacy/native
+handle destination. Owners explicitly schedule startup and quiet maintenance;
+ordinary emission does no history scan. Dispatch's adapter retains its public
+paths, discovery schema and synchronous behavior.
+Maintenance attempts are debounced even when storage is unavailable; only an
+explicit forced retry bypasses that window.
+
+### Explicit strict pre-effect write
+
+`DiagnosticLog.write_event_strict(event)` is a separate synchronous API, not a
+change to `write_event`, logging handlers, legacy/retained spool callbacks or
+buffer delivery. `process_telemetry.append.strict_write_capability()` reports
+`linux-file-directory-fsync-v1` only when the executing implementation has the
+Linux primitives; other platforms return `None` and strict writes raise
+`NotImplementedError` before custody or file effects. Package version, a queue
+offer, callback count and later readback are not this capability or readiness.
+Windows append-only writes are unchanged; no `FlushFileBuffers` or Windows
+strict-durability support is claimed.
+
+The caller supplies an already provisioned persistent local directory, bounded
+privacy-filtered JSON fields with an explicit aware timestamp, and the same
+participating custody owner used for rotation/retention. Strict writes create
+no parent directory, perform no history maintenance, and refuse expired or
+unparseable timestamps rather than silently skipping them. Equality at the
+30-day cutoff and future timestamps retain the existing policy. The encoded
+record must be one complete UTF-8 JSONL object, preserve the caller's fields,
+contain no nonfinite JSON numbers, and fit **65,536 bytes including newline**.
+Field preservation compares exact primitive JSON types recursively, including
+booleans versus numbers and integers versus floats. Nonfinite literal tokens
+and overflow notation such as `1e400` refuse, as do duplicate object fields,
+unsupported input types and lossy custom encoders.
+Finite primitive input is validated and deeply snapshotted before any callback.
+The timestamp decoder and encoder each receive an independent deep copy;
+encoded fields are compared with the untouched snapshot, not an event that
+the encoder could modify. Mutations that alter serialized fields refuse
+before custody, including timestamp or nested correlation changes.
+This bounds the submitted write, not arbitrary caller encoder work or heap use;
+owners must bound inputs before encoding.
+
+Under that existing custody, rollover preserves an interrupted old tail, and
+the append owner opens the directory and no-follow plain single-link file,
+performs exactly one `O_APPEND` write, checks its complete byte count, syncs
+the file and then its containing directory, and closes both descriptors before
+return. This includes active-file creation/rollover name changes. Any failure,
+including custody, encoding, append, short write, sync or close, is reported as
+degraded and propagated. A failure can leave a partial or complete record;
+there is no suffix retry, rollback, automatic replay or grant to call a backend.
+
+Call the backend only after the direct method returns successfully. An async
+owner must await this synchronous operation off the event loop; a timeout or
+lost reply is unknown, never permission to continue or repeat accepted work.
+Successful return means these kernel sync calls completed, not a hardware
+power-loss guarantee, network-filesystem guarantee, mounted-volume proof,
+permanent authority ledger or completion of the following effect. Caller
+provisioning must durably establish ancestors and exclude nonparticipating
+writers, foreign mounts and concurrent namespace replacement. Existing
+diagnostic age retention still applies: authoritative task/operation state
+remains in its existing journal/database, not this log.
+
+Synthetic syscall and caller-ordering tests live in
+`tests/test_strict_diagnostics.py`. The separately selected
+`tests/native_strict_diagnostics.py` exercises actual Linux local-file append,
+sync, lock contention, interrupted-tail rollover and refusal fixtures. Its
+sync failures are injected, not real disk exhaustion. Actual shared-volume,
+crash/interrupted-driver, storage-failure and other-platform qualification remain
+separate integration work; this API does not automatically wire or admit a
+reproducer case. Neither file expands the required unit-only CI packet.
+The separately selected `tests/native_hook_journal_processes.py` races real,
+independent processes on one hook journal: simultaneous starts against the
+marker cap, writers against a drainer, and a killed lock holder.
+
+Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
+writer, not another collector or service. Its producer copies bounded primitives
+without a blocking logging-handler lock, formatting, file access or history work.
+The existing copier limits (including 512 characters per string and supported
+primitive types) apply. The logging adapter retains nonprimitive arguments as
+explicit type placeholders and clips long primitive strings, without calling
+repr/str/equality hooks or serializing exception arguments. Unsupported envelopes,
+contention, overflow, failed callbacks and abandoned work remain observable losses,
+not lossless delivery. Exception type and up to eight frame
+locations are copied without exception objects/arguments, source reads, arbitrary
+repr, environment or credentials. Formatting, retention and kernel I/O occur on
+that one existing worker. Dynamic or over-512 format width/precision and
+over-8192-character formatted results fail the callback, preventing a small
+accepted format string from allocating unbounded output.
+Every conversion is parsed before interpolation; nested-parenthesis mapping keys
+are explicitly unsupported, so they cannot bypass width validation.
+Eligible maintenance also emits an ordinary local `diagnostic_buffer_callbacks`
+status record through the same retained writer. It is diagnostic history, not a
+new status registry, service endpoint or authority receipt; shutdown losses may
+remain unreported. Existing Bridge health packets stay unchanged.
+
+`BufferedSink(..., on_start=callback)` optionally performs owner initialization
+once on the same worker before consuming records. Existing callers default to
+no callback. This avoids depending on a droppable queue offer for startup
+maintenance. A callback failure increments `sink_failed`; there is no new retry
+or replacement worker. `close()` remains nonjoining/nonflushing; `closed` reports
+that state. The owner must not replace a writer still blocked after closure.
+Initialization and maintenance callbacks are not persisted log records, and
+`delivered` still counts successful callbacks, not receiver-confirmed persistence.
+`on_iteration=callback` optionally reuses the same existing per-batch/idle worker
+iteration and stop wait for owner maintenance, with no separate timer or task.
+Bridge uses that seam so its protected application, CLI orchestrator and health
+wire sources, registry and captured evidence remain unchanged. Successful queued
+sink callbacks (including explicit maintenance requests) count as `delivered`;
+initialization and per-iteration maintenance do not.
+
+See the actual adapters' [Bridge](../../plugins/agent-bridge/docs/diagnostic-logs.md)
+and [Dispatch](../../plugins/agent-dispatch/docs/diagnostic-logs.md) contracts.
+
+## Explicit retained-spool API (not legacy-path rotation)
+
+Both consumers expose `telemetry.make_retained_spool_sink(directory)` as a
+separate **Python API**. It is not a replacement for `make_spool_sink`, not a new
+zero-argument configuration selector, and does not automatically adopt a
+previously configured spool.
+
+The existing owner must first provision a **new, exclusively participating**
+`<directory>/retained/` namespace, verify that no legacy/nonparticipating writer
+targets it, and own maintenance and discovery. The factory never creates parent
+directories. Its active files are `agent-{bridge,dispatch}-telemetry.jsonl` under
+that child namespace, with the same UTC/unique archive convention. Never point an
+old factory at these files or retrofit retention behind an old writer.
+
+```python
+from agent_bridge import telemetry
+
+# Explicit caller-owned opt-in after normal owner provisioning/authorization.
+sink = telemetry.make_retained_spool_sink(preprovisioned_diagnostics_directory)
+sink(already_privacy_filtered_event)
+sink.maintain()          # normal owner cadence, including when no events arrive
+locations = sink.inventory()
+```
+
+The sink copies the producer dict, preserves fields and an existing `ts`, and
+adds the same epoch-millisecond default only when `ts` is absent. Retention's
+decoder explicitly expects epoch milliseconds; unsupported timestamps remain
+unaged/degraded, never guessed or rewritten. The underlying optional `RetainedSpool`
+also accepts an explicit owner timestamp decoder. Under the injected custody,
+each encoded JSONL record uses the unchanged `append_bytes` one-write primitive:
+no suffix retry, no parent creation, no arbitrary envelope or identity fields.
+Failures remain advisory. The sink is synchronous, not bounded-latency; an async
+producer must explicitly use its existing bounded adapter. Quiet/startup
+maintenance is not an autonomous service.
+
+This API is available for deliberate helper/owner adoption. Existing configured
+spools retain their original format, append behavior and **unretained** status.
+It does not adopt native stdout/stderr, installer attempts, lifecycle/bootstrap
+files, authoritative state or container output.
+An async owner may construct the sink off its serving path and explicitly use
+the existing adapter with `on_start=lambda: sink.maintain(force=True)` and
+`on_iteration=sink.maintain`. The sink constructor and direct callable remain
+synchronous; these options do not silently alter an old configuration.
+
+Bridge and Dispatch also own an additive configuration adapter:
+`{"retained_spool": {"directory": "<absolute base directory>"}}`, mutually
+exclusive with legacy `sink`/`spool`. `configured_spool` reuses their existing
+slot and buffer, constructs the retained sink on that worker after checking the
+preprovisioned exclusive child namespace, and supplies startup/busy/idle hooks.
+Their local `logs` inventories report configured paths with unknown live health,
+without importing arbitrary factories or reading event payloads. Old factories
+remain synchronous and unchanged; explicit clear/lifecycle closure remains
+nonjoining, and a still-running previous buffer prevents replacement.
+Configured buffers opt into `stamp_missing_ts=True`: only absent timestamps are
+generated on their already-bounded producer snapshot, before enqueue, with budget
+reserved for that field. Existing timestamps and default buffer behavior remain
+unchanged. Configured cleanup checks the slot's actual owned buffer type and
+clears it atomically under its existing configuration lock; there is no second
+plugin-global cleanup reference to go stale after rejected or concurrent reloads.
+
+## Measurements and reports
+
+`measurement.begin(slot, component, stage, parent=..., identity=...)` returns
+an owner-completed `Measurement`, or `None` before clock/UUID/validation work
+when disabled or sampled out. `finish(outcome, **counters)` emits at most once.
+The caller supplies only an approved stage, opaque correlation context, limited
+version metadata and nonnegative known counters. No prompt, argv, path, code,
+host/user/repository name, free-text error or environment dump is accepted.
+
+`TraceContext` supports explicit W3C traceparent correlation without baggage.
+The owner chooses sampling once; child contexts inherit it. CPU is whole-process
+CPU during the interval, **not** CPU attributable exclusively to a concurrent
+span. Unknown child CPU/memory must remain absent. Native executable/frame/
+prompt observations must come from their real owner, not inferred timestamps.
+
+`report.summarize` is a pure offline helper for a homogeneous workload/stage.
+It retains every supplied sample, distinguishes unavailable from zero, refuses
+over-counted/malformed input, reports nearest-rank p50/p95/p99/max, and leaves
+budget status unknown for incomplete/lossy samples. Fewer than 100 successful
+samples cannot qualify p99. Source/installed/serving metadata and workload
+provenance remain the enclosing native report owner's responsibility; this
+helper alone does not qualify native performance.
+
+## Delivery status and boundaries
+
+This is the bounded diagnostic producer from the reviewed
+[performance telemetry effort](../../efforts/active/performance-telemetry/README.md).
+Base installation has no SDK dependency or telemetry auto-install/start.
+Explicit consumers may install the optional `[otlp]` extra through their own
+approved dependency/deployment flow. Nothing installs it on a hook or import.
+
+### Optional real OpenTelemetry export
+
+`process_telemetry.otlp.LocalOtlpSink(endpoint, timeout=2)` constructs a real
+OpenTelemetry Python SDK `SpanExporter` only when explicitly called. It uses
+the official OTLP protobuf encoder and a bounded stdlib HTTP transport. The
+stock SDK HTTP exporter constructor parses/logs ambient headers even with
+explicit arguments; this adapter uses the public exporter extension point
+instead, without mutating process environment or SDK globals.
+The endpoint must include a literal loopback IP, explicit port and `/v1/traces`.
+No DNS name, implicit environment destination, proxy, netrc credentials,
+redirect, query or user-info is accepted. A remote consumer requires a separately
+authorized local transport owned elsewhere; this package never creates one.
+Resources are explicitly constructed, not discovered from environment/host data.
+
+```python
+from process_telemetry import SinkSlot
+from process_telemetry.otlp import LocalOtlpSink
+from process_telemetry.measurement import begin
+
+sink = LocalOtlpSink(configured_loopback_endpoint)
+slot = SinkSlot()
+writer = slot.set_buffered(sink.export_batch, batch_sink=True)
+measurement = begin(slot, "example-component", "preparation")
+if measurement is not None:
+    measurement.finish()
+# Owner shutdown: stop new work, never wait on UI/hook callbacks.
+slot.set(None)
+if writer.join(2):  # explicit off-path wait; lost diagnostics are permitted
+    sink.close()
+```
+
+Batch mode calls the existing callable with up to 32 records; there is no
+second SDK processor queue/thread. The exporter validates the typed performance
+schema before constructing SDK `ReadableSpan` objects; arbitrary lifecycle
+events or raw logs are refused. Export errors propagate to the buffer's
+per-record `sink_failed` counter. Each batch gets one HTTP attempt with the
+configured timeout (positive, at most five seconds); no retry queue is added.
+Non-2xx, malformed/oversize acknowledgements and reported rejected spans fail
+export rather than counting as successful delivery.
+Timeout is a transport/export budget, not a hard OS cancellation promise;
+a blocked call still cannot block producers/close or multiply writers.
+
+Wire contract: OTLP/HTTP protobuf traces, resource keys `service.name` (component)
+and `service.namespace` (`copilot-extensions`); span name
+`agent.<component>.<stage>`. Span attributes are `ce.component`, `ce.stage`,
+`ce.outcome`, `ce.schema`, plus `ce.`-prefixed known counter/version fields from
+`measurement.py`. Trace/span/parent identifiers are protocol fields, not metric
+dimensions. No descriptions, payload strings or free-form events are exported.
+
+An explicit synthetic canary is available in an environment with `[otlp]`:
+
+```text
+python -m process_telemetry.canary --endpoint http://127.0.0.1:<selected-port>/v1/traces --timeout 2
+```
+
+It prints generated trace/span IDs only after actual SDK export and explicitly
+reports `persistence: not-verified`. The receive owner must independently read
+that ID from durable local storage; an HTTP success is not persistence proof.
+The canary never starts a listener, discovers an endpoint or installs anything.
+Traces are the first interoperability slice. The closed source-signal adapter
+below adds real Logs and Metrics protobuf, not a generic log forwarding surface.
+Native product spans, overhead qualification and actual adopter receive/persist
+proof remain explicit effort acceptance; this is not all-telemetry completion.
+
+Manager first-frame/new-resume and composed hook instrumentation remain with
+their existing owners. Short-lived hooks must not create writers: use their
+existing owner result/IPC if available, otherwise drop diagnostics. No default
+fleet host, shared collector, off-site exporter or storage lifecycle is created.
+
+### Closed Manager source signals
+
+`signals.SignalEndpoints(traces=None, logs=None, metrics=None)` and
+`SignalIdentity(source_revision=None, payload_version=None, selected_version=None,
+serving_version=None)` are frozen stdlib configuration. Each requested endpoint
+is independently explicit, with a literal loopback address, port and matching
+`/v1/traces`, `/v1/logs` or `/v1/metrics` path. No sibling URL is inferred.
+
+`otlp.LocalOtlpSignalsSink(endpoints, identity=identity, timeout=2)` is a
+**single-writer** adapter, not another queue, worker, provider or logger.
+`export_batch(spans)` consumes 1–32 existing typed source spans from one trace;
+only the fixed `worktree-manager-source` component and six source stages are
+admitted. Identities in a record must agree with the once-admitted metadata.
+The existing Manager source writer calls it; Bridge/Dispatch legacy lifecycle
+dicts are not newly eligible log content.
+
+Logs use public SDK `LogRecord`, `ReadableLogRecord` and `LogRecordExporter`
+with official Logs protobuf classes. No private SDK log encoder is imported.
+Body/event name are `agent.source.observation`; `ce.schema` is
+`agent.source-observation.log.v1`. Fixed outcome/severity mapping is
+ok/cancelled → INFO, error → ERROR, unavailable → WARN. Attributes contain only
+component, stage, outcome, measured duration/queue wait, optional fixture roster
+and the four admitted identity fields. Unavailable duration is absent, not zero.
+Correlation uses actual trace/span fields. All three signals' Resources contain
+service name, namespace and `service.instance.id`: one opaque random UUID per
+configured signals sink, stable across its exports and distinct from other sinks
+in the same process. It is not derived from trace, session or source metadata
+and is never a datapoint or record attribute. Scope is
+`copilot-extensions.process-telemetry`, version `1`.
+No prompt, raw message, code, exception text, environment, path or arbitrary
+attribute map is accepted.
+
+Metrics use public SDK data models, `MetricExporter` and public `encode_metrics`:
+
+| Name | Type / unit | Population |
+|---|---|---|
+| `ce.source.observations` | monotonic DELTA Sum / `{observation}` | observed eligible records |
+| `ce.source.duration` | DELTA Histogram / `s` | actual first-refresh and input-receipt durations |
+| `ce.source.queue_wait` | DELTA Histogram / `s` | independently measured queue waits |
+
+Only `ce.stage`/`ce.outcome` labels are admitted; there are at most 56 data
+points per batch, no identity labels or exemplars. The resource instance UUID
+distinguishes independently owned DELTA streams without adding a datapoint label.
+Histogram bounds are 1, 5, 10, 25, 50, 100, 250, 500 ms and 1, 2, 5, 10 s,
+plus +Inf. Count/sum/min/max remain measurements, not a percentile estimate.
+Sampling is not inverse-weighted. Local drop/loss counters are not silently
+converted into remote measurements.
+
+The metric epoch starts at the observed `source_entry` marker. Missing origin
+or a non-advancing collection clock yields not-attempted points, never
+a fabricated zero interval. Collection and log observed-time use one
+writer-admitted wall/high-resolution monotonic (`perf_counter_ns`) anchor;
+source timestamps/durations remain the
+source's measurements, with no cross-clock duration subtraction. Subsequent
+DELTA intervals begin at the previous collection boundary, even when a batch
+is lost. Each explicit source lifetime has one trace and resets its epoch.
+Qualification is sequential source processes only, not concurrent installed
+metric-stream ownership.
+
+`SignalBatchResult` has one closed `SignalResult` per signal. Generated records
+partition into accepted + rejected + unknown + not-attempted; attempted is the
+accepted + rejected + unknown subtotal. Units are spans/log records/**metric
+data points**, respectively. Request counts and attempted payload bytes are
+reported; the latter are not a claim about bytes successfully transferred.
+
+The three signals share one monotonic batch deadline, including mapping time
+before transport. No network starts after it expires. The finite transport
+budgets each socket operation, including header/body slow-drip reads, uses
+256-KiB request and 64-KiB body/72-KiB wire response caps, closes every socket,
+and never follows redirects or retries. This is not OS cancellation of an
+arbitrarily blocked Python import. UI callbacks/close never wait for delivery.
+Logs/Metrics require HTTP 200, protobuf MIME and their matching protobuf ACK.
+Partial-success counts remain aggregate (which records failed is unknown);
+remote error text is discarded. Trace-only ACK behavior remains compatible.
+
+A failed/unsupported signal becomes inactive for that source lifetime; siblings
+remain independent. A signal not attempted because a sibling exhausted the
+budget can try on the next batch. No failed DELTA is replayed or carried into a
+later success. 404 is unsupported, not accepted. Empty/full/partial ACKs are
+transport acceptance only: collector policy filters may still drop accepted
+data, so independent exact readback is required for persistence.
+
+The optional floor and current seasoned resolution are SDK/proto/proto-common
+1.45.1. Missing/incompatible optional APIs mark the affected signal unavailable;
+there is no provider, global SDK/environment mutation, handler or exit hook.
+No runtime installs the extra automatically.
+
+## Validation
+
+The shared callable tests live in the concrete Bridge consumer's
+`tests/test_process_telemetry.py`; the composed policy contract tests live in
+`plugins/agent-bridge/tests/test_consumer_telemetry_policy.py`. Both plugins'
+existing telemetry suites exercise command-route compatibility. Run the
+targeted suites through the repository test runner; thread/process/native work
+remains outside required unit-only CI.
+Tests cover disabled effects, bounded copying, full/contended/blocked/throwing
+sinks, no-wait close, trace/privacy/clock semantics and incomplete summaries.
+With `[otlp]` explicitly installed in the isolated test environment,
+`tests/test_otlp_telemetry.py` exercises genuine SDK protobuf encoding into an
+owned port-zero loopback receiver, file readback/decoding, hostile ambient
+export configuration, redirect refusal and receiver outage. Without the extra
+that optional module is explicitly skipped, not counted as export proof.
+An isolated `-I -S` native control proves base imports work without the SDK.
+`tests/test_otlp_signals.py` adds closed-schema/aggregation/count tests and
+optional genuine SDK/protobuf loopback fixtures, malformed/partial ACKs,
+slow-drip/deadline controls, missing SDK and legacy trace compatibility.
+Manager's existing source-observation tests exercise the same writer through
+actual SDK export and protobuf-derived JSONL readback. Test receivers own
+their port-zero socket/thread and close them. Manager readback accepts legacy
+service-only Resources or a canonical instance UUID, rejecting malformed instance
+IDs and unexpected Resource attributes. These controls never configure a shared
+collector and are isolated API/wire controls, not a live native rollout.
+Native source/installed/serving measurements and overhead qualification are
+separate acceptance, not asserted by these unit/integration tests.

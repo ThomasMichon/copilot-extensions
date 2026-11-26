@@ -2991,6 +2991,23 @@ function Deploy-Package {
         }
     }
 
+    # Vendored process-telemetry lib (agent-process-telemetry / module
+    # process_telemetry). Optional consumer-telemetry command route; inert
+    # without its local admission file. Same dev/release-layout fallback.
+    $processTelemetryDir = Join-Path $PluginDir 'libs\process-telemetry'
+    if (-not (Test-Path (Join-Path $processTelemetryDir 'pyproject.toml'))) {
+        $processTelemetryDir = Join-Path $PluginDir '..\..\libs\process-telemetry'
+    }
+    if (Test-Path (Join-Path $processTelemetryDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-process-telemetry' -PkgDir $processTelemetryDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "process-telemetry library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     # Shared PR filter semantics must resolve locally, never from an index.
     $prFiltersDir = Join-Path $PluginDir 'libs\pr-filters'
     if (-not (Test-Path (Join-Path $prFiltersDir 'pyproject.toml'))) {

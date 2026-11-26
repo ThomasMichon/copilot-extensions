@@ -111,6 +111,7 @@ def reconcile(provider: Any, repo: str, number: int | None, origin: PublicationO
         result.update(ok=True, added=list(missing))
     except (ProviderError, OSError, ValueError, TypeError) as exc:
         result.update(error=str(exc), repair="pr-publication-labels", publication_retained=True)
+    last_result.set(result)
     return result
 
 
