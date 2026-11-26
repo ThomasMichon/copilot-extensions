@@ -1236,10 +1236,6 @@ issue #9448 F9 until the venue owner supplies matching HOME/unit search paths,
 bus/cgroup lifetime and authoritative cleanup. Their separate
 `UPDATE_DRIVER_NATIVE_LINUX_SERVICE=1` selector is not proof of those conditions.
 
-## Opt-in Windows native-crypto long-prefix regression
-
-[Guide](plugins/agent-vault/tests/native/README.md).
-
 ## Select the evidence first
 
 Agent SSH's `tests/test_health_observation_native.py` has an explicitly selected

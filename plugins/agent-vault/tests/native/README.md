@@ -16,4 +16,5 @@ files or starting a service. The fixture owner retains runtime cleanup; the
 runner owns each bounded child. This is native loading evidence, not service
 lifetime or the complete installed setup journey.
 
-See the [repository testing guide](../../../../TESTING.md#opt-in-windows-native-crypto-long-prefix-regression).
+See the [Vault references](../../README.md#architecture-and-references) and
+[repository testing guide](../../../../TESTING.md).
