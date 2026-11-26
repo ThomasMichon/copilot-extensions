@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-26 - Later missing-tool receiving proposal and live keeper boundaries](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
+
 - [2026-11-26 - One branch-context completion, three status retirements, retained activation assessment and 596 whole open](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
 
 - [2026-11-26 - Git deadline and snapshot-batching verification gaps; fourteen originals retained and 599 whole open](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
