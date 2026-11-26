@@ -53,6 +53,13 @@ diagnostics do not imply request acceptance. Missing/incompatible packaged
 support and cold namespaced or unsupported-platform calls require explicit
 repair/management rather than a foreground fallback. Managed-publication,
 pinned-read and no-self-provision refusals remain in force.
+Completed-runtime foreground entry and pinned identity-cache validation first
+admit that exact application interpreter through prepared-only managed UV.
+This is independent of the command's bootstrap interpreter and neither acquires
+Python nor changes the selected slot. Missing UV or native admission support
+refuses before either application entry, without another provisioning attempt.
+Configuration-root/context selection, pin ownership, activation and readiness
+policy remain unchanged.
 The legacy session bootstrap uses that same owner for its first stamp and
 version-drift provisioning, without a separate installer PID/reaping guard.
 It returns only `{}` and a diagnostic launch acknowledgement within its hook
