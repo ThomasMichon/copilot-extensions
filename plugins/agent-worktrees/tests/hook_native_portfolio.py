@@ -102,6 +102,7 @@ class FullNativeChildObserver(NativeChildPacketObserver):
     MAX_ROWS = 64
     CODE_TARGETS = {
         ("test_managed_session.py", "test_registered_file_local_write_reuses_original_guard_facts"),
+        ("test_managed_session.py", "test_registered_prepared_cell_membership_read_requires_complete_native_proof"),
         ("test_native_pre_policy.py", "test_registered_full_policy_composition"),
         ("test_post_tool_shell.py", "test_registered_prepared_cell_post_tool_uses_selected_original_owners"),
     }
@@ -147,6 +148,7 @@ class FullNativeChildObserver(NativeChildPacketObserver):
 
             claim = self.code_claim
             assert claim is not None
+
             return observed_subprocess(
                 emit, deadline_factory=lambda process, deadline: CodeChildObserver(
                     process, deadline, claim=claim,
