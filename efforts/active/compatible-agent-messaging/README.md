@@ -150,7 +150,7 @@ not additional operator requirements or live-effect authority.
 ### Finite #14606 - Durable producer acceptance
 
 - [x] Review this amendment before the broader acceptance implementation.
-- [ ] Establish controlled failures before changing each affected producer:
+- [x] Establish controlled failures before changing each affected producer:
   valid represented targets with unavailable/currently inadmissible consumers,
   known ACP targets with unavailable carriers, and exact pending native forms.
 - [ ] Separate durable queue writes from receiver selection and effect admission.
@@ -211,6 +211,35 @@ will follow reconciliation with the existing owners; no implementation or live
 rollout is claimed by this draft.
 
 ## Journal
+
+### 2026-11-25 - Managed producer expansion
+
+- The represented-provider repair merged in #14655. Its current-head review
+  reported no open findings after the seven source corrections; required CI
+  passed. The full #14606 acceptance objective remains open.
+- Two controlled failures established that a known managed destination with a
+  stopped or unavailable carrier had no durable ordinary-message ingress.
+  The additive managed-message API and Python client now commit to the
+  existing pending queue before carrier inspection, without changing legacy
+  turns, explicit native effects or stop-notice semantics.
+- Schema 51 retains original queue/key receipts after atomic consumer handoff
+  and explicit removal. Native generation is checked at consumer handoff, not
+  acceptance. The existing governed host-refresh heartbeat supplies the lost-
+  wake backstop; no new delivery worker or sender loop is introduced.
+- After integration with schema 50, 200 focused tests and strict Linux/Windows
+  checks for 16 changed Python files pass. An earlier 422-test lifecycle/storage
+  packet exposed two ordinary-write synchronization regressions, corrected
+  without upgrading legacy unassociated writes; the affected 69-test packet
+  passes. The cold-stop migration fixture's incompatible synthetic v28 guards
+  also fail without this managed slice and are tracked on #14606, not hidden
+  by weakening production validation.
+- The final 20-test managed-queue module also covers the actual serving
+  middleware: authentication remains required, while current carrier and
+  serving-readiness observations do not precede the durable write.
+- This is provider/client source validation only. Default CLI and remote
+  adoption, dormant-target discovery and complete end-to-end qualification
+  remain outstanding; release, installed adoption and live-queue repair are
+  not claimed.
 
 ### 2026-11-25 - Represented producer expansion
 
