@@ -249,7 +249,9 @@ class DockerDriver(RuntimeDriver):
         from . import fleet as fleet_mod
 
         if self.fleet.devcontainer_path:
-            return fleet_mod._devcontainer_up(
+            # Keep fleet's late-bound launch hook for recreation.
+            launch: Callable[..., str] = getattr(fleet_mod, "_devcontainer_up")
+            return launch(
                 self.fleet_name, self.fleet, name,
                 dotfiles=self.config.dotfiles, harness=self.config.harness,
                 exec_user=exec_user,
