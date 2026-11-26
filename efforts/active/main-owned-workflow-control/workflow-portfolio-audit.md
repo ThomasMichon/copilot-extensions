@@ -5,6 +5,41 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 26 reader-only prefix compatibility
+
+Reviewed intent #14648 precedes implementation. The existing bound admission
+owner now accepts explicit v3 prefix groups while retaining v1/v2 behavior
+and all existing logical/effect admission. Prefix/suffix expansion counts UTF-8
+bytes before constructing each full node; duplicate identities and invalid
+source/target/budget data still pass through the original strict validation.
+The pure encoder retains contiguous ordering and changes no input selection.
+The active stored manifest remains v2.
+
+Existing admitted test flows retain their names, parameter tables, decorators,
+old assertions and node identities while executing new v3 controls.
+Fifteen contract/packet/candidate cases pass unchanged guarding in
+1.41 pytest / 16.125 observation seconds: 45 passing phase reports,
+zero prohibited effects, 22 bound reads and actual production calls per case.
+Both existing real compatibility-CLI cases then pass v1/v2/v3, including the
+Main-only helper refusal, in 1.86 pytest / 10.797 observation seconds:
+six phase reports, zero prohibited effects and fifteen bound reads.
+Strict Linux/Windows whole-file checking and focused Ruff pass.
+
+Six fresh processes exercise frozen old and new receipt-file consumers.
+The old reader accepts v1/v2 and truthfully refuses v3; the new reader accepts
+all three. Every accepted result has identical recursive ordered values across
+the complete 10,375-node, 1,499-source, 546-target corpus.
+The final rebound input projects to 697,907 v3 bytes, a 350,640-byte reduction.
+This is a write-free projection, not an active migration or pipeline speedup.
+Only five existing code/test hashes change in active v2; its 1,048,547-byte
+size, 29-byte headroom, all old identities/targets and 92 helper decisions remain.
+Worktree Manager's declared packaged reader asset requires its own patch intent;
+that intent is recorded without installing or updating a runtime.
+
+Reader review, current hosted CI, merge and readback remain open.
+No workflow/controller, operational writer, native lane, rollout, eligibility
+or guard changes occur, and no retained refusal is replayed.
+
 ## November 25 original logical-environment tuple units
 
 The original module has fifteen cases in three complete functions.
@@ -55,7 +90,8 @@ That source-only representation direction preserves caps, logical witnesses,
 guards and deadlines; it does not select a larger limit, case omission,
 eligibility/guard exception or operational effect. Its implementation plan
 must clear automated review before code, compatible reading precedes data
-migration, and no successor codec or active format switch is implemented yet.
+migration. The later reader-only implementation above retains active v2
+storage; no active format switch has occurred.
 The parent remains active with its original acceptance gates unresolved.
 
 ## November 25 installed-inventory original refusal

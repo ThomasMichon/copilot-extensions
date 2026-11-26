@@ -1,0 +1,9 @@
+{
+  "comment": "Accept prefix-group unit manifests while preserving logical admission and all proof limits",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
