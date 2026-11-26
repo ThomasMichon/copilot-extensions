@@ -82,6 +82,13 @@ def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str], main: Any) -> Any:
     (["lease", "--origin", "u", "status", "k", "r"], None),
     (["lease", "--origin=u", "inspect", "k", "r"], None),
     (["status"], None), (["--version"], None), ([], None),
+    (["create-pr", "--dry-run"], None), (["pr", "create", "--dry-run"], None),
+    (["worktree", "create-pr", "--dry-run"], None), (["push-changes", "--dry-run"], None),
+    (["push-changes", "--title-only", "--title", "t"], None),
+    (["worktree", "push", "--title-only"], None), (["worktree", "push", "--dry"], None),
+    (["finalize", "--explain-landing", "--json"], None), (["finalize", "--dry-run"], None),
+    (["worktree", "finalize", "--explain-landing"], None),
+    (["pr-merge", "1", "--dry-run"], None), (["pr", "merge", "--all", "--dry-run"], None),
 ])
 def test_classify_observes_only_mutating_lifecycle_verbs(
     argv: list[str], expected: tuple[str, str] | None,
@@ -100,6 +107,9 @@ def test_legacy_install_runs_unchanged_and_starts_nothing(
 @pytest.mark.parametrize("argv", [
     ["status"], ["lease", "inspect", "k", "r"], ["lease", "--pretty", "list"],
     ["lease", "--origin", "u", "status", "k", "r"],
+    ["create-pr", "--dry-run"], ["pr", "create", "--dry-run"],
+    ["worktree", "push", "--title-only"], ["push-changes", "--dry-run"],
+    ["finalize", "--explain-landing", "--json"], ["worktree", "finalize", "--explain-landing"],
 ])
 def test_unobserved_verbs_never_read_the_policy(
     monkeypatch: pytest.MonkeyPatch, argv: list[str],

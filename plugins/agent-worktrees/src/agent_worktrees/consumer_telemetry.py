@@ -46,6 +46,30 @@ _PR_NAMESPACE = {"create": "create-pr", "merge": "pr-merge"}
 # Only these lease subcommands mutate; inspect/status/list stay unobserved.
 _MUTATING_LEASE = frozenset({"acquire", "borrow", "renew", "release"})
 _HELP = frozenset({"-h", "--help"})
+# Read-only/preview modes of an observed verb publish or land nothing, so they
+# are never recorded as activity (flags from each verb's owning parser).
+_PREVIEW_FLAGS: dict[str, frozenset[str]] = {
+    "create-pr": frozenset({"--dry-run"}),
+    "pr-create": frozenset({"--dry-run"}),
+    "push-changes": frozenset({"--dry-run", "--title-only"}),
+    "pr-merge": frozenset({"--dry-run"}),
+    "finalize": frozenset({"--dry-run", "--explain-landing"}),
+}
+# Shortest unambiguous argparse abbreviation accepted for each preview flag.
+_PREVIEW_PREFIX = {"--dry-run": "--dr", "--title-only": "--title-", "--explain-landing": "--ex"}
+
+
+def _is_preview(verb: str, rest: list[str]) -> bool:
+    flags = _PREVIEW_FLAGS.get(verb)
+    if not flags:
+        return False
+    for token in rest:
+        if token == "--":
+            break
+        for flag in flags:
+            if token == flag or (token.startswith(_PREVIEW_PREFIX[flag]) and flag.startswith(token)):
+                return True
+    return False
 
 
 def _verb_index(args: list[str]) -> int | None:
@@ -115,6 +139,8 @@ def classify(argv: list[str]) -> tuple[str, str] | None:
     if observed is None or _HELP.intersection(rest) or "help" in rest[:1]:
         return None
     if verb == "lease" and _lease_subcommand(rest) not in _MUTATING_LEASE:
+        return None
+    if _is_preview(verb, rest):
         return None
     if verb == "finalize" and "--abandon" in rest:
         return ("pr", "abandon")
