@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [seven further TTY cases and two source keepers](journal/2026/11.26-seven-further-tty-cases-and-two-source-keepers.md)
+proposes seven additive, independently OPEN case keys in existing #11966
+before separately audited tracking-only retirement. #14690's older shared
+Git fixture helper and #14729's bounded manifest-contention objective remain
+separately OPEN; nearby partial work and search absence do not establish
+fulfillment. No proposed disposition has occurred. The last settled census
+remains 606 whole OPEN, and all parent Plan/Validation states, spent units,
+owners and holds are unchanged.
+
 The [source fulfillment and four retained execution cases](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
 records reviewed #14775, whole accepted receiving and twelve separately
 audited dispositions: eight `COMPLETED` reports and four `NOT_PLANNED`
@@ -532,8 +541,8 @@ acquired final-review assessment gaps remain separately OPEN. Ten original
 final units remain spent, with no body permission or renewed check inferred.
 Two equal complete censuses measure 606 whole OPEN: 293 original-cohort and
 313 inflow, with exactly twelve departures from 618 and no arrivals or
-unrelated departures. Factual publication remains; all incumbent parent
-Plan/Validation states and actual holds are unchanged.
+unrelated departures. The factual outcome merged in #14777; all incumbent
+parent Plan/Validation states and actual holds are unchanged.
 
 The [four source deliveries and twelve retained execution cases](journal/2026/11.26-four-source-deliveries-and-twelve-retained-cases.md)
 records reviewed #14772, whole accepted receiving and sixteen separately
