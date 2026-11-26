@@ -30,6 +30,12 @@ on:
       - libs/payload-invocation/templates/posix-shim.tmpl
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
+      - libs/payload-invocation/tests/test_mcp_ready_source.py
+      - plugins/agent-mcp/scripts/runtime-gate.sh
+      - plugins/agent-mcp/scripts/runtime-gate.ps1
+      - plugins/agent-mcp/tests/test_managed_command_gate.py
+      - plugins/agent-mcp/tests/test_payload_invocation.py
+      - tools/installer_engine_ref.py
       - libs/installer-engine/bootstrap-capture.cs
       - libs/installer-engine/bootstrap-capture.exe
       - libs/installer-engine/bootstrap-capture.ps1
@@ -1259,6 +1265,52 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+  mcp-ready-admission:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            host: bash
+          - os: macos-latest
+            host: bash
+          - os: windows-latest
+            host: powershell
+          - os: windows-latest
+            host: pwsh
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify raw and materialized prepared MCP foreground entry
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_mcp_ready_source.py --allow-explicit-tiers
+          -k "${{ matrix.host }}"
+          --junit-dir qualification-evidence/mcp-ready
+      - name: Require every native control and repeated work report without skips
+        env:
+          QUALIFIED_SHELL: ${{ matrix.host }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/mcp-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='mcp_command_admission'];
+          assert len(reports)==16 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['application_uv_lookups']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'mcp_command_admission':reports},sort_keys=True))"
+
   mixed-python:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.

@@ -68,6 +68,22 @@ Windows native capture or installed-host lifetime. An additional real UV
 lookup checks native store inference with no install-directory override,
 including Windows' different managed-interpreter directory depth.
 
+MCP's `tests/test_managed_command_gate.py` runs its actual foreground command
+gates with real prepared UV and an inert 3.10.20 application independent of the
+3.11.18 bootstrap. Raw and materialized layouts cover current/LKG/newest and
+namespaced selection, readiness isolation, and missing UV/provider/capture
+refusals before application entry or provisioning. The Bash LKG control also
+retains resolver fallback after an incomplete current slot under gate `errexit`.
+Successful controls run twice and retain argv, stdin, both output streams, exit
+status and caller/application descriptors; poisoned Python/selectors cannot
+replace the addressed environment. Payload and slot bytes remain unchanged.
+Test-only observation counts the actual single prepared-only UV lookup per
+launch without replacing UV or capture. The path-gated native workflow requires
+all sixteen cases and reports per applicable Bash/PowerShell host on Ubuntu,
+macOS and Windows within eight-minute job limits. These fixtures isolate
+installation-context decisions and do not qualify installed-host lifetime,
+every MCP child producer or complete command latency.
+
 Index's `tests/test_managed_command_gate.py` runs the actual Bash and PowerShell
 gates with independent prepared 3.11.18 bootstrap and 3.10.20 application
 interpreters. Fourteen scenarios per shell cover current/LKG/newest, namespaced

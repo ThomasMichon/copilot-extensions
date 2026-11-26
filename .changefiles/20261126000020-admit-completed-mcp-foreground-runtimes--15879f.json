@@ -1,0 +1,9 @@
+{
+  "comment": "Admit completed MCP foreground runtimes through prepared-only exact UV selection on Bash and PowerShell.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
