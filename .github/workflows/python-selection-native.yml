@@ -35,6 +35,12 @@ on:
       - libs/payload-invocation/tests/test_mcp_ready_source.py
       - libs/payload-invocation/tests/test_vault_ready_source.py
       - libs/payload-invocation/tests/test_bridge_ready_source.py
+      - libs/payload-invocation/tests/test_codespaces_ready_source.py
+      - plugins/agent-codespaces/scripts/runtime-gate.sh
+      - plugins/agent-codespaces/scripts/runtime-gate.ps1
+      - plugins/agent-codespaces/scripts/bootstrap-python.ps1
+      - plugins/agent-codespaces/tests/managed_command_fixture.py
+      - plugins/agent-codespaces/tests/test_managed_command_gate.py
       - plugins/agent-mcp/scripts/runtime-gate.sh
       - plugins/agent-mcp/scripts/runtime-gate.ps1
       - plugins/agent-mcp/tests/test_managed_command_gate.py
@@ -1347,6 +1353,61 @@ jobs:
       MCP_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *mcp-ready-steps
+
+  codespaces-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      CODESPACES_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &codespaces-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Codespaces command admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_codespaces_ready_source.py --allow-explicit-tiers
+          -k "${{ env.CODESPACES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/codespaces-ready
+      - name: Require all Codespaces command controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.CODESPACES_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/codespaces-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==18 and len({c.attrib['name'] for c in cases})==18;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='codespaces_command_admission'];
+          assert len(reports)==18 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else
+          2 if r['shell']=='bash' else 6)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'codespaces_command_admission':reports},sort_keys=True))"
+
+  codespaces-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      CODESPACES_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *codespaces-ready-steps
+
+  codespaces-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      CODESPACES_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *codespaces-ready-steps
 
   bridge-ready-admission-windows:
     runs-on: windows-latest
