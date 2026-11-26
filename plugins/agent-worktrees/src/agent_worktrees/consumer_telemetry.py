@@ -174,7 +174,8 @@ def classify(argv: list[str]) -> tuple[str, str] | None:
     if verb == "lease" and _lease_subcommand(rest) not in _MUTATING_LEASE:
         return None
     options = _options(verb, rest)
-    if options & _PREVIEW_FLAGS.get(verb, frozenset()):
+    # An abbreviated --help prints usage and exits 0 like the full spelling.
+    if "--help" in options or options & _PREVIEW_FLAGS.get(verb, frozenset()):
         return None
     if verb == "finalize" and "--abandon" in options:
         return ("pr", "abandon")

@@ -96,6 +96,8 @@ def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str], main: Any) -> Any:
     (["finalize", "--", "--dry-run"], ("pr", "merge")),
     (["finalize", "--ab", "--handoff-to", "x"], ("pr", "abandon")),
     (["worktree", "finalize", "--a", "--h", "x"], ("pr", "abandon")),
+    (["pr-merge", "1", "--now", "--he"], None), (["finalize", "--hel"], None),
+    (["push-changes", "--he"], None), (["create-pr", "--help=x"], None),
 ])
 def test_classify_observes_only_mutating_lifecycle_verbs(
     argv: list[str], expected: tuple[str, str] | None,
