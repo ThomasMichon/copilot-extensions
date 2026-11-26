@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
+from agent_bridge.client_read_budget import ReadDeadlineExpired
 from agent_bridge.managed_messages import CAPABILITY
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 
@@ -32,6 +33,7 @@ def test_missing_capability_refuses_before_mutation(
 
 @pytest.mark.parametrize("fault", [
     "none", "disconnect", "draining", "wrong-target", "wrong-key", "bad-state", "shape", "interrupt",
+    "deadline",
 ])
 def test_exact_one_attempt_preserves_original_operation_and_unknown_effect_fence(
     monkeypatch: pytest.MonkeyPatch, fault: str,
@@ -64,6 +66,8 @@ def test_exact_one_attempt_preserves_original_operation_and_unknown_effect_fence
             raise BridgeClientError(503, "draining")
         if fault == "interrupt":
             raise KeyboardInterrupt
+        if fault == "deadline":
+            raise ReadDeadlineExpired("POST response budget exhausted")
         if fault == "shape":
             return {}
         return {
@@ -91,3 +95,17 @@ def test_exact_one_attempt_preserves_original_operation_and_unknown_effect_fence
         assert error.value.detail["idempotency_key"] == "original"
     assert [method for method, _ in calls] == ["GET", "POST"]
     assert resolve == []
+
+
+def test_pre_attempt_deadline_is_not_unknown_acceptance(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = BridgeClient("http://fixture", "fixture")
+    calls = []
+
+    def request(method: str, path: str, **kwargs: Any) -> Any:
+        calls.append((method, path))
+        raise ReadDeadlineExpired("health budget exhausted")
+
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(ReadDeadlineExpired):
+        client.submit_managed_message("original-target", "input", idempotency_key="original")
+    assert calls == [("GET", "/health")]

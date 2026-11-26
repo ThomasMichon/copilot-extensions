@@ -13,6 +13,7 @@ from .managed_messages import CAPABILITY, ManagedMessage
 def submit(client: Any, session_id: str, message: ManagedMessage) -> dict[str, Any]:
     from .client import BridgeClientError, BridgeConnectionError
     from .client_protocol_floor import protocol_floored_request
+    from .client_read_budget import ReadDeadlineExpired
     from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED
 
     attempted = False
@@ -61,7 +62,7 @@ def submit(client: Any, session_id: str, message: ManagedMessage) -> dict[str, A
             raise
         raise unknown() from exc
     except (BridgeConnectionError, OSError, http.client.HTTPException, UnicodeError, json.JSONDecodeError,
-            KeyboardInterrupt) as exc:
+            KeyboardInterrupt, ReadDeadlineExpired) as exc:
         if not attempted:
             raise
         raise unknown() from exc

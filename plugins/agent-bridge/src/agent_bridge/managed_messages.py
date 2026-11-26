@@ -50,7 +50,7 @@ def accept(db: Database, session_id: str, message: ManagedMessage) -> dict[str, 
                 raise ValueError("managed_message_key_conflict")
             return _receipt(saved, duplicate=True)
         target = conn.execute(
-            "SELECT acp_session_id FROM sessions WHERE id=?", (session_id,),
+            "SELECT acp_session_id FROM sessions WHERE id=? AND status!='ended'", (session_id,),
         ).fetchone()
         if target is None:
             raise KeyError(session_id)

@@ -205,6 +205,31 @@ async def test_old_generation_settles_without_retargeting_or_blocking_next_input
 
 
 @pytest.mark.asyncio
+async def test_ended_history_recovers_original_but_cannot_accept_new_operations(
+    session_manager: SessionManager, spawn_target: SpawnTarget,
+    mock_acp_client: MagicMock, _patch_spawn: Any, _patch_acp: Any,
+) -> None:
+    session = await session_manager.start_session(spawn_target)
+    mock_acp_client.is_running = False
+    path = f"/api/v1/sessions/{session.session_id}/messages"
+    payload = {"prompt": "original", "idempotency_key": "before-end"}
+    async with _client(session_manager) as client:
+        original = await client.post(path, json=payload)
+        assert original.status_code == 202
+        session_manager.db.clear_pending_prompts(session.session_id)
+        session_manager.db.update_session_status(session.session_id, "ended", time.time())
+        session_manager._sessions.pop(session.session_id)
+        recovered = await client.post(path, json=payload)
+        assert recovered.status_code == 202
+        assert recovered.json()["queue_id"] == original.json()["queue_id"]
+        assert recovered.json()["delivery_state"] == "removed"
+        fresh = await client.post(path, json={**payload, "idempotency_key": "after-end"})
+        assert fresh.status_code == 404
+        assert session_manager.db.list_pending_prompts(session.session_id) == []
+        mock_acp_client.send_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_failed_write_rolls_back_input_and_original_key_together(
     session_manager: SessionManager, spawn_target: SpawnTarget,
     mock_acp_client: MagicMock, _patch_spawn: Any, _patch_acp: Any,
