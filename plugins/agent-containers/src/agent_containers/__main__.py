@@ -125,6 +125,8 @@ def _main(argv: list[str] | None = None) -> int:
         "--json", action="store_true", help="Emit JSON")
     proxy = sub.add_parser("runtime-proxy", help=argparse.SUPPRESS)
     proxy.add_argument("--fleet")
+    proxy.add_argument("--member")
+    proxy.add_argument("--expected-runtime")
     proxy.add_argument("argv", nargs=argparse.REMAINDER)
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")

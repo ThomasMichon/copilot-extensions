@@ -10,6 +10,7 @@ Knobs (environment):
   FAKE_DRIVER_CAPS      JSON object returned as ``capabilities``.
   FAKE_DRIVER_FAIL      ``<verb>:<code>`` -- fail that verb with that code.
   FAKE_DRIVER_PROTOCOL  protocolVersion to answer with (default 1).
+  FAKE_DRIVER_EXEC_STDOUT  return this stdout after identity checks, without a guest process.
 
 Leading options (set in a manifest command):
   --root <dir>          use ``<dir>`` instead of ``$FAKE_DRIVER_ROOT``.
@@ -214,6 +215,9 @@ def main(argv: list[str]) -> int:
         _save(state)
         return _respond({"ok": True})
     if verb == "exec":
+        if "FAKE_DRIVER_EXEC_STDOUT" in os.environ:
+            return _respond({"ok": True, "exitCode": 0,
+                             "stdout": os.environ["FAKE_DRIVER_EXEC_STDOUT"], "stderr": ""})
         env = os.environ.copy()
         env.update(request.get("env") or {})
         env["FAKE_MEMBER_USER"] = request.get("user") or ""

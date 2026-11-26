@@ -37,7 +37,7 @@ from agent_procutil import no_window_flags
 from plugin_resolve.reflection import selection_spec
 
 from . import lifecycle
-from ._invoke import payload_command_argv
+from ._invoke import current_provider_argv, payload_command_argv
 from .config import (
     DISPATCH_ONLY_LABEL,
     DISPATCH_BINDING_LABEL,
@@ -811,6 +811,14 @@ class ContainerResolver:
                 runtime_drivers.launch_plan, fleet, name, relay_enabled,
             )
             spec["venue"]["driver"] = fleet.driver
+            binding = (
+                runtime_drivers.proxy_binding(config, name, info.fleet, plan.driver)
+                if plan.driver is not None else None
+            )
+            if binding is not None:
+                spec["venue"]["runtime_proxy"] = {
+                    **binding, "provider_command": current_provider_argv(),
+                }
             spec["venue"]["transport"] = "ssh" if plan.ssh else "driver-exec"
             spec["venue"]["capabilities"]["session_host"] = plan.ssh
             if not plan.ssh:

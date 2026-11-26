@@ -901,14 +901,53 @@ def runtime_identity(name: str) -> str:
     route = owner_of(name)
     if route is None:
         return "docker"
-    spec = getattr(route.driver, "spec", None)
-    options = getattr(getattr(route.driver, "fleet", None), "driver_options", None)
+    return _driver_identity(route.driver)
+
+
+def _driver_identity(driver: RuntimeDriver) -> str:
+    spec = getattr(driver, "spec", None)
+    options = getattr(getattr(driver, "fleet", None), "driver_options", None)
     registration = json.dumps(
-        [spec.name, list(spec.command), spec.source, options] if spec else route.driver.name,
+        [spec.name, list(spec.command), spec.source, options] if spec else driver.name,
         sort_keys=True, default=str,
     )
     digest = hashlib.sha256(registration.encode("utf-8")).hexdigest()[:16]
-    return f"driver:{route.driver.name}/{getattr(route.driver, 'fleet_name', None)}@{digest}"
+    return f"driver:{driver.name}/{getattr(driver, 'fleet_name', None)}@{digest}"
+
+
+def _proxy_fleets(config: ContainersConfig, name: str) -> list[str]:
+    return [
+        key for key, fleet in config.fleets.items()
+        if fleet.driver and _owns(key, fleet, name)
+    ]
+
+
+def proxy_binding(
+    config: ContainersConfig, name: str, fleet: str, driver: RuntimeDriver,
+) -> dict[str, int | str] | None:
+    """Advertise exact proxy support only for uniquely owned namespaces."""
+    if _proxy_fleets(config, name) != [fleet]:
+        return None
+    return {"version": 1, "execution_runtime": _driver_identity(driver)}
+
+
+def bound_proxy_route(
+    config: ContainersConfig, fleet: str, name: str, instance_id: str, runtime: str,
+) -> Route:
+    """Re-establish ownership in a fresh proxy process before any driver effect."""
+    from .external_driver import _ID_RE, _MEMBER_RE
+
+    if not _MEMBER_RE.fullmatch(name) or not _ID_RE.fullmatch(instance_id):
+        raise RuntimeError("Bound runtime proxy requires an exact member name and instance ID")
+    if _proxy_fleets(config, name) != [fleet]:
+        raise RuntimeError(f"'{name}' no longer has a unique configured runtime-driver fleet")
+    driver = driver_for_fleet(config, fleet, config.fleets[fleet])
+    if _driver_identity(driver) != runtime:
+        raise RetiredIncarnation(f"Runtime registration changed for '{name}'; resolve it again")
+    docker_id = _docker_id_for_name(name)
+    if docker_id is not None and docker_id != instance_id:
+        raise RuntimeError(f"'{name}' also identifies a distinct Docker container")
+    return Route(driver, name, instance_id)
 
 
 def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> str:

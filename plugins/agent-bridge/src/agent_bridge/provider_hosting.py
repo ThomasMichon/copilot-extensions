@@ -182,17 +182,47 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     if not isinstance(identity, str) or not identity:
         raise AgentHostingError("Container hosting check requires an exact receiving instance")
     runtime = ["docker"]
-    if venue.get("driver"):
+    bound = "runtime_proxy" in venue
+    binding = venue.get("runtime_proxy")
+    fleet = venue.get("fleet")
+    driver = venue.get("driver")
+    if driver:
         # The member lives in an external runtime driver's runtime, not
         # necessarily Docker's: the provider proxies the same inspect/exec.
-        provider = _provider_command(metadata)
-        if provider is None:
-            raise AgentHostingError("Container receiver lacks an attributed runtime proxy")
-        fleet = venue.get("fleet")
-        # The fleet scopes the provider's discovery to the member's own driver.
-        runtime = [*provider, "runtime-proxy", *(
-            ["--fleet", fleet] if isinstance(fleet, str) and fleet else []
-        )]
+        if bound:
+            if (
+                not isinstance(binding, dict) or type(binding.get("version")) is not int
+                or binding["version"] != 1
+                or not isinstance(binding.get("execution_runtime"), str)
+                or not binding["execution_runtime"]
+                or not isinstance(fleet, str) or not fleet
+                or not isinstance(name, str) or not name
+                or venue.get("target_id") != f"container:{name}"
+                or not isinstance(expected, str) or not expected
+                or venue.get("instance_id") != expected
+                or metadata.get("instance_id", expected) != expected
+            ):
+                raise AgentHostingError("Invalid or unsupported bound container runtime proxy")
+            provider = binding.get("provider_command")
+            if (
+                not isinstance(provider, list) or not provider
+                or any(not isinstance(part, str) or not part for part in provider)
+                or not Path(provider[0]).is_absolute()
+            ):
+                raise AgentHostingError("Bound runtime proxy lacks its attributed provider command")
+            if not Path(provider[0]).is_file():
+                raise AgentHostingError("Bound runtime proxy provider is unavailable; resolve the container again")
+            runtime = [*provider, "runtime-proxy", "--fleet", fleet,
+                       "--member", name, "--expected-runtime", binding["execution_runtime"]]
+        else:
+            provider = _provider_command(metadata)
+            if provider is None:
+                raise AgentHostingError("Container receiver lacks an attributed runtime proxy")
+            runtime = [*provider, "runtime-proxy", *(
+                ["--fleet", fleet] if isinstance(fleet, str) and fleet else []
+            )]
+    elif bound:
+        raise AgentHostingError("Bound container runtime proxy requires an external driver")
     rc, output, error = await _run_provider([*runtime, "inspect", identity], timeout=30)
     if rc:
         raise AgentHostingError(f"Container hosting inspection failed: {error.decode(errors='replace')}")
@@ -205,10 +235,18 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
         state = actual.get("State")
         if (
             not isinstance(instance, str) or not instance
-            or expected and not instance.startswith(expected)
+            or expected and not (instance == expected if bound else instance.startswith(expected))
             or not isinstance(state, dict) or state.get("Running") is not True
         ):
             raise ValueError("selected container is changed or not running")
+        if bound:
+            labels = actual["Config"]["Labels"]
+            if (
+                actual.get("Name") != "/" + name or not isinstance(labels, dict)
+                or labels.get("agent-containers.fleet") != fleet
+                or labels.get("agent-containers.driver") != driver
+            ):
+                raise ValueError("provider inspected another container member")
     except (KeyError, TypeError, ValueError) as exc:
         raise AgentHostingError("Cannot establish the actual running container for hosting policy") from exc
     workspace = (
@@ -227,6 +265,8 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
             if (
                 rc or not isinstance(refreshed_venue, dict)
                 or refreshed_venue.get("instance_id") != instance
+                or bound and any(refreshed_venue.get(key) != venue.get(key) for key in
+                                 ("target_id", "fleet", "driver", "runtime_proxy"))
             ):
                 raise ValueError("provider resolved another or unknown instance")
             user = user or spec.get("user")

@@ -1181,6 +1181,40 @@ def test_runtime_proxy_serves_bridge_hosting_checks(
     assert cli.main(["runtime-proxy", "inspect", "plain-1"]) == 1  # never a Docker fallback
 
 
+def test_bound_proxy_verifies_current_fleet_registration_and_collisions(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    runtime = runtime_drivers.runtime_identity("example-1")
+    instance = fake.state()["members"]["example-1"]["id"]
+    before = len(fake.state()["calls"])
+    runtime_drivers.clear_bindings()
+
+    def command(fleet_name: str, expected_runtime: str, target: str) -> list[str]:
+        return ["runtime-proxy", "--fleet", fleet_name, "--member", "example-1",
+                "--expected-runtime", expected_runtime, "inspect", target]
+
+    for args, error in [
+        (command("wrong", runtime, instance), "unique configured runtime-driver fleet"),
+        (command("example", runtime + "0", instance), "Runtime registration changed"),
+        (command("example", runtime, instance[:-1]), "requires an exact member name and instance ID"),
+    ]:
+        assert cli.main(args) == 1
+        assert error in capsys.readouterr().err
+
+    monkeypatch.setattr(runtime_drivers, "_docker_id_for_name", lambda name: "d" * 64)
+    assert cli.main(command("example", runtime, instance)) == 1
+    assert "distinct Docker container" in capsys.readouterr().err
+
+    config.fleets["overlap"] = driver_fleet(name_prefix="example")
+    monkeypatch.setattr(config_module, "load_config", lambda *, strict=False: config)
+    assert cli.main(command("example", runtime, instance)) == 1
+    assert "unique configured runtime-driver fleet" in capsys.readouterr().err
+    assert len(fake.state()["calls"]) == before
+
+
 @pytest.mark.parametrize("denied", [False, True])
 def test_runtime_proxy_delivers_portable_policy_archive_to_real_driver_process(
     fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

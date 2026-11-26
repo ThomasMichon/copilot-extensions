@@ -10,6 +10,10 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .runtime_drivers import Route
 
 
 def _owner_of(target: str):
@@ -80,6 +84,30 @@ def _parse_docker_cp(argv: list[str]) -> tuple[str, str, str] | None:
     return argv[2], target, path
 
 
+def _run_exec(
+    parsed: _ExecArgs, route: Route, *, input_text: str | None, timeout: float,
+) -> subprocess.CompletedProcess:
+    driver, name = route.driver, route.name
+    if parsed.unsupported:
+        raise RuntimeError(
+            f"runtime driver '{driver.name}' cannot express docker exec "
+            f"options {parsed.unsupported}"
+        )
+    env = dict(parsed.env)
+    for key in parsed.inherit_env:
+        if key in os.environ:
+            env[key] = os.environ[key]
+    result = driver.exec(
+        name, parsed.command, user=parsed.user, env=env,
+        workdir=parsed.workdir,
+        stdin=input_text if parsed.interactive else None,
+        timeout=timeout, instance_id=route.instance_id,
+    )
+    return subprocess.CompletedProcess(
+        [driver.name, "exec", name], result.exit_code, result.stdout, result.stderr,
+    )
+
+
 def run_routed(
     argv: list[str], *, input_text: str | None = None, timeout: float = 30.0,
 ) -> subprocess.CompletedProcess | None:
@@ -93,25 +121,7 @@ def run_routed(
         route = _owner_of(parsed.target)
         if route is None:
             return None
-        driver, name = route.driver, route.name
-        if parsed.unsupported:
-            raise RuntimeError(
-                f"runtime driver '{driver.name}' cannot express docker exec "
-                f"options {parsed.unsupported}"
-            )
-        env = dict(parsed.env)
-        for key in parsed.inherit_env:
-            if key in os.environ:
-                env[key] = os.environ[key]
-        result = driver.exec(
-            name, parsed.command, user=parsed.user, env=env,
-            workdir=parsed.workdir,
-            stdin=input_text if parsed.interactive else None,
-            timeout=timeout, instance_id=route.instance_id,
-        )
-        return subprocess.CompletedProcess(
-            [driver.name, "exec", name], result.exit_code, result.stdout, result.stderr,
-        )
+        return _run_exec(parsed, route, input_text=input_text, timeout=timeout)
     copied = _parse_docker_cp(argv)
     if copied is not None:
         source, target, path = copied

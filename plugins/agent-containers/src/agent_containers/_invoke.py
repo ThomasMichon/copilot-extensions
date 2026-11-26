@@ -119,6 +119,13 @@ def payload_command_argv() -> list[str]:
     return [*command, "--fleet-repository", str(repository)] if repository else command
 
 
+def current_provider_argv() -> list[str]:
+    """Address the actual runtime that emitted a provider capability."""
+    command = [sys.executable, "-m", _PACKAGE]
+    repository = fleet_repository.get()
+    return [*command, "--fleet-repository", str(repository)] if repository else command
+
+
 _ROOT = runtime_root()
 #: Legacy single-venv layout (pre versioned-runtime). Kept only as a last-resort
 #: fallback -- the versioned-runtime migration stopped updating it, so it goes
