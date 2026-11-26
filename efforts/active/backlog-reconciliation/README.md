@@ -522,6 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [legacy fixture correspondence and retained publication gates](journal/2026/11.26-legacy-fixtures-and-publication-gates.md)
+qualify eight complete originals and all four discussions, identify two
+conditional source-completion candidates and retain six distinct unfinished
+reports plus the carried #6556/#6557 gaps. Matching admitted source/test
+deltas and current Main/Dev preservation do not replace the two separate
+final verification units or authorize execution. No new issue disposition
+or census is claimed; every parent Plan/Validation state remains.
+
 The [later workflow-status intake and keeper boundaries](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
 qualify six complete originals and all six discussions, preserve the
 remaining unadmitted union and three carried controls, and record reviewed
@@ -530,7 +538,8 @@ audited `NOT_PLANNED` #5598. Its two historical attempts are preserved,
 not repaired or rerun. Two equal complete censuses measure 595 whole OPEN,
 with exactly that departure and no arrival or unrelated departure.
 No new source completion, branch deletion or execution is claimed;
-every parent Plan/Validation state remains.
+the factual outcome merged in #14804 and every parent Plan/Validation
+state remains.
 
 The [hosted activation and incomplete-attempt outcomes](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
 record reviewed #14796/#14798, whole accepted receiving and four separately
