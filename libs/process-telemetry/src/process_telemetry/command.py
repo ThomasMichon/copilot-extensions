@@ -35,11 +35,11 @@ def _projection(schema: str) -> tuple[
     Callable[[dict[str, Any]], dict[str, Any]], Callable[[dict[str, Any]], dict[str, Any]],
 ]:
     if schema == "bridge.lifecycle.v1":
-        from . import bridge_projection as module
-        return module.offered_fields, module.project
+        from . import bridge_projection
+        return bridge_projection.offered_fields, bridge_projection.project
     if schema == "dispatch.lifecycle.v1":
-        from . import dispatch_projection as module
-        return module.offered_fields, module.project
+        from . import dispatch_projection
+        return dispatch_projection.offered_fields, dispatch_projection.project
     from . import stage_projection
 
     return stage_projection.for_schema(schema)
