@@ -30,6 +30,7 @@ owns publication, recovery and provider upgrade/rollback mechanics.
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
 | Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a dated, worktree-stamped task folder with an ownership breadcrumb; keep ad hoc outputs attributable without treating names, age or receipts as deletion permission |
 | Secret-pattern masking avoidance | [`secret-masking-fallback`](instructions/secret-masking-fallback.instructions.md) | [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) | Never construct an auth header as one scheme-plus-secret literal or f-string (e.g. a bearer-scheme word concatenated or interpolated directly with a token variable) -- Copilot's own content pipeline can silently rewrite that shape into a masked placeholder, with no error and no diff marker; split the scheme word across its own concatenation instead, and verify with a non-rendering byte/boolean check, never a plain read-back |
+| Skeptical blocker review | [`blocker-review-fallback`](instructions/blocker-review-fallback.instructions.md) | [`reviewing-blockers-skeptically`](skills/reviewing-blockers-skeptically/SKILL.md) | A failed preferred route is not a blocker: before declaring work blocked, parking it, escalating a prerequisite, or asking a human/owner about a failure, state the blocker precisely, enumerate the alternate tools, routes, already-authorized credentials, and narrower changes actually available, and test each cheaply -- while explicit safety, policy, content-exclusion, and access denials still stop immediately with no bypass attempt; report the surviving human-only action with evidence |
 
 New modules declare their instruction projection in
 [`instruction-projections.json`](instruction-projections.json), adding a paired
@@ -65,6 +66,7 @@ patches or weakened update gates.
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "prepare a delegate assignment", "write a bounded sub-agent prompt" | Authors an explicitly requested assignment prompt/contract; ordinary delegation or task execution does not select it |
 | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) skill | writing a draft PR/issue body, a captured log, a one-off JSON dump, or any other ad hoc file outside a repository checkout | Resolves a portable scratch root, owner-stamped dated task folders, ownership breadcrumbs and scoped temporary-output placement |
 | [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) skill | writing or reviewing an `Authorization` header, or any auth-scheme-plus-secret string construction; an auth header that still fails despite a reviewed, seemingly-correct diff | Confirms whether a credential-shaped string got silently masked, and applies the split-literal construction that avoids the rewrite |
+| [`reviewing-blockers-skeptically`](skills/reviewing-blockers-skeptically/SKILL.md) skill | about to report "blocked" / "cannot proceed" / "waiting on", park or defer work, escalate a prerequisite, or ask a human or owner to explain or fix a failure | Separates hard stops from assumed ones, tests the available alternatives cheaply, challenges the conclusion, and -- only if a blocker survives -- produces an evidence-backed blocked report with one concrete human-only ask |
 
 Enable it in Copilot settings:
 
@@ -116,7 +118,18 @@ The agent should bind the scheme word to its own variable, split across its
 own concatenation, and combine it with the token in a separate statement --
 never a single scheme-plus-secret literal or f-string -- then verify the
 real header value landed with a non-rendering byte/boolean check rather
-than a plain read-back, per the secret-masking skill.
+than a plain read-back, per the secret-masking skill. Or:
+
+> The integration test fails with a 401 and the CLI I'd normally use isn't on
+> PATH -- I think we're blocked until someone fixes access.
+
+Before reporting it blocked, the agent should classify the 401 (expired
+credential, wrong token scope, explicit entitlement denial, or transient),
+locate the CLI through its supported install route or an equivalent tool,
+compare with peer cases on the same dependency, and only then -- if an
+explicit denial or a genuinely human-only action remains -- report the
+operation, evidence, alternatives tried, and the single concrete ask, per the
+blocker-review skill.
 
 ## Useful autonomy and durable pre-clearance
 
@@ -295,7 +308,16 @@ lookup or model resolver invocation is required to honor a request.
   folders and discovery-only ownership breadcrumbs, a boundary against using session-managed
   state folders as a checkout/build/sensitive-data scratch root, and
   reuse/cleanup/durable-filing guidance — with no hardcoded path for any
-  operator or machine.
+  operator or machine;
+- (blocker-review module) a hard-stop versus assumed-stop split that keeps
+  explicit safety/policy/content-exclusion/access denials as immediate stops,
+  a precise blocker statement (operation, scope, condition, dated evidence,
+  origin), an enumerate-and-cheaply-test pass over the alternatives actually
+  available, a table of common assumed stops with their discriminating
+  checks, an optional independent challenge with upheld/overturned/
+  narrowed/unresolved verdicts, and an evidence-backed blocked-report shape —
+  stateless, with any verdict record left to the operator's own task or
+  knowledge store.
 
 **Does NOT provide**
 
@@ -360,9 +382,11 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | [`skills/spawning-headless-processes/SKILL.md`](skills/spawning-headless-processes/SKILL.md) | Per-language/per-OS headless-spawn route table and verification checklist (process-hygiene module) |
 | [`skills/delegating-work/SKILL.md`](skills/delegating-work/SKILL.md) | Explicit assignment prompt/contract authoring, not ordinary delegation execution |
 | [`skills/using-scratch-space/SKILL.md`](skills/using-scratch-space/SKILL.md) | Scratch-root resolution, owner-stamped dated task folders, discovery breadcrumbs and cleanup boundaries (scratch-space module) |
+| [`skills/reviewing-blockers-skeptically/SKILL.md`](skills/reviewing-blockers-skeptically/SKILL.md) | Hard-stop split, alternatives-testing pass, challenge verdicts, and blocked-report shape (blocker-review module) |
 | [`instruction-projections.json`](instruction-projections.json) | Declares every module's checked-in ambient fallback |
 | [`instructions/process-hygiene-fallback.instructions.md`](instructions/process-hygiene-fallback.instructions.md) | The projected fallback content for the process-hygiene module |
 | [`instructions/scratch-space-fallback.instructions.md`](instructions/scratch-space-fallback.instructions.md) | The projected fallback content for the scratch-space module |
+| [`instructions/blocker-review-fallback.instructions.md`](instructions/blocker-review-fallback.instructions.md) | The projected fallback content for the blocker-review module |
 | [`scripts/resolve-model-routing.py`](scripts/resolve-model-routing.py) | Optional strict inert repository/operator registry resolver |
 | [`schemas/model-routing.schema.json`](schemas/model-routing.schema.json) | Versioned purpose-to-model configuration contract |
 | [`examples/model-routing.json`](examples/model-routing.json) | Synthetic configuration example |

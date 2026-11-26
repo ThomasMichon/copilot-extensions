@@ -1,0 +1,9 @@
+{
+  "comment": "Add skeptical blocker-review module (instruction projection and reviewing-blockers-skeptically skill)",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}
