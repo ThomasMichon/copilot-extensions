@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 import test_azure_devops_point_runtime as runtime
 import test_azure_devops_point_worker as worker
 from test_azure_devops_point_service_recovery import _reopen_connector
+from test_change_hints_transport import _wire_api
 from test_native_azure_devops_point_matrix import _samples, _seed
 from test_native_delta_matrix import measure_round
 
@@ -92,7 +93,7 @@ def test_explicit_client_acquires_and_replays_beside_unrelated_native_history(
                         assert transport.portal is not None
                         runner = app.state.task_runner
                         transport.portal.call(runner.point_service.activate)
-                        api, requests = runtime.hinted._wire_api(
+                        api, requests = _wire_api(
                             transport, patch, installation_id=app.state.installation_id,
                             instance_token=app.state.instance_token,
                         )
