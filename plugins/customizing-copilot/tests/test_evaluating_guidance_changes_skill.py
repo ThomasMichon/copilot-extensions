@@ -16,7 +16,7 @@ def _frontmatter(text: str) -> str:
     return text.split("---", 2)[1]
 
 
-def test_skill_frontmatter_and_negative_scope():
+def test_skill_frontmatter_and_negative_scope() -> None:
     text = _SKILL.read_text(encoding="utf-8")
     assert text.startswith("---\nname: evaluating-guidance-changes\n")
     frontmatter = _frontmatter(text)
@@ -24,7 +24,7 @@ def test_skill_frontmatter_and_negative_scope():
     assert "Not for" in frontmatter
 
 
-def test_skill_keeps_outcome_gating_and_safety_rules():
+def test_skill_keeps_outcome_gating_and_safety_rules() -> None:
     text = _SKILL.read_text(encoding="utf-8")
     assert "never gating" in text
     assert "Outcome, not self-score" in text
@@ -32,6 +32,6 @@ def test_skill_keeps_outcome_gating_and_safety_rules():
     assert "## Cost limits" in text
 
 
-def test_skill_is_listed_in_plugin_readme():
+def test_skill_is_listed_in_plugin_readme() -> None:
     readme = (_PLUGIN / "README.md").read_text(encoding="utf-8")
     assert "skills/evaluating-guidance-changes/SKILL.md" in readme
