@@ -17,9 +17,9 @@ from process_telemetry.finite_owner import capability
 
 # The detached-launch seams (fixture and fake SSH session) are shared with the
 # launch tests rather than copied.
-def _load_launch_tests() -> Any:
+def _load_launch_tests(name: str = "test_copilot_detach.py") -> Any:
     spec = importlib.util.spec_from_file_location(
-        "_codespaces_launch_tests", Path(__file__).with_name("test_copilot_detach.py"),
+        "_codespaces_ + Path(name).stem", Path(__file__).with_name(name),
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -29,6 +29,8 @@ def _load_launch_tests() -> Any:
 
 _launch_tests: Any = _load_launch_tests()
 seams = _launch_tests.seams
+_portable_tests: Any = _load_launch_tests("test_portable_mux_launch.py")
+flow = _portable_tests.flow
 
 _RECEIVER = """\
 import json, sys
@@ -361,3 +363,50 @@ def test_an_enclosing_stage_closed_by_exit_keeps_the_inner_cause() -> None:
         ("ssh", "failure", "clone_auth_failed"),
         ("launch", "failure", "clone_auth_failed"),
     ]
+
+
+def test_a_full_recorder_keeps_the_terminal_result_and_launch_summary() -> None:
+    ct.start_launch()
+    ct.begin("ssh")
+    for _ in range(ct.MAX_RECORDS + 5):
+        ct.retry("transport_retry")
+    ct.fail("transport_failed", outcome="timeout")
+    events = ct.finish(1)
+    assert len(events) == ct.MAX_RECORDS
+    assert [(e["stage"], e["outcome"], e["reason"]) for e in events[-2:]] == [
+        ("ssh", "timeout", "transport_failed"), ("launch", "failure", "transport_failed"),
+    ]
+
+
+def test_a_recovered_retry_does_not_become_a_later_failure_cause() -> None:
+    ct.start_launch()
+    ct.begin("ssh")
+    ct.note("codespace_connect", "retry", "transport_retry")
+    ct.note("codespace_connect", "success", "none", attempt=2)
+    events = ct.finish(1)
+    assert [(e["stage"], e["outcome"], e["reason"]) for e in events if e["stage"] != "codespace_connect"] == [
+        ("ssh", "failure", "other"), ("launch", "failure", "other"),
+    ]
+
+
+def _portable_stage(stage: str) -> list[tuple[Any, Any]]:
+    return [(r["outcome"], r["reason"]) for r in ct._records if r["stage"] == stage]
+
+
+def test_a_portable_launch_whose_session_never_registers_is_observed(flow: Any) -> None:
+    flow.registration_missing = True
+    assert flow.invoke() == copilot_detach._BUSY_EXIT
+    assert _portable_stage("seed_validation") == [("success", "none")]
+    assert _portable_stage("bridge_registration") == [("failure", "session_unrepresented")]
+
+
+def test_a_portable_launch_with_an_oversized_seed_is_observed(
+    flow: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def oversized(args: Any) -> str:
+        raise ValueError("seed is too long (max 1 characters)")
+
+    monkeypatch.setattr("agent_codespaces.portable_mux_launch.read_seed", oversized)
+    assert flow.invoke() == 1
+    assert _portable_stage("seed_validation") == [("failure", "seed_too_long")]
+    assert ct._last_reason == "seed_too_long"

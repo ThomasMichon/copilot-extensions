@@ -57,13 +57,20 @@ def _elapsed(started: float) -> int:
     return max(0, int((_now() - started) * 1000))
 
 
+_TERMINAL = frozenset({"failure", "timeout"})
+
+
 def elapsed_ms(started: float) -> int:
     """Milliseconds since a `clock()` mark."""
     return _elapsed(started)
 
 
 def _append(event: dict[str, Any]) -> None:
-    if len(_records) < MAX_RECORDS and event.get("stage") in STAGES:
+    # Bounded, newest-wins: a run's terminal stage and launch summary come last
+    # and must survive a burst of earlier retries.
+    if event.get("stage") in STAGES:
+        if len(_records) >= MAX_RECORDS:
+            del _records[0]
         _records.append(event)
 
 
@@ -72,7 +79,7 @@ def _close(outcome: str, reason: str, **extra: Any) -> None:
     current, _open = _open, None
     if current is None:
         return
-    if outcome != "success":
+    if outcome in _TERMINAL:
         _last_reason = reason
     _append({
         "kind": "stage", "stage": current["stage"], "outcome": outcome,
@@ -152,7 +159,7 @@ def note(
             event["duration_ms"] = duration_ms
         elif started is not None:
             event["duration_ms"] = _elapsed(started)
-        if outcome != "success":
+        if outcome in _TERMINAL:
             global _last_reason
             _last_reason = reason
             if _open is not None:
