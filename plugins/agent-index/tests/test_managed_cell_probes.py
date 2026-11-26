@@ -20,6 +20,7 @@ from test_managed_command_gate import application_python as application_python
 @pytest.mark.parametrize("scenario", [
     "origin", "site", "missing-uv", "missing-support", "missing-runtime",
     "failed-import", "outside-slot",
+    "excess-output", "invalid-utf8",
 ])
 def test_real_prepared_cell_probe(
     tmp_path: Path, materialized: bool, scenario: str, application_python: Path,
@@ -59,7 +60,9 @@ def test_real_prepared_cell_probe(
         "'isolated':sys.flags.isolated,'bytecode':sys.dont_write_bytecode,"
         "'cwd':os.getcwd()}),encoding='utf-8')\n"
         + ("raise RuntimeError('inert import failure')\n" if scenario == "failed-import" else "")
-        + ("__file__=os.environ['OUTSIDE_ORIGIN']\n" if scenario == "outside-slot" else ""),
+        + ("__file__=os.environ['OUTSIDE_ORIGIN']\n" if scenario == "outside-slot" else "")
+        + ("os.write(1,b'x'*65537)\n" if scenario == "excess-output" else "")
+        + ("os.write(1,b'\\xff')\n" if scenario == "invalid-utf8" else ""),
         encoding="utf-8",
     )
     tools = tmp_path / "private tools"

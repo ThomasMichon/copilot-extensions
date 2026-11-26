@@ -977,6 +977,8 @@ ten-second execution bound and 64 KiB limit on each output stream. Missing UV
 or helper support refuses rather than acquiring prerequisites or selecting a
 different environment. Unconfirmed native cleanup propagates with its original
 process/Job/resource custody and cannot trigger failed-candidate deletion.
+Settled output-limit and UTF-8 capture failures remain ordinary cell errors,
+so existing invalid-target rollback still runs.
 Other construction commands retain their existing installation owners.
 
 The default durable tier now registers the same stable launchers with the

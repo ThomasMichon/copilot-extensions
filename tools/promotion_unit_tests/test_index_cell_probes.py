@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -23,8 +23,9 @@ def cell(monkeypatch: pytest.MonkeyPatch) -> Any:
     selected = {
         "CellError", "_venv_python", "_cell_process_helpers", "_runtime_install_target",
         "_build_runtime", "_provision_constructed", "_isolated_environment",
+        "_resume_selection_transaction",
     }
-    definitions = [
+    definitions: list[ast.stmt] = [
         node for node in tree.body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in selected
         or isinstance(node, ast.ImportFrom) and node.module == "__future__"
@@ -33,11 +34,13 @@ def cell(monkeypatch: pytest.MonkeyPatch) -> Any:
             and target.id in {"PLUGIN_ID", "RUNTIME_PROFILE_FILE", "_process_helpers"}
             for target in node.targets
         )
+        or isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        and node.target.id == "_process_helpers"
     ]
     assert {node.name for node in definitions if hasattr(node, "name")} == selected
     module = ModuleType("_unit_cell_probes")
     module.__dict__.update(
-        __file__=str(source), Path=Path, os=os, importlib=importlib, hashlib=hashlib,
+        __file__=str(source), Path=Path, os=os, importlib=importlib, hashlib=hashlib, cast=cast,
         _context_arguments=lambda *a, **k: [],
     )
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(source), "exec"), module.__dict__)
@@ -51,19 +54,24 @@ def cell(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.mark.parametrize("phase", ["lookup", "probe"])
-@pytest.mark.parametrize("uncertain", [False, True])
+@pytest.mark.parametrize("outcome", ["ordinary", "output-limit", "invalid-utf8", "uncertain"])
 def test_probe_failure_preserves_custody(
     cell: Any, monkeypatch: pytest.MonkeyPatch,
-    phase: str, uncertain: bool,
+    phase: str, outcome: str,
 ) -> None:
     helper = cell._cell_process_helpers()
     root = Path("fixture-runtime").absolute()
     _, owner = helper._prepared_process_helpers()
     process, job, resource = object(), object(), object()
-    error = (
-        owner.OwnedCleanupError(process, job, cleanup_resources=(("fixture", resource),))
-        if uncertain else RuntimeError("fixture refusal")
-    )
+    error: Any
+    if outcome == "uncertain":
+        error = owner.OwnedCleanupError(process, job, cleanup_resources=(("fixture", resource),))
+    elif outcome == "output-limit":
+        error = owner.OutputLimitExceeded("stdout", 65536)
+    elif outcome == "invalid-utf8":
+        error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid fixture byte")
+    else:
+        error = RuntimeError("fixture refusal")
     calls = []
 
     def select(_python: Path) -> str:
@@ -80,14 +88,14 @@ def test_probe_failure_preserves_custody(
         SimpleNamespace(resolve_runtime_python=select),
         SimpleNamespace(run_caller_owned=capture, OwnedCleanupError=owner.OwnedCleanupError),
     ))
-    with pytest.raises(owner.OwnedCleanupError if uncertain else cell.CellError) as caught:
+    with pytest.raises(owner.OwnedCleanupError if outcome == "uncertain" else cell.CellError) as caught:
         helper.runtime_probe(
             root / "python", root, "raise AssertionError",
             environment={}, error_type=cell.CellError,
             isolated_environment=helper.isolated_environment,
         )
     assert calls == (["lookup"] if phase == "lookup" else ["lookup", "probe"])
-    if uncertain:
+    if outcome == "uncertain":
         assert caught.value is error
         assert error.process is process and error.job is job
         assert error.cleanup_resources == (("fixture", resource),)
@@ -184,3 +192,56 @@ def test_candidate_discard_requires_settled_probe(
     if uncertain:
         assert error.process is process and error.job is job
         assert error.cleanup_resources == (("fixture", resource),)
+
+
+@pytest.mark.parametrize("outcome", ["output-limit", "invalid-utf8", "uncertain"])
+def test_invalid_target_rollback_distinguishes_unconfirmed_cleanup(
+    cell: Any, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    helper = cell._cell_process_helpers()
+    _, owner = helper._prepared_process_helpers()
+    error = (
+        owner.OutputLimitExceeded("stdout", 65536) if outcome == "output-limit" else
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid fixture byte")
+        if outcome == "invalid-utf8" else
+        owner.OwnedCleanupError(object(), object(), cleanup_resources=(("fixture", object()),))
+    )
+    root = Path("fixture-runtime")
+    transaction = {
+        "namespaceGeneration": "namespace", "installGeneration": "install",
+        "management": {"path": str(root), "version": "1.0"},
+        "target": {"manifest": {}}, "prior": {"manifest": {}},
+    }
+    rollbacks = []
+
+    def capture(*_args: Any, **_kwargs: Any) -> Any:
+        raise error
+
+    def validate(*_args: Any) -> None:
+        helper.runtime_probe(
+            root / "python", root, "pass", environment={}, error_type=cell.CellError,
+            isolated_environment=helper.isolated_environment,
+        )
+
+    def rollback(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        rollbacks.append(kwargs["outcome"])
+        return transaction
+
+    monkeypatch.setattr(owner, "run_caller_owned", capture)
+    managed, _ = helper._prepared_process_helpers()
+    monkeypatch.setattr(managed, "resolve_runtime_python", lambda *a: str(root / "python"))
+    monkeypatch.setattr(cell, "_plugin_version", lambda *a: "1.0", raising=False)
+    monkeypatch.setattr(cell, "_normalized_path", str, raising=False)
+    monkeypatch.setattr(cell, "_manifest_with_current_source", lambda m, *a: m, raising=False)
+    monkeypatch.setattr(cell, "_validate_transaction_target", validate, raising=False)
+    monkeypatch.setattr(cell, "_rollback_selection_transaction", rollback, raising=False)
+    validated = {"pluginRoot": str(root), "namespaceGeneration": "namespace", "generation": "install"}
+    with pytest.raises(owner.OwnedCleanupError if outcome == "uncertain" else cell.CellError) as caught:
+        cell._resume_selection_transaction(
+            root, root / "context.json", "example", root, validated, "token", transaction,
+        )
+    assert rollbacks == ([] if outcome == "uncertain" else ["restored-invalid-target"])
+    if outcome == "uncertain":
+        assert caught.value is error
+    else:
+        assert caught.value.__cause__ is error

@@ -8,12 +8,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable
+from types import ModuleType
+from typing import Callable, cast
 
-_HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+_HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
-def _prepared_process_helpers():
+def _prepared_process_helpers() -> tuple[ModuleType, ModuleType]:
     capsule = Path(__file__).with_name("daemon_instance_runtime.pyz")
     if not capsule.is_file():
         raise FileNotFoundError("prepared process-helper capsule is unavailable")
@@ -42,12 +43,14 @@ def runtime_probe(
     try:
         managed, owner = _prepared_process_helpers()
         selected = managed.resolve_runtime_python(interpreter)
-        return owner.run_caller_owned(
+        return cast(subprocess.CompletedProcess[str], owner.run_caller_owned(
             [selected, "-I", "-B", "-X", "utf8", "-c", code],
             cwd=slot, env=isolated_environment(environment),
             input_text="", timeout=10.0, max_stdout_bytes=65536, max_stderr_bytes=65536,
-        )
-    except (ImportError, OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        ))
+    except (ImportError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if cleanup_pending(exc):
+            raise
         raise error_type(
             "runtime probe requires prepared UV and process support; "
             "use explicit installation management"
@@ -82,7 +85,7 @@ def isolated_environment(environment: dict[str, str] | None = None) -> dict[str,
 def load_versioned_runtime(
     payload_root: Path, *, error_type: type[Exception],
     validate_chain: Callable[[Path, Path, str], None], validate_file: Callable[[Path, str], None],
-):
+) -> ModuleType:
     path = payload_root / "scripts/versioned_runtime.py"
     validate_chain(path, payload_root, "versioned runtime")
     validate_file(path, "versioned runtime")
@@ -108,7 +111,7 @@ def run_checked(command: list[str], *, error_type: type[Exception],
 
 
 def install_dependency(
-    payload_root: Path, uv: str, interpreter: Path, source: Path, cwd: Path, *,
+    payload_root: Path, uv: str, interpreter: Path, source: Path | str, cwd: Path, *,
     error_type: type[Exception], validate_file: Callable[[Path, str], None],
     quote: Callable[[str], str], isolated_environment: Callable[..., dict[str, str]],
     execute: Callable[..., None],

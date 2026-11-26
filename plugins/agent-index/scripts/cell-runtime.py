@@ -26,7 +26,8 @@ import venv
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from types import ModuleType
+from typing import Any, Iterator, cast
 
 PLUGIN_ID = "agent-index"
 REPO_ID = "copilot-extensions"
@@ -102,7 +103,8 @@ def _lexists(path: Path) -> bool:
 
 def _is_reparse(path: Path) -> bool:
     try:
-        return bool(path.lstat().st_file_attributes & 0x400)
+        attributes = getattr(path.lstat(), "st_file_attributes", None)
+        return path.is_symlink() if attributes is None else bool(attributes & 0x400)
     except (AttributeError, OSError):
         return path.is_symlink()
 
@@ -220,7 +222,7 @@ def _atomic_bytes(path: Path, value: bytes, *, mode: int | None = None) -> None:
 
 
 def _isolated_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
-    return _cell_process_helpers().isolated_environment(environment)
+    return cast(dict[str, str], _cell_process_helpers().isolated_environment(environment))
 
 
 def _context_runner(payload_root: Path) -> Path:
@@ -260,7 +262,7 @@ def _run_context(
         encoding="utf-8",
         errors="replace",
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -366,21 +368,21 @@ def _pid_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         process_query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
+        handle = getattr(ctypes, "windll").kernel32.OpenProcess(
             process_query_limited_information, False, pid
         )
         if not handle:
-            return ctypes.get_last_error() == 5
+            return bool(getattr(ctypes, "get_last_error")() == 5)
         exit_code = ctypes.c_uint32()
         try:
-            if not ctypes.windll.kernel32.GetExitCodeProcess(
+            if not getattr(ctypes, "windll").kernel32.GetExitCodeProcess(
                 handle,
                 ctypes.byref(exit_code),
             ):
                 return True
             return int(exit_code.value) == 259
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            getattr(ctypes, "windll").kernel32.CloseHandle(handle)
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
         tail = raw.rsplit(")", 1)[1].split()
@@ -408,7 +410,7 @@ def _process_birth_identity(pid: int) -> str | None:
             ]
 
         process_query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
+        handle = getattr(ctypes, "windll").kernel32.OpenProcess(
             process_query_limited_information,
             False,
             pid,
@@ -420,7 +422,7 @@ def _process_birth_identity(pid: int) -> str | None:
         kernel = FileTime()
         user = FileTime()
         try:
-            if not ctypes.windll.kernel32.GetProcessTimes(
+            if not getattr(ctypes, "windll").kernel32.GetProcessTimes(
                 handle,
                 ctypes.byref(creation),
                 ctypes.byref(exit_time),
@@ -431,7 +433,7 @@ def _process_birth_identity(pid: int) -> str | None:
             value = (int(creation.high) << 32) | int(creation.low)
             return f"windows-filetime:{value}"
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            getattr(ctypes, "windll").kernel32.CloseHandle(handle)
     proc_stat = Path(f"/proc/{pid}/stat")
     try:
         raw = proc_stat.read_text(encoding="ascii")
@@ -610,7 +612,7 @@ def _installation_lock(
             )
             if (
                 owner_valid
-                and _pid_alive(incumbent_pid)
+                and _pid_alive(cast(int, incumbent_pid))
             ):
                 if time.monotonic() >= deadline:
                     raise CellError("timed out waiting for the installation lock")
@@ -991,6 +993,7 @@ def _validate_runtime_profile(
     )
     if not valid:
         raise CellError("runtime dependency profile receipt is invalid")
+    profile = cast(dict[str, Any], profile)
     expected_role, expected_extras = _runtime_profile(role)
     if enforce_role and (
         profile["role"] != expected_role or profile["extras"] != expected_extras
@@ -1058,10 +1061,10 @@ def _validate_runtime_interpreter_layout(
     return resolved
 
 
-_process_helpers = None
+_process_helpers: ModuleType | None = None
 
 
-def _cell_process_helpers():
+def _cell_process_helpers() -> ModuleType:
     global _process_helpers
     if _process_helpers is None:
         source = Path(__file__).with_name("cell_runtime_processes.py")
@@ -1085,11 +1088,11 @@ def _run_checked(
     )
 
 
-def _load_versioned_runtime(payload_root: Path):
-    return _cell_process_helpers().load_versioned_runtime(
+def _load_versioned_runtime(payload_root: Path) -> ModuleType:
+    return cast(ModuleType, _cell_process_helpers().load_versioned_runtime(
         payload_root, error_type=CellError,
         validate_chain=_assert_path_chain, validate_file=_assert_regular_file,
-    )
+    ))
 
 
 def _reconcile_installer_instances(runtime_root: Path) -> None:
@@ -1103,7 +1106,7 @@ def _reconcile_installer_instances(runtime_root: Path) -> None:
 
 
 def _install_runtime_dependency(
-    payload_root: Path, uv: str, interpreter: Path, source: Path, cwd: Path,
+    payload_root: Path, uv: str, interpreter: Path, source: Path | str, cwd: Path,
 ) -> None:
     _cell_process_helpers().install_dependency(
         payload_root, uv, interpreter, source, cwd, error_type=CellError,
@@ -1119,11 +1122,11 @@ def _runtime_module_path(
     environment: dict[str, str] | None = None,
     label: str,
 ) -> Path:
-    return _cell_process_helpers().runtime_module_path(
+    return cast(Path, _cell_process_helpers().runtime_module_path(
         interpreter, slot, environment=environment, label=label, error_type=CellError,
         isolated_environment=_isolated_environment, absolute_path=_absolute_path,
         validate_chain=_assert_path_chain, validate_file=_assert_regular_file,
-    )
+    ))
 
 
 def _runtime_install_target(snapshot_root: Path, role: str | None) -> str:
@@ -1225,9 +1228,9 @@ def _build_runtime(
             snapshot_root / "libs" / "agent-procutil",
             _runtime_install_target(snapshot_root, role),
         )
-        for source in sources:
+        for dependency_source in sources:
             _install_runtime_dependency(
-                policy_payload_root or snapshot_root, uv, interpreter, source, snapshot_root,
+                policy_payload_root or snapshot_root, uv, interpreter, dependency_source, snapshot_root,
             )
     _validate_runtime_interpreter_layout(
         interpreter,
@@ -1244,7 +1247,7 @@ def _build_runtime(
     return interpreter
 
 
-def _load_installation_context(payload_root: Path):
+def _load_installation_context(payload_root: Path) -> ModuleType:
     path = _context_runner(payload_root)
     module_name = (
         "agent_index_installation_context_"
@@ -1304,7 +1307,7 @@ def _git_source(path: Path) -> tuple[str | None, str | None, bool]:
             encoding="utf-8",
             errors="replace",
             check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         ).stdout.strip()
 
     try:
@@ -1388,6 +1391,9 @@ def _load_manifest(
     )
     if not valid:
         raise CellError("cell deploy manifest identity or provenance is invalid")
+    runtime = cast(dict[str, Any], runtime)
+    source = cast(dict[str, Any], source)
+    selected = cast(dict[str, Any], selected)
     runtime_root = _absolute_path(plugin_root / "versions" / runtime["version"])
     interpreter = _absolute_path(_venv_python(runtime_root))
     if not _paths_equal(runtime["path"], runtime_root):
@@ -2660,7 +2666,7 @@ def _undrain_owned_instance(
     raise CellError("owned draining service did not reopen admission")
 
 
-def _payload_routing_module():
+def _payload_routing_module() -> ModuleType:
     payload_root = Path(__file__).resolve().parent.parent
     library = payload_root / "libs" / "zdd" / "src"
     if not library.is_dir(): library = payload_root.parents[1] / "libs" / "zdd" / "src"
@@ -2869,8 +2875,8 @@ def _spawn_windows_owned_process(
         stderr=stderr,
         creationflags=flags,
     )
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    ntdll = ctypes.WinDLL("ntdll")
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    ntdll = getattr(ctypes, "WinDLL")("ntdll")
     kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
     kernel32.CreateJobObjectW.restype = ctypes.c_void_p
     kernel32.AssignProcessToJobObject.argtypes = [
@@ -2892,16 +2898,16 @@ def _spawn_windows_owned_process(
     try:
         if not kernel32.AssignProcessToJobObject(
             job_handle,
-            int(process._handle),
+            int(getattr(process, "_handle")),
         ):
-            error = ctypes.get_last_error()
+            error = getattr(ctypes, "get_last_error")()
             process.terminate()
             process.wait(timeout=5)
             raise CellError(
                 "Windows service process could not be assigned to its job "
                 f"(error {error})"
             )
-        status = int(ntdll.NtResumeProcess(int(process._handle)))
+        status = int(ntdll.NtResumeProcess(int(getattr(process, "_handle"))))
         if status != 0:
             kernel32.TerminateJobObject(job_handle, 1)
             process.wait(timeout=5)
@@ -3230,7 +3236,7 @@ def _reconcile_service(
     }
     log_path = Path(environment["AGENT_INDEX_LOG_DIR"]) / "service.log"
     log_stream = log_path.open("ab")
-    process: subprocess.Popen[Any]
+    process: subprocess.Popen[Any] | _WindowsOwnedProcess
     try:
         if os.name == "nt":
             command = [
@@ -3294,7 +3300,7 @@ def _installation_status(
     context: Path,
     marketplace_id: str,
     durable_home: Path,
-) -> None:
+) -> dict[str, Any]:
     return _run_context(
         payload_root,
         "status",
@@ -4111,7 +4117,7 @@ def _provision_constructed(
     version: str,
     validated: dict[str, Any],
     lock_token: str,
-    runtime,
+    runtime: ModuleType,
     lifecycle: ExitStack,
 ) -> dict[str, Any]:
     plugin_root = Path(str(validated["pluginRoot"]))

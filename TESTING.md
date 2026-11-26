@@ -88,11 +88,13 @@ isolate context/configuration ownership and do not qualify the cell validator's
 independent package probes, installed-host adoption or complete command latency.
 
 Index's `tests/test_managed_cell_probes.py` separately covers those package-origin
-probes and the smoke-build site-directory probe. Fourteen raw/materialized controls
+probes and the smoke-build site-directory probe. Eighteen raw/materialized controls
 execute real prepared UV and caller-owned capture with independent 3.11.18
 bootstrap and inert 3.10.20 application environments. Successful paths run twice;
 missing UV/support/runtime refuses before application import, failed imports
-remain failures, and outside-slot origins remain rejected. Poisoned ambient
+remain failures, and outside-slot origins remain rejected. Settled output-limit
+and UTF-8 capture failures retain invalid-target rollback, while unconfirmed
+cleanup propagates without rollback. Poisoned ambient
 Python/selectors cannot replace the addressed environment; runtime bytes remain
 unchanged. The same three native command-gate jobs require every control and
 offline work-count/elapsed report within their existing eight-minute deadlines.

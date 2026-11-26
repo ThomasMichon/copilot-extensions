@@ -72,11 +72,11 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-cell-probes').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==len({c.attrib['name'] for c in cases})==14;
+          assert len(cases)==len({c.attrib['name'] for c in cases})==18;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_cell_probe_performance'];
-          assert len(reports)==14;
+          assert len(reports)==18;
           assert all(r['network']=='disabled' and r['status']=='measured' and
           r['completed']==len(r['samples_seconds']) and
           r['completed']==(2 if r['scenario'] in ('origin','site') else 1) and
