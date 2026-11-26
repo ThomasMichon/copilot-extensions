@@ -18,7 +18,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator, cast
 
 _runtime_spec = importlib.util.spec_from_file_location(
     "containers_profile_runtime", Path(__file__).with_name(
@@ -60,11 +60,12 @@ LIBRARIES = (
     "dropin-registry",
     "single-instance-lease",
     "plugin-activation",
+    "process-telemetry",
 )
 
 
-def _unique_object(pairs: list[tuple[str, object]]) -> dict:
-    value = {}
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
             raise RuntimeError(f"Duplicate runtime-profile key: {key}")
@@ -72,7 +73,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     return value
 
 
-def _read_json(path: Path) -> dict:
+def _read_json(path: Path) -> dict[str, Any]:
     path = runtime._leases._native_path(path)
     if path.is_symlink() or not path.is_file():
         raise RuntimeError(f"Profile must be an ordinary JSON file: {path}")
@@ -84,7 +85,7 @@ def _read_json(path: Path) -> dict:
     return value
 
 
-def _write_json(path: Path, value: dict) -> None:
+def _write_json(path: Path, value: dict[str, Any]) -> None:
     path = runtime._leases._native_path(path)
     if path.exists():
         if _read_json(path) == value:
@@ -99,7 +100,7 @@ def _write_json(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _execution_contract() -> dict:
+def _execution_contract() -> dict[str, Any]:
     return {"schema": EXECUTION_SCHEMA, "version": 1, "retainedCreation": False}
 
 
@@ -142,7 +143,7 @@ def select_execution(root: Path) -> ExecutionSelection:
     return _read_execution(root, python)
 
 
-def _check_wheel_execution_profile(slot: Path, value: dict) -> None:
+def _check_wheel_execution_profile(slot: Path, value: dict[str, Any]) -> None:
     try:
         receipt = _read_json(slot / ".runtime-input-origins.json")
         wheels = receipt["wheel_inputs"]
@@ -248,7 +249,7 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
             or value["profile"] not in PROFILES
         ):
             raise RuntimeError(f"Invalid Containers runtime profile: {path}")
-        profile = value["profile"]
+        profile = cast(str, value["profile"])
     else:
         profile = "base"
         python = runtime.resolve_python(root)
@@ -258,7 +259,7 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
             sites.extend((slot / "lib").glob("python*/site-packages"))
             distributions = importlib.metadata.distributions(path=[str(p) for p in sites])
             if any(
-                distribution.metadata.get("Name", "").lower() == "paramiko"
+                cast(Any, distribution.metadata).get("Name", "").lower() == "paramiko"
                 for distribution in distributions
             ):
                 profile = "provider-exec"
@@ -269,7 +270,7 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
     return profile
 
 
-def application_profile(root: Path) -> dict:
+def application_profile(root: Path) -> dict[str, Any]:
     """Translate existing installed profile intent into application extras."""
     root = Path(os.path.abspath(root.expanduser()))
     profile = selected_profile(root)
@@ -308,7 +309,7 @@ def _fingerprint(payload: Path, libraries: list[Path]) -> str:
                     for part in path.relative_to(root).parts
                 ):
                     paths.append(path)
-    return runtime.fingerprint_source(paths)
+    return cast(str, runtime.fingerprint_source(paths))
 
 
 def _run(arguments: list[str], *, cwd: Path) -> None:
@@ -319,7 +320,7 @@ def _run(arguments: list[str], *, cwd: Path) -> None:
             stdout=output,
             stderr=subprocess.STDOUT,
             check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         if result.returncode:
             output.seek(0, os.SEEK_END)
@@ -361,14 +362,17 @@ def _package_version(payload: Path) -> str:
     return match.group(1)
 
 
-def _check_source(payload: Path, version: str, identity, *, on_progress=None) -> None:
+def _check_source(
+    payload: Path, version: str, identity: Any, *,
+    on_progress: Callable[[], None] | None = None,
+) -> None:
     if source.read_source_identity(
         payload, version, plugin="agent-containers", on_progress=on_progress,
     ) != identity:
         raise RuntimeError("Containers source identity changed after runtime selection")
 
 
-def _check_selected_source(identity, expected_identity: str | None) -> None:
+def _check_selected_source(identity: Any, expected_identity: str | None) -> None:
     if (
         expected_identity is not None
         and json.dumps(source.manifest_fields(identity), sort_keys=True) != expected_identity
@@ -379,11 +383,11 @@ def _check_selected_source(identity, expected_identity: str | None) -> None:
 @dataclass(frozen=True)
 class RuntimeTarget:
     package_version: str
-    identity: source.SourceIdentity | None
+    identity: Any  # source.SourceIdentity | None, from the dynamically loaded helper
     profile: str
     runtime_version: str
 
-    def document(self, root: Path) -> dict:
+    def document(self, root: Path) -> dict[str, Any]:
         if self.identity is None:
             raise RuntimeError("Source target planning requires a prepared source identity")
         return {
@@ -415,7 +419,7 @@ def _select_target(
 def plan_source(
     root: Path, payload: Path, *, expected_source_version: str,
     expected_source_identity: str,
-) -> dict:
+) -> dict[str, Any]:
     """Read installed profile policy and bind its target without provisioning."""
     root = Path(os.path.abspath(root.expanduser()))
     payload = Path(os.path.abspath(payload.expanduser()))
@@ -445,15 +449,16 @@ def stamp_source(
     snapshots.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
         candidate = Path(temporary) / "payload"
-        def copy(origin, destination):
+        def copy(origin: str, destination: str) -> object:
             result = shutil.copy2(origin, destination)
             if on_progress is not None:
                 on_progress()
             return result
 
-        shutil.copytree(
-            payload, candidate, **({"copy_function": copy} if on_progress is not None else {}),
-        )
+        if on_progress is not None:
+            shutil.copytree(payload, candidate, copy_function=copy)
+        else:
+            shutil.copytree(payload, candidate)
         _check_source(candidate, version, identity, on_progress=on_progress)
         _check_source(payload, version, identity, on_progress=on_progress)
         candidate.rename(snapshot)
@@ -471,7 +476,7 @@ def provision(
     expected_source_identity: str | None = None,
     wheel_profile: Path | None = None,
     wheel_directory: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Called under the installer's installation-wide transaction lock."""
     if not uv:
         raise RuntimeError("uv is required; unrestricted pip fallback is not supported")
@@ -500,7 +505,7 @@ def provision(
                 "executionContract": _execution_contract(),
             }
 
-            def validate(slot):
+            def validate(slot: Path) -> None:
                 evidence = slot / PROFILE_FILE
                 if evidence.exists():
                     if _read_json(evidence) != expected:
