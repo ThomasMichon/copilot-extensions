@@ -487,6 +487,21 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
+- [ ] Qualify the remaining two complete original logical-environment functions:
+  six invalid/conflicting identities and one native/guest-distinction case.
+  Their earlier hold was storage only, not a failed effect observation.
+  Preserve the existing eight-row table and original objects, fixtures,
+  parameter values/types, marks and IDs. Compare complete metadata before a
+  fresh unchanged guarded observation with actual production-call coverage.
+  Add only those seven nodes and honestly refresh the existing adapter hash;
+  keep every other source, target, helper, budget and refusal unchanged.
+  Encode through the merged v3 codec, then use normal review/full CI/merge and
+  persistent readback. This is not whole-census or parent completion.
+  Complete metadata comparison passes all fifteen original/adapter cases.
+  The new seven pass in 1.49 pytest / 21.610 observation seconds with all
+  21 phase reports, zero prohibited effects, 25 bound reads and actual owner
+  calls per case. V3 admission produces 10,382 nodes, 1,499 bindings,
+  546 targets and 698,148 bytes; review/CI/merge/readback remain.
 - [x] Qualify the two complete original core-profile early-refusal functions:
   three registered-manifest schema cases and one expired-deadline/explicit-limit
   case. Metadata-only collection measures 22 originals / four selected cases
@@ -745,14 +760,17 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   migration recorded in the [scope approval](manifest-storage-successor.md#scope-approval).
   No larger cap, test omission, eligibility/guard exception or operational
   authority follows. The original-census, every-release and parent gates stay open.
-- [ ] Deliver the [reader-first manifest successor](manifest-storage-successor.md)
+- [x] Deliver the [reader-first manifest successor](manifest-storage-successor.md)
   through reviewed intent, actual consumer/bootstrap closure, compatible reader
   delivery and a separately reviewed source-data migration. Complete that
   phase's Plan and Validation before resuming further original-unit admission.
   Reader #14658 is merged with the full 10,375-case packet; persistent reviewed
   blobs and all current bindings/helpers match. The separate format-only
   migration preserves that exact post-reader inventory in 697,907 bytes.
-  Its review, complete current packet and merged/persistent readback remain.
+  Data #14662 is independently confirmed merged; current-head review,
+  complete fresh packet, required checks and persistent blob/binding/helper
+  readback complete that bounded phase. Resume original census admission
+  with v3 storage and unchanged eligibility/effect gates.
   Preserve the parent completion gate and all retained owners and holds.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
@@ -5192,12 +5210,14 @@ regressions, retained-owner seams and the completion gate.
 
 ## Validation Plan
 
-- [ ] Manifest successor satisfies the
+- [x] Manifest successor satisfies the
   [phase validation](manifest-storage-successor.md#validation): existing-format
   compatibility, exact ordered logical equivalence, unchanged bounds and
   eligibility, actual consumer readiness before migration, focused fresh
   execution and the complete admitted packet. No representation-only milestone
   establishes the historical census, every-release or parent acceptance.
+  Reader #14658 and separate data #14662 pass each source-only phase item;
+  final baseline preserves all thirteen intervening peer binding refreshes.
 - [ ] Installed-Manager acceptance satisfies every positive, falsifying,
   isolation, identity and actual promotion-admission case in the
   [lifecycle matrix](installed-manager-lifecycle.md#validation-plan).

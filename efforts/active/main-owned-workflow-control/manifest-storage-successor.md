@@ -2,7 +2,7 @@
 
 Parent and completion gate: [Main-Owned Workflow Control](README.md).
 Coordination: #6237; existing CI/release and operational owners remain.
-Status: compatible reader merged; exact format-only migration prepared for separate review.
+Status: Done - compatible reader and separate data migration reviewed, merged and persistently verified.
 
 ## Goal
 
@@ -149,7 +149,7 @@ _Agent-recommended realization within the selected scope; not new authority._
   cases pass unchanged effect guarding. Names, parameter tables, old assertions
   and selection remain; only five existing code/test hashes are rebound in v2.
   Fresh-process old/new file consumers preserve ordered full-corpus values.
-  Reader delivery and data migration remain unchecked below.
+  Reader delivery and separate data migration are recorded below.
 - [x] Merge the reader and prove the actual consumers can read the successor
   before migration. Use their real code/control selection, not package-version
   equality. If a separately owned consumer needs adoption, preserve that
@@ -174,46 +174,62 @@ _Agent-recommended realization within the selected scope; not new authority._
   type/order comparison preserve all 10,375 nodes, 1,499 bindings, 546 targets,
   92 helper decisions and the 300-second limit. Both fresh-process file
   consumers agree; only storage changes from 1,048,547 to 697,907 bytes.
-  Separate data review/hosted qualification/merge remain pending below.
-- [ ] Verify reviewed delivery, full current packet and persistent bytes,
+  Separate data #14662 merges as `8764468e066378ca16fc0d71c24c91fdbacc4f1b`;
+  current-head approval, full fresh hosted execution, required gates and
+  independent persistent readback complete the delivery.
+- [x] Verify reviewed delivery, full current packet and persistent bytes,
   journal the phase outcome, then resume original-unit census through its
   unchanged metadata/guard/coverage/admission flow. Return to the parent
   Goal and unresolved Plan/Validation; do not finalize this worktree.
+  All seven reviewed/merged/working blobs and the exact frozen logical
+  baseline match. Current bindings/helpers and retained 22/15 focused input
+  hashes verify without replay. Resume the seven original logical-environment
+  cases previously held only by storage, using the existing whole-function
+  metadata, unchanged guarded observation and v3 encoder flow.
 
 ## Validation
 
 _Agent-recommended checks preserving the established acceptance boundary._
 
-- [ ] Existing v1/v2 inputs normalize identically; supported old/new reader
+- [x] Existing v1/v2 inputs normalize identically; supported old/new reader
   directions, strict unknown-version refusal and rollback remain explicit.
-- [ ] New stored data reconstructs exact original node strings and order,
+- [x] New stored data reconstructs exact original node strings and order,
   including class-qualified/parameterized names, Unicode, brackets, empty
   parameter suffixes where applicable, noncontiguous runs and repeated file
   groups. No case is truncated, relabeled, omitted or sorted into a new order.
-- [ ] Malformed shapes/types, duplicate logical identities, invalid paths or
+- [x] Malformed shapes/types, duplicate logical identities, invalid paths or
   source bindings, invalid UTF-8, invalid budgets and oversized expansion
   fail closed under the existing limits. Bound expansion before oversized
   materialization; no unbounded reference/repetition encoding is introduced.
-- [ ] Focused new controls genuinely execute during reader qualification;
+- [x] Focused new controls genuinely execute during reader qualification;
   retaining test files without running their new branches is not coverage.
   Preserve old assertions and identities while closing the bootstrap budget.
-- [ ] A lightweight real consumer path exercises old/new input in a fresh
+- [x] A lightweight real consumer path exercises old/new input in a fresh
   process without production preload where feasible. Record the actual mode
   used and any unavailable tier rather than substituting a proxy.
-- [ ] Natural required hosted CI runs the complete admitted packet at each
+- [x] Natural required hosted CI runs the complete admitted packet at each
   relevant code/data head. Preserve source, context, counts and outcomes;
   never rerun merely to erase an unchanged failure or bypass required CI.
-- [ ] Prove actual consumer compatibility before the data switch and exact
+- [x] Prove actual consumer compatibility before the data switch and exact
   post-reader-baseline logical equivalence before/after conversion.
-- [ ] Review, configured required checks, normal role-scoped merge, independent
+- [x] Review, configured required checks, normal role-scoped merge, independent
   merged-state/blob readback, supported pull-forward and current binding/helper
   verification complete both stages. Record unit, simple E2E, first-touch and
   hosted tiers and concrete reasons for any inapplicable tier.
-- [ ] The data-only migration stays within 1 MiB and preserves the exact
+- [x] The data-only migration stays within 1 MiB and preserves the exact
   frozen post-reader counts and values. The present pre-reader inventory is
   10,375 nodes, 1,499 source bindings, 546 targets and every existing helper
   decision. Any reader-stage binding update or new focused control must be
   explicit and normally qualified; no census addition is hidden in migration.
+
+The [implementation Journal](journal/2026/11.26-manifest-successor.md#separate-data-migration-delivered-and-phase-closed)
+records both data-head executions, the additional automatic edited-event run,
+its reuse refusal, the initial expected-gate merge refusal and subsequent
+ordinary completion only after that gate finishes. These outcomes are not
+relabelled as cache hits or native/installed acceptance.
+The source-only unit, simple E2E and hosted tiers pass; a first-provision rig
+is inapplicable because no installer/bootstrap behavior changes. Every phase
+item is resolved; no unfinished phase acceptance is transferred or hidden.
 
 ## Decision and progress record
 

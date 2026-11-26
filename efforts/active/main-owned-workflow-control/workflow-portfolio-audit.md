@@ -5,6 +5,23 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 26 remaining original logical-environment cases
+
+With the bounded storage phase complete, the existing adapter adds the two
+whole original functions previously held only by storage: six invalid/conflict
+rows and one native/guest-distinction case. Complete metadata comparison covers
+all fifteen original/adapter cases without changing code origins, objects,
+fixtures, parameter types/values, marks or IDs.
+The seven new cases pass unchanged guarding in 1.49 pytest / 21.610 observation
+seconds: all 21 phase reports pass, zero prohibited effects, 25 bound reads and
+actual production call coverage per case. The old eight remain unchanged.
+V3 admission adds seven nodes and refreshes only the existing adapter hash:
+10,382 nodes, 1,499 bindings, 546 unchanged targets, 92 unchanged helper decisions,
+300 seconds and 698,148 bytes. Strict Linux/Windows typing and Ruff pass.
+Original tests and production string/regex/dataclass code are unchanged.
+No OS/native/guest probe or environment-variable change executes.
+Review, full hosted CI, merge and persistent readback remain.
+
 ## November 26 separate format-only migration
 
 Reader #14658 merges as `7ef2eefee79e64d48e265daefab4ded622de8fbd`
@@ -23,9 +40,26 @@ V3 is 697,907 bytes rather than 1,048,547, saving 350,640 under the same cap.
 No new census node or source/code hash is mixed into the conversion.
 Current Main's traced consumer selectors are unchanged; actual reader/data
 pairing and matching v2 rollback are explicit in TESTING.md.
-Migration review, a fresh complete hosted packet, merge and persistent readback
-remain pending. No runtime, operational writer, native, controller, eligibility,
-guard, ownership or cleanup change follows. The parent stays active.
+The first data head passes review/full CI but conflicts with newer Dev.
+Reconciliation preserves all thirteen intervening peer binding refreshes;
+the exact final baseline is `7006b6fdc0e6de4f0dcf87eb76aa5d1658cc4a46`.
+New independent equivalence and fresh-process checks precede another normal
+review and full current packet.
+Data #14662 merges as `8764468e066378ca16fc0d71c24c91fdbacc4f1b` after
+current approval, fresh configured checks and natural CI.
+CI `45734968287` passes all 10,375 cases in 144.465 packet seconds; its
+toolchain-binding timeout makes the artifact unqualified for reuse.
+The material PR-body update automatically starts `45735140736`, which also
+executes all 10,375 cases in 164.179 seconds, not a reuse hit.
+The additional run is retained duplicate-work evidence, not a workflow-count
+reduction. A first merge attempt refuses the expected required gate; ordinary
+completion succeeds only after that later automatic gate finishes and fresh
+checks pass. No CI rerun or bypass is used.
+Independent merge, supported pull-forward, all seven owned blobs, exact
+normalized values and current bindings/helpers verify persistently.
+The bounded storage phase is Done; no runtime, operational writer, native,
+controller, eligibility, guard, ownership or cleanup change follows.
+The parent stays active and the original census resumes under unchanged gates.
 
 ## November 26 reader-only prefix compatibility (prior stage)
 
