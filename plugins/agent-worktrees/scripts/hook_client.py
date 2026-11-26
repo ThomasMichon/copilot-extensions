@@ -877,6 +877,9 @@ def main(argv: list[str] | None = None) -> int:
     if (kind == "preToolUse" and not strict_policy
             and os.environ.get("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION") == "resident"):
         return 0
+    journal: ModuleType | None = None
+    journal_run: object | None = None
+    journal_error: BaseException | None = None
     try:
         raw = sys.stdin.read()
         try:
@@ -913,6 +916,9 @@ def main(argv: list[str] | None = None) -> int:
             policy = cast(ModuleType, _load_sibling("hook_pre_policy.py"))
             payload, initial = policy.deferred_frame(payload)
         if kind == "sessionStart":
+            # The start marker precedes product work so a runtime-stopped hook stays observable.
+            journal = _load_sibling("hook_telemetry.py")
+            journal_run = journal.begin(_selected_runtime_root(Path.home()), runtime=_RUNTIME) if journal else None
             try:
                 payload = _enrich_session_payload(payload)
                 # Catalog evidence must survive cancellation of slow lifecycle work.
@@ -955,6 +961,7 @@ def main(argv: list[str] | None = None) -> int:
         elif kind != "sessionEnd" and (result or strict_policy):
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception as error:
+        journal_error = error
         if kind == "preToolUse":
             hold = getattr(_load_sibling("hook_pre_policy.py"), "hold_pending", None)
             if callable(hold):
@@ -964,6 +971,8 @@ def main(argv: list[str] | None = None) -> int:
     # outside the try block, so an exception anywhere above still leaves
     # valid, parseable stdout for the host.
     if kind == "sessionStart":
+        if journal_run is not None and journal is not None:
+            journal.finish(journal_run, journal_error)
         sys.stdout.write("{}")
     return 0
 

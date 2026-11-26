@@ -84,6 +84,7 @@ def test_all_installers_deploy_every_py_hook() -> None:
         "hook_process_identity.py",
         "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
         "hook_lifecycle_runtime.py",
+        "hook_telemetry.py",
         "native_source_context.py",
         "terminal_probe.py",
         "pretool_killswitch.py",

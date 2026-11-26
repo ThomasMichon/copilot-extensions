@@ -308,10 +308,10 @@ def test_console_entry_is_instrumented(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen and seen[0].__qualname__ == "instrument.<locals>.run"
 
 
-def test_packaged_descriptor_names_only_the_worktrees_schema() -> None:
+def test_packaged_descriptor_names_the_worktrees_and_hook_schemas() -> None:
     path = Path(consumer_telemetry.__file__).parent / "metadata" / "consumer-telemetry-contract.json"
     assert json.loads(path.read_text(encoding="utf-8")) == capability([
-        consumer_telemetry.SOURCE_SCHEMA,
+        consumer_telemetry.SOURCE_SCHEMA, consumer_telemetry.HOOK_SOURCE_SCHEMA,
     ])
 
 

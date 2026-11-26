@@ -829,7 +829,7 @@ def test_fallback_write_ignores_disconnected_client() -> None:
         }).encode() + b"\n"
     )
     handler.wfile = cast(io.BufferedIOBase, DisconnectedWriter())
-    handler.server = cast(socketserver.BaseServer, SimpleNamespace(token="token", decide=lambda *args: {}))
+    handler.server = cast(Any, SimpleNamespace(token="token", decide=lambda *args: {}))
     handler.handle()
 
 
@@ -3384,6 +3384,16 @@ def test_native_hooks_prefer_payload_without_legacy_install(monkeypatch: pytest.
         'import json,sys;print(json.dumps({"additionalContext":"payload-"+sys.argv[1]}))\n',
         encoding="utf-8",
     )
+    # Native Windows tool hooks select PowerShell entries, not hook_client.py.
+    (script.parent / "pre-tool-hook.ps1").write_text(
+        "[Console]::Out.Write('{\"additionalContext\":\"payload-preToolUse\"}')\n",
+        encoding="utf-8",
+    )
+    (script.parent / "post-tool-hook.ps1").write_text(
+        "function Invoke-PostToolHook { param($Raw) "
+        "[Console]::Out.Write('{\"additionalContext\":\"payload-postToolUse\"}') }\n",
+        encoding="utf-8",
+    )
     if event == "sessionEnd":
         (script.parent / "deregister-session.ps1").write_text(
             "[Console]::Out.Write('{\"additionalContext\":\"payload-sessionEnd\"}')\n",
@@ -3396,6 +3406,8 @@ def test_native_hooks_prefer_payload_without_legacy_install(monkeypatch: pytest.
     legacy = tmp_path / ".agent-worktrees/bin/hook_client.py"
     legacy.parent.mkdir(parents=True)
     legacy.write_text("raise AssertionError('legacy hook selected')\n", encoding="utf-8")
+    for name in ("pre-tool-hook.ps1", "post-tool-hook.ps1"):
+        (legacy.parent / name).write_text("throw 'legacy hook selected'\n", encoding="utf-8")
     environment = {
         **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
         "COPILOT_PLUGIN_ROOT": str(payload),
