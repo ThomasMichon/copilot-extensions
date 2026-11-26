@@ -151,6 +151,12 @@ async def test_acceptance_ignores_turn_and_daemon_admission(
         missing = await client.post("/api/v1/sessions/not-an-agent/messages", json=payload)
         assert missing.status_code == 404
         mock_acp_client.send_prompt.assert_not_awaited()
+        if unavailable == "draining":
+            session_manager._draining = False
+            await session_manager.refresh_host_reapable()
+            assert session._prompt_task is not None
+            await session._prompt_task
+            mock_acp_client.send_prompt.assert_awaited_once_with("wait for consumer")
 
 
 @pytest.mark.asyncio
