@@ -1,5 +1,5 @@
 {
-  "comment": "Converge selected SSH driver runtime dependencies and preserve native cancellation safety",
+  "comment": "Converge SSH driver dependencies with canonical process and bootstrap recovery",
   "changes": [
     {
       "plugin": "agent-bridge",
@@ -63,6 +63,10 @@
     },
     {
       "plugin": "libs/agent-procutil",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/installation-context",
       "type": "patch"
     },
     {
