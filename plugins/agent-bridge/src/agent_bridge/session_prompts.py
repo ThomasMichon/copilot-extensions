@@ -7,19 +7,26 @@ import contextlib
 import inspect
 import json
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 if TYPE_CHECKING:
+    from .session_manager import SessionManager
     from .native_keyed_admission import KeyedNativePrompt
     from .native_send_admission import NativeSendPrompt
     from .native_turn_transport import NativeTurnAttempt
     from .runtime_custody import RuntimeAdmission, RuntimeInstallation
+    from .turn_custody import NativeTurnConsumer
 
 from .db_events import PendingPromptRemovedError
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .session_manager import DaemonDrainingError, Session, log
 from .session_stop import SESSION_NOT_RUNNING, SESSION_STOPPED
 from .transport import SpawnTarget
+
+
+class _TurnCustody(TypedDict, total=False):
+    runtime_admission: RuntimeAdmission
+    native_consumer: NativeTurnConsumer
 
 
 class SessionStoppedError(ValueError):
@@ -47,6 +54,7 @@ class _SessionPromptMixin:
         from .native_turn_transport import NativeTurnTransport
         from .runtime_custody import RuntimeCustodyError
 
+        self = cast("SessionManager", self)
         if self._draining:
             raise DaemonDrainingError("native transport enrollment")
         session = self.get_session(session_id)
@@ -68,6 +76,7 @@ class _SessionPromptMixin:
         expected_native_session_id: str | None = None,
     ) -> int:
         """Atomically start a turn against conditional idle teardown."""
+        self = cast("SessionManager", self)
         if self._draining:
             raise DaemonDrainingError("turn")
         resolved = self._resolve_ref(session_id) or session_id
@@ -104,6 +113,7 @@ class _SessionPromptMixin:
         """
         from .cold_outages import assert_prompt_allowed, reconnect_admitted_before_drain
 
+        self = cast("SessionManager", self)
         if self._draining and not reconnect_admitted_before_drain(
             self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
         ):
@@ -168,7 +178,7 @@ class _SessionPromptMixin:
         turn_index = session.turn_count
         now = time.time()
         native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
-        custody = ({
+        custody: _TurnCustody = ({
             "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,
         } if native_owner is not None else {})
 
@@ -179,12 +189,17 @@ class _SessionPromptMixin:
                 native_admission=native_admission,
                 **custody,
             )
+            assert admitted is not None
             if not admitted["inserted"]:
-                return admitted["receipt"]["turn_index"]
+                return int(admitted["receipt"]["turn_index"])
         elif pending_prompt_id is not None:
             self._db.create_turn(
                 session_id, turn_index, prompt, now, delivery_id=delivery_id,
                 pending_prompt_id=pending_prompt_id,
+                pending_prompt_native_session_id=(
+                    session.acp_session_id
+                    if session.client and session.client.acp_session_id == session.acp_session_id else None
+                ),
                 **custody,
             )
         elif delivery_id is None:
@@ -289,6 +304,7 @@ class _SessionPromptMixin:
         ``no_resume`` refuses a STOPPED session instead (:class:`SessionStoppedError`),
         decided under the session's lock so a concurrent stop can't be undone.
         """
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -320,6 +336,7 @@ class _SessionPromptMixin:
 
         ``no_resume`` (a stop's wind-down notice) never hands off, resumes, or
         respawns: each of those would undo a stop racing this admission."""
+        self = cast("SessionManager", self)
         session_id = session.session_id
 
         # Context-pressure handoff (opt-in, prompt-triggered): a prompt into an
@@ -424,6 +441,7 @@ class _SessionPromptMixin:
         session a racing stop may just have stopped). Best-effort: a failure here
         leaves the rows durably queued for the next resume/settle, never lost.
         """
+        self = cast("SessionManager", self)
         try:
             if (session.status == SessionStatus.IDLE
                     and session.client and session.client.is_running):
@@ -447,6 +465,7 @@ class _SessionPromptMixin:
         drains instead, so a queued message is never lost to a dead process, and
         queue consumption and turn persistence commit atomically.
         """
+        self = cast("SessionManager", self)
         async with session._turn_start_lock:
             if self._sessions.get(session.session_id) is not session:
                 return
@@ -454,6 +473,7 @@ class _SessionPromptMixin:
 
     async def _drain_pending_prompts_locked(self, session: Session) -> None:
         """Submit one queued prompt while teardown is excluded."""
+        self = cast("SessionManager", self)
         if session.status != SessionStatus.IDLE:
             return
         if not (session.client and session.client.is_running):
@@ -468,6 +488,7 @@ class _SessionPromptMixin:
                 await self._submit_prompt_locked(
                     session.session_id, prompt, pending_prompt_id=row["id"],
                     pending_prompt_caller_id=row.get("caller_id"),
+                    no_resume=True,
                 )
             except PendingPromptRemovedError:
                 log.info(
@@ -494,6 +515,7 @@ class _SessionPromptMixin:
         follow-ups never resurface against a session the operator tore down.
         Returns how many rows were removed.
         """
+        self = cast("SessionManager", self)
         removed = self._db.clear_pending_prompts(session.session_id)
         if removed and session.event_log:
             session.event_log.append("queue_cleared", {
@@ -504,6 +526,7 @@ class _SessionPromptMixin:
 
     def list_pending_queue(self, session_id: str) -> list[dict[str, Any]]:
         """Snapshot a session's durable queue in FIFO order (route/CLI read)."""
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         if session_id not in self._sessions:
             raise KeyError(f"Session {session_id} not found")
@@ -511,6 +534,7 @@ class _SessionPromptMixin:
 
     def remove_pending_prompt(self, session_id: str, queue_id: int) -> bool:
         """Drop one queued prompt by id (operator drops a chip). True if hit."""
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -522,6 +546,7 @@ class _SessionPromptMixin:
 
     def clear_pending_queue(self, session_id: str) -> int:
         """Clear a session's whole durable queue on operator request."""
+        self = cast("SessionManager", self)
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
@@ -533,7 +558,10 @@ class _SessionPromptMixin:
         native_attempt: NativeTurnAttempt | None = None,
     ) -> None:
         """Background task: send prompt via ACP and persist the result."""
+        self = cast("SessionManager", self)
         try:
+            if session.client is None:
+                raise RuntimeError("Prompt consumer has no client")
             result = await (
                 session.client.send_prompt(prompt) if native_attempt is None
                 else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
@@ -625,6 +653,7 @@ class _SessionPromptMixin:
         model. The client re-emits the *applied* model through this same path
         (a model-only ``usage_update``), so the last-known model sticks.
         """
+        self = cast("SessionManager", self)
         now = time.time()
         if "context_size" in data:
             session.context_size = data.get("context_size")
@@ -683,6 +712,7 @@ class _SessionPromptMixin:
     def _host_reapable(self, session: Session) -> bool:
         """Is the child safe to free? True only when its turn has completed and
         no background sub-agents are still running (#51)."""
+        self = cast("SessionManager", self)
         if (
             session.status != SessionStatus.IDLE or session.has_active_background_tasks
             or session._native_turn_transport is not None
@@ -745,5 +775,9 @@ class _SessionPromptMixin:
         a turn boundary -- so the host's ``_last_reapable`` never drifts stale
         enough to reap a session that is actually busy, or to miss reaping a
         genuinely idle one (#51)."""
+        self = cast("SessionManager", self)
         for session in list(self._sessions.values()):
             await self._notify_host_reapable(session)
+        from .managed_messages import drain_ready
+
+        await drain_ready(self)
