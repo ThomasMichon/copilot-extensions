@@ -76,6 +76,16 @@ the operation. Dynamic `launch_prefix` and native-only legacy execution remain
 unchanged; older bootstraps and missing or malformed generation evidence refuse
 only this optional route. No ordinary caller opts into pinning automatically.
 
+`retained_peer_prefix` is an explicit single-interpreter variant for an already
+observed peer and build identity. The selected peer Python starts isolated,
+without site imports or bytecode, validates the same current owner/peer receipts
+and governance, then runs the existing slot-local retention bootstrap in that
+process. That bootstrap still owns completion, retention leasing, exact build
+identity, site initialization and module execution. Missing pins, a different
+interpreter or pre-enabled site imports refuse before execution. Repository
+Vault calls use this variant while retaining their fresh parent-side before/after
+selection checks; legacy calls and other prefix consumers are unchanged.
+
 Bridge's `_agent_worktrees_pinned_selection()` retains the prefix, installation
 root and interpreter for an explicit caller. It also supports its existing
 legacy owner boundary, retaining tombstone checks without a PATH fallback.

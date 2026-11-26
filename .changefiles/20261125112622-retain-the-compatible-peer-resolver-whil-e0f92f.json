@@ -1,5 +1,5 @@
 {
-  "comment": "Retain the compatible peer resolver while exposing one fresh owner observation",
+  "comment": "Retain compatible peer validators and fresh owner observations, and offer explicit single-interpreter peer execution through the unchanged selected-runtime retention bootstrap.",
   "changes": [
     {
       "plugin": "agent-bridge",

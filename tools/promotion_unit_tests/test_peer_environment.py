@@ -58,3 +58,6 @@ test_retained_peer_validator_still_observes_each_receipt = (
 test_retained_peer_validator_refuses_changed_code = (
     _original.test_retained_peer_validator_refuses_changed_code
 )
+test_inprocess_peer_refuses_unretained_interpreter_before_execution = (
+    _original.test_inprocess_peer_refuses_unretained_interpreter_before_execution
+)

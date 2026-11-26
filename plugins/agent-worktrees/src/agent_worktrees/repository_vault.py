@@ -39,8 +39,10 @@ def selected() -> VaultInvocation:
                 raise ValueError("Vault has no completed observable runtime")
             root = Path(own["pluginRoot"])
             identity = _peer_launch.retained_runtime_identity(Path(peer["pluginRoot"]), python, "agent_vault")
-            prefix = _peer_launch.launch_prefix("agent-worktrees", root, own["installReceipt"], "agent-vault")
-            prefix[6:6] = ["--pinned-runtime", str(python), "--runtime-identity", identity]
+            prefix = _peer_launch.retained_peer_prefix(
+                "agent-worktrees", root, own["installReceipt"], "agent-vault", python,
+                runtime_identity=identity,
+            )
             binding = json.dumps([own, peer], sort_keys=True)
         else:
             payload = reconcile.core_installed_payload_dir("agent-vault")

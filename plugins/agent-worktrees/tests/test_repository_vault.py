@@ -121,8 +121,8 @@ def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(
         return
     selected = vault.selected()
     assert resolutions == ["agent-vault"]
-    assert selected.argv[6:10] == ("--pinned-runtime", str(python), "--runtime-identity", "retained-build")
-    assert selected.argv[11:13] == (own["pluginRoot"], own["installReceipt"])
+    assert selected.argv[8:12] == ("--pinned-runtime", str(python), "--runtime-identity", "retained-build")
+    assert selected.argv[13:15] == (own["pluginRoot"], own["installReceipt"])
     selected.verify()
     assert resolutions == ["agent-vault", "agent-vault"]
     peer["installReceipt"] = "changed"
@@ -267,6 +267,7 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(
     monkeypatch.setattr(peer_launch_adapter, "validate_owner", observe_owner)
     invocation = vault.selected()
     assert len(owner_observations) == 2
+    assert Path(invocation.argv[0]).samefile(python)
     selection = repository_setup.SSHKeySelection(
         (), str(tmp_path), "-SSH/example", str(tmp_path / "keys"), "SHA256:" + "A" * 43,
         owner="agent-vault",
@@ -280,6 +281,17 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(
     assert observed["env"]["AGENT_VAULT_HOME"] == str(root)
     assert observed["env"]["AGENT_VAULT_NO_SELFPROVISION"] == "1"
     assert "KPDB" not in observed["env"] and "AGENT_VAULT_ENDPOINT" not in observed["env"]
+    for path in (bootstrap / "runtime-generation", slot / ".install-complete.json"):
+        original = path.read_bytes()
+        try:
+            path.write_bytes(b"2" * 32 if path.name == "runtime-generation" else original + b"\n")
+            refused = repository_ssh_setup.run_caller_owned(
+                [*invocation.argv, "probe"], env=invocation.environment, timeout=20,
+                max_stdout_bytes=16384, max_stderr_bytes=16384,
+            )
+            assert refused.returncode != 0 and not refused.stdout
+        finally:
+            path.write_bytes(original)
     changed_root = cell / "plugins" / changed_owner
     receipt = changed_root / "install.json"
     original_receipt = receipt.read_text()

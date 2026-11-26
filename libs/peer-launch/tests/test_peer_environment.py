@@ -174,9 +174,9 @@ def test_vault_rebinds_native_owner_without_caller_credential_selection(
 def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(peer_launch.os, "name", "posix")
-    monkeypatch.setattr(peer_launch.sys, "platform", "linux")
-    monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(peer_launch, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(peer_launch, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(peer_launch, "shutil", SimpleNamespace(which=lambda _name: None))
     with pytest.raises(ValueError, match="SHA-256 suffix support"):
         peer_launch._vault_service_suffix("/example/Vault")
 
@@ -184,9 +184,11 @@ def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(
 def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(peer_launch.os, "name", "posix")
-    monkeypatch.setattr(peer_launch.sys, "platform", "darwin")
-    monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: pytest.fail("unqualified owner lookup"))
+    monkeypatch.setattr(peer_launch, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(peer_launch, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(peer_launch, "shutil", SimpleNamespace(
+        which=lambda _name: pytest.fail("unqualified owner lookup"),
+    ))
     with pytest.raises(ValueError, match="native Windows and Linux only"):
         peer_launch._vault_service_suffix("/example/Vault")
 
@@ -434,6 +436,32 @@ print(json.dumps({"selected": str(selected), "probe": environment["COPILOT_EXTEN
     assert not list(tmp_path.rglob("*.pyc"))
 
 
+@pytest.mark.parametrize("failure", ["unpinned", "site-enabled", "foreign-python"])
+def test_inprocess_peer_refuses_unretained_interpreter_before_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str,
+) -> None:
+    python = Path(sys.executable)
+    monkeypatch.setattr(peer_launch, "_resolve_peer", lambda *a, **k: (
+        {"pluginRoot": str(tmp_path)}, {}, python,
+    ))
+    monkeypatch.setattr(peer_launch, "sys", SimpleNamespace(
+        executable=str(tmp_path / "foreign-python") if failure == "foreign-python" else str(python),
+        flags=SimpleNamespace(
+            isolated=True, no_site=failure != "site-enabled", dont_write_bytecode=True,
+        ),
+    ))
+    monkeypatch.setattr(
+        peer_launch, "_retention_launcher",
+        lambda *a: pytest.fail("unretained execution reached the runtime bootstrap"),
+    )
+    with pytest.raises((ValueError, OSError), match="retained|isolated|No such file|cannot find"):
+        peer_launch.launch(
+            "agent-worktrees", tmp_path, "owner", "agent-vault", ["probe"],
+            pinned_python=None if failure == "unpinned" else python,
+            runtime_identity="original-build", inprocess=True,
+        )
+
+
 @pytest.mark.parametrize("pinned", [False, True], ids=["dynamic", "pinned"])
 @pytest.mark.parametrize(("selected", "executable"), [
     (r"C:\runtime\python.exe", r"C:\runtime\python.exe"),
@@ -483,3 +511,11 @@ def test_windows_peer_launch_binds_executable_without_rewriting_argv(
     )
     assert kwargs["creationflags"] == 0x08000000
     assert "shell" not in kwargs
+    inprocess = peer_launch.retained_peer_prefix(
+        "agent-dispatch", tmp_path, "validated-owner", "agent-worktrees", python,
+        runtime_identity="original-build",
+    )
+    assert inprocess[0] == executable
+    assert inprocess[8:12] == [
+        "--pinned-runtime", str(python), "--runtime-identity", "original-build",
+    ]
