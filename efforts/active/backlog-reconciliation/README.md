@@ -5618,6 +5618,16 @@ Exactly seventeen campaign departures are offset by two metadata-only
 arrivals; no unrelated closure is credited. The independent #11506/#11560
 research refinements and all thirteen retained study issues remain OPEN.
 
+The [next forty-case installed-TTY receiving proposal](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md)
+retains forty independently OPEN execution cases in existing #11966,
+preserving its whole original, four earlier rows, ten human comments and
+attributed diagnostic distinctions. Six explicit ownership/diagnostic,
+discussion or module keepers and four later studied cases remain OPEN.
+Four new local delivery gates are unresolved; no new tracker effect,
+technical completion, custody transfer or parent checkbox change is claimed.
+The preceding factual outcome is merged in #14686. Its complete census
+remains 763 whole open, 34 above fixed 729; a later 764 hint is not a census.
+
 ### Phase 2b - Vision-linked stabilization roadmap
 
 - [x] _(Agent-recommended)_ Establish the reviewed research method and
