@@ -278,9 +278,11 @@ def _read_enabled_plugin_settings(
     rels: Sequence[tuple[str, ...]],
     *,
     include_self: bool = False, inherited_plugin: str | None = None,
+    inherited_plugins: Sequence[str] = (),
 ) -> list[str]:
     """Read activation settings strictly so callers can fail closed."""
-    enabled = {f"{inherited_plugin}@{MARKETPLACE}": True} if inherited_plugin else {}
+    inherited = (*inherited_plugins, *((inherited_plugin,) if inherited_plugin else ()))
+    enabled = {f"{name}@{MARKETPLACE}": True for name in inherited}
     for rel in rels:
         path = base.joinpath(*rel)
         try:
@@ -309,7 +311,10 @@ def _read_enabled_plugin_settings(
     return sorted(_ce_plugin_names(enabled, include_self=include_self))
 
 
-def read_enabled_plugins(repo_dir: Path, *, include_self: bool = False, inherited_plugin: str | None = None) -> list[str]:
+def read_enabled_plugins(
+    repo_dir: Path, *, include_self: bool = False, inherited_plugin: str | None = None,
+    inherited_plugins: Sequence[str] = (),
+) -> list[str]:
     """Return copilot-extensions plugin names enabled in repo settings.
 
     Reads the repo's plugin settings across both the Copilot-native and Claude
@@ -321,7 +326,10 @@ def read_enabled_plugins(repo_dir: Path, *, include_self: bool = False, inherite
     """
     from plugin_resolve import SETTINGS_RELS
 
-    return _read_enabled_plugin_settings(repo_dir, SETTINGS_RELS, include_self=include_self, inherited_plugin=inherited_plugin)
+    return _read_enabled_plugin_settings(
+        repo_dir, SETTINGS_RELS, include_self=include_self,
+        inherited_plugin=inherited_plugin, inherited_plugins=inherited_plugins,
+    )
 
 
 def read_user_enabled_plugins() -> list[str]:

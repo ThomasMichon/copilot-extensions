@@ -128,8 +128,8 @@ def runtime_command(
     return [str(python), "-I", "-X", "utf8", "-B", "-m", plugin.replace("-", "_")], selected
 
 
-def legacy_worktrees_command(
-    owner: Path, environment: dict[str, str],
+def legacy_peer_command(
+    owner: Path, environment: dict[str, str], plugin: str,
 ) -> tuple[list[str], dict[str, str]]:
     """Resolve the optional installed owner before loading any of its code."""
     environment = {
@@ -161,14 +161,14 @@ def legacy_worktrees_command(
         if registration:
             if Path(cast(str, current_record["payload"])).resolve() != owner.resolve():
                 raise ValueError("Installed inventory selected another caller")
-            expected_peer = owner.resolve().parent / "agent-worktrees"
+            expected_peer = owner.resolve().parent / plugin
             if (
                 "inventory" in current
                 and not expected_peer.exists()
                 and not expected_peer.is_symlink()
             ):
                 raise FileNotFoundError("Optional installed peer is absent")
-            optional = installed_item(f"agent-worktrees@{marketplace}", home, cache)
+            optional = installed_item(f"{plugin}@{marketplace}", home, cache)
             optional_record = cast(
                 dict[str, object], optional.get("inventory") or optional.get("reference"),
             )
@@ -180,7 +180,7 @@ def legacy_worktrees_command(
             if Path(cast(str, optional_record["payload"])).resolve() != expected_peer:
                 raise ValueError("Optional installed payload escaped its qualified installation")
             return runtime_command(
-                Path(cast(str, optional_record["payload"])), "agent-worktrees", environment
+                Path(cast(str, optional_record["payload"])), plugin, environment
             )
     # Compatibility for legacy source/snapshot payloads without native inventory.
     # A rejected inventory/source is never retried against a different owner.
@@ -189,7 +189,7 @@ def legacy_worktrees_command(
         "_snapshot_peer_provenance",
     )
     marker = (
-        Path.home() / ".agent-worktrees" / "payload-dir"
+        Path.home() / f".{plugin}" / "payload-dir"
     )  # marketplace-isolation: allow legacy source/snapshot ownership compatibility
     payload = Path(marker.read_text(encoding="utf-8").strip())
     if not payload.is_absolute():
@@ -201,20 +201,31 @@ def legacy_worktrees_command(
     )
     peer = primitive.resolve_payload_source(
         payload_root=payload,
-        plugin_id="agent-worktrees",
+        plugin_id=plugin,
         environment=environment,
     )
     if own["sourceFingerprint"] != peer["sourceFingerprint"]:
         raise ValueError("Optional owner belongs to another source")
-    return runtime_command(payload, "agent-worktrees", environment)
+    return runtime_command(payload, plugin, environment)
 
 
-def worktrees_command(
-    owner: Path, own: Mapping[str, object] | None,
+def legacy_worktrees_command(
+    owner: Path, environment: dict[str, str],
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve the optional Worktrees owner without provisioning."""
+    return legacy_peer_command(owner, environment, "agent-worktrees")
+
+
+def peer_command(
+    owner: Path, own: Mapping[str, object] | None, plugin: str,
 ) -> tuple[list[str], dict[str, str]]:
     """Compose existing owners inside the caller-owned request worker."""
     if own is None:
-        command, environment = legacy_worktrees_command(owner, dict(os.environ))
+        command, environment = (
+            legacy_worktrees_command(owner, dict(os.environ))
+            if plugin == "agent-worktrees"
+            else legacy_peer_command(owner, dict(os.environ), plugin)
+        )
     else:
         peer = load(
             owner / "src" / "agent_ssh" / "_peer_launch.py",
@@ -223,21 +234,21 @@ def worktrees_command(
         primitive = sys.modules["_owner_installation_context"]
         root = Path(cast(str, own["pluginRoot"]))
         durable = root.parents[3]
-        receipt = Path(cast(str, own["cellRoot"])) / "plugins" / "agent-worktrees" / "install.json"
+        receipt = Path(cast(str, own["cellRoot"])) / "plugins" / plugin / "install.json"
         if not receipt.parent.exists():
             raise FileNotFoundError("Optional peer is absent")
         selected = peer._active_context(
             primitive,
             receipt,
             durable,
-            "agent-worktrees",
+            plugin,
             Path(cast(str, own["cellRoot"])),
             {},
         )
         environment = peer.peer_environment(selected, dict(os.environ))
         command, environment = runtime_command(
             Path(selected["payloadRoot"]),
-            "agent-worktrees",
+            plugin,
             environment,
         )
         # The request worker admitted the caller before resolution; fence changes now.
@@ -255,6 +266,14 @@ def worktrees_command(
             != own["invocationGovernance"]
         ):
             raise ValueError("Caller installation changed during optional runtime resolution")
+    return command, environment
+
+
+def worktrees_command(
+    owner: Path, own: Mapping[str, object] | None,
+) -> tuple[list[str], dict[str, str]]:
+    """Compose the optional topology reader inside the caller-owned worker."""
+    command, environment = peer_command(owner, own, "agent-worktrees")
     # The selected runtime imports only the existing owner resolution APIs,
     # including its normal cwd/project discovery, not the broad CLI composition.
     command[-2:] = [str(owner / "scripts" / "snapshot_worktrees.py")]

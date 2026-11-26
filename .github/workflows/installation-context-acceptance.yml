@@ -863,6 +863,64 @@ jobs:
     timeout-minutes: 15
     steps: *update-diagnostics-steps
 
+  ssh-driver-dependency-maintenance-linux:
+    if: ${{ inputs.update_diagnostics }}
+    name: SSH driver dependency maintenance (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps: &ssh-driver-dependency-maintenance-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+        id: ssh_tools
+      - name: Prove POSIX shared caller lifetime and cleanup
+        if: ${{ runner.os == 'Linux' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_caller_owned.py
+      - name: Prove deferred termination and cleanup-error priority
+        if: ${{ !cancelled() && steps.ssh_tools.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_spawn_signals.py
+      - name: Prove canonical repair and interrupted installer custody
+        if: ${{ !cancelled() && steps.ssh_tools.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-machines
+          --test-file tests/test_installation_repair.py
+          -k "outer_apply_timeout or unconfirmed_installer_fences or cleanup_confirmation or fence_persistence or fence_write_failure or ssh_maintenance_consumer or explicit_refresh_runs_real_owner or process_timeout or caller_owned_readiness or process_cancellation or bounds_both_pipes or inherited_pipe"
+      - name: Prove repair cancellation and cleanup-before-unlock boundaries
+        if: ${{ !cancelled() && steps.ssh_tools.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-machines
+          --test-file tests/test_installation_repair_boundaries.py
+      - name: Prove full and targeted SSH update planning
+        if: ${{ !cancelled() && steps.ssh_tools.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_update_driver_dependencies.py
+      - name: Prove selected dependency resolution and failure controls
+        if: ${{ !cancelled() && steps.ssh_tools.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_driver_dependencies.py
+
+  ssh-driver-dependency-maintenance-windows:
+    if: ${{ inputs.update_diagnostics }}
+    name: SSH driver dependency maintenance (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps: *ssh-driver-dependency-maintenance-steps
+
   immutable-runtime-linux:
     if: ${{ inputs.immutable_runtime }}
     name: Native immutable runtime (Linux, ${{ matrix.mode }})
