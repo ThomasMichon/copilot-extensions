@@ -1,0 +1,9 @@
+{
+  "comment": "Add an optional package source (local path, or git URL with optional ref) for uv-tool/pipx package resources, installing a third-party tool from source instead of an index",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

@@ -77,7 +77,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from .authority import contributor, effective_authority, sort_decisions
-from . import package_detection, package_versions
+from . import package_detection, package_source, package_versions
 from .registry_values import parse_reg_query as _parse_reg_query, registry_values_equal
 from .resource_file_ownership import (
     conflicting_git_config_files,
@@ -148,7 +148,7 @@ class ResolvedResource:
 
     type: str
     id: str  # display id
-    identity: tuple
+    identity: tuple[Any, ...]
     desired: dict[str, Any]
     contributors: list[str] = field(default_factory=list)
     contributor_details: list[dict[str, Any]] = field(default_factory=list)
@@ -187,7 +187,8 @@ class ResolvedResource:
             return "enabled" if self.desired.get("state", "present") == "present" else "disabled"
         if self.type == "fleet-update":
             return "enabled" if self.desired.get("state", "present") == "present" else "disabled"
-        return self.desired.get("state", "present")
+        fallback: str = self.desired.get("state", "present")
+        return fallback
 
 
 @dataclass
@@ -270,11 +271,11 @@ def _semantic_key(value: Any) -> tuple[str, str]:
 
 def _select_field(
     members: list[ResourceContribution],
-    identity: tuple,
+    identity: tuple[Any, ...],
     field_name: str,
-    value_of,
+    value_of: Callable[[ResourceContribution], Any],
     *,
-    include=lambda _member: True,
+    include: Callable[[ResourceContribution], bool] = lambda _member: True,
 ) -> tuple[
     Any,
     list[ResourceContribution],
@@ -401,7 +402,7 @@ class ResourceHandler:
 
     TYPE = ""
 
-    def identity(self, decl: dict[str, Any]) -> tuple:  # pragma: no cover - abstract
+    def identity(self, decl: dict[str, Any]) -> tuple[Any, ...]:  # pragma: no cover - abstract
         raise NotImplementedError
 
     def display_id(self, decl: dict[str, Any]) -> str:  # pragma: no cover - abstract
@@ -438,7 +439,7 @@ class ResourceHandler:
 class PackageResourceHandler(ResourceHandler):
     TYPE = "package"
 
-    def identity(self, decl: dict[str, Any]) -> tuple:
+    def identity(self, decl: dict[str, Any]) -> tuple[Any, ...]:
         return ("package", str(decl.get("manager")), str(decl.get("id")))
 
     def display_id(self, decl: dict[str, Any]) -> str:
@@ -458,19 +459,19 @@ class PackageResourceHandler(ResourceHandler):
         return package_versions.merge(members, self.identity(members[0].declaration))
 
     # -- detect / apply -----------------------------------------------------
-    def _detect(self, ctx: ResourceContext, mgr: dict, pkg_id: str) -> dict[str, Any]:
+    def _detect(self, ctx: ResourceContext, mgr: dict[str, Any], pkg_id: str) -> dict[str, Any]:
         argv = mgr["detect"](pkg_id, None)
         try:
             out = ctx.runner(argv)
         except (OSError, subprocess.SubprocessError):
             return {"known": False, "present": False, "version": None}
-        detected = mgr["parse_detect"](out, pkg_id)
+        detected: dict[str, Any] = mgr["parse_detect"](out, pkg_id)
         detected["known"] = detected.get("known", out.returncode == 0 or (
             not detected["present"] and out.returncode in mgr.get("absent_returncodes", set())
         ))
         return detected
 
-    def _detect_pin(self, ctx: ResourceContext, mgr: dict, pkg_id: str) -> dict[str, Any]:
+    def _detect_pin(self, ctx: ResourceContext, mgr: dict[str, Any], pkg_id: str) -> dict[str, Any]:
         detect_pin = mgr.get("detect_pin")
         parse_pin = mgr.get("parse_pin")
         if not detect_pin or not parse_pin:
@@ -479,7 +480,7 @@ class PackageResourceHandler(ResourceHandler):
             out = ctx.runner(detect_pin(pkg_id))
         except (OSError, subprocess.SubprocessError):
             return {"known": False, "present": False, "version": None}
-        detected = parse_pin(out, pkg_id)
+        detected: dict[str, Any] = parse_pin(out, pkg_id)
         detected["known"] = out.returncode == 0 or (
             not detected["present"] and out.returncode in mgr.get("absent_returncodes", set())
         )
@@ -661,10 +662,9 @@ class PackageResourceHandler(ResourceHandler):
                 live["present"] and (ver or d.get("minimum_version"))
                 and not self._matches_package(live, d)
             )
-            if needs_install:
-                commands.append(mgr["install"](pkg_id, ver))
-            elif needs_update:
-                commands.append(mgr["update"](pkg_id, ver))
+            if needs_install or needs_update:
+                commands.append(package_source.install_argv(d) or mgr[
+                    "install" if needs_install else "update"](pkg_id, ver))
             if d.get("pin") and mgr.get("pin"):
                 pin = self._detect_pin(ctx, mgr, pkg_id)
                 if not self._matches_desired(pin, ver):
@@ -811,7 +811,7 @@ class FileResourceHandler(ResourceHandler):
         override = decl.get("end")
         return str(override) if override else f"# <<< {decl.get('block')} <<<"
 
-    def identity(self, decl: dict[str, Any]) -> tuple:
+    def identity(self, decl: dict[str, Any]) -> tuple[Any, ...]:
         # A managed-block declaration owns only its marked block, so its identity
         # carries the block id -- distinct blocks in one file are separate
         # (compatible) identities, while whole-file strategies use the empty id.
@@ -869,7 +869,7 @@ class FileResourceHandler(ResourceHandler):
                         f"{', '.join(sorted(member.owner for member in selected))}.",
                     )
                 )
-            if decision:
+            if decision and info is not None:
                 decisions.append(decision)
                 findings.append(info)
             content, selected, _, conflict, decision, info = _select_field(
@@ -887,7 +887,7 @@ class FileResourceHandler(ResourceHandler):
                         f"{', '.join(sorted(member.owner for member in selected))}.",
                     )
                 )
-            if decision:
+            if decision and info is not None:
                 decisions.append(decision)
                 findings.append(info)
             if floor:
@@ -921,7 +921,7 @@ class FileResourceHandler(ResourceHandler):
                         f"{', '.join(sorted(member.owner for member in selected))}.",
                     )
                 )
-            if decision:
+            if decision and info is not None:
                 decisions.append(decision)
                 findings.append(info)
         else:
@@ -946,7 +946,7 @@ class FileResourceHandler(ResourceHandler):
                         f"{', '.join(sorted(member.owner for member in selected))}.",
                     )
                 )
-            if decision:
+            if decision and info is not None:
                 decisions.append(decision)
                 findings.append(info)
             content, selected, _, conflict, decision, info = _select_field(
@@ -964,7 +964,7 @@ class FileResourceHandler(ResourceHandler):
                         f"content across {who}; the first by owner order is used.",
                     )
                 )
-            if decision:
+            if decision and info is not None:
                 decisions.append(decision)
                 findings.append(info)
             strategy = "ensure-present"
@@ -1025,7 +1025,7 @@ class FileResourceHandler(ResourceHandler):
                     f"{', '.join(sorted(member.owner for member in selected))}.",
                 )
             )
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
 
@@ -1045,7 +1045,7 @@ class FileResourceHandler(ResourceHandler):
                     f"{', '.join(sorted(member.owner for member in selected))}.",
                 )
             )
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
         desired = {
@@ -1093,7 +1093,7 @@ class FileResourceHandler(ResourceHandler):
         return self._apply_text(resolved, target, exists, strategy, dry_run)
 
     def _apply_managed_block(
-        self, resolved, target: Path, exists: bool, dry_run: bool
+        self, resolved: ResolvedResource, target: Path, exists: bool, dry_run: bool
     ) -> ResourceResult:
         d = resolved.desired
         begin, end = str(d["begin"]), str(d["end"])
@@ -1141,7 +1141,7 @@ class FileResourceHandler(ResourceHandler):
         )
 
     def _apply_text(
-        self, resolved, target: Path, exists: bool, strategy: str, dry_run: bool
+        self, resolved: ResolvedResource, target: Path, exists: bool, strategy: str, dry_run: bool
     ) -> ResourceResult:
         desired = str(resolved.desired.get("content", ""))
         marker = resolved.desired.get("marker")
@@ -1200,7 +1200,7 @@ class FileResourceHandler(ResourceHandler):
         )
 
     def _apply_json(
-        self, resolved, target: Path, exists: bool, strategy: str, dry_run: bool
+        self, resolved: ResolvedResource, target: Path, exists: bool, strategy: str, dry_run: bool
     ) -> ResourceResult:
         from .surfaces._common import merge_enforce, merge_floor
 
@@ -1282,7 +1282,7 @@ def canonical_reg_key(path: str) -> str:
 class RegistryResourceHandler(ResourceHandler):
     TYPE = "registry"
 
-    def identity(self, decl: dict[str, Any]) -> tuple:
+    def identity(self, decl: dict[str, Any]) -> tuple[Any, ...]:
         # Registry keys and value names are case-insensitive, so identity folds
         # case; the concrete (cased) key is carried in ``desired`` for reg.exe.
         key = canonical_reg_key(str(decl.get("path"))).lower()
@@ -1324,7 +1324,7 @@ class RegistryResourceHandler(ResourceHandler):
                     f"{', '.join(sorted(member.owner for member in selected))}.",
                 )
             )
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
         value, selected, _, conflict, decision, info = _select_field(
@@ -1345,7 +1345,7 @@ class RegistryResourceHandler(ResourceHandler):
                     f"{', '.join(sorted(member.owner for member in selected))}.",
                 )
             )
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
         vtype, selected, _, conflict, decision, info = _select_field(
@@ -1367,7 +1367,7 @@ class RegistryResourceHandler(ResourceHandler):
                     f"{', '.join(sorted(member.owner for member in selected))}.",
                 )
             )
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
         desired = {
@@ -1531,7 +1531,7 @@ FEATURE_MANAGERS: dict[str, dict[str, Any]] = {
 class FeatureResourceHandler(ResourceHandler):
     TYPE = "feature"
 
-    def identity(self, decl: dict[str, Any]) -> tuple:
+    def identity(self, decl: dict[str, Any]) -> tuple[Any, ...]:
         return ("feature", str(decl.get("manager")), str(decl.get("id")).lower())
 
     def display_id(self, decl: dict[str, Any]) -> str:
@@ -1568,7 +1568,7 @@ class FeatureResourceHandler(ResourceHandler):
                     f"{', '.join(sorted(member.owner for member in selected))}.",
                 )
             )
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
         desired = {
@@ -1579,12 +1579,13 @@ class FeatureResourceHandler(ResourceHandler):
         }
         return desired, findings, decisions
 
-    def _detect(self, ctx: ResourceContext, mgr: dict, fid: str) -> dict[str, Any]:
+    def _detect(self, ctx: ResourceContext, mgr: dict[str, Any], fid: str) -> dict[str, Any]:
         try:
             out = ctx.runner(mgr["detect"](fid))
         except (OSError, subprocess.SubprocessError):
             return {"present": False}
-        return mgr["parse_detect"](out, fid)
+        detected: dict[str, Any] = mgr["parse_detect"](out, fid)
+        return detected
 
     def apply(
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
@@ -1856,9 +1857,9 @@ def _resource_gate_ok(decl: dict[str, Any], pkg: RequirementPackage, machine: st
 
 def group_resources(
     packages: list[RequirementPackage], machine: str, plat: str
-) -> dict[tuple, list[tuple[RequirementPackage, dict[str, Any]]]]:
+) -> dict[tuple[Any, ...], list[tuple[RequirementPackage, dict[str, Any]]]]:
     """Group applicable resource declarations by cross-package identity."""
-    groups: dict[tuple, list[tuple[RequirementPackage, dict[str, Any]]]] = {}
+    groups: dict[tuple[Any, ...], list[tuple[RequirementPackage, dict[str, Any]]]] = {}
     for pkg in packages:
         for decl in pkg.resources:
             rtype = str(decl.get("type"))
