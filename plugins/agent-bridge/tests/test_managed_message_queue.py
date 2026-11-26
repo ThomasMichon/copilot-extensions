@@ -288,7 +288,7 @@ async def test_queue_consumption_rolls_back_with_failed_turn_write(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed", ["holder", "stored"])
+@pytest.mark.parametrize("changed", ["holder", "stored", "client"])
 async def test_consumer_requires_original_native_in_memory_and_storage(
     session_manager: SessionManager, spawn_target: SpawnTarget,
     mock_acp_client: MagicMock, _patch_spawn: Any, _patch_acp: Any, changed: str,
@@ -303,6 +303,8 @@ async def test_consumer_requires_original_native_in_memory_and_storage(
         assert accepted.status_code == 202
         if changed == "holder":
             session.acp_session_id = "other-native"
+        elif changed == "client":
+            mock_acp_client.acp_session_id = "other-native"
         else:
             session_manager.db.execute_write(
                 "UPDATE sessions SET acp_session_id=? WHERE id=?", ("other-native", session.session_id),
@@ -312,6 +314,42 @@ async def test_consumer_requires_original_native_in_memory_and_storage(
         recovered = await client.post(path, json=payload)
         assert recovered.json()["delivery_state"] == "target_changed"
         assert recovered.json()["queue_id"] == accepted.json()["queue_id"]
+        mock_acp_client.send_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_handoff_transfers_only_unbound_legacy_inputs(
+    session_manager: SessionManager, spawn_target: SpawnTarget,
+    mock_acp_client: MagicMock, _patch_spawn: Any, _patch_acp: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = await session_manager.start_session(spawn_target)
+    mock_acp_client.is_running = False
+    path = f"/api/v1/sessions/{session.session_id}/messages"
+    payload = {"prompt": "original native only", "idempotency_key": "handoff-bound"}
+    successor = MagicMock(session_id="successor")
+
+    async def handoff(*args: Any, **kwargs: Any) -> MagicMock:
+        session_manager.db.clear_pending_prompts(session.session_id)
+        return successor
+
+    transfer = AsyncMock()
+    monkeypatch.setattr(session_manager, "handoff_session", handoff)
+    monkeypatch.setattr(session_manager, "submit_or_queue_prompt", transfer)
+    async with _client(session_manager) as client:
+        original = await client.post(path, json=payload)
+        assert original.status_code == 202
+        session_manager.db.enqueue_prompt(
+            session.session_id, "legacy follow-up", time.time(), caller_id="legacy-sender",
+        )
+        await session_manager._run_auto_handoff(session.session_id)
+        transfer.assert_awaited_once_with(
+            successor.session_id, "legacy follow-up", caller_id="legacy-sender",
+        )
+        recovered = await client.post(path, json=payload)
+        assert recovered.json()["queue_id"] == original.json()["queue_id"]
+        assert recovered.json()["duplicate"] is True
+        assert recovered.json()["delivery_state"] == "removed"
         mock_acp_client.send_prompt.assert_not_awaited()
 
 

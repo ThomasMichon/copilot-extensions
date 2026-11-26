@@ -196,7 +196,10 @@ class _SessionPromptMixin:
             self._db.create_turn(
                 session_id, turn_index, prompt, now, delivery_id=delivery_id,
                 pending_prompt_id=pending_prompt_id,
-                pending_prompt_native_session_id=session.acp_session_id,
+                pending_prompt_native_session_id=(
+                    session.acp_session_id
+                    if session.client and session.client.acp_session_id == session.acp_session_id else None
+                ),
                 **custody,
             )
         elif delivery_id is None:
