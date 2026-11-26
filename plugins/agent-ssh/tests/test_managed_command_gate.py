@@ -149,7 +149,7 @@ def test_ready_command_admits_exact_prepared_application(
             "bootstrap-capture.ps1" if os.name == "nt" else "versioned_runtime_native.ps1"
         )
         capture.rename(capture.with_suffix(".unavailable"))
-    arguments = ["inspect", "space value", 'quote"value', "", "end\\", "\u03bb"]
+    arguments = ["inspect", "space value", 'quote"value', "", "end\\", "\u03bb", "1234", "True"]
     command = [shell, str(payload / "bin/agent-ssh"), *arguments]
     descriptors = tmp_path / "inherited-fds"
     if host == "bash" and scenario == "current":
@@ -164,10 +164,11 @@ def test_ready_command_admits_exact_prepared_application(
         ]
     elif host != "bash":
         harness = tmp_path / "invoke.ps1"
-        quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments)
+        quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments[:-2])
         harness.write_text(
             "$PSNativeCommandArgumentPassing='Legacy'\n"
-            f"$forward=@({quoted})\n& '{str(payload / 'bin/agent-ssh.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
+            f"$port=1234\n$enabled=$true\n$forward=@({quoted}) + @($port,$enabled)\n"
+            f"& '{str(payload / 'bin/agent-ssh.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
             "exit $LASTEXITCODE\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]
