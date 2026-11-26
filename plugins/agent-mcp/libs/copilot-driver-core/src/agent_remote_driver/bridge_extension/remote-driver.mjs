@@ -14,12 +14,15 @@ function selectedContextError(reason, message, plugin) {
 }
 
 export async function selectedLoadout(native, {
-  pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector,
+  pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector, extensionPid,
 }) {
   if (bridgePluginRoot === undefined) return;
   const canonical = (path) => realpathSync(resolve(path));
   if (typeof bridgePluginRoot !== "string" || !isAbsolute(bridgePluginRoot)
       || typeof extensionPluginRoot !== "string" || !isAbsolute(extensionPluginRoot)
+      || extensionPid !== undefined && (
+        nativeConnector === undefined || !Number.isSafeInteger(extensionPid) || extensionPid <= 0
+      )
       || nativeConnector !== undefined && (
         nativeConnector.sessionId !== expectedSessionId || nativeConnector.cwd !== cwd
         || nativeConnector.bridgePluginRoot !== bridgePluginRoot
@@ -39,8 +42,10 @@ export async function selectedLoadout(native, {
     throw selectedContextError("selection-root-mismatch",
       "Portable receiving requires native observation of its selected extension roots");
   }
-  if (typeof native.rpc?.plugins?.list !== "function") {
-    throw selectedContextError("plugins-list-unsupported",
+  const executing = extensionPid !== undefined;
+  const observer = executing ? native.rpc?.extensions : native.rpc?.plugins;
+  if (typeof observer?.list !== "function") {
+    throw selectedContextError(executing ? "extensions-list-unsupported" : "plugins-list-unsupported",
       "Portable receiving requires native observation of its selected extension roots");
   }
   if (typeof native.rpc?.metadata?.snapshot !== "function") {
@@ -51,7 +56,8 @@ export async function selectedLoadout(native, {
     catch { throw selectedContextError(reason, "Native execution context observation failed"); }
   };
   const before = await observe(() => native.rpc.metadata.snapshot(), "metadata-before-failed");
-  const loadout = await observe(() => native.rpc.plugins.list(), "plugins-list-failed");
+  const loadout = await observe(() => observer.list(),
+    executing ? "extensions-list-failed" : "plugins-list-failed");
   const after = await observe(() => native.rpc.metadata.snapshot(), "metadata-after-failed");
   for (const snapshot of [before, after]) {
     if (snapshot?.sessionId !== expectedSessionId) {
@@ -68,6 +74,34 @@ export async function selectedLoadout(native, {
     if (observedCwd !== selectedCwd) {
       throw selectedContextError("native-cwd-mismatch", "Portable receiving native execution context changed");
     }
+  }
+  if (executing) {
+    if (!Array.isArray(loadout?.extensions)) {
+      throw selectedContextError("extension-observation-invalid", "Native extension observation is unavailable");
+    }
+    const invalid = (reason, role) => selectedContextError(reason,
+      "The launch-bound native connector has another or unavailable executing owner", role);
+    const owners = loadout.extensions.filter((extension) =>
+      extension?.name === "copilot-driver-headed"
+      || typeof extension?.id === "string" && extension.id.startsWith("plugin:copilot-driver-headed:"));
+    if (owners.length !== 1) {
+      throw invalid(owners.length === 0 ? "plugin-missing" : "plugin-duplicated", "connector");
+    }
+    const owner = owners[0];
+    if (owner.id !== "plugin:copilot-driver-headed:copilot-driver-headed"
+        || owner.name !== "copilot-driver-headed" || owner.source !== "plugin") {
+      throw invalid("extension-identity-mismatch", "connector");
+    }
+    if (owner.status !== "running") throw invalid("extension-not-running", "connector");
+    if (owner.pid !== extensionPid) throw invalid("extension-process-mismatch", "connector");
+    for (const [name, role] of [["agent-bridge", "bridge"], ["agent-remote-driver", "driver"]]) {
+      const peers = loadout.extensions.filter((extension) =>
+        extension?.name === name || typeof extension?.id === "string" && extension.id.startsWith(`plugin:${name}:`));
+      if (peers.some((extension) => !["disabled", "failed"].includes(extension.status))) {
+        throw invalid("extension-competing", role);
+      }
+    }
+    return;
   }
   if (!Array.isArray(loadout?.plugins)) {
     throw selectedContextError("plugin-observation-invalid", "Portable receiving plugin observation is unavailable");

@@ -22,6 +22,36 @@ def _owner(relative: str) -> SimpleNamespace:
     return SimpleNamespace(**runpy.run_path(str(ROOT / relative)))
 
 
+def _command_controls(tmp_path: Path) -> None:
+    owner = _owner(STAGING)
+    options = _owner("libs/copilot-driver-core/src/agent_remote_driver/native_arguments.py").VALUE_OPTIONS
+    roots = {}
+    for name in ("agent-bridge", "agent-remote-driver", "other"):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "plugin.json").write_text(json.dumps({
+            "name": name if name != "other" else "agent-bridge",
+        }), encoding="utf-8")
+        roots[name] = str(root)
+    selected = {
+        "bridgePluginRoot": roots["agent-bridge"], "driverPluginRoot": roots["agent-remote-driver"],
+    }
+    driver = ["--plugin-dir=" + roots["agent-remote-driver"]]
+    bridge = ["--plugin-dir", roots["agent-bridge"]]
+    base = ["copilot", "--session-id", SESSION]
+    owner.selected_connector_roots(selected, [*base, *driver, *bridge], value_options=options)
+    for argv in (
+        [*base, *driver],
+        [*base, *driver, *bridge, *bridge],
+        [*base, *driver, "--plugin-dir", roots["other"]],
+        [*base, *driver, "--", *bridge],
+        [*base, *driver, "--interactive", "--plugin-dir", roots["agent-bridge"]],
+        [*base, *driver, *bridge, "--plugin-dir", roots["other"]],
+    ):
+        with pytest.raises(ValueError):
+            owner.selected_connector_roots(selected, argv, value_options=options)
+
+
 def _selection() -> tuple[dict[str, Any], dict[str, str]]:
     selected: dict[str, Any] = {
         "contract": CONTRACT, "version": 1, "sessionId": SESSION, "cwd": str(ROOT),
@@ -37,12 +67,13 @@ def _selection() -> tuple[dict[str, Any], dict[str, str]]:
     return selected, env
 
 
-def test_original_headed_selection_is_legacy_without_a_scoped_declaration() -> None:
+def test_original_headed_selection_is_legacy_without_a_scoped_declaration(tmp_path: Path) -> None:
     owner = _owner(STAGING)
     assert owner.connector_selection({}, session_id=SESSION, cwd=str(ROOT)) is None
     selected, env = _selection()
     env[owner.CONNECTOR_ENV] = json.dumps(selected)
     assert owner.connector_selection(env, session_id=SESSION, cwd=str(ROOT)) == selected
+    _command_controls(tmp_path)
 
 
 @pytest.mark.parametrize("field,value", [

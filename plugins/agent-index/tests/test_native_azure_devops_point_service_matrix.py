@@ -12,19 +12,23 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 import test_azure_devops_point_runtime as runtime
 import test_azure_devops_point_worker as worker
 from test_azure_devops_point_service_recovery import _reopen_connector
+from test_change_hints_transport import _wire_api
 from test_native_azure_devops_point_matrix import _samples, _seed
 from test_native_delta_matrix import measure_round
 
+from agent_index.indexing.component_read import read_component
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls
 from agent_index.indexing.point_hints import CommentVersionTarget, WorkItemRevisionTarget
 from agent_index.indexing.task_store import TaskRecord, TaskStatus
 from agent_index.indexing.work_counts import measure_reindex
 from agent_index.store.component_ledger import ComponentLedger
+from agent_index.store.file_projection import capture_file_projection
 
 application = worker.application
 subject = worker.subject
@@ -33,6 +37,127 @@ pytestmark = [
     pytest.mark.effect("filesystem"),
     pytest.mark.effect("service"),
 ]
+
+
+def _selected_projection(f: worker.Fixture) -> list[Any]:
+    result = []
+    for path in ("workitems/7/body.md", "workitems/7/comments/5.md"):
+        observed = read_component(
+            ComponentLedger(f.config, f.store), f.paths, path,
+            point_scope=f.claim.hints.scope, application_scope=worker.SCOPE, max_rows=32,
+        )
+        raw = capture_file_projection(
+            f.config, f.store, f.claim.hints.canonical_family, path,
+            max_rows=32, point_scope=f.claim.hints.scope,
+        )
+        result.append((observed, [
+            (model.model_id, [
+                {key: value for key, value in row.items() if key != "indexed_at"}
+                for row in json.loads(model.rows)
+            ]) for model in raw.models
+        ]))
+    return result
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native process I/O qualification is Linux-only")
+@pytest.mark.parametrize("deleted", [False, True], ids=["content", "tombstone"])
+def test_explicit_client_acquires_and_replays_beside_unrelated_native_history(
+    application: worker.Fixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    deleted: bool, capsys: pytest.CaptureFixture[str],
+) -> None:
+    template = application
+    if deleted:
+        template.provider.comment = {"id": 5, "version": 2, "isDeleted": True}
+    assert template.run().status == TaskStatus.COMPLETE
+    reference = _selected_projection(template)
+    baselines: dict[str, Any] = {}
+    selected_rows = 2 if deleted else 3
+    for size in (100, 10_000, 100_000):
+        started = perf_counter()
+        f, samples = _seed(template, tmp_path / str(size), size)
+        f.tasks.update_status(f.claim.task_id, TaskStatus.CANCELLED)
+        initial = f.tasks.get_task(f.claim.task_id)
+        assert initial is not None and initial.status == TaskStatus.CANCELLED
+        before_samples = _samples(f, samples, size)
+        poll = f.config.state_file.read_bytes()
+        setup_seconds = perf_counter() - started
+        for name in ("apply", "replay"):
+            f.reopen()
+            before = worker._projection(f)
+            with monkeypatch.context() as patch:
+                app, clients = runtime._point_service_app(f, patch)
+
+                @measure_reindex
+                def consume() -> dict[str, Any]:
+                    with TestClient(app) as transport:
+                        assert transport.portal is not None
+                        runner = app.state.task_runner
+                        transport.portal.call(runner.point_service.activate)
+                        api, requests = _wire_api(
+                            transport, patch, installation_id=app.state.installation_id,
+                            instance_token=app.state.instance_token,
+                        )
+                        receipt = api.reindex_points(f.claim.hints)
+                        assert [(r.method, r.url.path) for r in requests] == [
+                            ("GET", "/health"), ("POST", "/reindex/hints"),
+                        ]
+                        task_id = receipt["task"]["id"]
+                        assert task_id != initial.id
+                        assert runner.store.get_task(task_id) is None
+                        transport.portal.call(runtime._wait_point_state, lambda: bool(
+                            (task := f.tasks.get_task(task_id))
+                            and task.status == TaskStatus.COMPLETE
+                        ))
+                        completed = f.tasks.get_task(task_id)
+                        assert completed is not None and completed.change_hints == f.claim.hints
+                    assert clients == ["open", "closed"] and f.connector._http.client.is_closed
+                    return {"task": completed}
+
+                for method in ("get_all_entries", "get_paths_by_family", "get_content_hashes"):
+                    patch.setattr(PathIndex, method, lambda *_a, **_k: pytest.fail(
+                        "explicit point client enumerated corpus checkpoints",
+                    ))
+                wall, cpu = perf_counter(), process_time()
+                measurement = measure_round(consume, patch)
+                measurement["wall_seconds"] = perf_counter() - wall
+                measurement["process_cpu_seconds"] = process_time() - cpu
+
+            counts = measurement["counts"]
+            assert f.provider.body_reads == 2 and len(f.provider.requests) == 18
+            expected_writes = selected_rows if name == "apply" else 0
+            assert counts["content_rows_upserted"] == expected_writes
+            for model in counts["models"].values():
+                assert model["chunks_embedded"] == model["vector_rows_upserted"] == expected_writes
+            assert counts["fts_ensure_attempts"] == counts["cluster_pass_attempts"] == 0
+            native = measurement["native"]
+            assert native["queries"] > 0
+            assert native["rows_scanned"] <= 32 * native["queries"], (size, name, measurement)
+            if name in baselines:
+                assert counts == baselines[name]["counts"], (size, name, measurement)
+                assert native == baselines[name]["native"], (size, name, measurement)
+            else:
+                baselines[name] = measurement
+            if name == "replay":
+                assert not f.calls and worker._projection(f) == before
+            assert _selected_projection(f) == reference
+            assert _samples(f, samples, size) == before_samples
+            assert f.config.state_file.read_bytes() == poll
+            assert f.tasks.get_task(f.claim.task_id) == initial
+            assert f.retained_count() == 0
+            assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, worker.SCOPE) is None
+            assert ComponentLedger(f.config, f.store)._bound_table().count_rows() == size + 2
+            assert f.store.content_store.db.open_table(f.config.content_table).count_rows() == (
+                size + selected_rows
+            )
+            for model in f.config.model_profiles:
+                assert f.store.get_vector_table(model)._get_or_create_table().count_rows() == (
+                    size + selected_rows
+                )
+            with capsys.disabled():
+                print("POINT_CLIENT_NATIVE_WORK " + json.dumps({
+                    "size": size, "deleted": deleted, "round": name,
+                    "setup_seconds": setup_seconds, "native_plan_replay": True, **measurement,
+                }, sort_keys=True))
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native process I/O qualification is Linux-only")

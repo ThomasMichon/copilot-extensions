@@ -22,7 +22,7 @@ try {
         validateSendContext: () => selectedLoadout(native, {
           pluginRoot: selected.driverPluginRoot, bridgePluginRoot: selected.bridgePluginRoot,
           expectedSessionId: selected.sessionId, cwd: selected.cwd,
-          extensionPluginRoot: pluginRoot, nativeConnector: selected,
+          extensionPluginRoot: pluginRoot, nativeConnector: selected, extensionPid: process.pid,
         }),
       });
       return native;
