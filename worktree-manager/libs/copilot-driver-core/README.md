@@ -95,6 +95,17 @@ The suffix is advisory text, not a new capability or retry permission. A failed
 observation still holds control without input, abort, fallback or replay.
 Older peers retain the same refusal without the diagnostic suffix.
 
+For a connector identity mismatch, an optional second `[owner-checks ...]`
+suffix distinguishes the observed ID comparison, directory/qualified/other
+name shape, known source/status enums and same/other/missing/invalid PID
+comparison. It contains only a fixed vocabulary, not actual IDs, names, PIDs,
+paths or raw registry records. Incomplete, extra or unrecognized diagnostic
+fields are omitted. These are comparisons from the refused observation, not
+proof that another field passed its later admission check or that startup
+completed. Every existing identity, running-state, PID and competing-sender
+predicate remains unchanged; the diagnostic cannot authorize retry or clear
+the adapter's hold.
+
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older
 providers.

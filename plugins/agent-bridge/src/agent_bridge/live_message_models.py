@@ -72,12 +72,15 @@ class LiveMessageReceipt(BaseModel):
     sdk_accepted_at: float | None = None
     consumed_at: float | None = None
     disposition: dict[str, object] | None = None
+    queue_reason: Literal["awaiting_consumer", "legacy_delivery_unconfirmed"] | None = None
 
     @model_serializer(mode="wrap")
     def serialize_receipt(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         result: dict[str, Any] = handler(self)
         if self.disposition is None:
             result.pop("disposition", None)
+        if self.queue_reason is None:
+            result.pop("queue_reason", None)
         return result
 
 

@@ -22,7 +22,23 @@ function selectedContextDiagnostic(error) {
     ? error.selectedContextReason : "context-validation-failed";
   const role = ["bridge", "driver", "connector"].includes(error?.selectedContextPlugin)
     ? `:${error.selectedContextPlugin}` : "";
-  return ` [${reason}${role}]`;
+  let identity = null;
+  try {
+    const observed = reason === "extension-identity-mismatch" && role === ":connector"
+      ? error?.selectedContextIdentity : null;
+    if (observed && typeof observed === "object") identity = Object.fromEntries(Object.entries(observed));
+  } catch {}
+  const fields = {
+    id: ["match", "other", "missing"], name: ["directory", "qualified", "other", "missing"],
+    source: ["project", "user", "plugin", "session", "unknown"],
+    status: ["running", "disabled", "failed", "starting", "unknown"],
+    pid: ["match", "other", "missing", "invalid"],
+  };
+  const details = identity && typeof identity === "object"
+      && Object.keys(identity).sort().join(",") === Object.keys(fields).sort().join(",")
+      && Object.entries(fields).every(([key, allowed]) => allowed.includes(identity[key]))
+    ? ` [owner-checks ${Object.keys(fields).map((key) => `${key}=${identity[key]}`).join(" ")}]` : "";
+  return ` [${reason}${role}]${details}`;
 }
 
 export function createHeadedAdapter(session, {

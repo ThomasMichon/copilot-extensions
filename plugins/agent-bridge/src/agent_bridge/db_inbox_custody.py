@@ -234,12 +234,14 @@ class _InboxCustodyMixin(DatabaseOperations):
             rows = conn.execute(
                 "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
                 "AND disposition_json IS NULL "
+                "AND NOT (producer_target_json IS NOT NULL AND handoff_json IS NULL AND claimed_at IS NOT NULL) "
                 "AND kind NOT LIKE 'control:%' ORDER BY id" + (" LIMIT ?" if limit is not None else ""),
                 (consumer.session_id, limit) if limit is not None else (consumer.session_id,),
             ).fetchall()
             result = []
             for row in rows:
-                if row["runtime_custody_json"] is None:
+                producer_queued = row["producer_target_json"] is not None
+                if row["runtime_custody_json"] is None and not producer_queued:
                     if consumer.message_base == 1 and all(row[name] is None for name in (
                         "claimed_at", "handoff_started_at", "delivered_at", "consumed_at", "outcome",
                     )):
@@ -251,9 +253,27 @@ class _InboxCustodyMixin(DatabaseOperations):
                         })
                         continue
                     raise RuntimeCustodyError("Legacy or foreign inbox admission remains unqualified")
+                if row["delivery"] not in ("steer", "queue") and producer_queued and all(
+                    row[name] is None for name in (
+                        "handoff_json", "claimed_at", "handoff_started_at", "delivered_at", "outcome",
+                    )
+                ):
+                    from .message_contracts import dispose
+
+                    dispose(
+                        conn, consumer, row["id"], "rejected", "unsupported_reader",
+                        "This receiver cannot enforce the requested delivery effect.", now=now,
+                    )
+                    continue
                 if row["delivery"] not in ("steer", "queue") and consumer.message_base != 1:
                     raise RuntimeCustodyError("Retained inbox interrupt delivery remains unsupported")
-                original_admission = RuntimeAdmission.parse(row["runtime_custody_json"])
+                association = row["runtime_custody_json"]
+                if association is None and producer_queued:
+                    association = (
+                        original_handoff(row)["admission"]
+                        if row["handoff_json"] is not None else admission.document()
+                    )
+                original_admission = RuntimeAdmission.parse(association)
                 self._inbox_admission(conn, identity, original_admission)
                 if consumer.message_base is None:
                     from .message_contracts import dispose, require_supported as require_contract
@@ -272,7 +292,7 @@ class _InboxCustodyMixin(DatabaseOperations):
                         raise RuntimeCustodyError("Prior inbox delivery remains unqualified")
                     raw = encode({
                         "version": 1, "id": uuid.uuid4().hex, "message_id": row["id"],
-                        "consumer": consumer.document(), "admission": row["runtime_custody_json"],
+                        "consumer": consumer.document(), "admission": association,
                     })
                     conn.execute("UPDATE live_messages SET handoff_json=? WHERE id=?",
                                  (raw, row["id"]))
@@ -321,7 +341,10 @@ class _InboxCustodyMixin(DatabaseOperations):
             require_supported(envelope(conn, row, consumer), row["kind"])
             if row["disposition_json"] is not None:
                 raise RuntimeCustodyError("Original message already has a disposition")
-            self._inbox_admission(conn, identity, RuntimeAdmission.parse(row["runtime_custody_json"]))
+            original_admission = original_handoff(row)["admission"]
+            if original_admission is None:
+                raise RuntimeCustodyError("Original inbox delivery admission is unavailable")
+            self._inbox_admission(conn, identity, RuntimeAdmission.parse(original_admission))
             if row["session_id"] != consumer.session_id:
                 raise RuntimeCustodyError("Inbox handoff cannot move to another native context")
             if row["delivery"] not in ("steer", "queue"):

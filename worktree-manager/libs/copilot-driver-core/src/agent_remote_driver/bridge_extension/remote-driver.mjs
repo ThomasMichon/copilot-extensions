@@ -13,6 +13,21 @@ function selectedContextError(reason, message, plugin) {
   });
 }
 
+function selectedIdentityObservation(owner, expectedPid) {
+  return {
+    id: owner.id === "plugin:copilot-driver-headed:copilot-driver-headed" ? "match"
+      : typeof owner.id === "string" && owner.id ? "other" : "missing",
+    name: owner.name === "copilot-driver-headed" ? "directory"
+      : typeof owner.name !== "string" || !owner.name ? "missing"
+      : owner.name === owner.id ? "qualified" : "other",
+    source: ["project", "user", "plugin", "session"].includes(owner.source) ? owner.source : "unknown",
+    status: ["running", "disabled", "failed", "starting"].includes(owner.status) ? owner.status : "unknown",
+    pid: Number.isSafeInteger(owner.pid) && owner.pid > 0
+      ? owner.pid === expectedPid ? "match" : "other"
+      : owner.pid == null ? "missing" : "invalid",
+  };
+}
+
 export async function selectedLoadout(native, {
   pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector, extensionPid,
 }) {
@@ -90,7 +105,9 @@ export async function selectedLoadout(native, {
     const owner = owners[0];
     if (owner.id !== "plugin:copilot-driver-headed:copilot-driver-headed"
         || owner.name !== "copilot-driver-headed" || owner.source !== "plugin") {
-      throw invalid("extension-identity-mismatch", "connector");
+      throw Object.assign(invalid("extension-identity-mismatch", "connector"), {
+        selectedContextIdentity: selectedIdentityObservation(owner, extensionPid),
+      });
     }
     if (owner.status !== "running") throw invalid("extension-not-running", "connector");
     if (owner.pid !== extensionPid) throw invalid("extension-process-mismatch", "connector");

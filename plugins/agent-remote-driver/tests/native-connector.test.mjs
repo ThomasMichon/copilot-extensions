@@ -134,6 +134,61 @@ test("live-owner validation retains the module root check independently of the o
     error.selectedContextReason === "selection-root-mismatch");
 });
 
+test("identity refusal reports bounded comparisons without dispatch or control reacquisition", async () => {
+  const observed = executingSelection(), f = nativeFixture();
+  Object.assign(observed.extensions[0], {
+    name: observed.extensions[0].id, source: "session", status: "starting", pid: process.pid + 1,
+  });
+  let checks = 0, aborts = 0;
+  f.native.abort = async () => { aborts++; };
+  const adapter = createHeadedAdapter(f.native, {
+    emit() {}, cwd: root, validateSendContext: async () => {
+      checks++;
+      await selectedLoadout(observed.native, observed.options);
+    },
+  });
+  try {
+    const request = {
+      jsonrpc: "2.0", id: 1, method: "session/prompt",
+      params: { sessionId, prompt: [{ type: "text", text: "not dispatched" }] },
+    };
+    const response = await adapter.handle(request);
+    assert.equal(response.error.code, -32001);
+    assert.equal(response.error.message,
+      "Selected native execution context is unavailable; no input was dispatched " +
+      "[extension-identity-mismatch:connector] " +
+      "[owner-checks id=match name=qualified source=session status=starting pid=other]");
+    assert.match((await adapter.handle({ ...request, id: 2 })).error.message, /control is unavailable/);
+    await assert.rejects(adapter.interrupt(), /control is unavailable/);
+    assert.equal(checks, 1);
+    assert.equal(aborts, 0);
+    assert.equal(f.sends.length, 0);
+  } finally { adapter.close(); }
+});
+
+test("identity evidence classifies unavailable and arbitrary registry fields without forwarding them", async () => {
+  const f = executingSelection();
+  Object.assign(f.extensions[0], {
+    id: "plugin:copilot-driver-headed:private-identity",
+    name: "private-name", source: "private-source", status: "private-status", pid: "private-pid",
+  });
+  await assert.rejects(selectedLoadout(f.native, f.options), (error) => {
+    assert.equal(error.selectedContextReason, "extension-identity-mismatch");
+    assert.deepEqual(error.selectedContextIdentity, {
+      id: "other", name: "other", source: "unknown", status: "unknown", pid: "invalid",
+    });
+    assert.doesNotMatch(JSON.stringify(error.selectedContextIdentity), /private-/);
+    return true;
+  });
+  delete f.extensions[0].name;
+  delete f.extensions[0].pid;
+  await assert.rejects(selectedLoadout(f.native, f.options), (error) => {
+    assert.equal(error.selectedContextIdentity.name, "missing");
+    assert.equal(error.selectedContextIdentity.pid, "missing");
+    return true;
+  });
+});
+
 test("a competing live sender leaves prompt and cancellation held without replay", async () => {
   const f = nativeFixture(), observed = executingSelection();
   observed.extensions.push({
