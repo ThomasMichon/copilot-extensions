@@ -1,5 +1,5 @@
 {
-  "comment": "Include original passive cleanup-diagnostic snapshots in guarded promotion units",
+  "comment": "Include original invalid-budget refusals without native helper imports in guarded promotion units",
   "changes": [
     {
       "plugin": "worktree-manager",

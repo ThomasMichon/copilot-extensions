@@ -487,29 +487,31 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the four original passive cleanup-diagnostic functions
-  for legacy snapshot/callback behavior, public-field sanitization,
-  numeric-error recording and accessor-safe custody. Preserve their complete
-  eight original cases, objects/globals, fixtures, typed values, all marks,
-  IDs and order. Compare complete original/adapted metadata and uniqueness
-  before unchanged guarding; require real diagnostic production call lines
-  per case. The imported native-launch fixture and every other whole
-  original function remain excluded before execution. No native creation,
-  cleanup target, thread start, environment rewrite, policy change or guard
-  exception is permitted. Preserve every current admission and limit.
-  Fresh review/full CI, normal merge and persistence remain.
-  Complete collection confirms 22 original cases and exactly eight adapted
-  cases across the same four whole functions (1/4/1/2), preserving original
-  objects/globals/fixtures, own parameter-row objects, typed values, all marks,
-  IDs and order. The other six whole functions/fourteen cases and imported
-  launch fixture remain excluded. First unchanged guarded qualification
-  passes eight in 0.89 pytest / 11.484 observation seconds: all 24 phases pass,
-  zero prohibited effects, 21 bound reads and actual diagnostic production
-  call lines for every case. The full observation is read before admission.
-  Only eight nodes, three adapter/original/helper bindings and one already-
-  bound production target are added: 11,187 nodes, 1,546 sources,
-  564 targets, unchanged 92 helpers, 300 seconds and 740,000 bytes.
-  Fresh review/full CI, normal merge and persistence remain before Done.
+- [ ] Qualify only the whole original invalid-budget refusal function,
+  retaining all four rows, including the exact NaN value, original
+  objects/globals/fixtures, own row objects, typed values, all marks, IDs
+  and order. All fourteen other whole functions remain excluded before
+  execution. Complete original/adapted metadata and unchanged guarding
+  precede admission; require actual budget validation calls per case.
+  Complete collection confirms 25 original cases and exactly four adapter
+  cases through the same whole function. First unchanged guarded execution
+  passes four in 0.87 pytest / 14.641 observation seconds: all twelve phases
+  pass, zero prohibited effects, nineteen bound reads and budget-validation
+  call lines for every case, without execution or cleanup budget consumers.
+  The full observation is read before admission. Only four nodes, two
+  adapter/original bindings and one already-bound production coverage target
+  are added: 11,183 nodes, 1,545 sources, 564 targets, unchanged 92 helpers,
+  300 seconds and 739,577 bytes. Fresh review/full CI, normal merge and
+  persistence remain before Done.
+- [ ] The passive cleanup-diagnostic candidate is disqualified by first-touch
+  Linux CI collection: its original module imports a native fixture helper,
+  whose `ctypes` import triggers forbidden `ctypes.dlopen`.
+  The local eight-case pass does not qualify that import path.
+  All eight candidate nodes, three new bindings, the added target and adapter
+  are withdrawn before any further execution; every prior admission/limit
+  is restored exactly first. Keep the failed CI and evidence.
+  No preload, fixture/original rewrite, environment change or guard exception
+  may make this module eligible. This remains blocked, not Done.
 - [x] Qualify only the whole original invalid-workspace refusal function
   with its original tmp-path fixture and both missing-path/file-path checks.
   Complete metadata and unchanged guarding must establish eligibility before
