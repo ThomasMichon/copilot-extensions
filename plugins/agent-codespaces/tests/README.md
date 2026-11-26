@@ -27,3 +27,10 @@ fixture materializes canonical admission support, addresses real prepared UV,
 and creates its application slot from a separately prepared managed interpreter.
 The evaluator's intentional context/guard doubles do not bypass application
 admission. These fixtures never acquire a missing interpreter.
+
+The retained namespaced publication fixture uses installation management's
+existing Bash 4.4+ prerequisite on macOS, selected only after the actual command
+packet has run under the system Bash. That packet isolates context decisions;
+it does not qualify canonical namespaced management under Bash 3.2. Windows
+evaluator packets select the host through the fixture parameter, not a substring
+filter that could also match another host's test name.

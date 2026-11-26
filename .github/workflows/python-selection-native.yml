@@ -1399,6 +1399,20 @@ jobs:
           2 if r['shell']=='bash' else 6)
           and all(v>0 for v in r['samples_seconds']) for r in reports);
           print(json.dumps({'codespaces_command_admission':reports},sort_keys=True))"
+      - name: Prepare the retained macOS installation-management prerequisite
+        if: runner.os == 'macOS'
+        run: |
+          prefix="$(brew --prefix bash)"
+          if ! test -x "$prefix/bin/bash"; then
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install bash
+          fi
+          test -x "$prefix/bin/bash"
+          printf '%s\n' "$prefix/bin" >> "$GITHUB_PATH"
+          "$prefix/bin/bash" --noprofile --norc -c '
+            ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))) ||
+              { printf "%s\n" "Native installation management requires Bash 4.4+" >&2; exit 1; }
+            printf "Retained management Bash: %s (%s)\n" "$BASH" "$BASH_VERSION"
+          '
       - name: Retain Codespaces publication-policy success and numeric forwarding
         env:
           INSTALLATION_CONTEXT_POWERSHELL: ${{ env.CODESPACES_QUALIFICATION_SHELL }}
@@ -1416,10 +1430,12 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Retain independent Windows evaluator and application transport
         if: runner.os == 'Windows'
+        env:
+          CODESPACES_EVALUATOR_HOST: ${{ env.CODESPACES_QUALIFICATION_SHELL }}
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_evaluator_bootstrap_consumers.py --allow-explicit-tiers
-          -k "agent-codespaces and ${{ env.CODESPACES_QUALIFICATION_SHELL }} and
+          -k "agent-codespaces and
           (selected_evaluator or native_path_semantics or native_argument_modes
           or path_lookup or absent_userprofile)"
           --junit-dir qualification-evidence/codespaces-evaluator
