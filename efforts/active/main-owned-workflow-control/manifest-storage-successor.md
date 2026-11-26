@@ -2,7 +2,7 @@
 
 Parent and completion gate: [Main-Owned Workflow Control](README.md).
 Coordination: #6237; existing CI/release and operational owners remain.
-Status: compatible reader implemented and locally checked; reader review/CI/merge precedes data migration.
+Status: compatible reader merged; exact format-only migration prepared for separate review.
 
 ## Goal
 
@@ -150,17 +150,31 @@ _Agent-recommended realization within the selected scope; not new authority._
   and selection remain; only five existing code/test hashes are rebound in v2.
   Fresh-process old/new file consumers preserve ordered full-corpus values.
   Reader delivery and data migration remain unchecked below.
-- [ ] Merge the reader and prove the actual consumers can read the successor
+- [x] Merge the reader and prove the actual consumers can read the successor
   before migration. Use their real code/control selection, not package-version
   equality. If a separately owned consumer needs adoption, preserve that
   owner's seam; do not dispatch a release, edit a controller or assume uptake.
   Name the supported reader/data pairs and rollback window explicitly.
   An older reader's truthful pre-execution refusal is not compatibility, and
   rollback must never drop admitted witnesses to regain an older format.
-- [ ] Prepare a separately reviewed source-data migration from the frozen
+  Reader #14658 merges as `7ef2eefee79e64d48e265daefab4ded622de8fbd`;
+  full hosted CI runs all 10,375 cases before normal Maintainer merge.
+  Reviewed/merged/working blobs and current bindings/helpers match.
+  PR heads and frozen-Dev helpers select the capable source reader.
+  Current Main `73554ecb6359f06ef8248fdf090c92686be719fe` leaves the traced
+  workflow/helper selection unchanged. Matching v2 data is retained at the
+  immutable reader merge; unsupported decoder-only rollback stays incompatible.
+- [x] Prepare a separately reviewed source-data migration from the frozen
   post-reader v2 baseline. Independently compare every ordered normalized
   value, source binding, target, helper decision and budget before writing.
   Do not combine additional unit enrollment with the format-only conversion.
+  The initial baseline is the reader merge above; the final reconciled baseline
+  is `7006b6fdc0e6de4f0dcf87eb76aa5d1658cc4a46`, retaining thirteen
+  peer-owned binding refreshes. Independent expansion and recursive
+  type/order comparison preserve all 10,375 nodes, 1,499 bindings, 546 targets,
+  92 helper decisions and the 300-second limit. Both fresh-process file
+  consumers agree; only storage changes from 1,048,547 to 697,907 bytes.
+  Separate data review/hosted qualification/merge remain pending below.
 - [ ] Verify reviewed delivery, full current packet and persistent bytes,
   journal the phase outcome, then resume original-unit census through its
   unchanged metadata/guard/coverage/admission flow. Return to the parent

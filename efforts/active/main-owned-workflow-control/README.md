@@ -749,6 +749,10 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   through reviewed intent, actual consumer/bootstrap closure, compatible reader
   delivery and a separately reviewed source-data migration. Complete that
   phase's Plan and Validation before resuming further original-unit admission.
+  Reader #14658 is merged with the full 10,375-case packet; persistent reviewed
+  blobs and all current bindings/helpers match. The separate format-only
+  migration preserves that exact post-reader inventory in 697,907 bytes.
+  Its review, complete current packet and merged/persistent readback remain.
   Preserve the parent completion gate and all retained owners and holds.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
