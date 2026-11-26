@@ -1238,8 +1238,7 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Opt-in Windows native-crypto long-prefix regression
 
-[Guide](plugins/agent-vault/tests/native/README.md): selection, explicit invocation,
-byte/origin checks and fixture-owned cleanup; not complete setup qualification.
+[Guide](plugins/agent-vault/tests/native/README.md).
 
 ## Select the evidence first
 
