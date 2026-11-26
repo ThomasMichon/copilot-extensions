@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -157,14 +158,23 @@ def qualify(path: Path, url: str) -> Source:
     if not (path / ".git").is_dir():
         raise SetupError("Repository setup requires an ordinary checkout, not a linked/bare anchor.")
     _plain(path / ".git")
-    if Path(_git(path, "rev-parse", "--show-toplevel")).resolve() != path:
+    queries = (
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        ("ls-files", "-v"),
+    )
+    with ThreadPoolExecutor(max_workers=len(queries)) as workers:
+        pending = [workers.submit(_git, path, *arguments) for arguments in queries]
+        top, origin, status, flags = [query.result() for query in pending]
+    if Path(top).resolve() != path:
         raise SetupError("Repository target is not the checkout root.")
-    if https_url(_git(path, "remote", "get-url", "origin")) != canonical:
+    if https_url(origin) != canonical:
         raise SetupError("Existing checkout has a different repository identity.")
-    if _git(path, "status", "--porcelain=v1", "--untracked-files=all"):
+    if status:
         raise SetupError("Repository contains source changes; preserve them and reconcile first.")
     if any(line and (line[0].islower() or line[0] == "S")
-           for line in _git(path, "ls-files", "-v").splitlines()):
+           for line in flags.splitlines()):
         raise SetupError("Repository index hides tracked source changes; reconcile its flags first.")
     commit = _git(path, "rev-parse", "--verify", "HEAD^{commit}")
     return Source(path, canonical, commit)

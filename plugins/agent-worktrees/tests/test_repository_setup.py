@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -86,6 +87,35 @@ def test_inspect_is_read_only_and_revision_bound(source: Path) -> None:
     (source / "setup.ps1").write_text("changed", encoding="utf-8")
     with pytest.raises(setup.SetupError, match="source changes"):
         selected.verify()
+
+
+def test_source_queries_overlap_and_settle_before_head(source: Path, monkeypatch) -> None:
+    queries = {
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        ("ls-files", "-v"),
+    }
+    rendezvous = threading.Barrier(len(queries), timeout=10)
+    completed: set[tuple[str, ...]] = set()
+    lock = threading.Lock()
+    original = setup._git
+
+    def observed(path: Path, *arguments: str) -> str:
+        if arguments in queries:
+            rendezvous.wait()
+            result = original(path, *arguments)
+            with lock:
+                completed.add(arguments)
+            return result
+        assert arguments == ("rev-parse", "--verify", "HEAD^{commit}")
+        assert completed == queries
+        return original(path, *arguments)
+
+    monkeypatch.setattr(setup, "_git", observed)
+    selected = setup.qualify(source, URL)
+    assert selected.commit == git(source, "rev-parse", "HEAD")
+    assert completed == queries
 
 
 @pytest.mark.parametrize("kind", ["foreign", "transport-path", "untracked", "modified", "linked", "nested"])
