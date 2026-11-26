@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import http.client
 import importlib.util
 import io
@@ -154,7 +155,7 @@ def boundary(
     discovered: list[bool] = []
 
     def get_client(**kwargs: Any) -> Any:
-        assert not kwargs or kwargs == {"ensure": False}
+        assert kwargs in ({}, {"ensure": False}, {"ensure": False, "propagate_errors": True})
         discovered.append(True)
         return client
 
@@ -166,12 +167,298 @@ def boundary(
         _startup_request_timeout=lambda **kwargs: 17.0,
         _add_stream_args=lambda parser: None,
         _cmd_session_status=service._cmd_session_status,
+        _sender_repo=lambda: "example",
     )
     monkeypatch.setattr(package, "__main__", core, raising=False)
     return ResumeBoundary(
         lifecycle, service, resume, contracts, client, errors,
         calls, response, health, failures, discovered,
     )
+
+
+@pytest.fixture
+def bridge_resume(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    module = ModuleType(f"{PACKAGE}.remote_errors")
+    module.__dict__["RemoteBridgeError"] = RuntimeError
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    boundary.health.update(
+        protocol_version=52, capabilities={"bridge_inventory": 2, "worktree_exact_resume": 1},
+    )
+    report: dict[str, Any] = {
+        "version": 1, "complete": True, "sources": {},
+        "bridges": [{
+            "handle": "worktree-123", "worktree_id": "worktree-123",
+            "session_id": "native-123", "managed_session_id": "owned-123",
+            "status": "dormant", "control": "unavailable",
+        }],
+    }
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> Any:
+        boundary.calls.append((method, path, {**kwargs, "body": args}))
+        if method == "GET":
+            if path == "/health":
+                return boundary.health.copy()
+            assert path == "/api/v1/bridges"
+            return report
+        assert path.endswith("/exact")
+        if boundary.failures:
+            raise boundary.failures.pop(0)
+        return boundary.response.copy()
+
+    monkeypatch.setattr(boundary.client, "_request", request)
+    for name in ("resume_session", "resume_worktree", "list_agents"):
+        monkeypatch.setattr(boundary.client, name, unavailable)
+    return report
+
+
+@pytest.mark.parametrize("cli", [False, True], ids=["acp", "cli"])
+@pytest.mark.parametrize("target", ["worktree", "native", "managed", "singleton"])
+def test_bridge_resume_pins_the_selected_native_without_legacy_fallback(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any,
+    cli: bool, target: str,
+) -> None:
+    row = bridge_resume["bridges"][0]
+    if target == "singleton":
+        row.update(handle="example@anchor", worktree_id="example@anchor")
+        boundary.response["worktree_id"] = "example@anchor"
+    if cli:
+        boundary.response.update(mode="cli", session_id="native-123")
+    identity = {
+        "worktree": "worktree-123", "native": "native-123",
+        "managed": "owned-123", "singleton": "example@anchor",
+    }[target]
+    boundary.invoke("--json", "resume", identity, "--bridge", *(["--cli"] if cli else []))
+    assert json.loads(capsys.readouterr().out) == {**boundary.response, "verb": "loaded"}
+    effects = [call for call in boundary.calls if call[0] == "POST"]
+    assert len(effects) == 1
+    assert effects[0][1] == (
+        f"/api/v1/worktrees/{'example%40anchor' if target == 'singleton' else 'worktree-123'}"
+        f"/resume/{'cli' if cli else 'acp'}/exact"
+    )
+    assert effects[0][2]["body"] == ({"native_session_id": "native-123"},)
+    assert effects[0][2]["allow_retry"] is False
+    assert effects[0][2]["request_timeout"] == 17.0
+    assert effects[0][2]["_endpoint"] == "http://example.invalid"
+    selection = next(call for call in boundary.calls if call[1] == "/api/v1/bridges")
+    assert selection[2]["params"] == {"project": "example", "local_only": "true"}
+
+
+def test_bridge_worktree_selector_and_explicit_scope_reach_common_owner(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any,
+) -> None:
+    boundary.invoke(
+        "--json", "resume", "--worktree-id", "worktree-123", "--bridge",
+        "--all-projects", "--machine", "machine-a", "--namespace", "container:example",
+    )
+    assert json.loads(capsys.readouterr().out)["worktree_id"] == "worktree-123"
+    selection = next(call for call in boundary.calls if call[1] == "/api/v1/bridges")
+    assert selection[2]["params"] == {
+        "machine": "machine-a", "namespace": "container:example", "local_only": "true",
+    }
+
+
+@pytest.mark.parametrize("options", [
+    ["--force"], ["--reclaim"], ["--worktree-writer-file", "unread.json"],
+    ["--retained-recovery-file", "-"],
+], ids=["force", "reclaim", "writer", "recovery"])
+def test_bridge_resume_rejects_specialized_inputs_before_file_or_client_io(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, options: list[str],
+) -> None:
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(read=unavailable))
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("resume", "worktree-123", "--bridge", *options)
+    assert refused.value.code == 2
+    assert boundary.discovered == [] and boundary.calls == []
+
+
+@pytest.mark.parametrize("options", [
+    ["--all-projects"], ["--machine", "machine-a"], ["--namespace", "container:example"],
+], ids=["all-projects", "machine", "namespace"])
+def test_legacy_resume_cannot_silently_ignore_bridge_scope(
+    boundary: ResumeBoundary, options: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("resume", "worktree-123", *options)
+    assert refused.value.code == 2
+    assert boundary.discovered == [] and boundary.calls == []
+
+
+@pytest.mark.parametrize("fault", ["absent", "ambiguous", "incomplete", "standalone", "no-native"])
+def test_bridge_resume_unavailable_selection_has_no_lifecycle_effect(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any, fault: str,
+) -> None:
+    if fault in {"absent", "incomplete"}:
+        bridge_resume["bridges"] = []
+        bridge_resume["complete"] = fault != "incomplete"
+    elif fault == "ambiguous":
+        bridge_resume["bridges"] *= 2
+    else:
+        bridge_resume["bridges"][0]["worktree_id" if fault == "standalone" else "session_id"] = None
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["reason"] == {
+        "absent": "bridge_not_found", "ambiguous": "ambiguous_bridge_selector",
+        "incomplete": "bridge_inventory_incomplete", "standalone": "bridge_resume_unavailable",
+        "no-native": "bridge_resume_unavailable",
+    }[fault]
+    assert all(call[0] == "GET" for call in boundary.calls)
+
+
+@pytest.mark.parametrize("capability", [None, False, 0, "1"])
+def test_bridge_resume_prior_provider_refuses_before_mutation(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any, capability: Any,
+) -> None:
+    boundary.health["capabilities"]["worktree_exact_resume"] = capability
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["reason"] == "bridge_resume_unavailable"
+    assert "required capability worktree_exact_resume" in result["error"]
+    assert all(call[0] == "GET" for call in boundary.calls)
+
+
+@pytest.mark.parametrize("fault", ["head-changed", "rollback", "connection", "invalid-native"])
+def test_bridge_resume_retains_original_identity_after_refusal_or_unknown(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any], capsys: Any, fault: str,
+) -> None:
+    if fault == "invalid-native":
+        boundary.response["acp_session_id"] = "other"
+    elif fault == "connection":
+        boundary.failures.append(boundary.errors.BridgeConnectionError("response lost"))
+    else:
+        boundary.failures.append(boundary.errors.BridgeClientError(
+            409 if fault == "head-changed" else 404,
+            {"reason": "native_identity_changed" if fault == "head-changed" else "route_rolled_back"},
+        ))
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["worktree_id"] == "worktree-123" and result["native_session_id"] == "native-123"
+    assert result["reason"] == {
+        "head-changed": "native_identity_changed", "rollback": "route_rolled_back",
+        "connection": "native_resume_unconfirmed", "invalid-native": "native_resume_unconfirmed",
+    }[fault]
+    assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
+
+
+@pytest.mark.parametrize("stage", [1, 2], ids=["selection", "exact-resume"])
+def test_bridge_resume_health_deadline_remains_structured_without_post_or_retry(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch, capsys: Any, stage: int,
+) -> None:
+    deadline = importlib.import_module(f"{PACKAGE}.client_read_budget").ReadDeadlineExpired
+    original = boundary.client._request
+    health_checks = 0
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> Any:
+        nonlocal health_checks
+        if path == "/health":
+            health_checks += 1
+            if health_checks == stage:
+                raise deadline("health negotiation deadline expired")
+        return original(method, path, *args, **kwargs)
+
+    monkeypatch.setattr(boundary.client, "_request", request)
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["reason"] == "bridge_resume_unavailable"
+    assert result["requested_target"] == "worktree-123"
+    assert "health negotiation deadline expired" in result["error"]
+    if stage == 2:
+        assert result["worktree_id"] == "worktree-123"
+        assert result["native_session_id"] == "native-123"
+    assert health_checks == stage
+    assert all(call[0] == "GET" for call in boundary.calls)
+
+
+@pytest.mark.parametrize("stage", ["health", "inventory", "exact-health"])
+@pytest.mark.parametrize("fault", ["timeout", "truncated"])
+def test_bridge_resume_real_response_read_failure_is_json_without_resume_or_retry(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch, capsys: Any, stage: str, fault: str,
+) -> None:
+    path = ROOT / "plugins/agent-bridge/src/agent_bridge/__main__.py"
+    node = next(
+        node for node in ast.parse(path.read_bytes()).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_get_client"
+    )
+    scope: dict[str, Any] = {
+        "__package__": PACKAGE, "BridgeClient": boundary.errors.BridgeClient,
+        "_ensure_daemon": unavailable,
+    }
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
+    monkeypatch.setattr(sys.modules[f"{PACKAGE}.__main__"], "_get_client", scope["_get_client"])
+    monkeypatch.setattr(
+        boundary.errors.BridgeClient, "from_config",
+        classmethod(lambda cls: boundary.client),
+    )
+    requests: list[tuple[str, str]] = []
+    failed_reads = 0
+    health_checks = 0
+
+    def urlopen(request: Any, *, timeout: float) -> io.BytesIO:
+        nonlocal health_checks
+        inventory = "/api/v1/bridges" in request.full_url
+        if not inventory:
+            health_checks += 1
+        requests.append((request.get_method(), request.full_url))
+        assert request.get_method() == "GET"
+        value = bridge_resume if inventory else boundary.health
+        stalled = (
+            stage == "health" and health_checks == 1
+            or stage == "inventory" and inventory
+            or stage == "exact-health" and not inventory and health_checks == 3
+        )
+
+        class Response(io.BytesIO):
+            status = 200
+
+            def read(self, size: Any = -1) -> bytes:
+                nonlocal failed_reads
+                if stalled:
+                    failed_reads += 1
+                    if fault == "timeout":
+                        raise TimeoutError("response body timed out")
+                    raise http.client.IncompleteRead(b"partial", 12)
+                return super().read(size)
+
+        return Response(json.dumps(value).encode())
+
+    monkeypatch.setattr(boundary.errors.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(
+        boundary.errors.urllib.request, "build_opener",
+        lambda *args, **kwargs: SimpleNamespace(open=urlopen),
+    )
+    monkeypatch.setattr(
+        boundary.client, "_request",
+        boundary.errors.BridgeClient._request.__get__(boundary.client),
+    )
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["reason"] == "bridge_resume_unavailable"
+    assert result["requested_target"] == "worktree-123"
+    expected_error = (
+        "protocol check" if fault == "timeout" and stage == "exact-health"
+        else "response body timed out" if fault == "timeout" else "IncompleteRead"
+    )
+    assert expected_error in result["error"]
+    if stage == "exact-health":
+        assert result["native_session_id"] == "native-123"
+        assert result["worktree_id"] == "worktree-123"
+    else:
+        assert "native_session_id" not in result
+    assert failed_reads == 1
+    assert len(requests) == {"health": 1, "inventory": 3, "exact-health": 4}[stage]
 
 
 @pytest.mark.parametrize("cli", [False, True], ids=["acp", "cli"])
@@ -442,6 +729,7 @@ def test_executing_cli_disclosure_matches_actual_parser(
             "agent-bridge.resume": {
                 "version": 1, "capabilities": [
                     "exact-worktree-target", "keyed-worktree-writer", "retained-native-recovery",
+                    "exact-bridge-workspace-resume",
                 ],
             },
             "bridge-session-current-requests-v1": {
