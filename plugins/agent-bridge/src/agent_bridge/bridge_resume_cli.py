@@ -32,6 +32,7 @@ def resume(args: argparse.Namespace, target: str, *, worktree_only: bool) -> Non
     from . import __main__ as core
     from .bridge_listing_cli import _scope
     from .client import BridgeClientError, BridgeConnectionError
+    from .client_read_budget import ReadDeadlineExpired
     from .hosting_admission_cli import configure_client
     from .resume_cli_contract import confirmed_resume
 
@@ -78,7 +79,7 @@ def resume(args: argparse.Namespace, target: str, *, worktree_only: bool) -> Non
             if isinstance(detail, dict) else None
         )
         fail(reason or "bridge_resume_unavailable", detail)
-    except BridgeConnectionError as exc:
+    except (BridgeConnectionError, ReadDeadlineExpired) as exc:
         fail("bridge_resume_unavailable", str(exc))
     except ValueError as exc:
         fail("bridge_resume_unavailable", str(exc))

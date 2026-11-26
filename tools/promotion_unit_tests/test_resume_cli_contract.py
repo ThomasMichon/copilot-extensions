@@ -346,6 +346,38 @@ def test_bridge_resume_retains_original_identity_after_refusal_or_unknown(
     assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
 
 
+@pytest.mark.parametrize("stage", [1, 2], ids=["selection", "exact-resume"])
+def test_bridge_resume_health_deadline_remains_structured_without_post_or_retry(
+    boundary: ResumeBoundary, bridge_resume: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch, capsys: Any, stage: int,
+) -> None:
+    deadline = importlib.import_module(f"{PACKAGE}.client_read_budget").ReadDeadlineExpired
+    original = boundary.client._request
+    health_checks = 0
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> Any:
+        nonlocal health_checks
+        if path == "/health":
+            health_checks += 1
+            if health_checks == stage:
+                raise deadline("health negotiation deadline expired")
+        return original(method, path, *args, **kwargs)
+
+    monkeypatch.setattr(boundary.client, "_request", request)
+    with pytest.raises(SystemExit) as refused:
+        boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+    assert refused.value.code == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["reason"] == "bridge_resume_unavailable"
+    assert result["requested_target"] == "worktree-123"
+    assert "health negotiation deadline expired" in result["error"]
+    if stage == 2:
+        assert result["worktree_id"] == "worktree-123"
+        assert result["native_session_id"] == "native-123"
+    assert health_checks == stage
+    assert all(call[0] == "GET" for call in boundary.calls)
+
+
 @pytest.mark.parametrize("cli", [False, True], ids=["acp", "cli"])
 @pytest.mark.parametrize("force", [False, True], ids=["ordinary", "reclaim"])
 def test_exact_selector_uses_only_the_actual_worktree_route(
