@@ -601,14 +601,15 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Vault removal custody adapter")
 @pytest.mark.parametrize("mode", ("ordinary", "verified", "missing", "refused"))
-def test_native_vault_removal_authenticates_before_import_and_never_falls_back(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize("plugin", ("agent-vault", "agent-dispatch", "agent-bridge"))
+def test_native_vault_removal_authenticates_before_import_and_never_falls_back(tmp_path, monkeypatch, mode, plugin):
     events = []
     owner = object()
     controller = MODULE._load(CONTROLLERS)
     payload, root = tmp_path / "payload", tmp_path / "runtime"
     monkeypatch.delenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", raising=False)
     if mode != "ordinary":
-        monkeypatch.setenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", "agent-vault")
+        monkeypatch.setenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", plugin)
 
     class Scope:
         def __enter__(self):
@@ -631,7 +632,7 @@ def test_native_vault_removal_authenticates_before_import_and_never_falls_back(t
     monkeypatch.setattr(MODULE, "_root", lambda *_args: events.append("root-validated"))
     monkeypatch.setattr(MODULE, "_load", load)
     admission = controller.native_controller_custody(
-        payload, "agent-vault", root, root_check=MODULE._root, load=MODULE._load, error=MODULE.UninstallRefused,
+        payload, plugin, root, root_check=MODULE._root, load=MODULE._load, error=MODULE.UninstallRefused,
     )
     if mode in {"missing", "refused"}:
         with pytest.raises(MODULE.UninstallRefused):
@@ -648,6 +649,43 @@ def test_native_vault_removal_authenticates_before_import_and_never_falls_back(t
         ]
         assert ("closed" in events) is (mode != "refused")
 
+
+@pytest.mark.skipif(os.name != "nt", reason="Native finite runtime removal custody")
+@pytest.mark.parametrize("plugin", ("agent-dispatch", "agent-bridge"))
+def test_native_finite_removal_cli_passes_driver_custody_to_the_consumer_scan(tmp_path, monkeypatch, plugin):
+    # uninstall-runtime.ps1 runs `installer_engine_uninstall.py --remove-runtime` inside
+    # the native participant; its foreground driver names --root, so the scan needs custody.
+    controller = MODULE._load(CONTROLLERS)
+    owner = object()
+    observed = {}
+    payload, root = tmp_path / "payload", tmp_path / f".{plugin}"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", plugin)
+
+    class Scope:
+        def __enter__(self):
+            return owner
+
+        def __exit__(self, *_args):
+            return False
+
+    def load(path):
+        assert path == payload / "scripts/installer_driver.py"
+        return SimpleNamespace(bootstrap=lambda _source: None, custody=Scope)
+
+    def cleanup(*arguments, **options):
+        observed.update(arguments=arguments, options=options)
+        return {"status": "removed"}
+
+    status = controller.run_cli(
+        ["--payload-root", str(payload), "--plugin-id", plugin, "--root", str(root),
+         "--shell", sys.executable, "--remove-runtime"],
+        description=None, cleanup=cleanup, root_check=lambda *_args: None, load=load,
+        error=MODULE.UninstallRefused,
+    )
+    assert status == 0
+    assert observed["arguments"][1] == plugin
+    assert observed["options"]["remove_runtime"] is True
+    assert observed["options"]["controller_custody"] is owner
 
 @pytest.mark.parametrize("plugin", ("agent-vault", "agent-bridge"))
 def test_native_broker_admission_passes_custody_to_the_scoped_receiver(tmp_path, monkeypatch, plugin):

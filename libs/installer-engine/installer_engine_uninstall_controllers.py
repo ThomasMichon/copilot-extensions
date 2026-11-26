@@ -32,9 +32,9 @@ def parse_cli(argv: Sequence[str] | None = None, *, description: str | None = No
 
 @contextmanager
 def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_check: Callable[[Path, Path], None], load: Callable[[Path], ModuleType], error: type[RuntimeError]) -> Iterator[Any]:
-    if os.name != "nt" or plugin != "agent-vault" or (
-        os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin
-    ):
+    # Every native participant's finite removal must carry its driver custody;
+    # without it the foreground driver (which names --root) is refused as a consumer.
+    if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin:
         yield None
         return
     root_check(payload, root)
@@ -42,7 +42,7 @@ def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_ch
     driver.bootstrap(payload)
     with driver.custody() as owner:
         if owner is None:
-            raise error("Native Vault removal requires its authenticated execution owner")
+            raise error("Native runtime removal requires its authenticated execution owner")
         yield owner
 
 
