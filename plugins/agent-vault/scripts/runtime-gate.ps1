@@ -252,8 +252,54 @@ function Resolve-RuntimePython {
     return $AgentRtPy
 }
 
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $scriptDir '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-vault] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
+function ConvertTo-RuntimeNativeArguments([string[]]$Arguments) {
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+        return @($Arguments | ForEach-Object {
+            '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+        })
+    }
+    return $Arguments
+}
+
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
+    $Python = Get-AdmittedRuntimePython $Python
     Set-RuntimeEnvironment -RuntimeRoot $runtimeRoot -Context $context `
         -InstallationId $installationId -ServiceSuffix $serviceSuffix
     if (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT) {
@@ -271,9 +317,17 @@ function Invoke-Runtime {
                 '--script', (Join-Path $scriptDir 'validate_identity_cache_context.py'), '--'
             ) + $validationArgs[2..($validationArgs.Count - 1)]
         }
-        $validatedCache = @(& $Python @validationArgs)
-        if ($LASTEXITCODE -ne 0) {
-            if ($readOnlyProbe -and $LASTEXITCODE -eq 126) { $validatedCache | Write-Output }
+        $validationArgs = @(ConvertTo-RuntimeNativeArguments $validationArgs)
+        $validationPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $validatedCache = @(& $Python @validationArgs)
+            $validationCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $validationPreference
+        }
+        if ($validationCode -ne 0) {
+            if ($readOnlyProbe -and $validationCode -eq 126) { $validatedCache | Write-Output }
             exit 126
         }
         $env:AGENT_VAULT_CACHE_DIR = ($validatedCache -join "`n").Trim()
@@ -288,13 +342,16 @@ function Invoke-Runtime {
     if ($commandArguments.Count -gt 0 -and $commandArguments[0] -in @('installer-readiness', 'invocation-contract')) {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
     }
+    $nativeArgs = @('-m', 'agent_vault') + $forwardArgs
+    if ($readOnlyProbe) {
+        $nativeArgs = @(
+            (Join-Path $scriptDir 'versioned_runtime_probe.py'),
+            '--plugin', 'agent-vault', '--module', 'agent_vault', '--'
+        ) + $forwardArgs
+    }
+    $nativeArgs = @(ConvertTo-RuntimeNativeArguments ($pythonOptions + $nativeArgs))
     try {
-        if ($readOnlyProbe) {
-            $probeEntry = Join-Path $scriptDir 'versioned_runtime_probe.py'
-            & $Python @pythonOptions $probeEntry --plugin agent-vault --module agent_vault -- @forwardArgs
-        } else {
-            & $Python @pythonOptions -m agent_vault @forwardArgs
-        }
+        & $Python @nativeArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }

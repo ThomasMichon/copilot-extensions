@@ -1,0 +1,13 @@
+{
+  "comment": "Retain canonical finite-capture settlement-stage diagnostics without changing admission or cleanup requirements.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
