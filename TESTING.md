@@ -1270,57 +1270,8 @@ original scripts without these probes. Probe overhead is included in diagnostic
 timings; passing observations are nonreproduction, not an explanation or fix
 for an earlier timeout. Production scripts, retries and deadlines are unchanged.
 
-The manual `prepared-membership-native.yml` `sender_diagnostics` input runs
-the exact original prepared-membership packet on a fresh Windows worker.
-An initial diagnostic-only test registers a call hook, then deliberately fails;
-the remaining modules, selection and test identities retain the default packet's
-order. Its setup-only module does not register the isolated adapter's fixture
-plugin or import the original packet early. Only the original registered read
-cases receive the receiver observer.
-The same opt-in setup observes only the original read, `patch-input` and
-`structured` shell children through their test module's local subprocess
-namespace. It keeps
-stdlib `run`'s timeout, kill, drain and exception handling, sampling only the
-creation-owned Windows handle. At most 24 samples retain process CPU counters,
-up to 16 snapshot-owned threads and fixed wait-chain kind/status numbers.
-Wait queries are asynchronous with one 25 ms observation window per sample;
-they never follow another process. Names, addresses, IDs and raw output are
-not retained. A bounded collector join reports unconfirmed cleanup explicitly
-instead of holding a failing child or masking its outcome. Communication
-completion only signals the collector to stop; joining and reporting happen
-after stdlib has killed/drained a timed-out child and exited its process context.
-The native blocked-collector control requires actual child exit before joining.
-The opt-in workflow runs that focused control after the original membership
-packet, so the control cannot warm or otherwise precede that packet.
-The opt-in workflow also runs the exact original patch-positive and structured
-packets on separate fresh Windows workers, with the same deliberately failing
-setup.
-Default acceptance selections and all original deadlines/assertions remain
-unchanged. Sampling can perturb timing; a passing observed original remains
-nonreproduction, not an explanation or acceptance.
-This selection leaves both the complete sender and PowerShell harness unchanged.
-It delegates to the original handler and reader,
-preserving returned byte objects, raised exceptions and the original reader for
-finish/close. After handling, it emits only connection/dispatch counts and fixed
-framing, JSON, version, authentication and kind categories plus byte lengths.
-Python finalization reports sidecar existence even on an original assertion failure.
-No frame, credential, endpoint, payload or error message is emitted.
-The separate post-entry selection leaves the complete
-sender file byte-identical and reports at most 32 caught base-exception types and
-HResult numbers after the hook returns; no error message, endpoint, token or
-payload is emitted. The separate stage selection observes fixed timing,
-connection and exception-type fields only in fixture-owned sender finalization.
-A focused control proves that its timed operations and all source outside the
-sender remain byte-identical.
-The original receiver assertion, child deadline and sender budget remain.
-Even a completed observation deliberately fails as diagnostic evidence, never
-as native acceptance. Local packet mechanics can select
-`tests/test_hook_packet_receiver_diagnostics.py`
-first, followed by `tests/test_post_tool_shell.py`, with
-`-k "enable_original_packet_receiver_observer or (registered_prepared_cell_post_tool_uses_selected_original_owners and read and not shell-read)"`.
-The isolated adapter remains available in Worktrees
-`tests/test_post_tool_sender_diagnostics.py -k registered_prepared_receiver_observation`
-with `AGENT_WORKTREES_SENDER_DIAGNOSTIC=1` and the existing explicit-tier runner.
+Focused sender, receiver and original-child observations are documented in
+[Focused original sender observation](plugins/agent-worktrees/docs/native-tool-hook-diagnostics.md#focused-original-sender-observation).
 
 The membership-tail file's `-k registered_policy_timeout_observation` selection invokes
 the unchanged `cross-modes` cell composition on both engines. Only that test
