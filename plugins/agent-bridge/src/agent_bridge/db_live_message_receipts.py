@@ -76,7 +76,8 @@ class _LiveMessageReceiptsMixin(DatabaseOperations):
             "delivered_at AS sdk_accepted_at, consumed_at, disposition_json, "
             "CASE WHEN producer_target_json IS NOT NULL AND handoff_json IS NULL "
             "AND delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
-            "THEN 'awaiting_consumer' END AS queue_reason FROM live_messages "
+            "THEN CASE WHEN claimed_at IS NOT NULL THEN 'legacy_delivery_unconfirmed' "
+            "ELSE 'awaiting_consumer' END END AS queue_reason FROM live_messages "
             f"WHERE (session_id={MESSAGE_TARGET_SQL} OR "
             "json_extract(producer_target_json,'$.session_id')=?) AND id=?",
             (session_id, session_id, session_id, session_id, message_id),
@@ -101,15 +102,17 @@ class _LiveMessageReceiptsMixin(DatabaseOperations):
         from .durable_inbox import LEGACY_SUPPORTED_SQL
 
         cur = self.execute_write(
-            "UPDATE live_messages SET consumed_at=? "
+            "UPDATE live_messages SET consumed_at=?, "
+            "claimed_at=CASE WHEN producer_target_json IS NOT NULL "
+            "THEN COALESCE(claimed_at,?) ELSE claimed_at END "
             f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=? AND consumed_at IS NULL "
             "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
-            "AND (producer_target_json IS NULL OR NOT EXISTS ("
+            "AND (producer_target_json IS NULL OR claimed_at IS NOT NULL OR NOT EXISTS ("
             "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=live_messages.session_id)) "
             f"AND {LEGACY_SUPPORTED_SQL} "
             "AND disposition_json IS NULL "
             "AND kind NOT LIKE 'control:%'",
-            (now, session_id, session_id, session_id, message_id),
+            (now, now, session_id, session_id, session_id, message_id),
         )
         return cur.rowcount
 

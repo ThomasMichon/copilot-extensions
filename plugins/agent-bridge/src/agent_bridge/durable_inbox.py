@@ -106,4 +106,12 @@ def schema_triggers() -> dict[str, tuple[str, str]]:
             "WHEN OLD.producer_target_json IS NOT NULL AND (" + changed + ") "
             "BEGIN SELECT RAISE(ABORT,'bridge_producer_input_immutable'); END",
         ),
+        "live_messages_producer_claim_retained": (
+            "live_messages",
+            "CREATE TRIGGER IF NOT EXISTS live_messages_producer_claim_retained "
+            "BEFORE UPDATE OF claimed_at ON live_messages "
+            "WHEN OLD.producer_target_json IS NOT NULL AND OLD.claimed_at IS NOT NULL "
+            "AND NEW.claimed_at IS NOT OLD.claimed_at "
+            "BEGIN SELECT RAISE(ABORT,'bridge_producer_claim_retained'); END",
+        ),
     }

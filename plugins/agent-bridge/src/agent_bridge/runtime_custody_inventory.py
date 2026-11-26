@@ -115,6 +115,8 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
                     handoff = original_handoff(row)
                     association = handoff["admission"]
                 if table == "live_messages" and row["producer_target_json"] is not None and association is None:
+                    if row["claimed_at"] is not None:
+                        blockers.append(f"native-outcome-unqualified:{table}:{row[columns[0]]}")
                     continue
                 if association is None:
                     blockers.append(f"unassociated:{table}:{row[columns[0]]}")

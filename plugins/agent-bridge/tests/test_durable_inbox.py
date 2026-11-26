@@ -46,6 +46,63 @@ def test_installation_receiver_rejects_unsupported_fresh_effect_without_blocking
 
 
 @pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("cleanup", [False, True])
+def test_legacy_body_exposure_keeps_original_delivery_ownership_after_enrollment(
+    serving: Serving, native: bool, cleanup: bool,
+) -> None:
+    _, client, db, consumer = serving
+    accepted = client.post(MESSAGES, json=PAYLOAD)
+    assert accepted.status_code == 200
+    message_id = accepted.json()["message_id"]
+    legacy, = db.list_pending_live_messages(consumer.session_id)
+    assert legacy["id"] == message_id
+    stored, = db.execute_read("SELECT * FROM live_messages")
+    body = (native_enroll if native else enroll)(client, consumer)
+    offered = client.post(PREFIX + "/poll", json=current(body))
+    assert offered.status_code == 200, offered.text
+    for duplicate in offered.json()["messages"]:
+        if duplicate["id"] == message_id:
+            assert client.post(PREFIX + "/begin", json=attempt(body, duplicate)).json() == {"begin": False}
+    assert all(message["id"] != message_id for message in offered.json()["messages"])
+    assert stored["claimed_at"] is not None
+    with pytest.raises(sqlite3.IntegrityError, match="bridge_producer_claim_retained"):
+        db.execute_write("UPDATE live_messages SET claimed_at=NULL WHERE id=?", (message_id,))
+    next_input = client.post(MESSAGES, json={**PAYLOAD, "idempotency_key": "next-input"})
+    assert next_input.status_code == 200
+    row = poll(client, body)
+    assert row["id"] == next_input.json()["message_id"]
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": True}
+    original, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (message_id,))
+    assert original["handoff_json"] is None and original["handoff_started_at"] is None
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None and receipt["queue_reason"] == "legacy_delivery_unconfirmed"
+    if cleanup:
+        assert db.deregister_live_session(consumer.session_id)
+    acknowledged = client.post(MESSAGES + "/ack", json={"ids": [message_id]})
+    assert acknowledged.status_code == 200 and acknowledged.json()["acked"] == 1
+    assert client.post(MESSAGES + "/ack", json={"ids": [message_id]}).json()["acked"] == 0
+    assert db.consume_live_message(consumer.session_id, message_id, time.time()) == 1
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None and receipt["stage"] == "consumed"
+
+
+def test_unsupported_legacy_poll_does_not_claim_hidden_exact_input(serving: Serving) -> None:
+    _, client, db, consumer = serving
+    accepted = client.post(MESSAGES, json={
+        **PAYLOAD, "exact_session": True, "expected_session_id": consumer.session_id,
+    })
+    assert accepted.status_code == 200
+    old_reader = client.get(MESSAGES)
+    assert old_reader.status_code == 200 and old_reader.json()["messages"] == []
+    stored, = db.execute_read("SELECT * FROM live_messages")
+    assert stored["claimed_at"] is None
+    body = enroll(client, consumer)
+    row = poll(client, body)
+    assert row["id"] == accepted.json()["message_id"]
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": True}
+
+
+@pytest.mark.parametrize("native", [False, True])
 def test_unavailable_receiver_later_delivers_the_original_durable_input(
     serving: Serving, native: bool,
 ) -> None:

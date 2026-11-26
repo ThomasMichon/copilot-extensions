@@ -157,10 +157,19 @@ Schema 50 expands the existing queue with nullable producer-target metadata
 and retention/input guards. Preexisting rows and effects remain unchanged.
 An enrolled receiver selects its delivery admission when polling, not when
 the sender writes. Legacy baseline receiving remains supported for unenrolled
-targets, but cannot take retained work after receiver enrollment or execute
+targets, but cannot take unclaimed retained work after receiver enrollment or execute
 unknown message revisions/required semantics. Shared-token authentication,
 valid target assertions and writable prepared storage still apply.
 Controls and typed startup retain their independent effect admission.
+
+A supported legacy body poll durably records its ownership before returning
+new producer input. Later enrollment does not transfer that original to another
+SDK sender or block progress on new input. Until its original acknowledgement,
+the receipt reports `legacy_delivery_unconfirmed`; a lost reply is not proof
+that no effect occurred. Late original acknowledgements remain idempotent after
+enrollment and registration cleanup. Unsupported exact-native or startup polls
+do not claim input they cannot return. Claimed originals cannot be reset into
+fresh delivery, and no new SDK acceptance or consumption is inferred.
 
 This is provider-first expansion: prior ordinary callers keep their wire form,
 and supported current/prior receivers keep the existing retained-inbox wire
