@@ -119,7 +119,8 @@ class NativeReceiver:
             # cancellation can enter the common retirement path.
             self._preparation.cancelled.set()
             try:
-                self.listener = await _settle(task)
+                listener = await _settle(task)
+                self.listener = listener
             except gateway_sshd.PreparationCancelled:
                 pass
             raise

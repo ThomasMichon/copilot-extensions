@@ -13,6 +13,7 @@ import pytest
 from ssh_manager.config_sources import SSHConfig
 
 from agent_ssh import gateway_receiver as receiver
+from agent_ssh import gateway_authorization as authorization
 from agent_ssh import gateway_sshd
 from agent_ssh.gateway_native import Observation
 from test_gateway_native import Provider, key
@@ -272,7 +273,7 @@ def test_stopping_preparation_retires_blocked_native_probes_before_receiver_clea
     selected.selected["environment"] = "windows"
     selected.owner.config["environment"] = "windows"
     key_root = tmp_path / "native-key"
-    gateway_sshd.authorization._windows_create_directory(key_root)
+    authorization._windows_create_directory(key_root)
     selected.selected["host_key_file"] = key_root / "host"
     selected.owner.config["host_key_file"] = key_root / "host"
     atomic_write_text(selected.selected["host_key_file"], "fixture private host key\n")
@@ -281,7 +282,7 @@ def test_stopping_preparation_retires_blocked_native_probes_before_receiver_clea
     monkeypatch.setattr(gateway_sshd, "_executable", Mock())
     monkeypatch.setattr(gateway_sshd, "_check_endpoint", Mock())
     publication = Mock()
-    monkeypatch.setattr(gateway_sshd.authorization, "apply_projection", publication)
+    monkeypatch.setattr(authorization, "apply_projection", publication)
     python, environment = direct_python(sys.executable)
     ready = tmp_path / "probe-ready"
     native: list[Any] = []
