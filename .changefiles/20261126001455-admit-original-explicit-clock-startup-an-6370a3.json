@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original explicit-clock startup and diagnostic early-refusal unit contracts",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

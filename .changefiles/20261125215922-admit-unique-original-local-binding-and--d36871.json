@@ -1,9 +1,0 @@
-{
-  "comment": "Admit unique original local-binding and profile unit contracts with module marks preserved",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

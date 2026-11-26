@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve primary command results when Bash native evidence lacks process identity.",
-  "changes": [
-    {
-      "plugin": "libs/process-telemetry",
-      "type": "patch"
-    }
-  ]
-}

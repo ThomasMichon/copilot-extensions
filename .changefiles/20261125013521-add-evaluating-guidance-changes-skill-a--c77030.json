@@ -1,9 +1,0 @@
-{
-  "comment": "Add evaluating-guidance-changes skill (A/B method for proving a guidance or skill change does not make an agent worse)",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

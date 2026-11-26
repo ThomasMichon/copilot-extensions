@@ -1,9 +1,0 @@
-{
-  "comment": "Add identity-pinned workspace resume over existing native lifecycle owners without retry or selector fallback",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

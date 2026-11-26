@@ -1,9 +1,0 @@
-{
-  "comment": "Durably accept ordinary input for known represented conversations before receiver admission; preserve original queued input and bind delivery at consumer poll",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

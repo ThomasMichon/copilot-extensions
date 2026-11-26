@@ -1,9 +1,0 @@
-{
-  "comment": "Keep generated related-repository dispatch and exploration hints on explicit legacy profile startup",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

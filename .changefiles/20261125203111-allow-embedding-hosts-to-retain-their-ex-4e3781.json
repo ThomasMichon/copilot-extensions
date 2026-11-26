@@ -1,9 +1,0 @@
-{
-  "comment": "Allow embedding hosts to retain their explicit point-service binding through the synchronous service entrypoint.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

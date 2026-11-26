@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh canonical MCP command-capture assets consumed by source installation packaging.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
