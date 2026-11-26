@@ -161,3 +161,26 @@ def test_local_text_unknown_prints_original_generated_key_and_selected_identity(
     key = client.accepted[0]["idempotency_key"]
     output = capsys.readouterr()
     assert all(value in output.err for value in ("managed-original", "native-original", key))
+
+
+@pytest.mark.parametrize("length", [512, 513])
+def test_managed_key_limit_has_a_typed_cli_outcome_before_client_mutation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], length: int,
+) -> None:
+    client = DurableClient("stopped")
+    monkeypatch.setattr(core, "_get_client", lambda **_kwargs: client)
+    monkeypatch.setattr(core, "_caller_id_for", lambda _args: "sender")
+    monkeypatch.setattr(core, "_sender_repo", lambda: "fixture-project")
+    args = core.build_parser().parse_args([
+        "--json", "send", "managed-original", "input", "--idempotency-key", "k" * length,
+    ])
+    if length == 513:
+        with pytest.raises(SystemExit) as error:
+            targeting._cmd_send(args)
+        assert error.value.code == 2
+        assert client.accepted == []
+        assert json.loads(capsys.readouterr().out)["outcome"] == "refused_invalid"
+    else:
+        targeting._cmd_send(args)
+        assert len(client.accepted) == 1
+        assert json.loads(capsys.readouterr().out)["outcome"] == "queued"

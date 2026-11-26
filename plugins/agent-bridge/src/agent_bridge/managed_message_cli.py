@@ -15,6 +15,11 @@ def send(
     from .send_outcome import SendRefused, emit
 
     key = getattr(args, "idempotency_key", None) or uuid.uuid4().hex
+    if not 1 <= len(key) <= 512:
+        raise SendRefused(
+            "refused_invalid", reason="managed_message_key", retryable=False, target=session_id,
+            error="managed message idempotency key must contain 1-512 characters",
+        )
     args.idempotency_key = key
     try:
         result = client.submit_managed_message(
