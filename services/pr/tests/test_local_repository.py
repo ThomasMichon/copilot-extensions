@@ -159,6 +159,28 @@ def test_omitted_batch_selection_accepts_the_prior_core_binding_shape(
     assert not log.exists() and not config.root.exists()
 
 
+def test_recovery_requires_executing_core_support_before_owner_or_state_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import snapshot_batch_recovery
+    from agent_pull_requests_service import snapshot_batch_transition
+
+    path, value, _state, log = configuration(tmp_path)
+    path.write_text(json.dumps(value | {"github_snapshot_batches": True}))
+    config = load_service_config(path)
+    assert isinstance(config, LocalHostConfig)
+    assert snapshot_batch_transition.recovery_contract() == "agent-pull-requests.snapshot-query-recovery/v1"
+    monkeypatch.delattr(snapshot_batch_recovery, "RECOVERY_PROTOCOL")
+    selection = snapshot_batch_recovery.RecoverySelection("a" * 64, "b" * 32, "c" * 32, "retain-unknown")
+
+    def unwanted_access() -> None:
+        pytest.fail("unselected recovery runtime checked owner")
+
+    with pytest.raises(ValueError, match="executing .* unsupported"):
+        snapshot_batch_transition.recover(config, selection, owner_checkpoint=unwanted_access, expires_at=2000)
+    assert not config.root.exists() and not log.exists()
+
+
 def test_local_adoption_rechecks_private_serving_user_root_without_repair(tmp_path: Path) -> None:
     path, _value, _state, log = configuration(tmp_path)
     config = load_service_config(path)

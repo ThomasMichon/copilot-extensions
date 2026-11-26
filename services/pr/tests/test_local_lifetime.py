@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 import threading
 import time
@@ -96,4 +97,74 @@ def test_local_foreground_keeps_writer_until_original_native_cleanup_joins(
         assert config.store().path.read_bytes() == before
         with SingleInstance(config.root, service="agent-pull-requests-watch"):
             pass
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux local ingress")
+def test_query_recovery_requires_actual_joined_foreground_and_exclusive_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests.snapshot_batch_recovery import RecoverySelection
+    from agent_pull_requests.snapshot_batch_state import BatchAdmission, scope
+    from agent_pull_requests_service import snapshot_batch_transition as recovery
+
+    path, value, _state, log = configuration(tmp_path)
+    path.write_text(json.dumps(value | {"github_snapshot_batches": True}))
+    config = load_service_config(path)
+    assert isinstance(config, LocalHostConfig)
+    config.provision()
+    store = config.store()
+    identity = config.observations[0].repository_identity
+    assert identity is not None and identity.provider == "github"
+    key = scope(identity)
+    expires_at = int(time.time()) + 60
+    pending = BatchAdmission(store).begin(key, expires_at=expires_at)
+    assert pending is not None
+    selection = RecoverySelection(key, pending, "1" * 32, "retain-unknown")
+    entered, finish = threading.Event(), threading.Event()
+    original = run_caller_owned
+
+    def cleanup(deadline: float) -> None:
+        entered.set()
+        if not finish.wait(max(0, deadline - time.monotonic())):
+            raise TimeoutError
+
+    def delayed(argv: list[str], **kwargs: Any) -> Any:
+        if "inventory" in argv and "--contract" not in argv:
+            raise OwnedCleanupError(None, cleanup_retry=cleanup)
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(native_command, "run_caller_owned", delayed)
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        foreground = asyncio.create_task(hosting.run(config, stop=stop))
+        joined = False
+
+        def verify_owner() -> None:
+            if not joined:
+                raise PermissionError("fixture predecessor has not gracefully joined")
+
+        try:
+            assert await asyncio.to_thread(entered.wait, 10)
+            stop.set()
+            before = store.path.read_bytes()
+            with pytest.raises(PermissionError, match="not gracefully joined"):
+                recovery.recover(config, selection, owner_checkpoint=verify_owner, expires_at=expires_at)
+            with pytest.raises(AlreadyRunningError):
+                recovery.recover(config, selection, owner_checkpoint=lambda: None, expires_at=expires_at)
+            assert store.path.read_bytes() == before and not foreground.done()
+        finally:
+            stop.set()
+            finish.set()
+            await asyncio.wait_for(asyncio.shield(foreground), 10)
+        joined = True
+        provider_calls = log.read_bytes()
+        original_recovery = recovery.recover(
+            config, selection, owner_checkpoint=verify_owner, expires_at=expires_at,
+        )
+        assert original_recovery == recovery.read_recovery(config, selection, expires_at=expires_at)
+        assert original_recovery["disposition"] == "outcome-unknown"
+        assert log.read_bytes() == provider_calls
+
     asyncio.run(scenario())

@@ -105,11 +105,53 @@ the absence of a backoff field cannot establish the latest send's outcome.
 Completed independent members may still publish their already-valid facts.
 An unresolved operation blocks further provider acquisition for
 that account/API. It is not a timed lease: elapsed time is not proof of the
-provider's unknown throttle result or native settlement. This source slice
-provides no automatic pending-marker recovery or clearing command. Preserve
+provider's unknown throttle result or native settlement. There is no automatic
+pending-marker recovery or clearing command. Preserve
 the original state and custody for explicit owner-led reconciliation; do not
 strip the marker, select a different label/root, or retry scalar reads to
 bypass it. Other accounts/providers remain independent.
+
+## Explicit owner recovery API
+
+The opt-in Python API `snapshot_batch_recovery` implements
+`agent-pull-requests.snapshot-query-recovery/v1`. This is a policy transition
+for future observation, not proof that the original query was unsent,
+completed or joined. The embedding owner must have authority to accept
+retained uncertainty and must gracefully withdraw and join its current
+foreground/native scopes first. A vacant writer lock is not that proof.
+
+Construct `RecoverySelection(key, pending, recovery_id, "retain-unknown")`
+with the original 64-hex account/API scope, original 32-hex pending operation
+and a newly chosen stable 32-hex recovery identity. Call `recover(store,
+selection, lifecycle_checkpoint=..., expires_at=...)` only under the
+embedding owner's current lifecycle authority. The callback must refuse when
+that authority or its joined-current-owner condition no longer holds; it is
+checked within the existing ReplayStore transaction, including before commit.
+The exact original scope and pending fence must still match at mutation time.
+
+The atomic transition selects metadata version 2. It retains the old pending
+identity, original clock/backoff fields, recovery identity and recording time
+with disposition `outcome-unknown`, then clears only the selected current
+admission fence. Existing backoff never shortens; backward clocks, expiry,
+withdrawn lifecycle authority and mismatched fences refuse. Replay identities,
+other scopes and external accounting are unchanged. At most 64 recovery
+records are retained without eviction or expiry; capacity exhaustion refuses.
+New queries and their unknown outcomes/backoff remain independent.
+
+If a response is lost, call `read_recovery(store, selection,
+expires_at=...)` with the **original complete selection**. It reads without
+writing, even after another query becomes pending. Reusing an accepted recovery
+identity for another transition refuses rather than replaying mutation.
+
+The standalone adapter `agent_pull_requests_service.snapshot_batch_transition`
+exposes `recovery_contract()`, `recover(config, selection,
+owner_checkpoint=..., expires_at=...)` and matching `read_recovery`. It checks
+the executing Core capability, configured GitHub scope and existing owner
+volume, and holds the original service writer lease on its existing inode.
+Its embedding supervisor supplies the actual graceful-drain checkpoint.
+There is deliberately no command-line or HTTP recovery endpoint that could
+substitute lease vacancy for joined drain. Release, installation, supervisor
+adoption and live recovery each remain separate qualification gates.
 
 ## Provision, adoption and rollback
 
@@ -133,6 +175,9 @@ The same ledger then still fences shared-secondary and unresolved admissions,
 while REST may operate through a primary-only hold. Removing the metadata
 selection or using an older reader refuses the adopted envelope without
 rewriting it. Retain the compatible state/reader; no downgrade/reset is implied.
+After recovery selects version 2, a version-1-only batch reader also refuses
+without rewriting. Fresh provisioning and ordinary version-1 adoption remain
+unchanged until an explicit recovery transition.
 
 ## Evidence and limits
 

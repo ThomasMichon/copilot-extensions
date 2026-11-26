@@ -147,7 +147,9 @@ relabeled as a provider secondary limit, and no new ledger or poller is added.
 
 ## Proposed explicit unresolved-query recovery
 
-**Agent-recommended, review-first contract; not implemented.** An interrupted
+**Agent-recommended contract accepted in #14379; optional source implementation
+is undergoing validation and review. Release, installation and live adoption
+remain open.** An interrupted
 native observation can leave query admission fenced after the original result
 or cleanup receipt is lost. Preserve that uncertainty rather than infer an
 unsent or completed operation from elapsed time, missing metrics or a later
@@ -212,6 +214,15 @@ outcomes. Exercise the actual existing writer-lease/drain seam with isolated
 fixtures. Do not substitute an arbitrary minimum query duration or fabricated
 old receipt for the missing evidence. Native/installed/provider qualification
 stays outside the focused unit gate.
+
+The source implementation is documented in the
+[owner recovery API](../../../plugins/agent-pull-requests/docs/snapshot-batches.md#explicit-owner-recovery-api).
+It reuses the actual replay transaction and standalone writer lease; the
+embedding supervisor supplies proof of current graceful drain. No recovery CLI,
+HTTP mutation or automatic startup action is added. Source acceptance (S)
+requires ordinary review/merge; it cannot stand in for promoted release (R),
+executing-runtime/supervisor qualification (I), the authorized exact-fence
+transition or fresh provider-backed membership and fairness (L).
 
 ## Journal
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicit snapshot query recovery with the standalone writer lifecycle",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}
