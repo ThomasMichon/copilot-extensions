@@ -58,6 +58,56 @@ test("selected context diagnostics do not forward arbitrary errors or reason fie
   }
 });
 
+test("owner comparisons require the exact bounded schema and identity-refusal context", async () => {
+  const identity = { id: "match", name: "directory", source: "plugin", status: "running", pid: "match" };
+  for (const fields of [
+    { selectedContextReason: "plugin-missing", selectedContextPlugin: "connector",
+      selectedContextIdentity: identity },
+    { selectedContextReason: "extension-identity-mismatch", selectedContextPlugin: "driver",
+      selectedContextIdentity: identity },
+    ...[
+      { ...identity, source: "private-source" }, { ...identity, pid: "private-process" },
+      { ...identity, extra: "private-payload" }, { id: "match" }, ["private-payload"],
+      { ...identity, get source() { throw new Error("private observer failure"); } },
+    ].map((selectedContextIdentity) => ({
+      selectedContextReason: "extension-identity-mismatch", selectedContextPlugin: "connector",
+      selectedContextIdentity,
+    })),
+  ]) {
+    const f = fixture({ validateSendContext: async () => {
+      throw Object.assign(new Error("private observer payload"), fields);
+    } });
+    try {
+      const { error } = await f.prompt();
+      assert.equal(error.message, "Selected native execution context is unavailable; no input was dispatched " +
+        `[${fields.selectedContextReason}:${fields.selectedContextPlugin}]`);
+      assert.equal(f.sent.length, 0);
+    } finally { f.adapter.close(); }
+  }
+});
+
+test("owner comparisons serialize the same values that passed validation", async () => {
+  let reads = 0;
+  const identity = {
+    id: "match", name: "directory", status: "running", pid: "match",
+    get source() { return reads++ === 0 ? "plugin" : "private-observer-payload"; },
+  };
+  const f = fixture({ validateSendContext: async () => {
+    throw Object.assign(new Error("not forwarded"), {
+      selectedContextReason: "extension-identity-mismatch", selectedContextPlugin: "connector",
+      selectedContextIdentity: identity,
+    });
+  } });
+  try {
+    const { error } = await f.prompt();
+    assert.equal(error.message, "Selected native execution context is unavailable; no input was dispatched " +
+      "[extension-identity-mismatch:connector] " +
+      "[owner-checks id=match name=directory source=plugin status=running pid=match]");
+    assert.equal(reads, 1);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
 test("input takeover during asynchronous loadout validation prevents late native dispatch", async () => {
   let release;
   const validation = new Promise((resolve) => { release = resolve; });
