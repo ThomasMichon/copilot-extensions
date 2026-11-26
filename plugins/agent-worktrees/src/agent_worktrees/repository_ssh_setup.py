@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
 from contextlib import contextmanager
 import base64
 import binascii
@@ -16,6 +17,7 @@ import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
+from types import ModuleType
 
 from agent_procutil.owned_process import run_caller_owned
 
@@ -30,7 +32,7 @@ KEY_REFERENCE_CAPABILITY = "continuity-ssh-key-reference-v1"
 KEY_PIN_CAPABILITY = "continuity-ssh-key-pin-v1"
 
 
-def _installer():
+def _installer() -> ModuleType:
     helper = Path(__file__).parent / "_runtime_assets" / "scripts" / "install_source.py"
     protocol._plain(helper)
     if not helper.is_file():
@@ -48,7 +50,7 @@ def _installer():
     return module
 
 
-def _description(value: dict) -> dict:
+def _description(value: dict[str, Any]) -> dict[str, Any]:
     version = value.get("version")
     protocol._fields(value, {
         "schema", "version", "snapshot", "root", "selection", "request_digest", "host",
@@ -70,7 +72,7 @@ def _description(value: dict) -> dict:
     return value
 
 
-def key_binding(context, description: dict) -> None:
+def key_binding(context: Any, description: dict[str, Any]) -> None:
     selection = context.ssh_key
     directory = Path(selection.directory).expanduser()
     if description.get("key_files") != {
@@ -95,9 +97,9 @@ def _verify_vault_boundary(
 
 
 def _vault_call(
-    selection, arguments: list[str], *, timeout: int, invocation: VaultInvocation | None = None,
+    selection: Any, arguments: list[str], *, timeout: int, invocation: VaultInvocation | None = None,
     source: protocol.Setup | None = None, verify_source_after: bool = False,
-) -> tuple[int, dict]:
+) -> tuple[int, dict[str, Any]]:
     _verify_vault_boundary(source, invocation)
     environment = (
         dict(invocation.environment) if invocation is not None else protocol._environment(attended=False)
@@ -143,7 +145,9 @@ def _key_fingerprint(value: object) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
 
 
-def prepare_key(setup, context, description: dict, *, invocation=None) -> protocol.Outcome | None:
+def prepare_key(
+    setup: Any, context: Any, description: dict[str, Any], *, invocation: VaultInvocation | None = None,
+) -> protocol.Outcome | None:
     """Reuse the selected owning Vault before any new enrollment or installation."""
     selection = context.ssh_key
     key_binding(context, description)
@@ -235,13 +239,13 @@ def prepare_key(setup, context, description: dict, *, invocation=None) -> protoc
     return None
 
 
-def same_description(value: dict, description: dict) -> bool:
+def same_description(value: dict[str, Any], description: dict[str, Any]) -> bool:
     expected = {name: item for name, item in description.items() if name != "key_files"} | {"version": 1}
     return _description(value) == expected
 
 
 @contextmanager
-def selected_inputs(description: dict):
+def selected_inputs(description: dict[str, Any]) -> Iterator[tuple[ModuleType, Any]]:
     try:
         with _selected_inputs(description) as selected:
             yield selected
@@ -254,7 +258,7 @@ def selected_inputs(description: dict):
 
 
 @contextmanager
-def _selected_inputs(description: dict):
+def _selected_inputs(description: dict[str, Any]) -> Iterator[tuple[ModuleType, Any]]:
     """Keep the original complete Source/profile association through installation."""
     module = _installer()
     snapshot = Path(description["snapshot"])
@@ -285,10 +289,10 @@ def _selected_inputs(description: dict):
         yield module, selected
 
 
-def status(description: dict, module, *, require_ready: bool = False) -> bool:
+def status(description: dict[str, Any], module: Any, *, require_ready: bool = False) -> bool:
     from .repository_continuity import _invoke
 
-    def unavailable(stage):
+    def unavailable(stage: str) -> bool:
         if require_ready:
             raise protocol.SetupError("SSH application readiness refused: " + stage + ".")
         return False
@@ -320,7 +324,10 @@ def status(description: dict, module, *, require_ready: bool = False) -> bool:
     return True
 
 
-def run(setup, context, arguments: list[str], description: dict, *, apply: bool, invocation=None):
+def run(
+    setup: Any, context: Any, arguments: list[str], description: dict[str, Any], *,
+    apply: bool, invocation: VaultInvocation | None = None,
+) -> protocol.Outcome:
     from .repository_continuity import _invoke
 
     arguments = [*arguments, "--expected-request-digest", description["request_digest"]]

@@ -87,7 +87,7 @@ def test_key_application_joins_all_fresh_source_and_owner_barriers(
         return SimpleNamespace(returncode=0, stdout=json.dumps(value))
 
     monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
-    invocation = SimpleNamespace(argv=("peer-python",), environment={}, verify=owner_verify)
+    invocation: Any = SimpleNamespace(argv=("peer-python",), environment={}, verify=owner_verify)
     arguments = (
         SimpleNamespace(verify=source_verify), SimpleNamespace(ssh_key=selection), description,
     )
