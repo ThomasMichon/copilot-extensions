@@ -6727,8 +6727,9 @@ def main(argv: list[str] | None = None, *, publication: Publication | None = Non
 
 def console_entry() -> None:
     """Compatibility entry retaining the root's late-bound main callable."""
+    from .consumer_telemetry import instrument
     from .current_roster_entry import run_legacy_console
-    run_legacy_console(main)
+    run_legacy_console(instrument(main))
 
 
 def __getattr__(name: str) -> Any:
