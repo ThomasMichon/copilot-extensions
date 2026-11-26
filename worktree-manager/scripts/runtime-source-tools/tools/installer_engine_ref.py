@@ -69,6 +69,7 @@ STANDALONE_NATIVE_ADOPTERS = (
 )
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 STANDALONE_NATIVE_EXTRA_FILES = {
+    "plugins/agent-mcp": ("native_capture.sh",),
     "plugins/agent-machines": ("runtime_launcher.py",),
     "plugins/budget-guidance": (
         "bootstrap_uv_capture.py",
