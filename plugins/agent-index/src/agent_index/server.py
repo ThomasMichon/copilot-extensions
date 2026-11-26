@@ -862,8 +862,11 @@ def _clear_routing() -> None:
 
 
 @daemon_entrypoint("agent-index", source=__file__, purpose="production")
-def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
-    """Bind an OS-assigned local endpoint and run the service."""
+def serve(
+    cfg: Config | None = None, *, passive: bool = False,
+    point_service_factory: Callable[[], PointService] | None = None,
+) -> None:
+    """Run the service with an optional, initially paused point binding."""
     uvicorn = importlib.import_module("uvicorn")
 
     cfg = cfg or load_config()
@@ -886,7 +889,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
         )
     sock = _bind_listen_socket(cfg.host, cfg.port)
     bound_port = sock.getsockname()[1]
-    app = build_app(passive=passive)
+    app = build_app(passive=passive, point_service_factory=point_service_factory)
     if not passive:
         for name in (
             "AGENT_INDEX_CELL_TRANSACTION",

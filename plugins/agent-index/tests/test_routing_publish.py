@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from agent_index import server
 from agent_index.config import Config
+from agent_index.runtime_version import current_runtime_version
 
 
-def test_publish_and_clear_routing(monkeypatch, tmp_path) -> None:
+def test_publish_and_clear_routing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = []
 
-    def fake_publish(config_dir, **kwargs):
+    def fake_publish(config_dir: Path, **kwargs: Any) -> None:
         calls.append(("publish", config_dir, kwargs))
 
-    def fake_clear(config_dir, pid):
+    def fake_clear(config_dir: Path, pid: int) -> bool:
         calls.append(("clear", config_dir, {"pid": pid}))
         return True
 
@@ -34,10 +37,10 @@ def test_publish_and_clear_routing(monkeypatch, tmp_path) -> None:
     assert calls[1][0] == "clear"
 
 
-def test_passive_does_not_self_publish(monkeypatch, tmp_path) -> None:
+def test_passive_does_not_self_publish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = []
 
-    def fake_publish(_config_dir, **kwargs):
+    def fake_publish(_config_dir: Path, **kwargs: Any) -> None:
         calls.append(kwargs)
 
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
@@ -49,8 +52,8 @@ def test_passive_does_not_self_publish(monkeypatch, tmp_path) -> None:
 
 
 def test_namespaced_startup_cleans_owned_evidence_when_routing_publish_fails(
-    monkeypatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
     run_root = home / "run"
@@ -63,30 +66,32 @@ def test_namespaced_startup_cleans_owned_evidence_when_routing_publish_fails(
             installation_id="cell-a/agent-index",
             instance_token="instance-token",
             transaction_id=None,
-            runtime_version=server.current_runtime_version(),
+            runtime_version=current_runtime_version(),
             promoted=True,
         )
     )
-    monkeypatch.setattr(server, "build_app", lambda *, passive=False: app)
+    monkeypatch.setattr(
+        server, "build_app", lambda *, passive=False, point_service_factory=None: app,
+    )
 
     class _Socket:
         closed = False
 
         @staticmethod
-        def getsockname():
+        def getsockname() -> tuple[str, int]:
             return ("127.0.0.1", 4321)
 
-        def close(self):
+        def close(self) -> None:
             self.closed = True
 
     sock = _Socket()
     monkeypatch.setattr(server, "_bind_listen_socket", lambda *_args: sock)
 
     class _Server:
-        def __init__(self, _config):
+        def __init__(self, _config: Any) -> None:
             pass
 
-        def run(self, *, sockets):
+        def run(self, *, sockets: list[Any]) -> None:
             pytest.fail(f"server ran after routing publication failed: {sockets}")
 
     monkeypatch.setattr("uvicorn.Config", lambda *_args, **_kwargs: object())

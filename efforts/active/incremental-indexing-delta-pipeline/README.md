@@ -207,6 +207,8 @@ After the reviewed proposal, the operator admitted execution:
   retry. An explicit [service binding](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
   composes isolated exact-scope HTTP intake, the existing governed runner and
   joined client lifetime, with paused reconstruction and no ordinary activation.
+  The normal Python `server.serve` entrypoint accepts that same optional factory;
+  default CLI selection and explicit activation remain unchanged.
   Fresh entirely superseded claims can now select qualified higher-version
   completion before named-body acquisition; equal versions retain canonical
   comparison, mixed claims retain whole acquisition and existing pending work
@@ -359,12 +361,20 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-25 - Explicit point binding through service entry
+
+The [service-entry journal](journal/2026/11.25%20point-service-entry.md)
+records the existing factory's synchronous entrypoint composition, native
+active/passive startup and invalid-binding refusal. This is not a serialized
+selector, ordinary CLI migration, automatic activation or parent completion.
+
 ### 2026-11-25 - Native alias-revert recovery qualification
 
 The [native alias journal](journal/2026/11.25%20native-alias-recovery.md)
 records #14684's shared-store A/B/C control through separate actual workers,
-pre-acquisition refusal and explicit synthetic repair. It does not complete
-the broader source-ownership gate or either parent's ten open items.
+pre-acquisition refusal and explicit synthetic repair, merged in #14685.
+It does not complete the broader source-ownership gate or either parent's
+ten open items.
 
 ### 2026-11-25 - Bounded GitHub hinted acquisition
 
