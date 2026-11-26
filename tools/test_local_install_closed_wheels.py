@@ -15,11 +15,13 @@ import zipfile
 
 from packaging.markers import default_environment
 from packaging.tags import sys_tags
+from packaging.utils import canonicalize_name
 import pytest
 
 import local_install_closed_wheels as closed
 import local_install_profile as profiles
 import local_install_source as source
+from installer_wheel_inputs import inspect_archive
 from wheel_input_fixture import wheel_bytes as _wheel_bytes
 
 wheel_bytes = cast(Callable[..., bytes], _wheel_bytes)
@@ -207,6 +209,41 @@ def test_snapshot_retained_scope_refuses_changes_during_real_lock(
     monkeypatch.setattr(profiles, "_lock_application", lock)
     with pytest.raises((ValueError, RuntimeError), match="changed|differs|identity|digest"):
         closed.prepare(**application)
+
+
+@pytest.mark.parametrize("invalid_dependency", [False, True])
+def test_application_lookup_hints_do_not_replace_complete_wheel_inspection(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, invalid_dependency: bool,
+) -> None:
+    original_association = original_profile = inspect_archive
+    associated: list[str] = []
+    inspected: list[str] = []
+
+    def association(*args: Any, **kwargs: Any) -> Any:
+        facts = original_association(*args, **kwargs)
+        associated.append(canonicalize_name(facts.name))
+        return facts
+
+    def profile(*args: Any, **kwargs: Any) -> Any:
+        inspected.append(str(args[0].name))
+        return original_profile(*args, **kwargs)
+
+    monkeypatch.setattr(closed, "inspect_archive", association)
+    monkeypatch.setattr(profiles, "inspect_archive", profile)
+    if invalid_dependency:
+        path = application["archives"]["helper-1.0.0-py3-none-any.whl"]
+        path.write_bytes(b"not a wheel archive")
+        application["digests"][path.name] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        monkeypatch.setattr(
+            profiles, "_lock_application",
+            lambda *_args, **_kwargs: pytest.fail("invalid dependency reached application lock"),
+        )
+        with pytest.raises((ValueError, RuntimeError), match="archive|wheel|ZIP"):
+            closed.prepare(**application)
+    else:
+        closed.prepare(**application)
+    assert associated == ["demo-app"]
+    assert len(inspected) == 2
 
 
 @pytest.mark.parametrize("isolated_preparation", [False, True])

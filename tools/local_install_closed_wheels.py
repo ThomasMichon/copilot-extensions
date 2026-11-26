@@ -10,7 +10,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from packaging.utils import canonicalize_name
+from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import Version
 
 import local_install_source as source
@@ -75,6 +75,9 @@ def prepare(
         name = canonicalize_name(metadata["project"]["name"])
         associated: dict[str, Any] | None = None
         for filename, archive in retained.archives.items():
+            _check_deadline(deadline)
+            if canonicalize_name(parse_wheel_filename(filename)[0]) != name:
+                continue
             facts = inspect_archive(archive, limits=profiles.wheel_limits(), deadline=deadline)
             if canonicalize_name(facts.name) != name:
                 continue
