@@ -1810,6 +1810,13 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [later publisher and installed-TTY proposal](journal/2026/11.26-later-publisher-and-tty-occurrences.md)
+maps nineteen further independent OPEN cases into existing #7378/#11966
+before conditional tracking-only retirements. It preserves #13180's distinct
+120-second retained-asset read, six literal HTTP 403 observations and
+#13062's separate complete human diagnostic follow-up, without technical
+completion, execution or custody transfer.
+
 The [strict-import completion and thirteen-case continuation](journal/2026/11.26-strict-import-completion-and-thirteen-tty-cases.md)
 records #11506's independently audited finite `COMPLETED` disposition and
 thirteen audited tracking-only retirements after reviewed, whole accepted
