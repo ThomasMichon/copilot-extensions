@@ -191,6 +191,15 @@ def test_limited_drains_keep_the_remainder_pending(tmp_path: Path) -> None:
     assert hook_journal.drain(tmp_path) == []
 
 
+def test_a_torn_tail_never_absorbs_the_next_healthy_completion(tmp_path: Path) -> None:
+    _finish_runs(tmp_path, 1)
+    with (tmp_path / "pending.jsonl").open("ab") as stream:
+        stream.write(b'{"kind":"hook","plugin":"agent-va')  # an interrupted writer
+    _finish_runs(tmp_path, 1)
+    assert [event["run_sequence"] for event in hook_journal.drain(tmp_path)] == [1, 2]
+    assert hook_journal.drain(tmp_path) == []
+
+
 def test_drain_waits_out_an_in_progress_append_without_losing_it(tmp_path: Path) -> None:
     _finish_runs(tmp_path, 1)
     with hook_journal._journal_lock(tmp_path) as held:

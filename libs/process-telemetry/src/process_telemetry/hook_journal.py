@@ -137,10 +137,20 @@ def _append_held(directory: Path, events: list[dict[str, Any]]) -> bool:
         size = path.stat().st_size
     except FileNotFoundError:
         size = 0
+    if size and not _ends_with_newline(path, size):
+        # A torn tail from an interrupted writer must stay its own (invalid)
+        # line rather than absorb this healthy record.
+        data = b"\n" + data
     if size + len(data) > PENDING_LIMIT:
         return False
     append_bytes(path, data, mode=0o600)
     return True
+
+
+def _ends_with_newline(path: Path, size: int) -> bool:
+    with path.open("rb") as stream:
+        stream.seek(size - 1)
+        return stream.read(1) == b"\n"
 
 
 def _append(directory: Path, event: dict[str, Any]) -> bool:
