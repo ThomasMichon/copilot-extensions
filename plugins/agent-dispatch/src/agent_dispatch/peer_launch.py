@@ -18,7 +18,10 @@ import sys
 import threading
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future, ThreadPoolExecutor
 
 CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 PEERS = {
@@ -543,6 +546,7 @@ def validate_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, An
 def _resolve_peer_observation(
     owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
     pinned_python: Path | None = None,
+    workers: ThreadPoolExecutor | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, str], Path | None]:
     """Return both owners from one fresh before/after peer observation."""
     if plugin not in PEERS:
@@ -576,12 +580,27 @@ def _resolve_peer_observation(
         if python is None:
             raise support.ProbeContractError("Peer probe requires a qualified installed interpreter.")
         support.runtime_contract(python, PEERS[plugin], plugin=plugin)
-    if (
-        validate_owner(owner, own_root, raw_context) != own
-        or _active_context(peer_primitive, peer_receipt, durable, plugin,
-                           cell, environment) != peer
-        or _governance(peer_primitive, peer, durable, environment) != before
-    ):
+    if workers is None:
+        unchanged = (
+            validate_owner(owner, own_root, raw_context) == own
+            and _active_context(peer_primitive, peer_receipt, durable, plugin,
+                                cell, environment) == peer
+            and _governance(peer_primitive, peer, durable, environment) == before
+        )
+    else:
+        from concurrent.futures import wait
+        from contextvars import copy_context
+
+        checks: list[Future[dict[str, Any]]] = []
+        try:
+            checks.append(workers.submit(copy_context().run, validate_owner, owner, own_root, raw_context))
+            checks.append(workers.submit(copy_context().run, _active_context, peer_primitive,
+                                         peer_receipt, durable, plugin, cell, environment))
+            checks.append(workers.submit(copy_context().run, _governance, peer_primitive, peer, durable, environment))
+        finally:
+            wait(checks)
+        unchanged = checks[0].result() == own and checks[1].result() == peer and checks[2].result() == before
+    if not unchanged:
         raise ValueError("Installation governance changed during peer resolution")
     if pinned_python is None and not allow_native and _peer_python_inprocess(peer) != python:
         raise ValueError("Peer runtime selection changed during observation")

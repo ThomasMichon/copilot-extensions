@@ -113,6 +113,16 @@ are normalized to context refusal; interruption exceptions still propagate.
 The same refusal normalization covers installation-context primitive and
 fragment initialization, before owner or peer validation can consume that code.
 
+An in-process caller may lend an existing finite executor to a peer observation.
+Only the final independent owner, shipped-peer receipt and peer-governance
+readbacks overlap, each under a fresh copied context. All started work settles
+before results are consumed in their original priority, followed by the final
+runtime-selection check. Initial checks, observation boundaries and refusal
+semantics remain unchanged. The observer neither creates an executor nor retains
+accepted results. Repository Vault selection uses its operation's existing
+Source executor; callers without one and standalone children stay serial and
+do not import executor machinery on that route.
+
 Normal POSIX venv
 interpreter symlinks remain supported. This boundary does not provision,
 activate, or impose exemplar-only snapshot/completion receipt contracts.
