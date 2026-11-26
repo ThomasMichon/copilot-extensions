@@ -80,6 +80,7 @@ def prepare_application(uv: Path, application: Path, slot: Path, env: dict[str, 
         "'argv':sys.argv[1:],'stdin':sys.stdin.read(),'cwd':os.getcwd(),"
         "'root':os.environ.get('AGENT_RT_ROOT'),"
         "'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT'),"
+        "'transport_keys':[key for key in os.environ if key.startswith('COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_')],"
         "'selector':os.environ.get('UV_PYTHON')}\n"
         "Path(os.environ['APPLICATION_PROOF']).write_text(json.dumps(value),encoding='utf-8')\n"
         "print('application stdout')\nprint('application stderr',file=sys.stderr)\nraise SystemExit(37)\n",

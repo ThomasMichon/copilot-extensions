@@ -34,6 +34,7 @@ prepared_python = _fixture.prepared_python
 @pytest.mark.parametrize("scenario", [
     "current", "lkg", "newest", "cell", "cell-changed", "missing-uv",
     "missing-provider", "missing-capture", "cell-missing-bootstrap", "cell-missing-admission",
+    "long-body", "cell-long-body",
 ])
 @pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
 def test_ready_command_admits_exact_prepared_application(
@@ -161,6 +162,8 @@ def test_ready_command_admits_exact_prepared_application(
     elif scenario == "cell-missing-admission":
         admission.rename(admission.with_suffix(".unavailable"))
     arguments = ["inspect", "space value", 'quote"value', "", "end\\", "\u03bb", "1234", "True"]
+    if scenario.endswith("long-body"):
+        arguments[-2:-2] = ["--body", "x" * 8000 + "\U0001f642" * 1000 + "y" * 16000]
     command = [shell, str(payload / "bin/agent-pull-requests"), *arguments]
     descriptors = tmp_path / "inherited-fds"
     if host == "bash" and scenario == "current":
@@ -178,13 +181,16 @@ def test_ready_command_admits_exact_prepared_application(
         quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments[:-2])
         harness.write_text(
             "$PSNativeCommandArgumentPassing='Legacy'\n"
+            "$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0='caller-owned'\n"
             f"$port=1234\n$enabled=$true\n$forward=@({quoted}) + @($port,$enabled)\n"
             f"& '{str(payload / 'bin/agent-pull-requests.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
-            "exit $LASTEXITCODE\n", encoding="utf-8-sig",
+            "$code=$LASTEXITCODE\n"
+            "if ($env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0 -cne 'caller-owned') { throw 'caller argument environment changed' }\n"
+            "exit $code\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]
     original_slot, original_payload = snapshot(slot), snapshot(payload)
-    positive = scenario in ("current", "lkg", "newest", "cell")
+    positive = scenario in ("current", "lkg", "newest", "cell", "long-body", "cell-long-body")
     application_lookup = f"python find --no-project --managed-python --no-python-downloads {python}"
     bootstrap_lookup = (
         "python find --no-project --system --managed-python --no-python-downloads "
@@ -215,7 +221,7 @@ def test_ready_command_admits_exact_prepared_application(
             "python": str(python), "prefix": str(slot), "version": [3, 10, 20],
             "argv": arguments, "stdin": "foreground input\n", "cwd": str(tmp_path),
             "root": str(root), "context": str(context) if cell else None,
-            "selector": "unrelated-python",
+            "selector": "unrelated-python", "transport_keys": [],
         }
         if cell:
             assert json.loads(bootstrap_proof.read_text(encoding="utf-8")) == {

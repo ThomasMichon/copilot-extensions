@@ -48,14 +48,38 @@ function Invoke-PythonEntry {
     $ErrorActionPreference = 'Continue'
     if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
         $json = ConvertTo-Json -InputObject @($Arguments) -Compress
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
-        if ($ScriptEntry) {
-            $entry = "import base64,json,runpy,sys;script=sys.argv[1];sys.argv=[script,'--']+json.loads(base64.b64decode(sys.argv[2]));runpy.run_path(script,run_name='__main__')"
-            & $Python -I -c $entry $Target $encoded
-        } else {
-            $entry = "import base64,json,runpy,sys;module=sys.argv[1];sys.argv=[module]+json.loads(base64.b64decode(sys.argv[2]));runpy.run_module(module,run_name='__main__',alter_sys=True)"
-            & $Python -c $entry $Target $encoded
+        $previous = @{}
+        $count = 0
+        try {
+            for ($offset = 0; $offset -lt $json.Length; $offset += $length) {
+                $length = [Math]::Min(8192, $json.Length - $offset)
+                # Keep UTF-16 surrogate pairs within the same environment value.
+                if ($offset + $length -lt $json.Length -and
+                    [char]::IsHighSurrogate($json[$offset + $length - 1])) {
+                    $length--
+                }
+                $name = 'COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_' + $count
+                $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+                [Environment]::SetEnvironmentVariable($name, $json.Substring($offset, $length), 'Process')
+                $count++
+            }
+            $decode = "arguments=json.loads(''.join(os.environ.pop('COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_'+str(i)) for i in range(int(sys.argv[2]))));"
+            if ($ScriptEntry) {
+                $entry = 'import json,os,runpy,sys;script=sys.argv[1];' + $decode +
+                    "sys.argv=[script,'--']+arguments;runpy.run_path(script,run_name='__main__')"
+                & $Python -I -c $entry $Target $count
+            } else {
+                $entry = 'import json,os,runpy,sys;module=sys.argv[1];' + $decode +
+                    "sys.argv=[module]+arguments;runpy.run_module(module,run_name='__main__',alter_sys=True)"
+                & $Python -c $entry $Target $count
+            }
+            $invocationExit = $LASTEXITCODE
+        } finally {
+            foreach ($name in $previous.Keys) {
+                [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
+            }
         }
+        exit $invocationExit
     } elseif ($ScriptEntry) {
         & $Python -I $Target -- @Arguments
     } else {
