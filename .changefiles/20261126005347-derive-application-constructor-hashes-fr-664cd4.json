@@ -1,5 +1,5 @@
 {
-  "comment": "Derive application constructor hashes from one fresh Source observation.",
+  "comment": "Derive application constructor facts from one fresh Source observation and share invocation-owned closed-wheel Source preparation without caching accepted state.",
   "changes": [
     {
       "plugin": "agent-bridge",

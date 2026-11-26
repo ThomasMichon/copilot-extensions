@@ -7023,9 +7023,13 @@ data under the same owned, isolated candidate interpreter. It runs only for
 fresh construction, before the installed-origin/full-surface health gate and
 immutable completion publication; exact reuse never reruns it. It receives
 the `frozen_plugin` field as a pristine, verified source snapshot held by the
-candidate owner through preparation and health. It is separate from UV's
+candidate owner through preparation and health. Ordinary source keeps it
+separate from UV's
 retained build projection, whose dependency metadata may be rewritten to
-disable editable installation. Payload preparation must not copy that build
+disable editable installation. Explicit closed-wheel Source does not rewrite
+that metadata, so its invocation-owned retained copy also serves as the original
+snapshot; content, graph and Source-pin checks still surround the callback.
+Payload preparation must not copy a rewritten build
 projection into an identity-qualified payload or return to live source inputs.
 Both snapshot content and selected source identity are revalidated around the
 callback; installed-origin checks continue to attest the actual UV build inputs.
