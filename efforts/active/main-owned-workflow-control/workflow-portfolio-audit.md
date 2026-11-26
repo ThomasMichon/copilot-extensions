@@ -28,6 +28,14 @@ typing pass. Current-head review, fresh full CI, normal merge and independent
 persistence remain. This is not parent completion,
 native qualification or a measured whole-flow savings claim.
 
+After #14683 publication, a Bridge merge adds seventeen cases and refreshes
+four existing bindings. Semantic reconciliation preserves the entire peer
+inventory and applies only our qualified 128-case/four-binding delta.
+The complete 27-source observed-input union remains exact without local replay.
+The final union is 10,576 nodes, 1,508 sources, 549 targets, 92 helpers,
+300 seconds and 712,076 bytes. Fresh current-head review, full CI, merge
+and persistent verification remain.
+
 ## November 26 original pure registry projections
 
 The adapter exports eleven entire original normalization/selection functions

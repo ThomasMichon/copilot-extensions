@@ -512,6 +512,12 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   300 seconds and 711,753 bytes. All preceding inventory and hashes remain;
   fatal Ruff and whole-file strict Linux/Windows typing pass. Current-head
   review, fresh full CI, normal merge and persistence remain.
+  Publication #14683 conflicts with a subsequent Bridge merge.
+  Reconciliation preserves all seventeen peer cases and four peer binding
+  refreshes; the complete 27-source observed-input union remains unchanged,
+  without trial replay. Final inventory is 10,576 nodes, 1,508 sources,
+  549 targets and 712,076 bytes, with the same helpers/deadline. Fresh
+  current-head review and complete hosted CI must qualify this union.
 - [x] Qualify original pure registry projections through eleven complete
   functions and the entire `TestMachineName` and `TestFindMachineEntry`
   classes. Preserve original classes/methods, code/global origins, fixtures,
