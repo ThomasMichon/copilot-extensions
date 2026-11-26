@@ -53,6 +53,18 @@ session-to-log pipeline out of any single bespoke service:
   [usage evidence](docs/usage-evidence.md) and
   [transcript estimation](docs/usage-estimation.md).
 
+## Foreground command admission
+
+The six payload-local commands select a completed owning runtime read-only,
+then admit its exact interpreter through PATH-resolved UV with managed-only
+selection, project discovery disabled and downloads forbidden. Ambient Python,
+virtual environments and UV Python selectors cannot redirect the application.
+Missing UV or admission support refuses before application Python and requires
+explicit setup. The native installation-context evaluator, command/module
+allowlist, scoped installation environment and existing first-use eligibility
+remain authoritative. This exact-runtime admission is not the complete
+independently declared project/environment launcher contract.
+
 ## Windows scheduling
 
 The task enters the canonical native GUI finite-task host, then the
