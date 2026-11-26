@@ -30,6 +30,16 @@ def load(name: str) -> ModuleType:
     return module
 
 
+def test_native_guard_proof_matches_current_source_contract() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "promotion_native_read_contract", ROOT / "tools/render-hook-read-policy.py",
+    )
+    assert spec and spec.loader
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    assert (SCRIPTS / "hook-read-policy.json").read_text("utf-8") == renderer.render()
+
+
 def merge(current: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], load("hook_client.py")._merge_pre_decisions(current, new))
 

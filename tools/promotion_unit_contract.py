@@ -94,6 +94,7 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "plugins/agent-worktrees/scripts/install.sh",
     "plugins/agent-worktrees/scripts/install.ps1",
     "plugins/agent-worktrees/scripts/pre-tool-hook.ps1",
+    "plugins/agent-worktrees/scripts/hook-read-policy.json",
     "plugins/agent-vault/scripts/installer-engine.sh",
     "plugins/agent-vault/scripts/installer-engine.ps1",
     "plugins/agent-ssh/scripts/installer-engine.sh",
