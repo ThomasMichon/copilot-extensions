@@ -211,9 +211,11 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   valid owned source bindings and the 300-second budget. The opt-in caller
   is source-released. Stop/end selectors, default lifecycle migration,
   full-flow qualification and installed adoption are not complete.
-  The ordinary resume default follow-up uses the common selector in both
-  hosting modes and refuses a changed head. Its publication, qualification
-  and release gates remain open.
+  Ordinary resume defaults merge in #14739 on November 26 at 13:02:42 UTC as
+  `559d355878703d9290e5db28df54902bc9c4d307`, after current-head approval,
+  resolved threads, required source CI and both native OS jobs. All 13
+  published files match the confirmed squash merge. The caller uses the
+  common selector in both hosting modes and refuses a changed head.
   Existing strict and hosting-fenced forms keep their original selectors
   without a Dispatch update or new child environment. This preserves running,
   older and rolled-back producers while unqualified ordinary resume uses the
@@ -221,7 +223,13 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   generated singleton-profile recovery hints select legacy matching.
   All 267 focused source-effect controls pass without forbidden effects.
   The five Python files in the reduced final diff pass whole-file strict
-  checks for Linux and Windows. Publication and final hosted gates remain open.
+  checks for Linux and Windows. The final manifest retains all 11,183 target
+  nodes in order and adds 21 controls under the unchanged budget. Normal
+  source release is verified in Main
+  `c13efa6353e358323d27e6becaf70fd9c9e6b810`, Bridge `0.9.578-dev1`,
+  after successful promotion `45826076819`. All nine released content files
+  match, with the complete 11,204-node census, order, owned source bindings
+  and 300-second budget preserved. No installed adoption is claimed.
 - **Return:** finish the remaining selector, guarded lifecycle, qualification
   and release gates below, then return the driving worktree to its retained
   earlier objectives. Do not equate this source slice with receiving recovery.
@@ -557,11 +565,15 @@ Installed fleet adoption is not claimed.
   published blobs match the merge. All ten released content paths match Main
   `ddf9a6ee0681`, Bridge `0.9.575-dev1`, with the complete original admission
   census and order preserved. No local rollout is authorized.
-- [ ] Qualify and release ordinary resume defaults over the exact provider,
+- [x] Qualify and release ordinary resume defaults over the exact provider,
   preserving explicit legacy selection, specialized writer/recovery contracts,
   the hosting choice and existing programmatic retained-resume producers.
-  Local consumer, strict, source-effect and static checks pass; publication,
-  exact-head required CI, native OS qualification and release remain open.
+  #14739 merges as `559d35587870` after current-head approval, resolved threads,
+  both exact-source CI runs and both native OS jobs. All 13 published files
+  match the merge. Local consumer, strict, source-effect and static checks
+  pass. All nine released content paths match Main `c13efa6353e3`, Bridge
+  `0.9.578-dev1`, after normal promotion `45826076819`; the complete
+  11,204-node admission census and order remain preserved.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Local and explicit-host observations and sends, including ordinary defaults,
@@ -588,6 +600,12 @@ Installed fleet adoption is not claimed.
   refusal. Do not select result-owner IDs from a different host's merged row.
   Legacy history, event-cursor, attention and workspace
   following remain unchanged until their replacement contracts are ready.
+- [ ] Qualify and release the provider-first exact local managed stop operation.
+  Bind the persisted, in-memory and live-client native identities under the
+  existing lifecycle owner; preserve workspace, history, pending prompts,
+  background-work refusal and unknown teardown outcomes. The additive HTTP
+  provider does not migrate CLI callers, reclaim Hosts or implement durable
+  placement release.
 - [ ] Separate potential placements from bridges, including empty worktrees,
   eligible roots, containers, CodeSpaces, configured ACP hosts and external
   endpoints, with occupancy and allocation behavior visible.
@@ -680,6 +698,7 @@ not another permanent public discovery path.
 Dated pages retain every original journal entry.
 
 - [2026-11-26](journal/2026/11.26-identity-pinned-resume.md) - Exact-resume merge, qualification and source-release return.
+- [2026-11-26](journal/2026/11.26-exact-managed-stop.md) - Exact managed-stop qualification and unknown teardown boundaries.
 - [2026-11-25](journal/2026/11.25-default-selection-review.md) - Default-selector review corrections and consumer qualification.
 - [2026-11-24](journal/2026/11.24-remote-results-and-validation.md) - Result bounds, delivery and validation.
 - [2026-11-23](journal/2026/11.23-exact-observations-and-sends.md) - Exact inspection, observations and sends.

@@ -1,0 +1,9 @@
+{
+  "comment": "Add identity-pinned local managed stop with retained state and truthful unknown outcomes",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

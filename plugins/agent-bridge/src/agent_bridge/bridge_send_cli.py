@@ -200,7 +200,10 @@ def _proven_managed_refusal(exc: Exception, session_id: str) -> bool:
         or status == 409
         and (
             detail.startswith(
-                ("expected_native_mismatch:", "session_stopped:", "session_not_running:")
+                (
+                    "expected_native_mismatch:", "session_stopped:", "session_not_running:",
+                    "exact_stop_requires_resume:",
+                )
             )
             or detail.startswith(f"Session {session_id} is ")
             and detail.endswith(", not idle")

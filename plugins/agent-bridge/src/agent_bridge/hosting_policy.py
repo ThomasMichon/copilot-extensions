@@ -9,7 +9,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from repository_policy import AgentHostingError, require_agent_hosting, validate_hosting_result
 
@@ -41,9 +41,16 @@ class SessionHostingFence:
         )
 
     def changed(self, manager: SessionManager) -> bool:
+        from .managed_stop_state import TOKEN_FAMILY, manual_resume_admitted
+
         return (
             manager._sessions.get(self.session.session_id) is not self.session
-            or self.session._stop_requested
+            or (
+                self.session._stop_requested or self.stop_token is not None
+                and self.stop_token.startswith(TOKEN_FAMILY)
+            ) and not manual_resume_admitted(
+                manager, self.session.session_id, self.stop_token,
+            )
             or self.capture(manager, self.session) != self
         )
 
@@ -113,7 +120,7 @@ async def _resume_codespace_selection(
     allow_missing: bool = False,
 ) -> tuple[CliNamespaceResolver, SpawnTarget] | None:
     from .agent_registry_namespace import CliNamespaceResolver
-    from .models import SessionStatus
+    from .session_status import SessionStatus
 
     metadata = session.target.codespace or {}
     name = metadata.get("name")
@@ -147,8 +154,9 @@ def _retained_receiving_target(retained: SpawnTarget, candidate: SpawnTarget) ->
     metadata = retained.codespace or {}
     negotiated = dict(metadata)
     negotiated.pop("portable_receiving_policy", None)
-    if "portable_receiving_policy" in (candidate.codespace or {}):
-        negotiated["portable_receiving_policy"] = candidate.codespace["portable_receiving_policy"]
+    candidate_metadata = candidate.codespace or {}
+    if "portable_receiving_policy" in candidate_metadata:
+        negotiated["portable_receiving_policy"] = candidate_metadata["portable_receiving_policy"]
     return replace(retained, codespace=negotiated)
 
 
@@ -269,7 +277,7 @@ async def resolve_project_cwd(target: SpawnTarget) -> str:
         policy_check_args(None, worktree_id=target.worktree_id), target.project,
     )
     validate_policy_result(result)
-    return result["repository"]
+    return cast(str, result["repository"])
 
 
 def policy_check_args(
@@ -297,6 +305,7 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
     """Read the actual receiving owner without starting an agent channel."""
     if not target.host or not target.project:
         raise unsupported_receiver("SSH without an execution owner", operation=operation)
+    host = target.host
     from ssh_manager import SSHProfileResolutionError, SSHProfileSource, get_default_manager
 
     from .worktree_owner_operation import owner_ssh_command
@@ -313,10 +322,10 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
 
     async def read_policy() -> CommandResult:
         await manager.ensure_connected(
-            target.host, SSHProfileSource(host_alias=target.host, resolve_timeout=30),
+            host, SSHProfileSource(host_alias=host, resolve_timeout=30),
             preserve_existing_forwards=True,
         )
-        return await manager.exec_command(target.host, command, timeout=30)
+        return await manager.exec_command(host, command, timeout=30)
 
     try:
         result = await asyncio.wait_for(read_policy(), timeout=30)
@@ -332,7 +341,7 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
         payload = json.loads(result.stdout)
     except (TypeError, ValueError) as exc:
         raise unsupported_receiver("SSH policy check", operation=operation) from exc
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 async def require_owner_hosting(

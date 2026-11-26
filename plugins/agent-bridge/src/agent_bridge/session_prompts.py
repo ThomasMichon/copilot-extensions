@@ -122,6 +122,10 @@ class _SessionPromptMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .managed_stop_state import prompt_fenced
+
+        if prompt_fenced(self, session_id):
+            raise ValueError("exact_stop_requires_resume: Exact stop requires explicit resume")
         assert_prompt_allowed(self._db, session_id, delivery_id)
         if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
             raise ValueError(
@@ -338,6 +342,10 @@ class _SessionPromptMixin:
         respawns: each of those would undo a stop racing this admission."""
         self = cast("SessionManager", self)
         session_id = session.session_id
+        from .managed_stop_state import prompt_fenced
+
+        if prompt_fenced(self, session_id):
+            raise ValueError("exact_stop_requires_resume: Exact stop requires explicit resume")
 
         # Context-pressure handoff (opt-in, prompt-triggered): a prompt into an
         # already-saturated session that is idle rolls the worktree to a fresh
@@ -442,6 +450,10 @@ class _SessionPromptMixin:
         leaves the rows durably queued for the next resume/settle, never lost.
         """
         self = cast("SessionManager", self)
+        from .managed_stop_state import prompt_fenced
+
+        if prompt_fenced(self, session.session_id):
+            return
         try:
             if (session.status == SessionStatus.IDLE
                     and session.client and session.client.is_running):
@@ -474,6 +486,10 @@ class _SessionPromptMixin:
     async def _drain_pending_prompts_locked(self, session: Session) -> None:
         """Submit one queued prompt while teardown is excluded."""
         self = cast("SessionManager", self)
+        from .managed_stop_state import prompt_fenced
+
+        if prompt_fenced(self, session.session_id):
+            return
         if session.status != SessionStatus.IDLE:
             return
         if not (session.client and session.client.is_running):
@@ -562,10 +578,16 @@ class _SessionPromptMixin:
         try:
             if session.client is None:
                 raise RuntimeError("Prompt consumer has no client")
+            from .managed_stop_state import begin_prompt, record_completion
+
+            consumer = session.client if native_attempt is None else native_attempt.owner.client
+            begin_prompt(consumer)
             result = await (
-                session.client.send_prompt(prompt) if native_attempt is None
-                else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
+                consumer.send_prompt(prompt) if native_attempt is None
+                else consumer.send_prompt(prompt, native_attempt=native_attempt)
             )
+            if session.client is consumer:
+                record_completion(consumer)
 
             # Persist completed turn
             self._db.update_turn(
