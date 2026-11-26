@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-process-telemetry"
+version = "0.1.10-dev1"
+description = "Optional bounded diagnostic emission through existing callable sinks"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["agent-configuration-layers"]
+
+[project.optional-dependencies]
+command = ["agent-procutil"]
+command-errors = ["agent-procutil", "agent-single-instance-lease"]
+otlp = [
+    "opentelemetry-sdk>=1.45.1,<2",
+    "opentelemetry-exporter-otlp-proto-common>=1.45.1,<2",
+    "opentelemetry-proto>=1.45.1,<2",
+]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.sources]
+agent-procutil = { path = "../agent-procutil" }
+agent-configuration-layers = { path = "../configuration-layers" }
+agent-single-instance-lease = { path = "../single-instance-lease" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+process_telemetry = ["native/*.sh", "native/*.ps1", "native/*.tsv"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99

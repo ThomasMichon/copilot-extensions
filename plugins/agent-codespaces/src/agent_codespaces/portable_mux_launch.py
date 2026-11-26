@@ -8,6 +8,7 @@ import json
 from pathlib import PurePosixPath
 import shlex
 import subprocess
+from typing import Any, Callable
 import uuid
 
 from repository_policy import validate_hosting_result
@@ -16,6 +17,7 @@ from venue_copilot import (
     SESSION_SELECTORS, await_claim, last_json, live_session_for,
     read_seed, release_cli_mode, reserve_with_retry,
 )
+from venue_copilot.models import model_copilot_args
 from venue_copilot.portable_mux import MuxEndpoint
 from venue_copilot.refs import (
     owned_delivery_journal, owned_result, reconcile_owned_delivery, require_cli_context,
@@ -24,25 +26,24 @@ from venue_copilot.refs import (
 from . import connection_owner as owner
 from .bridge_receiving import BridgeReceiving
 from .copilot_detach_startup import ssh_namespace
-from .model_launch import model_copilot_args
 from .portable_mux_control import require_owner, retained_endpoint
 
 KIND = "portable-mux-launch"
 
 
-def _wire(bridge: BridgeReceiving, request: dict) -> tuple[str, bytes]:
+def _wire(bridge: BridgeReceiving, request: dict[str, Any]) -> tuple[str, bytes]:
     command, payload = bridge.launch(request)
     if json.loads(payload)["request"]["policy_context"] != bridge.policy_context:
         raise ValueError("Selected Bridge receiving context changed during preparation")
     return command, payload
 
 
-def _plan_endpoint(plan: dict, endpoint: MuxEndpoint) -> None:
+def _plan_endpoint(plan: dict[str, Any], endpoint: MuxEndpoint) -> None:
     plan["mux_session"] = endpoint.mux_session
     plan["venue"].update(mux_session_name=endpoint.mux_session, mux_endpoint=endpoint.record())
 
 
-def _probe(name, workspace, context, remote) -> str:
+def _probe(name: str, workspace: str, context: str, remote: Callable[..., Any]) -> str:
     command, payload = build_receiving_policy_check(workspace, context)
     result = remote(name, command, input_bytes=payload, timeout=90)
     if result is None or result[0]:
@@ -55,13 +56,16 @@ def _probe(name, workspace, context, remote) -> str:
     )
     if result is None or result[0]:
         raise RuntimeError("Cannot resolve the selected receiving state directory")
-    root = result[1].strip()
+    root = str(result[1]).strip()
     if not PurePosixPath(root).is_absolute() or "\0" in root or "\n" in root:
         raise RuntimeError("Invalid receiving state directory")
     return root
 
 
-def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
+def cmd_launch(
+    args: Any, plan: dict[str, Any], config: Any, codespace: Any, *, ssh_session: Callable[..., int],
+) -> int:
+    from . import consumer_telemetry as ct
     from .copilot_detach import (
         _BUSY_EXIT, _commands, _fail, _progress, _remote, _send_refs,
         _int_port_map, _local_forwards_ready, _pending_local_forwards,
@@ -84,7 +88,13 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
         given = list(getattr(args, "copilot_args", None) or [])
         if any(arg.split("=", 1)[0] in SESSION_SELECTORS for arg in given):
             raise ValueError("Portable launch retains its own native session identity; use rejoin")
-        seed = read_seed(args)
+        ct.begin("seed_validation")
+        try:
+            seed = read_seed(args)
+        except (OSError, ValueError) as exc:
+            ct.fail("seed_too_long" if "(max" in str(exc) else "seed_invalid")
+            raise
+        ct.succeed()
         if pending and (seed or getattr(args, "ref_files", None) or given):
             raise ValueError("Recover the original portable attempt without replacing its inputs")
         local = parse_local_forwards(getattr(args, "local_forwards", None) or [])
@@ -127,11 +137,15 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
                 "native": None, "socket_identity": None,
             })
         _plan_endpoint(plan, endpoint)
+        requested: dict[str, Any] = {}
+        if local:
+            requested["local_forwards"] = local
+        if reverse:
+            requested["reverse_forwards"] = reverse
         owner.hold(
             args.name, plan["tenant"], daemon_port=daemon_port,
             mux_session=endpoint.mux_session, mux_endpoint=endpoint.record(), fresh=new,
-            **({"local_forwards": local} if local else {}),
-            **({"reverse_forwards": reverse} if reverse else {}),
+            **requested,
         )
         # From here, neither a failed registration nor unknown native creation
         # may drop the session tenant or invoke the legacy default-socket kill.
@@ -143,7 +157,8 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
                 if getattr(args, "ref_files", None):
                     from venue_copilot.refs import upload_for
 
-                    note = _send_refs(args.name, upload_for(args.ref_files, plan["scope_id"]))
+                    upload = upload_for(args.ref_files, plan["scope_id"])
+                    note = _send_refs(args.name, upload) if upload is not None else None
                     if note is None:
                         raise RuntimeError("Could not copy the portable launch references")
                     seed = f"{seed.rstrip()}\n\n{note}" if seed else note
@@ -163,9 +178,10 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
                     "operation": reservation["reservation_id"],
                 }
                 owner.record_pending_delivery(args.name, plan["tenant"], journal)
-            captured = {}
+            captured: dict[str, Any] = {}
+            launching: MuxEndpoint = endpoint
 
-            def builder(plugin_dirs):
+            def builder(plugin_dirs: list[str]) -> str:
                 context = require_cli_context(captured["prepared"]["plugin_context"])
                 if context["cwd"] != journal["workspace"]:
                     raise ValueError("Prepared execution checkout differs from the original portable launch")
@@ -182,13 +198,14 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
                     journal.update(request=request, payload_sha256=digest, phase="submitted")
                     captured["stdin"] = payload
                 else:
-                    command = endpoint.command("observe")
+                    command = launching.command("observe")
                 owner.record_pending_delivery(args.name, plan["tenant"], journal)
                 return command
 
-            def sink(result):
+            def sink(result: Any) -> int:
                 captured["result"] = result
-                return result.exit_code
+                code: int = result.exit_code
+                return code
 
             captured["prepared"] = {}
             ssh_args = ssh_namespace(args, "portable receiving", timeout=args.register_timeout + 300)
@@ -224,15 +241,22 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
                 args.name, plan["tenant"], daemon_port=daemon_port,
                 mux_session=endpoint.mux_session, mux_endpoint=endpoint.record(), confirmed=True,
             )
-            live = live_session_for(plan["scope_id"], run=bridge.run, strict=True)
-            session_id = live.get("session_id") if live.get("status") == "live" else None
-            if not session_id:
-                session_id = await_claim(
-                    plan["scope_id"], journal["reservation"]["reservation_id"],
-                    args.register_timeout, run=bridge.run,
-                )
+            ct.begin("bridge_registration")
+            try:
+                live = live_session_for(plan["scope_id"], run=bridge.run, strict=True)
+                session_id = live.get("session_id") if live.get("status") == "live" else None
+                if not session_id:
+                    session_id = await_claim(
+                        plan["scope_id"], journal["reservation"]["reservation_id"],
+                        args.register_timeout, run=bridge.run,
+                    )
+            except BaseException:
+                ct.fail("session_unregistered")
+                raise
             if session_id != endpoint.session_id:
+                ct.fail("session_unrepresented" if not session_id else "session_unregistered")
                 raise RuntimeError("The original portable native session has not registered with Bridge")
+            ct.succeed()
             if journal["seed"]:
                 if "delivery" not in journal:
                     journal["delivery"] = owned_delivery_journal(
@@ -255,7 +279,7 @@ def cmd_launch(args, plan, config, codespace, *, ssh_session) -> int:
             )
             prior_local = dict(getattr(held, "local_forwards", None) or {})
             assigned = dict(getattr(held, "assigned_local_forwards", None) or {})
-            forwards = {}
+            forwards: dict[str, Any] = {}
             if local or prior_local:
                 try:
                     reported = _reported_local_forwards(args.name, local, prior_local, assigned)

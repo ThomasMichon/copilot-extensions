@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-codespaces"
-version = "0.5.424-dev1"
+version = "0.5.425-dev1"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,7 @@ dependencies = [
     "agent-single-instance-lease",
     "agent-remote-login-shell",
     "agent-update-driver",
+    "agent-process-telemetry",
 ]
 
 [tool.uv.sources]
@@ -112,6 +113,9 @@ agent-single-instance-lease = { path = "libs/single-instance-lease" }
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-remote-login-shell = { path = "libs/remote-login-shell" }
 agent-update-driver = { path = "libs/update-driver" }
+# Optional, content-free consumer-telemetry command route for finite CLI
+# runs (module ``process_telemetry``); inert without the local admission file.
+agent-process-telemetry = { path = "libs/process-telemetry" }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"
@@ -124,6 +128,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 agent_codespaces = [
+    "metadata/*.json",
     "codespace_assets/ado-auth-helper-relay",
     "codespace_assets/ado-auth-helper-wrapper",
     "codespace_assets/auth-error-policy.instructions.md",
