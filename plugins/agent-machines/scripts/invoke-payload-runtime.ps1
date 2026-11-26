@@ -229,14 +229,14 @@ function Invoke-AgentMachinesRuntime([string]$Python) {
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     $pythonFlags = @()
     $entryPath = ''
-    $entryArgs = @($forwardArgs)
+    $entryArgs = @($forwardArgs | ForEach-Object { [string]$_ })
     if ($healthRunEntry) {
         $pythonFlags = @('-I')
         $entryPath = Join-Path $scriptDir 'health-collection-entry.py'
     } elseif ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
         $pythonFlags = @('-I', '-B', '-X', 'utf8')
         $entryPath = Join-Path $scriptDir 'versioned_runtime_probe.py'
-        $entryArgs = @('--plugin', 'agent-machines', '--module', 'agent_machines', '--') + $forwardArgs
+        $entryArgs = @('--plugin', 'agent-machines', '--module', 'agent_machines', '--') + $entryArgs
     }
     $ErrorActionPreference = 'Continue'
     try {

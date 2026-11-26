@@ -13,7 +13,9 @@ prove exact interpreter selection for ordinary, configuration, health and
 readiness commands; current, last-known-good and newest-complete resolution;
 namespaced context; hostile ambient selectors; stdin, streams, exit status and
 empty/quoted/Unicode arguments. Isolated health and readiness flags remain
-distinct. The real health compatibility and readiness helpers execute against
+distinct. Legacy controls also pass numeric and Boolean PowerShell variables
+and require native argument strings. Generated Bash instrumentation and carriers
+use Unix newlines even on Windows. The real compatibility/readiness helpers use
 synthetic declarations. POSIX Bash inherited descriptors survive admission.
 Missing UV, provider and capture controls refuse before importing the application
 or calling the installer. Repeated samples and exact UV lookups are recorded

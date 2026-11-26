@@ -62,12 +62,14 @@ def test_ready_command_admits_exact_prepared_application(
         shutil.copy2(REPO / "libs/agent-procutil/src/agent_procutil/native_capture.sh", capture)
         (scripts / "native_capture.sh").unlink(missing_ok=True)
     (scripts / "installation-context/installation-context.sh").write_text(
-        'printf "%s\\n" "$MACHINES_TEST_STATUS"\n', encoding="utf-8",
+        'printf "%s\\n" "$MACHINES_TEST_STATUS"\n', encoding="utf-8", newline="\n",
     )
     (scripts / "installation-context/installation-context.ps1").write_text(
         "Write-Output $env:MACHINES_TEST_STATUS\nexit 0\n", encoding="utf-8",
     )
-    (scripts / "init.sh").write_text("echo 'installer should not run' >&2\nexit 98\n", encoding="utf-8")
+    (scripts / "init.sh").write_text(
+        "echo 'installer should not run' >&2\nexit 98\n", encoding="utf-8", newline="\n",
+    )
     (scripts / "init.ps1").write_text("throw 'installer should not run'\n", encoding="utf-8")
     suffix = "sh" if host == "bash" else "ps1"
     provider = scripts / "_bootstrap_python" / f"bootstrap-uv.{suffix}"
@@ -78,7 +80,9 @@ def test_ready_command_admits_exact_prepared_application(
     )
     original = provider.read_text(encoding="utf-8")
     assert original.count(invocation) == 1
-    provider.write_text(original.replace(invocation, observation + invocation), encoding="utf-8")
+    provider.write_text(
+        original.replace(invocation, observation + invocation), encoding="utf-8", newline="\n",
+    )
     tools = tmp_path / "private tools"
     tools.mkdir()
     if os.name != "nt":
@@ -95,6 +99,7 @@ def test_ready_command_admits_exact_prepared_application(
         poison.write_text(
             '@echo off\n> "%AMBIENT_MARKER%" echo called\nexit /b 91\n' if native_cmd else
             '#!/bin/sh\nprintf called > "$AMBIENT_MARKER"\nexit 91\n', encoding="utf-8",
+            newline="\n" if host == "bash" else None,
         )
         poison.chmod(0o700)
     if scenario != "missing-uv":
@@ -192,7 +197,7 @@ def test_ready_command_admits_exact_prepared_application(
         "health-prepare": ["health", "prepare-job"], "health-job": ["health", "job"],
         "installer-readiness": ["installer-readiness"], "invocation-contract": ["invocation-contract"],
     }.get(scenario, ["inspect"])
-    arguments = [*prefix, "space value", 'quote"value', "", "end\\", "\u03bb"]
+    arguments = [*prefix, "space value", 'quote"value', "", "end\\", "\u03bb", "1234", "True"]
     command = [shell, (payload / "bin/agent-machines").as_posix(), *arguments]
     descriptors = tmp_path / "inherited-fds"
     if host == "bash":
@@ -205,7 +210,8 @@ def test_ready_command_admits_exact_prepared_application(
         if os.name == "nt":
             harness = tmp_path / "invoke.sh"
             harness.write_text(
-                setup + "exec bash " + shlex.join(command[1:]) + "\n", encoding="utf-8",
+                setup + "exec bash " + shlex.join(command[1:]) + "\n",
+                encoding="utf-8", newline="\n",
             )
             command = [shell, harness.as_posix()]
         else:
@@ -214,10 +220,11 @@ def test_ready_command_admits_exact_prepared_application(
             ]
     else:
         harness = tmp_path / "invoke.ps1"
-        quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments)
+        quoted = ",".join("'" + value.replace("'", "''") + "'" for value in arguments[:-2])
         harness.write_text(
             "$PSNativeCommandArgumentPassing='Legacy'\n"
-            f"$forward=@({quoted})\n& '{str(payload / 'bin/agent-machines.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
+            f"$port=1234\n$enabled=$true\n$forward=@({quoted}) + @($port,$enabled)\n"
+            f"& '{str(payload / 'bin/agent-machines.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
             "exit $LASTEXITCODE\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]

@@ -19,7 +19,8 @@ Installation-context selection, first-use provisioning and its lock remain
 with their existing owners. Configuration and health collection still require
 an already provisioned runtime. Health capability checks and isolated readiness
 probes retain their separate entrypoints; PowerShell Legacy argument forwarding
-preserves empty, quoted and Unicode values for both script and module entries.
+preserves empty, quoted and Unicode values plus native string conversion of
+numeric variables for both script and module entries.
 See the [inert command controls](tests/README.md) for qualification and limits.
 
 The PowerShell installer's declared, captured human output initializes UTF-8
