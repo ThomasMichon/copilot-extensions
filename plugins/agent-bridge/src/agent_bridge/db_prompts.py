@@ -1,9 +1,11 @@
 """Database pending-prompt queue helpers."""
 
 from __future__ import annotations
-from .owner_membership_signal import commit as commit_membership
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from .db import Database
 
 
 class _PromptsMixin:
@@ -20,6 +22,7 @@ class _PromptsMixin:
         is delivered exactly once, in order -- surviving a caller remount, an NF
         crash, and a bridge/host restart.
         """
+        self = cast("Database", self)
         cur = self.execute_write(
             "INSERT INTO pending_prompts (session_id, caller_id, prompt, "
             "created_at) VALUES (?, ?, ?, ?)",
@@ -29,6 +32,7 @@ class _PromptsMixin:
 
     def list_pending_prompts(self, session_id: str) -> list[dict[str, Any]]:
         """Return a session's queued prompts in FIFO (send) order."""
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT id, session_id, caller_id, prompt, created_at "
             "FROM pending_prompts WHERE session_id=? ORDER BY id ASC",
@@ -38,6 +42,7 @@ class _PromptsMixin:
 
     def peek_pending_prompt(self, session_id: str) -> dict[str, Any] | None:
         """Read the oldest prompt without consuming its durable queue entry."""
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT id, session_id, caller_id, prompt, created_at "
             "FROM pending_prompts WHERE session_id=? ORDER BY id ASC LIMIT 1",
@@ -52,8 +57,10 @@ class _PromptsMixin:
         (or a second bridge process sharing the DB) can never pop the same row
         twice.
         """
-        with self._write_lock:
-            conn = self._get_conn()
+        from .managed_messages import removed
+
+        self = cast("Database", self)
+        with self._runtime_transaction(write=True) as conn:
             row = conn.execute(
                 "SELECT id, session_id, caller_id, prompt, created_at "
                 "FROM pending_prompts WHERE session_id=? ORDER BY id ASC LIMIT 1",
@@ -61,17 +68,21 @@ class _PromptsMixin:
             ).fetchone()
             if row is None:
                 return None
+            removed(conn, session_id, row["id"])
             conn.execute("DELETE FROM pending_prompts WHERE id=?", (row["id"],))
-            commit_membership(conn, membership=False)
             return dict(row)
 
     def remove_pending_prompt(self, session_id: str, queue_id: int) -> bool:
         """Remove one queued prompt by id (operator drops a chip). True if hit."""
-        cur = self.execute_write(
-            "DELETE FROM pending_prompts WHERE session_id=? AND id=?",
-            (session_id, queue_id),
-        )
-        return cur.rowcount > 0
+        from .managed_messages import removed
+
+        self = cast("Database", self)
+        with self._runtime_transaction(write=True) as conn:
+            removed(conn, session_id, queue_id)
+            cur = conn.execute(
+                "DELETE FROM pending_prompts WHERE session_id=? AND id=?", (session_id, queue_id),
+            )
+            return cur.rowcount > 0
 
     def clear_pending_prompts(self, session_id: str) -> int:
         """Drop all queued prompts for a session; return how many were removed.
@@ -80,13 +91,17 @@ class _PromptsMixin:
         mirroring NF's "queue cleared if cancelled, ended, or rolled" so queued
         follow-ups never resurface against a session the operator tore down.
         """
-        cur = self.execute_write(
-            "DELETE FROM pending_prompts WHERE session_id=?", (session_id,)
-        )
-        return cur.rowcount
+        from .managed_messages import removed
+
+        self = cast("Database", self)
+        with self._runtime_transaction(write=True) as conn:
+            removed(conn, session_id)
+            cur = conn.execute("DELETE FROM pending_prompts WHERE session_id=?", (session_id,))
+            return cur.rowcount
 
     def count_pending_prompts(self, session_id: str) -> int:
         """Return the number of queued prompts for a session."""
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT COUNT(*) AS n FROM pending_prompts WHERE session_id=?",
             (session_id,),

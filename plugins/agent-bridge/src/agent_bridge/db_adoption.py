@@ -17,6 +17,7 @@ from .creation_writer_schema import validate_schema as validate_creation_writer_
 from .mux_question_schema import validate_schema as validate_mux_question_schema
 from .owner_membership import MembershipConnection
 from .message_contracts import validate_schema as validate_message_contracts
+from .managed_message_schema import validate_schema as validate_managed_messages
 
 
 def open_existing_writable(source: Database) -> Database:
@@ -65,6 +66,7 @@ def open_existing_writable(source: Database) -> Database:
         validate_creation_writer_schema(conn)
         validate_mux_question_schema(conn)
         validate_message_contracts(conn)
+        validate_managed_messages(conn)
         if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
             raise ValueError("Writable adoption requires an existing WAL database")
         conn.rollback()

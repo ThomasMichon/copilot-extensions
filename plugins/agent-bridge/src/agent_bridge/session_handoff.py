@@ -8,9 +8,9 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 import time
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .acquisition_worktree_writer import (
     current, handoff_state, lineage_errors, require_target, session_writer,
 )
@@ -52,6 +52,7 @@ class _SessionHandoffMixin:
         predecessor and successor at once, so the spawn-then-retire cutover does
         not apply (their retire-before-spawn variant is deferred, mirroring the
         guard in ``handoff_session``)."""
+        self = cast("SessionManager", self)
         if not self._auto_handoff.enabled:
             return False
         if session._native_turn_transport is not None:
@@ -82,6 +83,7 @@ class _SessionHandoffMixin:
         under -- and re-evaluated on its next settle. The prompt-triggered path
         (`submit_or_queue_prompt`) bypasses this and hands off directly, because
         the sender is explicitly asking for the next turn."""
+        self = cast("SessionManager", self)
         if not session._handoff_pending:
             return
         if session._stop_requested:  # a cooperative stop's notice settled: the stop comes next
@@ -104,12 +106,18 @@ class _SessionHandoffMixin:
         task.add_done_callback(self._auto_handoff_tasks.discard)
 
     async def _run_auto_handoff(self, session_id: str) -> None:
-        """Perform a policy-driven handoff and migrate any durably-queued
-        follow-ups onto the successor, so no prompt is stranded on the retired
-        predecessor. Best-effort: a failed handoff logs and leaves the
+        """Perform a policy-driven handoff and migrate unbound legacy follow-ups.
+        Managed inputs retain their original native binding and receipt.
+        Best-effort: a failed handoff logs and leaves the
         predecessor current (``handoff_session`` never orphans the worktree)."""
+        self = cast("SessionManager", self)
         try:
-            pending = self._db.list_pending_prompts(session_id)
+            pending = [dict(row) for row in self._db.execute_read(
+                "SELECT p.* FROM pending_prompts p WHERE p.session_id=? "
+                "AND NOT EXISTS (SELECT 1 FROM managed_message_receipts m WHERE m.queue_id=p.id) "
+                "ORDER BY p.id",
+                (session_id,),
+            )]
         except Exception:
             pending = []
         try:
@@ -179,6 +187,7 @@ class _SessionHandoffMixin:
     def _synthesize_handoff_brief(self, session: Session) -> str:
         """Fallback brief built from session-side state, used when the child
         cannot author one (dead client, errored turn, empty reply)."""
+        self = cast("SessionManager", self)
         rows = self._db.execute_read(
             "SELECT prompt FROM turns WHERE session_id=? ORDER BY turn_index ASC "
             "LIMIT 1",
@@ -212,6 +221,7 @@ class _SessionHandoffMixin:
         the duration and restored to IDLE afterward so watchdogs and the
         concurrency guard see a coherent state.
         """
+        self = cast("SessionManager", self)
         turn_index = session.turn_count
         native_owner = session._native_turn_transport
         if native_owner is None:
@@ -219,11 +229,12 @@ class _SessionHandoffMixin:
 
             require_unassociated_session(self, session, operation="handoff prompt")
         native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
-        custody = ({
-            "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,
-        } if native_owner is not None else {})
         now = time.time()
-        self._db.create_turn(session.session_id, turn_index, prompt, now, **custody)
+        self._db.create_turn(
+            session.session_id, turn_index, prompt, now,
+            runtime_admission=native_owner.admission if native_owner is not None else None,
+            native_consumer=native_owner.consumer if native_owner is not None else None,
+        )
         session.turn_count += 1
         session.status = SessionStatus.RUNNING
         session.last_output_at = now
@@ -232,6 +243,7 @@ class _SessionHandoffMixin:
         )
         result: dict[str, Any] | None = None
         try:
+            assert session.client is not None
             result = await (
                 session.client.send_prompt(prompt) if native_attempt is None
                 else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
@@ -303,6 +315,7 @@ class _SessionHandoffMixin:
         create any dependency on Copilot CLI extensions being active in the
         hosted child.
         """
+        self = cast("SessionManager", self)
         if self._draining:
             raise DaemonDrainingError("handoff")
         session_id = self._resolve_ref(session_id) or session_id

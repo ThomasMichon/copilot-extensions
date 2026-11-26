@@ -103,7 +103,7 @@ that every feature or platform is supported by every component.
 | [harness-knowledge](plugins/harness-knowledge/) | Bind a stateless harness to a separately selected private knowledge repo |
 | [ai-attribution](plugins/ai-attribution/) | Publication-policy guidance and attribution workflows |
 | [budget-guidance](plugins/budget-guidance/) | Attributable budget posture and bounded exact-session cues |
-| [agent-conduct-guidance](plugins/agent-conduct-guidance/) | Modular delegation, headless-process, scratch-space, and secret-masking guidance |
+| [agent-conduct-guidance](plugins/agent-conduct-guidance/) | Modular delegation, headless-process, scratch-space, secret-masking, and blocker-review guidance |
 
 ## Concepts: the control-harness repo
 

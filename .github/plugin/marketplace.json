@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.572-dev1",
+      "version": "0.9.573-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -85,8 +85,8 @@
     },
     {
       "name": "customizing-copilot",
-      "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.2.76-dev1",
+      "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, setting up an instruction-projection sync worker, and A/B-evaluating guidance changes - with the per-skill folder conventions and Agent Skills best practices; ships fifteen focused skills",
+      "version": "0.2.77-dev1",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -152,8 +152,8 @@
     },
     {
       "name": "agent-conduct-guidance",
-      "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, decision-scoped operator questions, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
-      "version": "0.1.45-dev1",
+      "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, decision-scoped operator questions, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene, secret-pattern masking avoidance and skeptical blocker review. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
+      "version": "0.1.46-dev1",
       "source": "plugins/agent-conduct-guidance"
     },
     {

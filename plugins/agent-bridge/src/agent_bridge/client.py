@@ -1025,6 +1025,17 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             or {}
         )
 
+    def resume_worktree_exact(
+        self, worktree_id: str, native_session_id: str, *,
+        mode: str = "acp", request_timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Resume only the selected native conversation, without retry or fallback."""
+        from .client_worktree_exact_resume import resume
+
+        return resume(
+            self, worktree_id, native_session_id, mode=mode, request_timeout=request_timeout,
+        )
+
     def end_session(
         self,
         session_id: str,
