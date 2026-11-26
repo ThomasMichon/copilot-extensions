@@ -90,6 +90,20 @@ caller-death descendant retirement without skips. Synthetic controls retain
 strict owned-group identity refusal while admission ignores unrelated borrowed
 peers; non-macOS skips are not native qualification.
 
+Bridge's `tests/test_managed_command_gate.py` runs its actual Bash and PowerShell
+gates with real prepared UV and an inert 3.10.20 application independent of the
+3.11.18 helper. Raw/materialized controls retain current/LKG/newest and namespaced
+selection, passive observation, configuration-only telemetry, readiness and
+invocation metadata. Successful paths run twice and preserve argv, stdin,
+both output streams, exit status, runtime environment and inherited descriptors.
+Windows also exercises PowerShell object input under Legacy argument passing.
+Missing UV/provider/capture refuses before application entry or provisioning;
+slot and payload bytes remain unchanged. The path-gated Ubuntu/macOS/Windows
+jobs require all 22 Bash or 24 per-Windows-host controls and reports without
+skips within eight-minute native job limits. Inert context decisions and modules
+perform no backend calls, message sends or service operations; this is not
+installed-host adoption or complete command-latency qualification.
+
 Vault's `tests/test_managed_command_gate.py` runs its actual Bash and PowerShell
 gates with real prepared UV and an inert 3.10.20 application independent of the
 3.11.18 helper. Thirteen raw/materialized scenarios cover current/LKG/newest,

@@ -66,7 +66,8 @@ command_error_write() {
     if [[ -z "$directory" && "${HOME:-}" == /* ]]; then
         directory="${HOME%/}/.copilot-extensions/logs/diagnostics/commands"
     fi
-    if [[ -n "$directory" && $# -ge 4 && $# -le 5 ]] &&
+    if [[ -n "$directory" && $# -ge 4 && $# -le 5 &&
+          "${BASHPID:-}" =~ ^[1-9][0-9]*$ ]] &&
         _ce_native_write "$1" "$2" "$3" "$4" "$BASHPID" \
             "$directory" 2>/dev/null; then
         :
