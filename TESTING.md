@@ -76,7 +76,11 @@ and an unprepared store, with poisoned ambient Python and inherited selectors.
 Explicit first-use provisioning retains its parent lock while admitting the
 new runtime; a missing-UV control isolates application admission after bootstrap.
 Successful paths run twice and preserve arguments, stdin, both output streams,
-exit status and existing bytecode options. Refusals must precede the gate's
+exit status and existing bytecode options. The Bash current-generation control
+retains caller/application descriptors 5-9. Test-only instrumentation records
+the exact native UV invocation sequence without replacing UV or capture:
+one version check and bootstrap lookup, then one application lookup per
+successful call, with no retries or acquisition. Refusals must precede the gate's
 origin import and must not enter or retry provisioning. The path-gated native workflow
 requires every Bash control on Ubuntu/macOS and both PowerShell hosts on
 Windows, plus every measured offline report without skips. These fixtures

@@ -68,6 +68,11 @@ jobs:
           r['completed']==(2 if r['scenario'] in
           ('current','lkg','newest','namespaced','setup','readiness','missing-marker','provisioned') else 1)
           for r in reports);
+          assert all(r['bootstrap_uv_lookups']==
+          (r['completed'] if r['completed']==2 or r['scenario']=='unprepared' else 0)
+          and r['application_uv_lookups']==(r['completed'] if r['completed']==2 else 0)
+          and r['uv_invocations']==2*r['bootstrap_uv_lookups']+r['application_uv_lookups']
+          for r in reports);
           print(json.dumps({'index_command_gate_performance':reports},sort_keys=True))"
   index-command-gate-macos:
     runs-on: macos-latest

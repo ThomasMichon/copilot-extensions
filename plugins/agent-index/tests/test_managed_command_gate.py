@@ -73,6 +73,16 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
     for path, content in outputs.items():
         path.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
     suffix = "sh" if host == "bash" else "ps1"
+    provider = scripts / "_bootstrap_python" / f"bootstrap-uv.{suffix}"
+    invocation = '    exec "$@"\n' if host == "bash" else "    $result = & $InvokeCaptured @options\n"
+    instrumentation = (
+        '    printf "%s\\n" "${*:2}" >> "$GATE_UV_LOG"\n'
+        if host == "bash" else
+        '    [IO.File]::AppendAllText($env:GATE_UV_LOG, ($Arguments -join " ") + "`n")\n'
+    )
+    provider_source = provider.read_text(encoding="utf-8")
+    assert provider_source.count(invocation) == 1
+    provider.write_text(provider_source.replace(invocation, instrumentation + invocation), encoding="utf-8")
     shutil.copy2(PLUGIN / "scripts" / f"resolve-runtime.{suffix}", scripts / f"resolve-runtime.{suffix}")
     root = tmp_path / "selected application's \u03bb root"
     slot = root / "versions/1.2.3"
@@ -205,6 +215,7 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
         TEST_PYTHON=str(python), TEST_CELL_ROOT=str(root), AGENT_INDEX_ROLE="client",
         ORIGIN_MARKER=str(tmp_path / "origin-ran"), AMBIENT_MARKER=str(tmp_path / "ambient-ran"),
         VALIDATION_MARKER=str(validation), INSTALLER_MARKER=str(tmp_path / "installer-ran"),
+        GATE_UV_LOG=str(tmp_path / "uv-invocations"),
         UV_PYTHON="unrelated-python", UV_NO_MANAGED_PYTHON="1",
         UV_CONFIG_FILE="missing-relative.toml", UV_NO_CONFIG="false",
         VIRTUAL_ENV="unrelated", CONDA_PREFIX="unrelated", PYTHONPATH="unrelated", PYTHONHOME="unrelated",
@@ -256,6 +267,14 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
     successful = scenario in {
         "current", "lkg", "newest", "namespaced", "setup", "readiness", "missing-marker", "provisioned",
     }
+    bootstrap_lookup = (
+        "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18"
+    )
+    application_lookup = f"python find --no-project --managed-python --no-python-downloads {python}"
+    expected_uv_calls = ["--version", bootstrap_lookup] if successful or scenario == "unprepared" else []
+    if successful:
+        expected_uv_calls.append(application_lookup)
+    uv_calls: list[str] = []
     for _cycle in range(2 if successful else 1):
         started = time.monotonic()
         result = subprocess.run(
@@ -264,6 +283,9 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         samples.append(time.monotonic() - started)
+        uv_log = Path(env["GATE_UV_LOG"])
+        uv_calls = uv_log.read_text(encoding="utf-8").splitlines() if uv_log.exists() else []
+        assert uv_calls == expected_uv_calls * (_cycle + 1), result.stdout + result.stderr
         assert not Path(env["AMBIENT_MARKER"]).exists(), result.stdout + result.stderr
         assert Path(env["INSTALLER_MARKER"]).exists() is (scenario == "provisioned"), result.stdout + result.stderr
         assert not list(empty.iterdir())
@@ -297,4 +319,6 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
         "shell": host, "scenario": scenario, "status": "measured",
         "samples_seconds": samples, "completed": len(samples), "network": "disabled",
         "bootstrap_python": "3.11.18", "application_python": "3.10.20",
+        "uv_invocations": len(uv_calls), "bootstrap_uv_lookups": uv_calls.count(bootstrap_lookup),
+        "application_uv_lookups": uv_calls.count(application_lookup),
     }))
