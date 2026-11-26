@@ -2,52 +2,8 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const gate = require("./required-pr-attribution.cjs");
 
-const marker = "<!-- agent-worktrees:source codename=clear-compass -->";
-const context = {
-  repo: { owner: "owner", repo: "repo" }, payload: { pull_request: { number: 1, head: { sha: "head" } } },
-  serverUrl: "https://github.com", runId: 123,
-};
-function pr(body, labels = []) {
-  return { body, labels, base: { ref: "dev" }, state: "open", head: { sha: "head" } };
-}
-function paged(invoke) {
-  invoke.iterator = async function* (method, options) {
-    const values = await invoke(method, options);
-    for (let start = 0; start < Math.max(1, values.length); start += options.per_page) {
-      const next = start + options.per_page < values.length;
-      yield { data: values.slice(start, start + options.per_page),
-        headers: next ? { link: '<https://api.github.com/next>; rel="next"' } : {} };
-    }
-  };
-  return invoke;
-}
-function countRequests(github) {
-  let requests = 0;
-  for (const endpoints of Object.values(github.rest)) {
-    for (const [name, invoke] of Object.entries(endpoints)) {
-      endpoints[name] = async (...params) => { requests++; return invoke(...params); };
-    }
-  }
-  const paginate = github.paginate;
-  github.paginate = paged(async (method, options) => {
-    const result = await paginate(method, options);
-    requests += Math.max(1, Math.ceil(result.length / options.per_page));
-    return result;
-  });
-  return () => requests;
-}
-function core() {
-  const messages = [];
-  const summary = {
-    addHeading(value) { messages.push(value); return this; },
-    addRaw(value) { messages.push(value); return this; },
-    async write() {},
-  };
-  return {
-    messages, summary, setFailed: (value) => messages.push(value),
-    info: (value) => messages.push(value), warning: (value) => messages.push(value),
-  };
-}
+const { marker, context, pr, paged, countRequests, core, headFixture } =
+  require("./source-attribution-test-fixture.cjs");
 
 test("public source and workflow forms use the existing envelope", () => {
   assert.equal(gate.validate(marker), null);
@@ -236,40 +192,6 @@ test("current description is reread and body-only repairs change the verdict", a
   current.labels = [];
   assert.ok(gate.decision(current));
 });
-
-function headFixture(values) {
-  const created = [];
-  const github = {
-    paginate: paged(async (method, options) => {
-      if (method === github.rest.checks.listForRef) {
-        assert.equal(options.filter, "all");
-        return (await github.rest.checks.listForRef(options)).data.check_runs;
-      }
-      return structuredClone(values.filter((value) =>
-        value.state === "open" && value.base.ref === "dev" &&
-        (!options.commit_sha || value.head.sha === options.commit_sha),
-      ));
-    }),
-    rest: {
-      repos: { listPullRequestsAssociatedWithCommit() {} },
-      pulls: { list() {}, get: async ({ pull_number }) => ({
-        data: structuredClone(values.find((value) => value.number === pull_number)),
-      }) },
-      checks: {
-        listForRef: async ({ ref }) => ({ data: { check_runs: created
-          .map((check, index) => ({ id: index + 1, app: { slug: "github-actions" }, ...check }))
-          .filter((check) => check.head_sha === ref) } }),
-        create: async (check) => { created.push(check); return { data: { id: created.length } }; },
-        get: async ({ check_run_id }) => ({ data: created[check_run_id - 1] }),
-        update: async (check) => {
-          assert.ok(created[check.check_run_id - 1]);
-          Object.assign(created[check.check_run_id - 1], check);
-        },
-      },
-    },
-  };
-  return { github, created };
-}
 
 test("scoped refresh repairs all historical owned runs without touching other producers or heads", async () => {
   const values = [{ ...pr(marker), number: 1 }, { ...pr(marker), number: 2, head: { sha: "other-head" } }];
