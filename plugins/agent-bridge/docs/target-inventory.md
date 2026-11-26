@@ -724,6 +724,11 @@ A lost or invalid admission response reports `outcome: unknown`, not permission
 to retry. JSON retains the selected native/owner binding in `bridge` and the
 original `idempotency_key` when supplied. Observe the original operation through
 its existing receipt owner; do not resend to a new key or successor.
+If selection succeeds but the client's submission preflight fails before any
+acceptance POST, local no-write evidence instead produces `refused_unavailable`
+with reason `managed_message_not_attempted`. This does not turn a post-attempt
+failure into a retry permit; unconfirmed writes retain the original unknown
+outcome and receipt identity.
 `tests/test_bridge_send_cli.py` exercises the real parser, client and private
 API owners, including refusal races, exact input retention, rollback and lost
 responses. These contained checks do not certify installed adoption.

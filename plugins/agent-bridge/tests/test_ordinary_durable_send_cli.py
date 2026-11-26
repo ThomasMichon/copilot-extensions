@@ -9,7 +9,8 @@ import pytest
 
 from agent_bridge import __main__ as core
 from agent_bridge import session_targeting_cli as targeting
-from agent_bridge.client import BridgeClientError
+from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
+from agent_bridge.client_read_budget import ReadDeadlineExpired
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 
 
@@ -184,3 +185,42 @@ def test_managed_key_limit_has_a_typed_cli_outcome_before_client_mutation(
         targeting._cmd_send(args)
         assert len(client.accepted) == 1
         assert json.loads(capsys.readouterr().out)["outcome"] == "queued"
+
+
+@pytest.mark.parametrize("fault,retryable", [
+    (BridgeConnectionError("submission health unavailable"), True),
+    (BridgeClientError(503, "submission health initializing"), True),
+    (BridgeClientError(503, {"code": []}), True),
+    (ReadDeadlineExpired("submission health deadline"), True),
+    (BridgeClientError(403, "submission health authentication refused"), False),
+])
+def test_selected_managed_preflight_failure_is_not_unknown_acceptance(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    fault: Exception, retryable: bool,
+) -> None:
+    client = BridgeClient("http://fixture.invalid", "fixture")
+    calls = []
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> Any:
+        calls.append((method, path))
+        assert (method, path) == ("GET", "/health")
+        raise fault
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(client, "resolve_bridge", lambda *_args, **_kwargs: {"bridge": {
+        "session_id": "native-original", "managed_session_id": "managed-original",
+        "status": "running",
+    }})
+    monkeypatch.setattr(core, "_get_client", lambda **_kwargs: client)
+    monkeypatch.setattr(core, "_caller_id_for", lambda _args: "sender")
+    monkeypatch.setattr(core, "_sender_repo", lambda: "fixture-project")
+    args = core.build_parser().parse_args([
+        "--json", "send", "managed-original", "input", "--idempotency-key", "original",
+    ])
+    with pytest.raises(SystemExit) as error:
+        targeting._cmd_send(args)
+    assert error.value.code == 69
+    result = json.loads(capsys.readouterr().out)
+    assert result["outcome"] == "refused_unavailable" and result["retryable"] is retryable
+    assert result["reason"] == "managed_message_not_attempted"
+    assert calls == [("GET", "/health")]

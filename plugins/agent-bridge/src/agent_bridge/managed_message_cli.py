@@ -27,14 +27,28 @@ def send(
             expected_native_session_id=native_session_id, caller_id=core._caller_id_for(args),
         )
     except BridgeClientError as exc:
+        if getattr(exc, "_managed_message_attempted", None) is False:
+            raise SendRefused(
+                "refused_unavailable", reason="managed_message_not_attempted", target=session_id,
+                retryable=exc.status >= 500 or exc.status == 429, error=str(exc),
+            ) from exc
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        if (exc.status, detail.get("code")) in {
+        code = detail.get("code")
+        code = code if isinstance(code, str) else None
+        if (exc.status, code) in {
             (404, "session_not_found"), (409, "managed_message_key_conflict"),
         } or exc.status == 426:
             raise SendRefused(
                 "refused_conflict" if exc.status == 409 else "refused_unavailable",
-                reason=str(detail.get("code") or "unsupported_durable_acceptance"),
+                reason=code or "unsupported_durable_acceptance",
                 error=str(exc), retryable=False, target=session_id,
+            ) from exc
+        raise
+    except Exception as exc:
+        if getattr(exc, "_managed_message_attempted", None) is False:
+            raise SendRefused(
+                "refused_unavailable", reason="managed_message_not_attempted", target=session_id,
+                retryable=True, error=str(exc),
             ) from exc
         raise
     if args.json:
