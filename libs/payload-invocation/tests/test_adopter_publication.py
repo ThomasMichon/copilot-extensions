@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from adopter_admission_fixture import prepare_codespaces_admission
 from test_command_binding import PowerShellFactory
 
 from test_command_binding import (
@@ -48,7 +49,7 @@ def _adopter(fixture: dict[str, Any], plugin: str, source: Path | None = None) -
     payload = fixture["payload"].with_name(plugin)
     payload.mkdir(exist_ok=True)
     root = fixture["home"] / f".{plugin}"
-    root.mkdir(exist_ok=True)
+    root.mkdir(mode=0o700, exist_ok=True)
     fixture.update(payload=payload, legacy=root)
     fixture["arguments"].update(payload_root=payload, plugin_id=plugin, legacy_root=root)
     if source is None:
@@ -62,6 +63,8 @@ def _adopter(fixture: dict[str, Any], plugin: str, source: Path | None = None) -
         COPILOT_PLUGIN_INSTALL_SMOKE="1",
         COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP="0",
     )
+    if plugin == "agent-codespaces":
+        prepare_codespaces_admission(fixture, environment, ROOT)
     for name in (
         "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
         "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
