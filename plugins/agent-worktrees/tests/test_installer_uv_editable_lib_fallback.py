@@ -102,7 +102,7 @@ $prevEAP = $ErrorActionPreference
 
 
 @pytest.mark.parametrize("lib", _LIBS)
-def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path):
+def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -118,7 +118,7 @@ def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path):
 
 
 @pytest.mark.parametrize("lib", _LIBS)
-def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: Path):
+def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -137,7 +137,7 @@ def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: P
 
 
 @pytest.mark.parametrize("lib", [lib for lib in _LIBS if lib != "pr-filters"])
-def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path):
+def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -150,7 +150,7 @@ def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path):
     assert proc.stdout == ""
 
 
-def test_missing_required_filter_library_refuses_without_index_fallback(tmp_path):
+def test_missing_required_filter_library_refuses_without_index_fallback(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -161,7 +161,7 @@ def test_missing_required_filter_library_refuses_without_index_fallback(tmp_path
     assert result.stdout.strip() == "False"
 
 
-def test_plugin_activation_block_runs_after_its_own_transitive_deps():
+def test_plugin_activation_block_runs_after_its_own_transitive_deps() -> None:
     """plugin_activation imports dropin_registry and plugin_resolve at module
     load time, so its own install step must come after both of theirs --
     installing it first would leave its own dependencies briefly
@@ -177,7 +177,7 @@ def test_plugin_activation_block_runs_after_its_own_transitive_deps():
     assert positions["plugin-activation"] > positions["plugin-resolve"]
 
 
-def test_zdd_preinstall_block_exists_before_main_package_install():
+def test_zdd_preinstall_block_exists_before_main_package_install() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
     zdd_marker = "# Vendored zero-downtime cutover lib (agent-zdd / module zdd)."
     main_install = "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir"
@@ -186,7 +186,7 @@ def test_zdd_preinstall_block_exists_before_main_package_install():
     assert installer.index(zdd_marker) < installer.index(main_install)
 
 
-def test_remote_login_shell_preinstall_block_exists_before_main_package_install():
+def test_remote_login_shell_preinstall_block_exists_before_main_package_install() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
     marker = "# Vendored remote-login-shell lib (agent-remote-login-shell / module"
     main_install = "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir"
@@ -195,7 +195,7 @@ def test_remote_login_shell_preinstall_block_exists_before_main_package_install(
     assert installer.index(marker) < installer.index(main_install)
 
 
-def test_machine_transport_preinstall_block_exists_after_remote_login_shell():
+def test_machine_transport_preinstall_block_exists_after_remote_login_shell() -> None:
     """machine-transport itself depends on remote-login-shell (see its own
     pyproject.toml), so its preinstall block must come after
     remote-login-shell's -- same reasoning as

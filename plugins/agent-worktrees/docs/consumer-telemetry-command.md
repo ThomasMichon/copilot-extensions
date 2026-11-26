@@ -36,12 +36,18 @@ absence, failure or refusal never changes the command's output or exit status.
 |------------|--------|
 | `create` | `kind: stage`, `stage: worktree_create` |
 | `bind-session` | `kind: stage`, `stage: session_bind` |
-| `lease <mutating subcommand>` | `kind: stage`, `stage: lease` |
+| `lease acquire` / `borrow` / `renew` / `release` | `kind: stage`, `stage: lease` |
 | `create-pr` / `pr-create` | `kind: pr`, `action: create` |
 | `push-changes` | `kind: pr`, `action: push` |
 | `pr-publication-labels` | `kind: pr`, `action: label` |
 | `pr-merge` | `kind: pr`, `action: merge` |
 | `finalize` / `finalize --abandon` | `kind: pr`, `action: merge` / `abandon` |
+
+Namespace aliases that reach the same handlers record the same way:
+`worktrees <verb>`, `worktree create` / `push` / `create-pr` / `finalize`,
+`pr create` and `pr merge`. Lease-global options (`--origin`, `--pretty`) are
+skipped before the subcommand is read; `inspect`, `status` and `list` are
+never observed.
 
 Outcome is `success` for exit 0 and `failure` otherwise. Reasons:
 `interrupted` (Ctrl-C or exit 130), `lease_conflict` (the lease verb's

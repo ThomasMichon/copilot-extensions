@@ -62,7 +62,19 @@ def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str], main: Any) -> Any:
     (["pr-merge", "1", "--now"], ("pr", "merge")),
     (["finalize"], ("pr", "merge")),
     (["finalize", "--abandon", "--handoff-to", "x"], ("pr", "abandon")),
+    (["pr", "create"], ("pr", "create")),
+    (["pr", "merge", "1", "--now"], ("pr", "merge")),
+    (["--project", "example", "worktrees", "create", "--json"], ("stage", "worktree_create")),
+    (["worktrees", "lease", "acquire", "x"], ("stage", "lease")),
+    (["worktree", "push", "id"], ("pr", "push")),
+    (["worktree", "finalize", "--abandon"], ("pr", "abandon")),
+    (["lease", "--origin", "u", "renew", "k", "r"], ("stage", "lease")),
+    (["lease", "--pretty", "release", "k", "r"], ("stage", "lease")),
+    (["pr", "status"], None), (["pr", "watch"], None), (["worktree", "list"], None),
     (["lease"], None), (["lease", "list"], None), (["create", "--help"], None),
+    (["lease", "inspect", "k", "r"], None), (["lease", "--pretty", "list"], None),
+    (["lease", "--origin", "u", "status", "k", "r"], None),
+    (["lease", "--origin=u", "inspect", "k", "r"], None),
     (["status"], None), (["--version"], None), ([], None),
 ])
 def test_classify_observes_only_mutating_lifecycle_verbs(
@@ -79,12 +91,52 @@ def test_legacy_install_runs_unchanged_and_starts_nothing(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_unobserved_verbs_never_read_the_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("argv", [
+    ["status"], ["lease", "inspect", "k", "r"], ["lease", "--pretty", "list"],
+    ["lease", "--origin", "u", "status", "k", "r"],
+])
+def test_unobserved_verbs_never_read_the_policy(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str],
+) -> None:
     def fail() -> Path:
         raise AssertionError("policy lookup on an unobserved verb")
 
     monkeypatch.setattr(config, "install_dir", fail)
-    assert _run(monkeypatch, ["status"], lambda: 7) == 7
+    assert _run(monkeypatch, argv, lambda: 7) == 7
+
+
+class _LabelProvider:
+    def __init__(self) -> None:
+        self.labels: list[str] = []
+
+    def get_publication_labels(self, repo: str, number: int, **_: Any) -> list[str]:
+        return list(self.labels)
+
+    def add_publication_labels(
+        self, repo: str, number: int, labels: tuple[str, ...], **_: Any,
+    ) -> None:
+        self.labels.extend(labels)
+
+
+def test_direct_reconciliation_reports_its_label_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Foreign-repository creation reconciles labels directly, not via refresh."""
+    root = _admit(tmp_path, monkeypatch)
+    origin = pr_publication_labels.parse_origin({"id": "origin", "labels": ["tag"]})
+
+    def main() -> int:
+        status = pr_publication_labels.reconcile(
+            _LabelProvider(), "owner/secret-repo", 7, origin,
+        )
+        assert status is not None and status["ok"] is True
+        return 0
+
+    assert _run(monkeypatch, ["pr", "create"], main) == 0
+    (record,) = _readback(root)
+    assert record["event"]["action"] == "create"
+    assert record["event"]["label_result"] == "applied"
+    assert "secret" not in json.dumps(record)
 
 
 def test_records_reach_a_real_receiver_without_identity(

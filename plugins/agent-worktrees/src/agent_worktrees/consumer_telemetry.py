@@ -34,15 +34,22 @@ _VERBS: dict[str, tuple[str, str]] = {
     "pr-merge": ("pr", "merge"),
     "finalize": ("pr", "merge"),
 }
-_READ_ONLY_LEASE = frozenset({"list", "show", "status", "-h", "--help", "help"})
+# `worktree <verb>` and `pr <verb>` aliases that reach the flat verbs' handlers.
+_WORKTREE_NAMESPACE = {
+    "create": "create",
+    "push": "push-changes",
+    "push-changes": "push-changes",
+    "create-pr": "create-pr",
+    "finalize": "finalize",
+}
+_PR_NAMESPACE = {"create": "create-pr", "merge": "pr-merge"}
+# Only these lease subcommands mutate; inspect/status/list stay unobserved.
+_MUTATING_LEASE = frozenset({"acquire", "borrow", "renew", "release"})
 _HELP = frozenset({"-h", "--help"})
 
-def classify(argv: list[str]) -> tuple[str, str] | None:
-    """Map an invocation to its observed kind and stage/action, or None."""
-    args = list(argv)
-    if args and args[0] in ("agent-worktrees", "worktrees", "worktree"):
-        args = args[1:]
-    verb_index = None
+
+def _verb_index(args: list[str]) -> int | None:
+    """Index of the first token after project options, or None on another option."""
     i = 0
     while i < len(args):
         token = args[i]
@@ -52,17 +59,53 @@ def classify(argv: list[str]) -> tuple[str, str] | None:
         if token.startswith("--project="):
             i += 1
             continue
-        if token.startswith("-"):
+        return None if token.startswith("-") else i
+    return None
+
+
+def _lease_subcommand(rest: list[str]) -> str | None:
+    """The lease subcommand after the lease-global options, if any."""
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "--origin":
+            i += 2
+            continue
+        if token == "--pretty" or token.startswith("--origin="):
+            i += 1
+            continue
+        return token
+    return None
+
+
+def classify(argv: list[str]) -> tuple[str, str] | None:
+    """Map an invocation to its observed kind and stage/action, or None."""
+    args = list(argv)
+    if args and args[0] == "agent-worktrees":
+        args = args[1:]
+    index = _verb_index(args)
+    if index is None:
+        return None
+    verb = args[index]
+    if verb == "worktrees":
+        # The command-surface router folds `worktrees <verb>` onto the flat verb.
+        return classify(args[:index] + args[index + 1:])
+    alias: dict[str, str] | None = None
+    if verb == "worktree":
+        alias = _WORKTREE_NAMESPACE
+    elif verb == "pr":
+        alias = _PR_NAMESPACE
+    if alias is not None:
+        args = args[:index] + args[index + 1:]
+        index = _verb_index(args)
+        if index is None or args[index] not in alias:
             return None
-        verb_index = i
-        break
-    if verb_index is None:
-        return None
-    verb, rest = args[verb_index], args[verb_index + 1:]
+        verb = alias[args[index]]
+    rest = args[index + 1:]
     observed = _VERBS.get(verb)
-    if observed is None or _HELP.intersection(rest):
+    if observed is None or _HELP.intersection(rest) or "help" in rest[:1]:
         return None
-    if verb == "lease" and (not rest or rest[0] in _READ_ONLY_LEASE):
+    if verb == "lease" and _lease_subcommand(rest) not in _MUTATING_LEASE:
         return None
     if verb == "finalize" and "--abandon" in rest:
         return ("pr", "abandon")
@@ -155,6 +198,10 @@ def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
         if observed is None:
             return main()
         kind, name = observed
+        labels = sys.modules.get("agent_worktrees.pr_publication_labels")
+        if labels is not None:
+            # Only this invocation's own label outcome may be reported.
+            labels.last_result.set(None)
         started = time.monotonic()
         code, interrupted = 1, False
         try:
