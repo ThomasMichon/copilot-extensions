@@ -2767,6 +2767,28 @@ default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so 
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
 
+On Windows, the default 480-second self-stage allowance measures **output
+inactivity**. Concurrent raw stdout and stderr reads renew it when bytes arrive,
+including partial lines; completed forwarding also renews delivery progress.
+Each stream retains one buffer until its asynchronous write completes.
+Output forwarding is cancellable and never blocks the supervision loop, so an
+undrained caller pipe cannot bypass either deadline. The parent forwards both
+streams without decoding or collecting the complete installation log in memory.
+A progressing build does not consume the time needed for a later healthy
+cutover. A quiet child still
+terminates with exit `124`; timer ticks do not count as progress. Explicit
+plugin or global deadline overrides retain the elapsed-time limit above,
+including the disabled value,
+while the Worktrees and Dispatch built-in budgets remain inactivity defaults.
+After the staged root exits, the parent drains buffered output for up to two
+seconds and returns the root's exit code. A descendant that retains an inherited
+pipe does not turn successful root completion into a timeout or an indefinite
+wait, including when watchdog deadlines are disabled. This drain does not
+retire descendants. POSIX self-stage watchdogs retain their existing
+elapsed-time behavior. A watchdog failure does not prove that incoming
+publication did not occur: inspect readiness and current selections before
+retrying.
+
 Unified `agent-worktrees update` gives module and registered-runtime installers
 the selected positive watchdog deadline plus 30 seconds for cleanup and failure
 publication, instead of preempting the default watchdog at 300 seconds. A disabled

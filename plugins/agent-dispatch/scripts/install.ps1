@@ -265,7 +265,8 @@ if ($env:OS -eq 'Windows_NT' -and
 # operator-provided generic value -- including 0 to disable the watchdog
 # entirely -- since the self-stage block always resolves the
 # plugin-specific name first.
-if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '1050' }
+$script:InstallerWatchdogDefaultApplied = $false
+if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '1050'; $script:InstallerWatchdogDefaultApplied = $true }
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -382,30 +383,101 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 # and log. The killed child's stage dir has a dead owner pid, so
                 # the next run's pid-guarded reap cleans it; its half-built slot
                 # has no completion marker, so it is tossed + rebuilt (retry).
-                # Deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
+                # The default bounds output inactivity, not a progressing build
+                # followed by cutover. Explicit deadline overrides retain their
+                # elapsed-time meaning; <=0 disables.
                 $__wdDeadline = 480
                 $__wdEnvVar = (($__selfStageName -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_INSTALL_DEADLINE_SEC'
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
                 if ($__wdRaw) { [void][int]::TryParse([string]$__wdRaw, [ref]$__wdDeadline) }
+                $__wdExplicit = [bool]$__wdRaw
+                if (Get-Variable -Name 'InstallerWatchdogDefaultApplied' -ValueOnly -ErrorAction SilentlyContinue) {
+                    $__wdExplicit = $false
+                }
                 $__selfStageArgs = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $__selfStagedEntry) + $__selfStageFwd |
                     ForEach-Object {
                         '"' + ([regex]::Replace(
                             [regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1'
                         )) + '"'
                     }) -join ' '
-                $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
-                    -WorkingDirectory $env:USERPROFILE `
-                    -ArgumentList $__selfStageArgs
+                $__wdStart = New-Object System.Diagnostics.ProcessStartInfo
+                $__wdStart.FileName = $__selfStageExe
+                $__wdStart.Arguments = $__selfStageArgs
+                $__wdStart.WorkingDirectory = $env:USERPROFILE
+                $__wdStart.UseShellExecute = $false
+                $__wdStart.CreateNoWindow = $true
+                $__wdStart.RedirectStandardOutput = $true
+                $__wdStart.RedirectStandardError = $true
+                $__wdChild = [Diagnostics.Process]::Start($__wdStart)
                 # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
                 $null = $__wdChild.Handle
-                if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
-                    try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
-                    try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
+                $__wdClock = [Diagnostics.Stopwatch]::StartNew()
+                $__wdLastOutput = 0L
+                $__wdRootExitAt = -1L
+                $__wdExpired = $false
+                $__wdFailure = $null
+                $__wdOutputCancel = New-Object System.Threading.CancellationTokenSource
+                $__wdPipes = @(
+                    @{ Stream = $__wdChild.StandardOutput.BaseStream; Sink = [Console]::OpenStandardOutput(); Buffer = (New-Object byte[] 8192); Read = $null; Write = $null; Done = $false },
+                    @{ Stream = $__wdChild.StandardError.BaseStream; Sink = [Console]::OpenStandardError(); Buffer = (New-Object byte[] 8192); Read = $null; Write = $null; Done = $false }
+                )
+                try {
+                    foreach ($__wdPipe in $__wdPipes) {
+                        $__wdPipe.Read = $__wdPipe.Stream.ReadAsync($__wdPipe.Buffer, 0, $__wdPipe.Buffer.Length)
+                    }
+                    while ($true) {
+                        foreach ($__wdPipe in $__wdPipes) {
+                            if ($__wdPipe.Write -and $__wdPipe.Write.IsCompleted) {
+                                $null = $__wdPipe.Write.GetAwaiter().GetResult()
+                                $__wdPipe.Write = $null
+                                $__wdLastOutput = $__wdClock.ElapsedMilliseconds
+                                $__wdPipe.Read = $__wdPipe.Stream.ReadAsync($__wdPipe.Buffer, 0, $__wdPipe.Buffer.Length)
+                            }
+                            if (-not $__wdPipe.Done -and -not $__wdPipe.Write -and $__wdPipe.Read.IsCompleted) {
+                                $__wdCount = $__wdPipe.Read.GetAwaiter().GetResult()
+                                if ($__wdCount -eq 0) {
+                                    $__wdPipe.Done = $true
+                                } else {
+                                    $__wdLastOutput = $__wdClock.ElapsedMilliseconds
+                                    $__wdPipe.Write = $__wdPipe.Sink.WriteAsync(
+                                        $__wdPipe.Buffer, 0, $__wdCount, $__wdOutputCancel.Token
+                                    )
+                                }
+                            }
+                        }
+                        if ($__wdChild.HasExited) {
+                            if ($__wdRootExitAt -lt 0) { $__wdRootExitAt = $__wdClock.ElapsedMilliseconds }
+                            # Descendants can retain inherited pipes after the installer has completed.
+                            if (($__wdPipes[0].Done -and $__wdPipes[1].Done) -or
+                                ($__wdClock.ElapsedMilliseconds - $__wdRootExitAt -ge 2000)) { break }
+                        } else {
+                            $__wdElapsed = $__wdClock.ElapsedMilliseconds
+                            if (-not $__wdExplicit) { $__wdElapsed -= $__wdLastOutput }
+                            if ($__wdDeadline -gt 0 -and $__wdElapsed -ge ([long]$__wdDeadline * 1000)) {
+                                $__wdExpired = $true
+                                break
+                            }
+                        }
+                        Start-Sleep -Milliseconds 20
+                    }
+                } catch {
+                    $__wdFailure = $_
+                } finally {
+                    if ($__wdExpired -or $__wdFailure) {
+                        try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
+                        try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
+                    }
+                    $__wdOutputCancel.Cancel()
+                    foreach ($__wdPipe in $__wdPipes) { $__wdPipe.Stream.Dispose() }
+                    $__wdOutputCancel.Dispose()
+                }
+                if ($__wdFailure) { throw $__wdFailure }
+                if ($__wdExpired) {
                     $__wdLog = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") 'reconcile.err.log'
                     try {
-                        Add-Content -LiteralPath $__wdLog -Value ("[{0}] WATCHDOG-KILL {1}: install exceeded {2}s deadline (child pid {3}); killed tree. Slot lacks a completion marker -> will be tossed + retried. Stage: {4}" -f ((Get-Date).ToUniversalTime().ToString('s') + 'Z'), $__selfStageName, $__wdDeadline, $__wdChild.Id, $__selfStageDir)
+                        $__wdKind = if ($__wdExplicit) { 'elapsed-time' } else { 'output-inactivity' }
+                        Add-Content -LiteralPath $__wdLog -Value ("[{0}] WATCHDOG-KILL {1}: install exceeded {2}s {5} deadline (child pid {3}); killed tree. Inspect incoming readiness and selections before retrying. Stage: {4}" -f ((Get-Date).ToUniversalTime().ToString('s') + 'Z'), $__selfStageName, $__wdDeadline, $__wdChild.Id, $__selfStageDir, $__wdKind)
                     } catch {}
                     exit 124
                 }
