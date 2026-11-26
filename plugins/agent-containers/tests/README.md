@@ -28,3 +28,10 @@ qualified by the synthetic context decisions.
 Inert modules and context decisions perform no Docker, Podman, backend, relay,
 credential or service operations. This is not installed-host adoption, complete
 command-latency measurement or qualification of other child producers.
+
+The retained macOS global-stamp path also qualifies the existing Python fallback
+transaction check on both Containers and Machines. It compares native
+`os.fstat(8)` with the no-follow named lock rather than Darwin's descriptor
+filesystem metadata. Six POSIX controls retain successful admission and
+replaced-file/symlink refusal; native-flock behavior, persistent inode,
+legacy-receipt refusal and close-only lock lifetime are unchanged.

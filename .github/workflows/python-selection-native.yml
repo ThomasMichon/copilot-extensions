@@ -39,6 +39,10 @@ on:
       - libs/payload-invocation/tests/test_containers_ready_source.py
       - libs/payload-invocation/tests/test_containers_first_use_publication.py
       - libs/payload-invocation/tests/test_containers_review_regressions.py
+      - libs/payload-invocation/tests/test_legacy_transaction_source.py
+      - plugins/agent-containers/scripts/legacy-transaction.sh
+      - plugins/agent-machines/scripts/legacy-transaction.sh
+      - tools/test_legacy_transaction_interop.py
       - libs/payload-invocation/tests/adopter_admission_fixture.py
       - libs/payload-invocation/tests/test_adopter_publication.py
       - libs/payload-invocation/tests/test_native_publication.py
@@ -1528,6 +1532,20 @@ jobs:
           2 if r['shell']=='bash' else 6)
           and all(v>0 for v in r['samples_seconds']) for r in reports);
           print(json.dumps({'containers_command_admission':reports},sort_keys=True))"
+      - name: Qualify persistent transaction descriptor identity
+        if: runner.os != 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_legacy_transaction_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/containers-transaction
+      - name: Require all six transaction identity controls without skips
+        if: runner.os != 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-transaction').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==6 and len({c.attrib['name'] for c in cases})==6;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Prepare the retained macOS installation-management prerequisite
         if: runner.os == 'macOS'
         run: |
