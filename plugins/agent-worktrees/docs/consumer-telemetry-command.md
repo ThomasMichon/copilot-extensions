@@ -45,9 +45,10 @@ absence, failure or refusal never changes the command's output or exit status.
 
 Namespace aliases that reach the same handlers record the same way:
 `worktrees <verb>`, `worktree create` / `push` / `create-pr` / `finalize`,
-`pr create` and `pr merge`. Lease-global options (`--origin`, `--pretty`) are
-skipped before the subcommand is read; `inspect`, `status` and `list` are
-never observed.
+`pr create` and `pr merge`. As in the CLI, the first project option
+(`-p`, `--project`, `--project=`) is lifted from any position. Lease-global
+options (`--origin`, `--pretty`) are skipped before the subcommand is read;
+`inspect`, `status` and `list` are never observed.
 
 Outcome is `success` for exit 0 and `failure` otherwise. Reasons:
 `interrupted` (Ctrl-C or exit 130), `lease_conflict` (the lease verb's

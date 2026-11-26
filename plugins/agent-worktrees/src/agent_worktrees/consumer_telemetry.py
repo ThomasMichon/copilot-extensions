@@ -63,6 +63,13 @@ def _verb_index(args: list[str]) -> int | None:
     return None
 
 
+def _without_project_option(args: list[str]) -> list[str]:
+    from .invocation_project import _extract_project_flag
+
+    remaining: list[str] = _extract_project_flag(args)[0]  # type: ignore[no-untyped-call]
+    return remaining
+
+
 def _lease_subcommand(rest: list[str]) -> str | None:
     """The lease subcommand after the lease-global options, if any."""
     i = 0
@@ -83,6 +90,8 @@ def classify(argv: list[str]) -> tuple[str, str] | None:
     args = list(argv)
     if args and args[0] == "agent-worktrees":
         args = args[1:]
+    # Mirror the CLI, which lifts the first project option from any position.
+    args = _without_project_option(args)
     index = _verb_index(args)
     if index is None:
         return None
