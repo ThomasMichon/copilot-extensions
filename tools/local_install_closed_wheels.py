@@ -129,10 +129,11 @@ def prepare(
         inputs.verify()
         prepared = profiles._write_snapshot(
             selected, output, profile, retained, deadline=deadline, uv=uv,
+            source_in_place=True,
         )
         inputs.verify()
         # All original application bytes, including development metadata, remain
         # bound to the same Source identity after emission and the owned UV lock.
-        if profiles.source_inputs.select_project(output, component).identity != identity:
+        if profiles.source_inputs.select_project(prepared, component).identity != identity:
             raise ProfileError("original application source changed during preparation")
         return prepared

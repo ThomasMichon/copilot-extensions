@@ -181,6 +181,50 @@ def test_snapshot_retains_one_inspected_wheel_scope_through_real_lock(
     assert (prepared / selected.project["application"] / "uv.lock").is_file()
 
 
+def test_closed_source_reaches_final_snapshot_without_another_copy(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = source._source_projects
+    sources: list[tuple[int, int]] = []
+
+    def selected_source(directory: Path, *args: Any, **kwargs: Any) -> Any:
+        result = original(directory, *args, **kwargs)
+        identity = (directory / "app/src/demo_app/__init__.py").stat()
+        sources.append((identity.st_dev, identity.st_ino))
+        return result
+
+    monkeypatch.setattr(source, "_source_projects", selected_source)
+    prepared = closed.prepare(**application)
+    identity = (prepared / "source/app/src/demo_app/__init__.py").stat()
+    assert sources == [(identity.st_dev, identity.st_ino)]
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    assert (prepared / selected.project["application"] / "uv.lock").is_file()
+
+
+@pytest.mark.parametrize("application", ["dist/legacy.whl"], indirect=True)
+@pytest.mark.parametrize("changed", ["content", "file-set"])
+def test_in_place_snapshot_refuses_changed_generated_source_inputs(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    original_lock = profiles._lock_application
+
+    def lock(directory: Path, *, uv: str, deadline: float) -> None:
+        original_lock(directory, uv=uv, deadline=deadline)
+        generated = directory.parent.parent / "source/app/dist"
+        if changed == "file-set":
+            (generated / "added.bin").write_bytes(b"added during emission")
+        else:
+            path = generated / "legacy.whl"
+            before = path.stat()
+            content = path.read_bytes()
+            path.write_bytes(bytes((content[0] ^ 1,)) + content[1:])
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    monkeypatch.setattr(profiles, "_lock_application", lock)
+    with pytest.raises((ValueError, RuntimeError), match="changed|differs|identity"):
+        closed.prepare(**application)
+
+
 @pytest.mark.parametrize("changed", ["profile", "wheel", "source"])
 def test_snapshot_retained_scope_refuses_changes_during_real_lock(
     application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,

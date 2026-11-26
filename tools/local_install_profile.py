@@ -282,6 +282,7 @@ def complete_profile(
 def _write_snapshot(
     selected: source_inputs.ProjectSource, output: Path, profile: RuntimeProfile,
     retained: WheelSnapshot, *, deadline: float, uv: str | None = None,
+    source_in_place: bool = False,
 ) -> Path:
     prepared = output / "snapshot"
     if prepared.exists() or prepared.is_symlink():
@@ -292,17 +293,46 @@ def _write_snapshot(
     packages = engine._package_roots(
         selected.payload, **({"closed_wheels": True} if selected.closed_wheel_source else {}),
     )
-    common = Path(os.path.commonpath(packages))
-    layout = selected.payload.relative_to(common)
-    payload_destination = payload.parents[len(layout.parts) - 1] if layout.parts else payload
-    frozen = engine.freeze_inputs(
-        selected.payload, payload_destination, deadline=deadline,
-        closed_wheel_source=selected.closed_wheel_source,
-    )
-    if frozen.plugin != payload:
+    source_files: tuple[Path, ...] = ()
+    source_hash: str | None = None
+
+    def check_time() -> None:
+        _check_deadline(deadline)
+
+    if source_in_place:
+        original_source = output / "source"
+        if (
+            not selected.closed_wheel_source
+            or selected.payload != source_inputs._member(output, relative)
+            or not selected.payload.is_relative_to(original_source)
+        ):
+            raise ProfileError("in-place snapshot requires its freshly composed closed-wheel Source")
+        source_files = engine._source_input_files(
+            packages, closed_wheel_source=True, on_progress=check_time,
+        )
+        source_hash = engine._construction_hash(
+            source_files, (), on_progress=check_time,
+        )
+        prepared.mkdir()
+        original_source.rename(prepared / "source")
+        (output / source_inputs.MANIFEST).rename(prepared / source_inputs.MANIFEST)
+        packages = tuple(prepared / "source" / root.relative_to(original_source) for root in packages)
+        source_files = tuple(
+            prepared / "source" / path.relative_to(original_source) for path in source_files
+        )
+        frozen_plugin = payload
+    else:
+        common = Path(os.path.commonpath(packages))
+        layout = selected.payload.relative_to(common)
+        payload_destination = payload.parents[len(layout.parts) - 1] if layout.parts else payload
+        frozen_plugin = engine.freeze_inputs(
+            selected.payload, payload_destination, deadline=deadline,
+            closed_wheel_source=selected.closed_wheel_source,
+        ).plugin
+    if frozen_plugin != payload:
         raise ProfileError("prepared project payload does not match its selected layout")
     if sources.read_source_identity(
-        frozen.plugin, selected.identity.package_version, plugin=component,
+        frozen_plugin, selected.identity.package_version, plugin=component,
     ) != selected.identity:
         raise ProfileError("prepared project source differs from its selected identity")
     wheels = prepared / "wheels" / component
@@ -319,7 +349,7 @@ def _write_snapshot(
     record["projects"] = {selected.project_key: record["projects"][selected.project_key]}
     project = record["projects"][selected.project_key]
     project.update({
-        "payload": frozen.plugin.relative_to(prepared).as_posix(),
+        "payload": frozen_plugin.relative_to(prepared).as_posix(),
         "wheels": wheels.relative_to(prepared).as_posix(),
         "wheel_inputs": wheels.relative_to(prepared).as_posix(),
         "profile": profile_path.relative_to(prepared).as_posix(),
@@ -333,7 +363,7 @@ def _write_snapshot(
         if uv is not None:
             from runtime_application_project import emit, install_callbacks
 
-            project_metadata = dependencies._toml(frozen.plugin / "pyproject.toml")
+            project_metadata = dependencies._toml(frozen_plugin / "pyproject.toml")
             metadata = project_metadata["project"]
             profile_record = profile.record()
             environment = profile_record["target"]["environment"]
@@ -390,6 +420,18 @@ def _write_snapshot(
         ) as emitted:
             emitted.verify()
         inputs.verify()
+    if source_in_place:
+        if (
+            engine._package_roots(frozen_plugin, closed_wheels=True) != packages
+            or engine._source_input_files(
+                packages, closed_wheel_source=True, on_progress=check_time,
+            ) != source_files
+            or engine._construction_hash(
+                source_files, (), on_progress=check_time,
+            ) != source_hash
+        ):
+            raise ProfileError("prepared source inputs changed during snapshot emission")
+    _check_deadline(deadline)
     return prepared
 
 

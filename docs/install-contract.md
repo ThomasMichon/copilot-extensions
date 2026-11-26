@@ -6266,6 +6266,15 @@ entry validator retains its path/type/collision checks. Final archive identity
 and full-byte rechecks still precede publication and completion; parsing,
 draining and rechecks share the original deadline. No accepted Source cache or
 metadata-only substitute for byte validation is introduced.
+Fresh closed-wheel Git Source reaches the final snapshot without copying that
+same payload again. Closure refusals retain the original Source layout and do
+not start snapshot emission. After admission, only that invocation's fresh
+Source and its record are moved into the final snapshot. The preparer retains the canonical
+closed-source file inventory and complete byte fingerprint before emission,
+then compares the package graph, full file set and bytes after the real lock
+and readback. Generated development data remains included. Source identity,
+complete wheel inspection and all final emitted-input checks still apply;
+this is not reuse of an earlier Source or installed runtime.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
 One inspected-wheel scope remains open through emission, offline locking and

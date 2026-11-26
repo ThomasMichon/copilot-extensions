@@ -1,5 +1,5 @@
 {
-  "comment": "Retain the complete canonical application Source closure and inspected wheel custody through offline snapshot emission, avoiding unrelated application-association scans while preserving complete closure and final emitted-byte checks.",
+  "comment": "Retain the complete canonical application Source closure and inspected wheel custody through offline snapshot emission, avoiding unrelated application-association scans and a second fresh-payload copy while preserving complete source/file/byte closure and final emitted-input checks.",
   "changes": [
     {
       "plugin": "worktree-manager",
