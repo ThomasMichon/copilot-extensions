@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 _MAX = 2**53 - 1
@@ -188,6 +189,8 @@ def _project_hook(event: dict[str, Any]) -> dict[str, Any]:
     if started is not None:
         if type(started) is not str or not _TIMESTAMP.match(started):
             raise ValueError("unadmitted timestamp")
+        # The shape check admits impossible values such as month 99.
+        datetime.strptime(started, "%Y-%m-%dT%H:%M:%S.%fZ")
         result["started_at"] = started
     _copy(result, event, {
         "exit_code": (-(2**31), 2**31 - 1), "duration_ms": (0, _MAX),

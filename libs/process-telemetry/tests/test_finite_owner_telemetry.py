@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from process_telemetry import SinkSlot, hook_journal
+from process_telemetry import SinkSlot, append, hook_journal
 from process_telemetry.command import SOURCES
 from process_telemetry.emission import LEGACY
 from process_telemetry.finite_owner import FiniteOwner, capability, load_policy
@@ -120,6 +120,12 @@ def test_codespaces_stage_projection_admits_closed_values_only(
     ("hook.lifecycle.v1", {"kind": "hook", "plugin": "agent-vault", "entry": "sessionStart",
                            "outcome": "success", "failure_category": "none",
                            "started_at": "yesterday"}),
+    ("hook.lifecycle.v1", {"kind": "hook", "plugin": "agent-vault", "entry": "sessionStart",
+                           "outcome": "success", "failure_category": "none",
+                           "started_at": "2026-99-99T99:99:99.999Z"}),
+    ("hook.lifecycle.v1", {"kind": "hook", "plugin": "agent-vault", "entry": "sessionStart",
+                           "outcome": "success", "failure_category": "none",
+                           "started_at": "2026-02-30T12:00:00.000Z"}),
 ])
 def test_unadmitted_records_drop(schema: str, event: dict[str, Any]) -> None:
     offered, project = for_schema(schema)
@@ -204,10 +210,10 @@ def test_a_committed_record_missing_its_newline_is_reported_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _finish_runs(tmp_path, 1)
-    real_append = hook_journal.append_bytes
+    real_append = append.append_bytes
 
-    def stopped_before_newline(path: Path, data: bytes, **kwargs: object) -> None:
-        real_append(path, data.rstrip(b"\n"), **kwargs)
+    def stopped_before_newline(path: Any, data: bytes, *, mode: int = 0o600) -> None:
+        real_append(path, data.rstrip(b"\n"), mode=mode)
         raise KeyboardInterrupt  # the runtime stops the hook mid-append
 
     monkeypatch.setattr(hook_journal, "append_bytes", stopped_before_newline)
@@ -322,6 +328,8 @@ def test_shared_journal_occupancy_stays_within_one_complete_scan(
     assert len(list(tmp_path.iterdir())) <= hook_journal._occupancy_bound()
     # A different plugin's start recovers every stalled run under its own name.
     monkeypatch.setattr(hook_journal, "STALE_AFTER_MS", 0)
+    # The production time budget is a latency cap, not what this test measures.
+    monkeypatch.setattr(hook_journal, "RECOVERY_BUDGET_S", 60.0)
     fresh = hook_journal.HookRun.begin(tmp_path, plugins[-1], "sessionStart", stale_after_ms=0)
     assert fresh.marker is not None
     fresh.finish(outcome="success")
