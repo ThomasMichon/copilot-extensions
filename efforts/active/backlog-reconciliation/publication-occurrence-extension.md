@@ -136,3 +136,50 @@ no execution authority.
 The [actual delivery and census](journal/2026/11.25-verifier-availability-and-publisher-extension.md#actual-extension-intake-and-tracking-retirements)
 resolve these five tracker gates only. The receiver's technical-case
 acceptance remains open, and incumbent campaign gate states are unchanged.
+
+## One further independent publication case
+
+The preceding twenty-nine technical cases, twenty-nine leaf-tracking
+retirements and resolved delivery gates are settled, not replayed.
+The [new whole-original study](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+proposes one additive case in the same existing OPEN #7378 receiver:
+
+| Clause / original | Signature | Reported commit | Actual failed execution | Technical state |
+|---|---|---|---|---|
+| P8626 / #8626 | `Signature: d63a07af9883` | `f15dfea69da1a76b22da91794fd2e90a4f71965b` | [40112079861 / 120928085970](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40112079861/job/120928085970) | OPEN |
+
+The actual failed boundary is **Publish and read back the qualified source
+release before merge / Publish immutable source assets and verify all raw
+bytes before merge**. Its complete excerpt contains cleanup, not a causal
+diagnostic. This is a separate unknown technical case; the evidence-file
+repair #8508 does not establish its fulfillment.
+
+After review, append the row and this complete acceptance to the immediate
+qualified whole receiver body, preserving the original, every earlier row,
+one disclosure, all five incumbent human comments, metadata and custodians.
+All thirty publisher technical cases remain independently OPEN. Preserve
+the literal signature, reported source, execution and still-required
+attributable diagnosis and evidence-backed technical disposition. Keep all
+incumbent release/tag, later admission, integrity and consumer-authority
+requirements; appoint no new investigator or implementation owner.
+
+Only #8626's separate redundant leaf tracking token may conditionally retire
+`NOT_PLANNED`, after independent whole receiving acceptance and its current
+eligibility/custody, unchanged-content, exact-signature routing, disclosed
+acknowledgment and independent proper-reason/original-preservation audits.
+Apply the existing producer-equivalent first-target gate before selective
+source-label withdrawal while it stays OPEN, before retirement and afterward.
+The OPEN receiver retains `ci-failure-signature` and its issue-level cooldown.
+Changed evidence, delay, unexpected routing or a hold keeps the source OPEN;
+unknown effects are reconciled, not replayed. No per-signature cadence,
+multi-case worker capability, workflow retry or product effect follows.
+
+### One-case delivery gates
+
+- [ ] The additive proposal passes review and required CI and merges.
+- [ ] Whole actual receiving preserves all incumbent text, discussion,
+  metadata, custody and thirty independently OPEN technical cases.
+- [ ] The new source passes its qualification, exact route, disclosed
+  acknowledgment and independent disposition/post-route/original audits.
+- [ ] A complete new census records actual effects and inflow, preserving
+  all prior local and parent gate states.

@@ -484,6 +484,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [coverage-bound and further-occurrence study](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+proposes two literal evidence-file source completions and seven tracking-only
+handoffs to existing receivers. Six further source-reuse cases and one
+publisher case remain technically OPEN; #8596's whole canonical/vendor
+acceptance remains OPEN and unchanged. Reviewed publication and separate
+source/receiving/routing gates precede effects. The 797-open hint is not a new
+complete census or prospective closure credit.
+
 The [further source-reuse and timeout intake](journal/2026/11.25-source-reuse-timeout-intake.md)
 records accepted receiving of nine more independent OPEN technical cases in
 existing #7872 and nine separately audited tracking retirements. Its entire
@@ -5704,6 +5712,13 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [new coverage and receiving delivery gates](journal/2026/11.25-coverage-bound-and-further-occurrences.md#delivery-gates)
+remain unresolved. Actual merged #8508 source and current finite packet
+controls support two narrow completion proposals, not a successful historical
+run, hosted release or installed claim. Seven unknown cases require complete
+accepted receiving and separate tracking audits. All incumbent local and
+parent gate states, source/copy/resource holds and fixed whole target remain.
 
 The [three verifier-completion and eleven-case receiving gates](journal/2026/11.25-verifier-availability-and-publisher-extension.md#separate-final-disposition-gates)
 are settled: each completion consumed its recorded final unit and received

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Literal coverage-bound repair and further independent source-reuse/publication cases](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+
 - [2026-11-25 - Twenty-nine source-reuse cases, nine further tracking retirements and separate manifest timeout](journal/2026/11.25-source-reuse-timeout-intake.md)
 
 - [2026-11-25 - Twenty-case source-reuse receiving, nineteen tracking retirements and separate candidate guard](journal/2026/11.25-source-reuse-and-verifier-keepers.md)
