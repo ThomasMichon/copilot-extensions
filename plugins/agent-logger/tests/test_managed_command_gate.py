@@ -88,7 +88,8 @@ def test_ready_command_admits_exact_prepared_application(
     if os.name != "nt":
         for name in ("bash", "dirname", "awk", "tr", "sed", "date", "sort", "find",
                      "mktemp", "mkfifo", "sleep", "rm", "rmdir", "mkdir", "cat",
-                     "grep", "cut", "ln", "readlink", "cksum", "id"):
+                     "grep", "cut", "ln", "readlink", "cksum", "id",
+                     *(("dscl",) if sys.platform == "darwin" else ())):
             executable = shutil.which(name)
             assert executable, name
             (tools / name).symlink_to(executable)
