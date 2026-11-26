@@ -130,7 +130,9 @@ After the reviewed proposal, the operator admitted execution:
 - [x] Delay expensive model readiness until a nonempty embedding plan exists.
   Keep search availability independent of indexing-engine lifecycle.
 - [ ] Preserve store-before-checkpoint ordering, partial-write recovery,
-  source isolation and compatibility with #4222/#4220.
+  source isolation and compatibility with #4222/#4220. The bounded native
+  canonical-alias revert qualification is tracked in #14684; broader ownership
+  acceptance remains with the existing receiving effort.
 
 ### Phase 3 - Delta-bounded discovery and reconciliation
 
@@ -357,12 +359,19 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-25 - Native alias-revert recovery qualification
+
+The [native alias journal](journal/2026/11.25%20native-alias-recovery.md)
+records #14684's shared-store A/B/C control through separate actual workers,
+pre-acquisition refusal and explicit synthetic repair. It does not complete
+the broader source-ownership gate or either parent's ten open items.
+
 ### 2026-11-25 - Bounded GitHub hinted acquisition
 
 The [hinted-acquisition journal](journal/2026/11.25%20github-hinted-acquisition.md)
 records #14679's explicit connector opt-in, existing journal composition and
-single-comment-page bound. Default callers, full reconciliation and the ten
-open parent Plan/Validation items remain unchanged.
+single-comment-page bound, merged in #14680. Default callers, full
+reconciliation and the ten open parent Plan/Validation items remain unchanged.
 
 ### 2026-11-25 - Explicit point client delivered
 
