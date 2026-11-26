@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from promotion_unit_contract import (
-    COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, bounded_bytes, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
+    COMPACT_PROFILE, PREFIX_COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, bounded_bytes, changed_paths, ci_requires_code_checks, ci_requires_units, compact_manifest, decode_json, manifest_digest, relative_file,
     requires_units, source_sha, verify_observations, verify_sources, windows_native_manifest,
 )
 
@@ -105,6 +105,34 @@ def test_compact_manifest_preserves_interleaved_nodes_and_logical_identity() -> 
     assert admitted == data and compact == original
     assert manifest_digest(admitted) == manifest_digest(data)
     assert admit_manifest(data) == data
+    prefixed = {
+        **compact, "profile": PREFIX_COMPACT_PROFILE,
+        "node_groups": [
+            [path, [["test_example", [""]]]],
+            [other, [["test_other", [""]]]],
+            [path, [["TestScope::test_nested", ["[a::b]"]]]],
+        ],
+    }
+    assert compact_manifest(data) == prefixed
+    assert admit_manifest(decode_json(json.dumps(prefixed))) == data
+    assert compact == original
+    edge = {**data, "nodes": [
+        path + "::test_many[\u00e9::\u03bb]", path + "::test_many[]",
+        path + "::TestGroup[a]::test_inner[x]", other + "::test_other",
+        path + "::test_many[last]", path + "::[opaque]",
+    ]}
+    before = copy.deepcopy(edge)
+    encoded = compact_manifest(edge)
+    assert encoded["node_groups"] == [
+        [path, [["test_many", ["[\u00e9::\u03bb]", "[]"]], ["TestGroup", ["[a]::test_inner[x]"]]]],
+        [other, [["test_other", [""]]]],
+        [path, [["test_many", ["[last]"]], ["[opaque]", [""]]]],
+    ]
+    assert admit_manifest(decode_json(json.dumps(encoded))) == edge and edge == before
+    assert list(encoded["sources"]) == list(edge["sources"])
+    assert encoded["coverage_targets"] == edge["coverage_targets"]
+    assert manifest_digest(admit_manifest(encoded)) == manifest_digest(edge)
+    assert compact_manifest(compact) == prefixed
 
 
 @pytest.mark.parametrize("groups", [
@@ -122,6 +150,13 @@ def test_compact_manifest_refuses_incomplete_or_duplicate_groups(groups: object)
     data.update(profile=COMPACT_PROFILE, node_groups=groups)
     with pytest.raises(UnitEvidenceError):
         admit_manifest(data)
+    prefixed_groups = copy.deepcopy(groups)
+    if isinstance(prefixed_groups, list):
+        for group in prefixed_groups:
+            if isinstance(group, list) and len(group) == 2 and isinstance(group[1], list):
+                group[1] = [[case, [""]] for case in group[1]]
+    with pytest.raises(UnitEvidenceError):
+        admit_manifest({**data, "profile": PREFIX_COMPACT_PROFILE, "node_groups": prefixed_groups})
 
 
 def test_compact_manifest_cannot_waive_flat_admission_or_add_fields() -> None:
@@ -138,6 +173,33 @@ def test_compact_manifest_cannot_waive_flat_admission_or_add_fields() -> None:
     for change in changes:
         with pytest.raises(UnitEvidenceError):
             admit_manifest({**compact, **change})
+    prefixed = compact_manifest(manifest())
+    path = NODE.partition("::")[0]
+    invalid_runs: tuple[object, ...] = (
+        None, [], ["test_example"], [["test_example"]], [[True, [""]]],
+        [["", [""]]], [["test_example", []]], [["test_example", ""]],
+        [["test_example", [True]]], [["test_example", [None]]],
+        [["test_example", [[]]]], [["test_example", ["\ud800"]]],
+        [["test_\ud800", [""]]], [["test_example", ["", ""]]],
+        [["test_", ["example"]], ["test_example", [""]]],
+    )
+    for runs in invalid_runs:
+        with pytest.raises(UnitEvidenceError):
+            admit_manifest({**prefixed, "node_groups": [[path, runs]]})
+    for change in (
+        {"max_seconds": 301}, {"max_seconds": True}, {"nodes": [NODE]},
+        {"composition": {}}, {"sources": {SOURCE: "b" * 64}},
+        {"coverage_targets": ["tools/unknown.py"]},
+        {"profile": "copilot-extensions.promotion-units/v4"},
+        {"node_groups": [["tools/outside.py", [["test_example", [""]]]]]},
+        {"node_groups": [[path, [["test_example", [""]]], "extra"]]},
+        {"node_groups": [[path, [["test_example", [""]], "extra"]]]},
+    ):
+        with pytest.raises(UnitEvidenceError):
+            admit_manifest({**prefixed, **change})
+    bad_path = "tools/promotion_unit_tests/test_\ud800.py"
+    with pytest.raises(UnitEvidenceError, match="valid UTF-8"):
+        admit_manifest({**prefixed, "node_groups": [[bad_path, [["test_example", [""]]]]]})
 
 
 def test_compact_manifest_bounds_expanded_utf8_before_creating_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,9 +210,33 @@ def test_compact_manifest_bounds_expanded_utf8_before_creating_nodes(monkeypatch
     case = "test_\u00e9"
     path = NODE.partition("::")[0]
     data.update(profile=COMPACT_PROFILE, node_groups=[[path, [case]]])
-    monkeypatch.setattr(contract, "MAX_PACKET_FILE_BYTES", len((path + "::" + case).encode()) - 1)
+    prefixed = {
+        **data, "profile": PREFIX_COMPACT_PROFILE,
+        "node_groups": [[path, [[case, [""]]]]],
+    }
+    size = len((path + "::" + case).encode())
+    monkeypatch.setattr(contract, "MAX_PACKET_FILE_BYTES", size)
+    assert admit_manifest(data)["nodes"] == [path + "::" + case]
+    assert admit_manifest(prefixed)["nodes"] == [path + "::" + case]
+    monkeypatch.setattr(contract, "MAX_PACKET_FILE_BYTES", size - 1)
     with pytest.raises(UnitEvidenceError, match="expanded byte bound"):
         admit_manifest(data)
+    with pytest.raises(UnitEvidenceError, match="expanded byte bound"):
+        admit_manifest(prefixed)
+
+    class UnmaterializedSuffix(str):
+        def __radd__(self, _other: object) -> str:
+            raise AssertionError("expanded node was allocated before its byte bound")
+
+    prefixed["node_groups"] = [[path, [["test_", [UnmaterializedSuffix("\u00e9")]]]]]
+    with pytest.raises(UnitEvidenceError, match="expanded byte bound"):
+        admit_manifest(prefixed)
+    first, second = "[a]", UnmaterializedSuffix("[b]")
+    maximum = sum(len((path + "::test_" + str(value)).encode()) for value in (first, second)) - 1
+    monkeypatch.setattr(contract, "MAX_PACKET_FILE_BYTES", maximum)
+    prefixed["node_groups"] = [[path, [["test_", [first, second]]]]]
+    with pytest.raises(UnitEvidenceError, match="expanded byte bound"):
+        admit_manifest(prefixed)
 
 
 @pytest.mark.parametrize("size", [3, 200001], ids=["small", "overflow"])
