@@ -194,15 +194,15 @@ delivery gates are resolved; all thirty publisher cases remain OPEN.
 The preceding thirty registered technical cases and all earlier leaf-token
 retirements are settled. The
 [whole-original/discussion study](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
-proposes four more independent cases in existing OPEN #7378. Two failed the
+records four more independent cases in existing OPEN #7378. Two failed the
 legacy exact-candidate publication guard and two the later qualified-source
 publisher. Do not collapse their different boundaries or infer a shared cause.
 
-Append the following complete block to the immediate qualified whole
-receiver body only after review. Preserve that entire incumbent, all thirty
+After reviewed #14664, the independently read whole actual receiver retained
+the following complete block, its entire immediate incumbent, all thirty
 earlier rows, original and later acceptance, one disclosure, all five comments,
-labels, assignments and custodians. Independently read the whole actual result
-before any source effect.
+labels, assignments and custodians. The whole actual result was read before
+any new source effect; all thirty-four registered technical cases remain OPEN.
 
 <!-- publication-four-boundaries:start -->
 ## Publication: four further independent legacy/current cases
@@ -272,10 +272,15 @@ runtime, rollout or resource operation.
 
 ### Four-case delivery gates
 
-- [ ] The additive proposal passes review and required CI and merges.
-- [ ] Whole actual receiving preserves all incumbent text, five comments,
+- [x] The additive proposal passes review and required CI and merges.
+- [x] Whole actual receiving preserves all incumbent text, five comments,
   both boundary families, metadata, custody and thirty-four OPEN cases.
-- [ ] Each new source passes its qualification, exact route, disclosed
+- [x] Each new source passes its qualification, exact route, disclosed
   acknowledgment and independent disposition/post-route/original audits.
-- [ ] A complete new census records actual effects and inflow, preserving
+- [x] A complete new census records actual effects and inflow, preserving
   all six keeper outcomes and all prior local and parent gate states.
+
+The [actual independent four-source outcome](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#reviewed-receiving-and-four-independent-tracking-outcomes)
+records all four disclosed acknowledgments, proper-reason/original audits and
+first-target #7378 routes. Only these four new delivery gates are resolved;
+the frozen technical acceptance above and all incumbent parent states remain.

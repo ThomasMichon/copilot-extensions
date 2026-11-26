@@ -484,13 +484,13 @@ the non-public approval conversation.
 
 ## Plan
 
-The [publication-guard and explicit-keeper study](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
-proposes four tracking-only publication handoffs, preserving two legacy
-exact-candidate guard cases separately from two later publisher cases.
-All remain technically OPEN in proposed existing #7378 receiving; whole
-#8632/#8634, #8660, #9317 and #8985/#9092 acceptance stays OPEN. Review,
-whole actual receiving and separate source/routing audits precede effects;
-the 788-open hint supplies no prospective subtraction.
+The [publication-guard and explicit-keeper outcome](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
+records four independently audited tracking-only publication handoffs after
+reviewed #14664 and whole actual #7378 receiving. Two legacy exact-candidate
+guard cases remain separate from two later publisher cases; all thirty-four
+registered publication cases stay technically OPEN. Whole #8632/#8634, #8660,
+#9317 and #8985/#9092 acceptance stays OPEN. The complete census is 784 whole,
+293 original-cohort and 491 inflow, still 55 above fixed 729.
 
 The [coverage-bound and further-occurrence outcome](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
 records two separately verified evidence-file source completions and seven
@@ -5723,11 +5723,13 @@ closure credit, resource release or parent checkbox change follows.
 ## Validation Plan
 
 The [four-publication-case delivery gates](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#delivery-gates)
-remain unresolved. All ten whole originals and eight discussions were
-qualified/read; distinct actual job boundaries and remaining gaps are
-preserved. Four tracking proposals are not technical completions. All six
-whole keeper outcomes, prior local states, parent gates, actual holds and
-the fixed whole-queue target remain.
+are settled: reviewed publication, whole accepted receiving and independently
+audited `NOT_PLANNED`/original-preservation/post-route readbacks for all four
+new tokens. Distinct actual job boundaries, all thirty-four OPEN technical
+cases and six whole keeper outcomes remain. The complete equal-pass census
+is 784 whole open at 17:44:26 PST on 2026-11-25. Prior local states, parent
+gates, actual holds and fixed whole target are unchanged; no new technical
+completion or final source-check unit was claimed.
 
 The [new coverage and receiving delivery gates](journal/2026/11.25-coverage-bound-and-further-occurrences.md#delivery-gates)
 are settled: two separate one-unit source checks and acknowledged `COMPLETED`
