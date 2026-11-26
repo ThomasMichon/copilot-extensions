@@ -1,0 +1,9 @@
+{
+  "comment": "Include original in-memory repository hosting-result parser contracts in the guarded promotion inventory",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -466,7 +466,27 @@ be discarded (or the cancel signature *persists* across sends). See the
 # Select exactly one managed worktree, without session-alias or singleton lookup.
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --strict
 <agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --cli
+
+# Opt in to project-scoped common selection and pin the selected native identity.
+<agent-bridge catalog argv[0]> --json --project <repo> resume <native-or-managed-id> --bridge
+<agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --bridge --cli
 ```
+
+`--bridge` uses the common exact inventory selector and one identity-pinned
+workspace resume. It requires the executing daemon's `bridge_inventory: 2`
+and `worktree_exact_resume: 1` capabilities. The executing CLI separately
+advertises `exact-bridge-workspace-resume` in `agent-bridge.resume/v1`.
+Selection supports `--all-projects`, `--machine` and `--namespace` through the
+local serving daemon, not a remote `--host`. Without `--cli`, the existing ACP
+mode remains selected; cached hosting does not authorize takeover.
+Standalone conversations lacking a workspace owner refuse. A singleton's
+known conversation can resume, but an empty singleton cannot initialize.
+This form rejects writer/recovery inputs and `--force`/`--reclaim` before
+input or discovery. It never ensures the service, falls back to a profile,
+or retries a refused or unknown operation. Plain resume and the specialized
+contracts below retain their existing behavior. See
+[exact workspace resume](../../../docs/target-inventory.md#opt-in-exact-workspace-resume)
+for identity checks and rollback.
 
 For an original keyed creation with a retained writer requirement,
 `resume <exact-session-id> --strict --worktree-writer-file <path>` carries the

@@ -71,7 +71,10 @@ def cli_contracts() -> dict[str, Any]:
             },
             "agent-bridge.resume": {
                 "version": 1,
-                "capabilities": ["exact-worktree-target", "keyed-worktree-writer", "retained-native-recovery"],
+                "capabilities": [
+                    "exact-worktree-target", "keyed-worktree-writer", "retained-native-recovery",
+                    "exact-bridge-workspace-resume",
+                ],
             },
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],

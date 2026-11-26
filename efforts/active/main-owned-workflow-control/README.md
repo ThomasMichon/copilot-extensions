@@ -487,7 +487,30 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the original explicit-clock startup controls and whole
+- [ ] Qualify all four original hosting-result parser functions as one
+  coherent source slice, preserving complete parameter rows, objects,
+  globals, fixtures, typed values, marks, IDs and order.
+  Compare original file/function admission uniqueness and full metadata
+  before unchanged guarding; require actual parser call lines per case
+  before admission. Only the pure answer-shape parser may execute:
+  no repository discovery, policy file read, live hosting check, authoring
+  admission, environment/host probe, native process or guard exception.
+  Retain every existing node/hash/target/helper/limit and refusal.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete collection confirms 34 cases across the same four whole
+  functions (2/22/6/4), preserving original objects/globals/fixtures,
+  parameter types and exact floating-point bytes, all marks, IDs and order.
+  First unchanged guarded qualification passes all 34 in 1.23 pytest /
+  19.421 observation seconds: all 102 phases pass, zero prohibited effects,
+  sixteen bound reads and actual parser call lines for every case.
+  Every trace avoids repository discovery, policy loading/reading and
+  real hosting admission. The complete observation is read before admission.
+  Only 34 nodes, three adapter/original/production bindings and one
+  production target are added: 11,134 nodes, 1,534 sources, 558 targets,
+  unchanged 92 helpers, 300 seconds and 736,046 bytes.
+  Fatal Ruff and strict Linux/Windows whole-file typing pass.
+  Fresh review/full hosted CI, normal merge and persistence remain.
+- [x] Qualify the original explicit-clock startup controls and whole
   diagnostic outer-frame refusal function as one coherent source slice.
   Preserve all four startup functions and all fifteen invalid-budget rows,
   including exact NaN/Inf/bool types and values; compare collection metadata
@@ -516,6 +539,13 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   11,100 nodes, 1,531 sources, 557 targets, unchanged 92 helpers,
   300 seconds and 734,924 bytes. Fatal Ruff and strict Linux/Windows
   whole-file typing pass; review/full hosted CI/merge/persistence remain.
+  Source #14722 merges at `245941f31c1051f9cc3d3a8980be53d9d811ca9b`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,100 units in 229.417 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, managed sync, all six owned
+  reviewed/merged/working blobs, exact candidate, all bindings/helpers,
+  nineteen observed inputs and the negative ambient-redactor witness verify
+  without replay. Only this 22-case leaf is Done; the parent stays active.
 - [x] Qualify the original explicit-data ownership-decision controls as one
   coherent source slice: ten whole ZDD claim functions and nine whole
   single-instance reaper functions. Exclude both whole default-current-PID
