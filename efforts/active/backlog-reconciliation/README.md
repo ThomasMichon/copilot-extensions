@@ -522,13 +522,17 @@ the non-public approval conversation.
 
 ## Plan
 
-The [eighteen later TTY-case proposal](journal/2026/11.26-eighteen-later-tty-cases.md)
-adds separate unresolved execution identities to existing #11966 only after
-review and whole actual receiving. Literal reported sources remain distinct
-from workflow metadata heads. #13660's verifier failure and #14053's two
-human repair claims, original mux-safety refusal and later missing-component
-report stay separately OPEN. No technical completion or new implementation
-authority is claimed; every incumbent parent Plan/Validation state remains.
+The [eighteen later TTY-case outcome](journal/2026/11.26-eighteen-later-tty-cases.md)
+retains eighteen separate unresolved execution identities in existing #11966
+after reviewed #14760 and whole actual receiving. Eighteen redundant leaf
+tokens have separately audited `NOT_PLANNED` dispositions; all 110 registered
+TTY case keys remain OPEN. Literal reported sources remain distinct from
+workflow metadata heads. #13660's verifier failure and #14053's two human
+repair claims, original mux-safety refusal and later missing-component report
+stay separately OPEN. Two equal complete censuses measure 653 whole OPEN:
+293 original-cohort and 360 inflow, with exactly eighteen departures and no
+arrival since 671. The factual outcome still owes publication; every
+incumbent parent Plan/Validation state remains unchanged.
 
 The [further publication and installed-TTY outcome](journal/2026/11.26-further-publication-and-tty-evidence.md)
 retains two distinct publication-boundary cases in existing #7378 and

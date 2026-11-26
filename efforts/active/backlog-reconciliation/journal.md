@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-26 - Eighteen later TTY cases: receiving proposal and separate verifier/native keepers](journal/2026/11.26-eighteen-later-tty-cases.md)
+- [2026-11-26 - Eighteen audited TTY handoffs, separate verifier/native keepers and 653 whole open](journal/2026/11.26-eighteen-later-tty-cases.md)
 
 - [2026-11-26 - Sixteen audited publication/TTY handoffs and 671 whole open](journal/2026/11.26-further-publication-and-tty-evidence.md)
 
