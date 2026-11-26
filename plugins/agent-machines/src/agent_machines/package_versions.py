@@ -17,7 +17,7 @@ def version_parts(value: Any) -> tuple[int, ...] | None:
     return tuple(int(part) for part in value.split("."))
 
 
-def version_key(value: str) -> tuple[int, ...]:
+def version_key(value: Any) -> tuple[int, ...]:
     parts = version_parts(value)
     if parts is None:
         raise ValueError("package compatibility versions must be dotted numeric strings")
@@ -62,8 +62,9 @@ def conflicts(desired: dict[str, Any]) -> bool:
 
 
 def merge(
-    members: list[ResourceContribution], identity: tuple,
+    members: list[ResourceContribution], identity: tuple[Any, ...],
 ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
+    from . import package_source
     from .resources import ResourceFinding, _select_field
 
     findings, decisions, selected_values = [], [], {}
@@ -90,7 +91,7 @@ def merge(
                 "error", "resource-conflict",
                 f"package '{identity[2]}' ({identity[1]}) {description} across packages: {owners}.",
             ))
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
     pin = any(bool(declaration.get("pin")) for declaration in declarations)
@@ -110,6 +111,8 @@ def merge(
             "error", "resource-conflict",
             f"package '{identity[2]}' ({identity[1]}) exact pin conflicts with compatibility constraints",
         ))
+    source, source_findings = package_source.merge(members, identity)
+    findings.extend(source_findings)
     guard_names = sorted({
         str(name).strip().casefold()
         for declaration in declarations
@@ -128,4 +131,5 @@ def merge(
         ),
         "maintenance_safe": any(bool(declaration.get("maintenance_safe")) for declaration in declarations),
         "process_guard": {"names": guard_names} if guard_names else None,
+        **({"source": source} if source else {}),
     }, findings, decisions
