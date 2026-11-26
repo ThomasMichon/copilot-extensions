@@ -487,7 +487,35 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify all forty complete original local-context functions as one
+- [ ] Qualify the original explicit-data ownership-decision controls as one
+  coherent source slice: ten whole ZDD claim functions and nine whole
+  single-instance reaper functions. Exclude both whole default-current-PID
+  tests before collection/execution; preserve assertions, injected liveness/
+  termination callbacks, objects, globals, fixtures, typed values, marks,
+  IDs and order. Check original file/function admission uniqueness and
+  complete metadata before unchanged guarding; require actual owner call
+  lines per case before admission. Preserve all prior inventory, hashes,
+  helpers, limits and refusals. No live claim, lease, process table, terminate,
+  clock/host observation, native/runtime/controller effect or cleanup is
+  authorized. Fresh review/full CI, normal merge and persistence remain.
+  Complete metadata collection confirms eleven original claim cases with
+  ten adapted, and ten original reaper cases with nine adapted, preserving
+  every original object/global, fixture, typed parameter, mark, ID and order.
+  Both current-PID default functions remain wholly excluded. First unchanged
+  trials pass ten in 0.97 pytest / 16.485 observation seconds and nine in
+  1.00 pytest / 17.563 observation seconds. All 57 phases pass with zero
+  prohibited effects, seventeen/twenty bound reads and actual owner call
+  lines per case; complete witnesses are read before admission.
+  Only nineteen nodes, five bindings and two covered targets are added:
+  11,069 nodes, 1,526 sources, 555 targets, unchanged 92 helpers,
+  300 seconds and 733,015 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass; review/full hosted CI/merge/persistence remain.
+  Pre-publication reconciliation preserves both #14712 driver binding
+  refreshes and every peer item. All 24 actually observed inputs remain
+  exact without replay; inventory, helpers and limits are unchanged.
+  Fresh exact-head review and natural complete hosted CI must qualify
+  this union before normal merge and persistence.
+- [x] Qualify all forty complete original local-context functions as one
   coherent source slice: 38 context functions against local execution and
   the two registry-only normalization functions against registry.
   Preserve original objects, code/global origins, fixtures, typed parameter
@@ -517,6 +545,15 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   union is 11,050 nodes, 1,521 sources, unchanged 553 targets,
   92 helpers, 300 seconds and 731,256 bytes. Fresh review and complete
   hosted CI must qualify this union before normal merge and persistence.
+  Source #14714 merges at `0b09279b99cec390524bd9c99f82edbf3c50966e`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,050 units in 188.716 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, managed sync, all six owned
+  reviewed/merged/working blobs, exact candidate, all bindings/helpers and
+  26 observed input hashes verify without replay. Only this 232-case leaf
+  is Done. The two remaining unbound machine-transport originals retain
+  their actual host/process boundaries and are not rewritten or executed
+  under pure-unit qualification.
 - [x] Qualify the still-unrepresented original local-execution binding and
   profile controls as one coherent source PR, only after checking original
   file/function admission uniqueness rather than new adapter node IDs.
