@@ -523,12 +523,14 @@ the non-public approval conversation.
 ## Plan
 
 The [legacy fixture correspondence and retained publication gates](journal/2026/11.26-legacy-fixtures-and-publication-gates.md)
-qualify eight complete originals and all four discussions, identify two
-conditional source-completion candidates and retain six distinct unfinished
-reports plus the carried #6556/#6557 gaps. Matching admitted source/test
-deltas and current Main/Dev preservation do not replace the two separate
-final verification units or authorize execution. No new issue disposition
-or census is claimed; every parent Plan/Validation state remains.
+qualify eight complete originals and all four discussions, record two
+separately spent final assessments after reviewed #14807, and record one
+independently audited `COMPLETED` outcome for #6679. #6545's source-review
+assessment remains unmet and OPEN, alongside six other reports and carried
+#6556/#6557 gaps. Two equal complete censuses measure 594 whole OPEN,
+with exactly that departure and no arrival or unrelated departure.
+No execution, publication/adoption completion or unit renewal is claimed;
+every parent Plan/Validation state remains.
 
 The [later workflow-status intake and keeper boundaries](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
 qualify six complete originals and all six discussions, preserve the
