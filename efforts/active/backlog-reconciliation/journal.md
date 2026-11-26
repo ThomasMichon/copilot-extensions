@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-26 - Conditional source fulfillment, four retained execution cases and six open originals](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
+- [2026-11-26 - Eight completions, four retained cases, two verification gaps and 606 whole open](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
 
 - [2026-11-26 - Four source completions, twelve retained execution cases and 618 whole open](journal/2026/11.26-four-source-deliveries-and-twelve-retained-cases.md)
 
