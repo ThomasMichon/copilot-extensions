@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
@@ -120,7 +120,7 @@ def _git(path: Path, *args: str) -> str:
     return cast(str, result.stdout.strip())
 
 
-def _tracked(path: Path, relative: str) -> Path:
+def _tracked_path(path: Path, relative: str) -> Path:
     if (
         not isinstance(relative, str) or not relative or "\\" in relative
         or ":" in relative or relative.startswith("/")
@@ -135,6 +135,11 @@ def _tracked(path: Path, relative: str) -> Path:
     _plain(file)
     if not file.is_file():
         raise SetupError("Setup entry must be a regular file.")
+    return file
+
+
+def _tracked(path: Path, relative: str) -> Path:
+    file = _tracked_path(path, relative)
     entry = _git(path, "--literal-pathspecs", "ls-files", "--stage", "--", relative)
     if not entry.startswith(("100644 ", "100755 ")) or "\n" in entry:
         raise SetupError("Setup entry must be tracked as a regular file.")
@@ -276,8 +281,20 @@ class Setup:
 
 
 def inspect(path: Path, url: str) -> Setup:
-    source = qualify(path, url)
-    declaration = _tracked(source.path, DECLARATION)
+    with _source_verification_scope() as workers:
+        source = qualify(path, url)
+        checks: list[Future[Path]] = []
+        try:
+            return _inspect(source, workers, checks)
+        finally:
+            wait(checks)
+            for check in checks:
+                check.result()
+
+
+def _inspect(source: Source, workers: ThreadPoolExecutor, checks: list[Future[Path]]) -> Setup:
+    declaration = _tracked_path(source.path, DECLARATION)
+    checks.append(workers.submit(copy_context().run, _tracked, source.path, DECLARATION))
     value = _json(declaration)
     version = value.get("version")
     if type(version) is not int or version not in (1, 2, 3, 4, 5):
@@ -319,12 +336,14 @@ def inspect(path: Path, url: str) -> Setup:
         expected = "powershell" if platform == "windows" else "bash"
         if entry["runtime"] != expected or not isinstance(entry["script"], str):
             raise SetupError("Unsupported repository setup runtime or script.")
-        _tracked(source.path, entry["script"])
+        checks.append(workers.submit(copy_context().run, _tracked, source.path, entry["script"]))
     platform = "windows" if sys.platform == "win32" else "posix"
     if platform not in entries:
         raise SetupError("Repository does not declare setup for this platform.")
     entry = entries[platform]
-    script = _tracked(source.path, entry["script"])
+    selected = workers.submit(copy_context().run, _tracked, source.path, entry["script"])
+    checks.append(selected)
+    script = selected.result()
     return Setup(source, script, entry["runtime"], _digest(declaration), _digest(script),
                  tuple(contexts))
 

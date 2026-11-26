@@ -176,6 +176,80 @@ def test_source_scope_reuses_workers_with_fresh_context_and_source(
         assert all(not worker.is_alive() for worker in workers)
 
 
+@pytest.mark.parametrize("failure", [None, setup.DECLARATION, "setup.ps1"])
+def test_inspect_overlaps_and_joins_every_tracked_query(
+    source: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    original = setup._git
+    rendezvous = threading.Barrier(4, timeout=3)
+    caller_context = ContextVar("tracked-query-caller", default=-1)
+    token = caller_context.set(7)
+    observed: list[str] = []
+    settled: list[str] = []
+    workers: set[threading.Thread] = set()
+    head_complete = False
+
+    def tracked(path: Path, *arguments: str) -> str:
+        nonlocal head_complete
+        if arguments[:3] != ("--literal-pathspecs", "ls-files", "--stage"):
+            result = original(path, *arguments)
+            if arguments == ("rev-parse", "--verify", "HEAD^{commit}"):
+                head_complete = True
+            return result
+        assert head_complete
+        relative = arguments[-1]
+        observed.append(relative)
+        workers.add(threading.current_thread())
+        assert caller_context.get() == 7
+        try:
+            rendezvous.wait()
+            if relative == failure:
+                raise setup.SetupError("tracked query failed")
+            return original(path, *arguments)
+        finally:
+            settled.append(relative)
+
+    monkeypatch.setattr(setup, "_git", tracked)
+    try:
+        with setup._source_verification_scope():
+            if failure is None:
+                assert setup.inspect(source, URL).source.commit == git(source, "rev-parse", "HEAD")
+            else:
+                with pytest.raises(setup.SetupError, match="tracked query failed"):
+                    setup.inspect(source, URL)
+            selected = "setup.ps1" if sys.platform == "win32" else "setup.sh"
+            assert sorted(observed) == sorted([setup.DECLARATION, "setup.ps1", "setup.sh", selected])
+            assert sorted(settled) == sorted(observed)
+            assert len(workers) == 4
+            assert all(worker.is_alive() for worker in workers)
+    finally:
+        caller_context.reset(token)
+    assert all(not worker.is_alive() for worker in workers)
+
+
+def test_inspect_preserves_tracked_failure_before_malformed_data(
+    source: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (source / setup.DECLARATION).write_text("not json", encoding="utf-8")
+    commit(source)
+    original = setup._git
+    settled = threading.Event()
+
+    def tracked(path: Path, *arguments: str) -> str:
+        if arguments == ("--literal-pathspecs", "ls-files", "--stage", "--", setup.DECLARATION):
+            try:
+                raise setup.SetupError("earlier membership failure")
+            finally:
+                settled.set()
+        return original(path, *arguments)
+
+    monkeypatch.setattr(setup, "_git", tracked)
+    with setup._source_verification_scope():
+        with pytest.raises(setup.SetupError, match="earlier membership failure"):
+            setup.inspect(source, URL)
+        assert settled.is_set()
+
+
 @pytest.mark.parametrize("kind", ["foreign", "transport-path", "untracked", "modified", "linked", "nested"])
 def test_preserves_unqualified_source(source: Path, kind: str) -> None:
     selected = source

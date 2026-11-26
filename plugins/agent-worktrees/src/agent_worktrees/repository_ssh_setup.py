@@ -178,10 +178,13 @@ def _prepare_key(
     invocation_options: dict[str, Any] = {}
     if selection.owner is not None:
         if invocation is None:
-            setup.verify()
             from . import repository_vault
 
-            invocation = repository_vault.selected()
+            source_check = workers.submit(copy_context().run, setup.verify)
+            selection_check = workers.submit(copy_context().run, repository_vault.selected)
+            wait((source_check, selection_check))
+            source_check.result()
+            invocation = selection_check.result()
         else:
             invocation_options["source"] = setup
         invocation_options["invocation"] = invocation

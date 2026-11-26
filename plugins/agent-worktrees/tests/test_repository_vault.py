@@ -7,6 +7,7 @@ from typing import Any
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import venv
@@ -14,9 +15,102 @@ import venv
 import pytest
 
 from agent_procutil.owned_process import run_caller_owned
+from agent_procutil import no_window_kwargs
 from agent_worktrees import repository_vault as vault
 from agent_worktrees import _peer_launch, peer_launch_adapter, reconcile
 from agent_worktrees.repository_setup import SetupError
+
+
+@pytest.mark.parametrize("failure", [None, "source", "selection", "both"])
+def test_initial_source_and_vault_selection_overlap_and_settle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    from agent_worktrees import repository_setup, repository_ssh_setup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    for arguments in (
+        ("init", "-q"), ("config", "core.autocrlf", "false"),
+        ("remote", "add", "origin", "https://example.invalid/team/sample.git"),
+    ):
+        subprocess.run(["git", "-C", str(source), *arguments], check=True,
+                       capture_output=True, **no_window_kwargs())
+    (source / ".agent-worktrees").mkdir()
+    (source / repository_setup.DECLARATION).write_text(json.dumps({
+        "version": 1, "entrypoints": {
+            "windows": {"runtime": "powershell", "script": "setup.ps1"},
+            "posix": {"runtime": "bash", "script": "setup.sh"},
+        },
+    }), encoding="utf-8")
+    for script in ("setup.ps1", "setup.sh"):
+        (source / script).write_text("", encoding="utf-8")
+    for arguments in (
+        ("add", "."),
+        ("-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture", "--no-verify"),
+    ):
+        subprocess.run(["git", "-C", str(source), *arguments], check=True,
+                       capture_output=True, **no_window_kwargs())
+    selected = repository_setup.inspect(source, "https://example.invalid/team/sample.git")
+    directory = tmp_path / "key"
+    selection = repository_setup.SSHKeySelection(
+        (), str(tmp_path), "SSH/node", str(directory), "unused", owner="agent-vault",
+    )
+    description = {"key_files": {
+        "identity_file": str(directory / "id_ed25519"),
+        "public_key_file": str(directory / "id_ed25519.pub"),
+    }}
+    rendezvous = threading.Barrier(2, timeout=3)
+    caller_context = ContextVar("initial-vault-caller", default=-1)
+    token = caller_context.set(9)
+    settled: set[str] = set()
+    workers: set[threading.Thread] = set()
+    original_verify = repository_setup.Setup.verify
+    calls: list[list[str]] = []
+
+    def observe(name: str) -> None:
+        workers.add(threading.current_thread())
+        assert caller_context.get() == 9
+        rendezvous.wait()
+        if failure in (name, "both"):
+            raise SetupError(name + " failed")
+
+    def verify(value: repository_setup.Setup) -> None:
+        try:
+            observe("source")
+            original_verify(value)
+        finally:
+            settled.add("source")
+
+    def choose() -> Any:
+        try:
+            observe("selection")
+            return SimpleNamespace(argv=("peer-python",), environment={}, verify=lambda: None)
+        finally:
+            settled.add("selection")
+
+    def child(argv: list[str], **_kwargs: Any) -> SimpleNamespace:
+        assert settled == {"source", "selection"}
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}")
+
+    monkeypatch.setattr(repository_setup.Setup, "verify", verify)
+    monkeypatch.setattr(vault, "selected", choose)
+    monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
+    try:
+        if failure:
+            expected = "source" if failure == "both" else failure
+            with pytest.raises(SetupError, match=expected + " failed"):
+                repository_ssh_setup.prepare_key(selected, SimpleNamespace(ssh_key=selection), description)
+        else:
+            result = repository_ssh_setup.prepare_key(selected, SimpleNamespace(ssh_key=selection), description)
+            assert result is not None and result.status == "refused"
+        assert settled == {"source", "selection"}
+        assert len(calls) == (0 if failure else 1)
+        assert len(workers) == 2
+        assert all(not worker.is_alive() for worker in workers)
+    finally:
+        caller_context.reset(token)
 
 
 @pytest.mark.parametrize("failure", [None, "source-before", "owner-before", "source-after", "owner-after"])
