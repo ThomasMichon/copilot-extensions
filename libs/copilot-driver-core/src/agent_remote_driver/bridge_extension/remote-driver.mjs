@@ -104,7 +104,7 @@ export async function selectedLoadout(native, {
     }
     const owner = owners[0];
     if (owner.id !== "plugin:copilot-driver-headed:copilot-driver-headed"
-        || owner.name !== "copilot-driver-headed" || owner.source !== "plugin") {
+        || typeof owner.name !== "string" || !owner.name || owner.source !== "plugin") {
       throw Object.assign(invalid("extension-identity-mismatch", "connector"), {
         selectedContextIdentity: selectedIdentityObservation(owner, extensionPid),
       });
