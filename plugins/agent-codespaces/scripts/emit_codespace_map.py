@@ -80,10 +80,11 @@ def _aw(*args: str, cwd: str | None = None) -> str | None:
         sys.path.insert(0, str(payload / "src"))
         sys.path.insert(0, _agent_procutil_src(payload))
         from agent_codespaces import worktrees
+        from agent_codespaces._peer_launch import ContextRefused
 
         proc = worktrees.run(*args, cwd=cwd, timeout=20)
         if proc is not None and proc.returncode != 0:
-            raise worktrees.ContextRefused(
+            raise ContextRefused(
                 proc.stderr.strip() or f"Same-cell map command exited {proc.returncode}"
             )
         return proc.stdout if proc is not None else None
@@ -161,7 +162,7 @@ def _render_aggregate(rows: list[dict[str, Any]], version: str) -> str:
         "\nNo local checkout; resolve with "
         "`agent-worktrees related resolve <name>`."
     )
-    entries = []
+    entries: list[str] = []
     for index, row in enumerate(rows):
         entry = (
             f"{row.get('name') or '?'}("

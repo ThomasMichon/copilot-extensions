@@ -130,7 +130,12 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   128 guard and 18 CodeSpace emitter cases under the unchanged limits.
   Local whole-file checking of the seven-file delta stopped during ordinary
   consumer materialization before MyPy started; it supplies no type verdict.
-  Fresh exact-head canonical source CI must supply that verdict.
+  The first current canonical CI run then finds two typing errors in the
+  complete CodeSpace emitter: an implicit exception re-export and an empty
+  list. The correction imports the same exception from its defining owner
+  and annotates the existing list. Both complete CodeSpace files now pass
+  strict Linux/Windows checks; all 18 emitter cases pass unchanged.
+  Fresh exact-head canonical source CI must still pass before merge.
   The existing owner's reader #14658 and separate data migration #14662 now
   remove the storage prerequisite without a competing implementation.
   The pinned target integration uses that delivered v3 encoder and preserves
