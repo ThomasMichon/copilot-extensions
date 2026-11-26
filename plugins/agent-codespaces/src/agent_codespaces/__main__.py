@@ -1700,8 +1700,6 @@ def _ssh_session(
                     exec_started()
                 except Exception:
                     pass
-            from . import consumer_telemetry as ct
-
             transport_started = ct.clock()
             try:
                 result = await manager.exec_command(
