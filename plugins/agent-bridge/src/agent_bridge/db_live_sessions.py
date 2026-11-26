@@ -251,6 +251,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 conn.execute(
                     "DELETE FROM live_messages WHERE session_id=? AND disposition_json IS NULL "
                     "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                    "AND producer_target_json IS NULL "
                     "AND kind!='control:answer-question'", (session_id,),
                 )
                 conn.execute("DELETE FROM live_session_aliases WHERE alias_session_id=? "
@@ -306,7 +307,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
-                "AND kind!='control:answer-question' "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question' "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
                 "WHERE worktree_id=? AND status='taken-over')",
@@ -404,7 +405,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
-                "AND kind!='control:answer-question' "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question' "
                 f"AND session_id IN ({_in(expire_from_live)})",
                 tuple(expire_from_live),
             )
@@ -431,7 +432,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
-                "AND kind!='control:answer-question' "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question' "
                 f"AND session_id IN ({_in(expire_from_wedged)})",
                 tuple(expire_from_wedged),
             )
@@ -449,7 +450,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)}) AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
-                "AND kind!='control:answer-question'",
+                "AND producer_target_json IS NULL AND kind!='control:answer-question'",
                 tuple(dead_ids),
             )
             self.execute_write(  # its aliases go with it (live_sessions_drop_orphaned_aliases),
@@ -851,14 +852,19 @@ class _LiveSessionsMixin(LiveControlsMixin):
         so an extension that predates controls never delivers one as a prompt.
         Consumption prevents replay even when the separate SDK ACK is lost.
         """
+        from .durable_inbox import LEGACY_SUPPORTED_SQL
+
         rows = self.execute_read(
             "SELECT * FROM live_messages "
             f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
             "AND disposition_json IS NULL "
-            "AND (exact_session=0 OR NOT EXISTS (SELECT 1 FROM live_session_aliases "
+            "AND ((exact_session=0 AND producer_target_json IS NULL) OR NOT EXISTS (SELECT 1 FROM live_session_aliases "
             "WHERE alias_session_id=live_messages.session_id)) "
             "AND consumed_at IS NULL AND handoff_json IS NULL "
             "AND disposition_json IS NULL "
+            "AND (producer_target_json IS NULL OR NOT EXISTS ("
+            "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=live_messages.session_id)) "
+            f"AND {LEGACY_SUPPORTED_SQL} "
             "AND runtime_custody_json IS NULL ORDER BY id ASC",
             (session_id, session_id, session_id),
         )
@@ -900,10 +906,15 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 (now, outcome or "applied", session_id, session_id, session_id, QUESTION_CONTROL, *ids),
             )
         else:
+            from .durable_inbox import LEGACY_SUPPORTED_SQL
+
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=? "
                 f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
                 "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
+                "AND (producer_target_json IS NULL OR NOT EXISTS ("
+                "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=live_messages.session_id)) "
+                f"AND {LEGACY_SUPPORTED_SQL} "
                 f"AND id IN ({placeholders})",
                 (now, session_id, session_id, session_id, *ids),
             )

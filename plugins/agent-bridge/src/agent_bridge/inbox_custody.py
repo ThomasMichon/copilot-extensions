@@ -10,7 +10,7 @@ import uuid
 from typing import Any, TypedDict, cast
 
 from .runtime_custody import (
-    RuntimeCustodyError, _normalized_schema, nonblank, operation_triggers, positive,
+    RuntimeAdmission, RuntimeCustodyError, _normalized_schema, nonblank, operation_triggers, positive,
 )
 
 COLUMNS = {
@@ -102,10 +102,16 @@ def original_handoff(row: sqlite3.Row | dict[str, Any]) -> InboxHandoff:
     """Validate retained row association without acquiring final-send authority."""
     retained = decode_handoff(row["handoff_json"])
     consumer = retained["consumer"]
+    consumer_admission = (
+        "producer_target_json" in row.keys() and row["producer_target_json"] is not None
+        and row["runtime_custody_json"] is None
+    )
+    if consumer_admission and retained["admission"] is not None:
+        RuntimeAdmission.parse(retained["admission"])
     if (
         retained["message_id"] != row["id"]
         or not isinstance(consumer, dict) or consumer["session_id"] != row["session_id"]
-        or retained["admission"] != row["runtime_custody_json"]
+        or (not consumer_admission and retained["admission"] != row["runtime_custody_json"])
     ):
         raise RuntimeCustodyError("Original inbox handoff observations changed")
     return retained
@@ -124,8 +130,16 @@ def handoff_stage(row: sqlite3.Row | dict[str, Any]) -> str:
 
 def schema_triggers(
     *, exact_native: bool = True, compatible_messages: bool = True,
+    durable_messages: bool = True,
 ) -> dict[str, tuple[str, str]]:
-    triggers = operation_triggers(("live_messages",), compatible_messages=compatible_messages)
+    triggers = operation_triggers(
+        ("live_messages",), compatible_messages=compatible_messages,
+        durable_messages=durable_messages and compatible_messages,
+    )
+    if durable_messages and compatible_messages:
+        from .durable_inbox import schema_triggers as producer_triggers
+
+        triggers.update(producer_triggers())
     for operation in ("INSERT", "UPDATE"):
         name = f"live_messages_control_{operation.lower()}_unsupported"
         triggers[name] = (
@@ -186,29 +200,38 @@ def schema_triggers(
 
 def ensure_schema(
     conn: sqlite3.Connection, *, exact_native: bool = True, compatible_messages: bool = True,
+    durable_messages: bool = True,
 ) -> None:
     """Prepare additive inbox storage only through the writable migration owner."""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(live_messages)")}
     for name, kind in COLUMNS.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE live_messages ADD COLUMN {name} {kind}")
+    if durable_messages and compatible_messages and "producer_target_json" not in columns:
+        conn.execute("ALTER TABLE live_messages ADD COLUMN producer_target_json TEXT")
     for _table, statement in schema_triggers(
         exact_native=exact_native, compatible_messages=compatible_messages,
+        durable_messages=durable_messages,
     ).values():
         conn.execute(statement)
 
 
 def validate_schema(
     conn: sqlite3.Connection, *, exact_native: bool = True, compatible_messages: bool = True,
+    durable_messages: bool = True,
 ) -> None:
     """Require exact prepared custody guards without creating or repairing them."""
     columns = {row[1]: row for row in conn.execute("PRAGMA table_info(live_messages)")}
-    for name, kind in COLUMNS.items():
+    required = {**COLUMNS, **(
+        {"producer_target_json": "TEXT"} if durable_messages and compatible_messages else {}
+    )}
+    for name, kind in required.items():
         row = columns.get(name)
         if row is None or row[2].upper() != kind or row[3] != 0 or row[5] != 0:
             raise RuntimeCustodyError(f"Inbox custody requires writable preparation: {name}")
     for name, (table, statement) in schema_triggers(
         exact_native=exact_native, compatible_messages=compatible_messages,
+        durable_messages=durable_messages,
     ).items():
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
@@ -239,5 +262,15 @@ def migrate_compatible_messages(conn: sqlite3.Connection) -> None:
     validate_schema(conn, compatible_messages=False)
     name = "live_messages_runtime_admission"
     conn.execute(f"DROP TRIGGER {name}")
-    conn.execute(schema_triggers()[name][1])
+    conn.execute(schema_triggers(durable_messages=False)[name][1])
+    validate_schema(conn, durable_messages=False)
+
+
+def migrate_durable_messages(conn: sqlite3.Connection) -> None:
+    """Expand producer storage without rewriting an existing input or handoff."""
+    validate_schema(conn, durable_messages=False)
+    if "producer_target_json" not in {row[1] for row in conn.execute("PRAGMA table_info(live_messages)")}:
+        conn.execute("ALTER TABLE live_messages ADD COLUMN producer_target_json TEXT")
+    conn.execute("DROP TRIGGER live_messages_runtime_admission")
+    ensure_schema(conn)
     validate_schema(conn)

@@ -75,6 +75,7 @@ class _SchemaMixin:
                     validate_inbox_schema(
                         conn, exact_native=recorded["version"] >= 40,
                         compatible_messages=recorded["version"] >= 47,
+                        durable_messages=recorded["version"] >= 50,
                     )
                 if recorded is not None and recorded["version"] >= 31:
                     validate_consumer_schema(
@@ -992,3 +993,12 @@ class _SchemaMixin:
 
             migrate_metadata(conn)
             log.info("Schema migrated to version 49: retained metadata adoption and namespace exclusion")
+
+        if from_version < 50:
+            from .inbox_custody import migrate_durable_messages
+
+            conn.execute("BEGIN IMMEDIATE")
+            with conn:
+                migrate_durable_messages(conn)
+                conn.execute("UPDATE schema_version SET version=?", (50,))
+            log.info("Schema migrated to version 50: durable producer input before receiver admission")

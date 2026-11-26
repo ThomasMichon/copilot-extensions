@@ -736,13 +736,8 @@ async def post_live_message(
         )
         now = time.time()
 
-    # Freshness lease (#2906): validate the target registration's heartbeat
-    # lease and enqueue *atomically* -- the check + insert run under one write
-    # lock, so a concurrent reaper / take-over invalidation / session roll can't
-    # strand a message on a just-expired registration. Rejects a stale, expired,
-    # or superseded target (409) rather than durably queuing a write that a
-    # later, unrelated incarnation could receive. The race-free enforcement NF's
-    # client-side pre-send freshness guard (#2905) can only approximate.
+    # Ordinary acceptance records the exact selected conversation, not a lease
+    # on its current receiver. Consumer admission independently fences effects.
     after = 0
     if body.wait:
         # Capture the represented head WITHOUT creating a store entry -- a

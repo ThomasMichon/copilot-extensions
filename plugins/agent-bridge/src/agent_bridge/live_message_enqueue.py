@@ -98,7 +98,7 @@ def _duplicate(
         "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
     )
     existing = db.execute_read(
-        "SELECT id, session_id, sender, body, reply_to, kind, delivery, exact_session, runtime_custody_json, handoff_json, message_contract_json, disposition_json, "
+        "SELECT id, session_id, sender, body, reply_to, kind, delivery, exact_session, runtime_custody_json, handoff_json, message_contract_json, disposition_json, producer_target_json, "
         f"{msg_canon} = {_CANON} AS same_target, "
         f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
         "FROM live_messages WHERE idempotency_key = ?",
@@ -127,6 +127,11 @@ def _duplicate(
     same_expected = (
         request.expected_session_id is None or request.expected_session_id == row["session_id"]
     ) if retained or request.exact_session else bool(row["same_expected"])
+    if row["producer_target_json"] is not None:
+        from .durable_inbox import original_target
+
+        same_target = row["producer_target_json"] == original_target(request)
+        same_expected = same_target
     if (
         same_target and same_expected
         and row["sender"] == request.sender and row["body"] == request.body
@@ -233,6 +238,10 @@ def enqueue_fresh(
             replay = _duplicate(db, request, None, original_association=True)
             if replay is not None:
                 return replay
+            if not request.kind.casefold().startswith(("control:", "startup:")):
+                from .durable_inbox import enqueue
+
+                return enqueue(conn, request)
             selected = _enrolled_admission(db, conn, request, admission, inbox_refusal)
             native_control = selected is None and _requires_retained_admission(request) and bool(conn.execute(
                 "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? "
