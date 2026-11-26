@@ -143,6 +143,11 @@ def _interrupted(exc: BaseException) -> bool:
     return isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError))
 
 
+def transport_reason(exc: BaseException, failed: str) -> str:
+    """Closed reason for an SSH call that raised instead of returning a status."""
+    return "interrupted" if _interrupted(exc) else failed
+
+
 _ENGINE_MARKERS = (
     "docker cli not found", "daemon not reachable", "docker daemon is running",
     "runtime driver for",

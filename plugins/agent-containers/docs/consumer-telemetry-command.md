@@ -46,10 +46,10 @@ output or exit status, and the original error is always reported unchanged.
 | `bridge_payload` | detached | `payload_install_failed` (the agent-worktrees launch payload could not be installed in the container) |
 | `credential_relay` | both paths, only when the relay is enabled | `relay_not_listening` (no live published relay port, or its ping probe failed) |
 | `plugin_preparation` | both paths | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening`; the detached path records success only after the prepared CLI context is admitted. The attached path records only host-side staging failures: the staged script runs inside the interactive channel and shares its exit status, so its remote outcome is not observed |
-| `exec` | detached | `timeout`/`transport_failed` with `limit_ms`, `transport_failed` (OpenSSH exit 255) |
+| `exec` | detached | `timeout`/`transport_failed` with `limit_ms`, `transport_failed` (OpenSSH exit 255 or an SSH spawn error), `interrupted` |
 | `remote_embody` | detached | `installer_unavailable`, `bootstrap_python_unavailable` |
 | `bridge_registration` | detached | `session_unregistered`, `session_unrepresented`; closes as success once the claim settles, so a later seed-delivery bookkeeping failure is a `launch` failure, not a registration one |
-| `container_connect` | attached | `connect_failed` (OpenSSH exit 255; any other exit is the interactive session's own status and records success) |
+| `container_connect` | attached | `connect_failed` (OpenSSH exit 255 or an SSH spawn error), `interrupted`; any other exit is the interactive session's own status and records success |
 | `launch` | detached | the overall detached launch |
 
 Every stage may also report `interrupted` or `other`. A successful record

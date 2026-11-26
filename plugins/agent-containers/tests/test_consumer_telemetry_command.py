@@ -546,3 +546,44 @@ def test_a_failure_after_the_claim_settled_is_not_a_registration_failure(
         ("bridge_registration", "success", "none"),
     ]
     assert shapes[-1][:2] == ("launch", "failure")
+
+
+@pytest.mark.parametrize("error, reason", [
+    (OSError("spawn failed"), "transport_failed"),
+    (KeyboardInterrupt(), "interrupted"),
+])
+def test_a_raised_exec_is_a_failed_exec_attempt(
+    seams: Any, monkeypatch: pytest.MonkeyPatch, error: BaseException, reason: str,
+) -> None:
+    def raising(argv: list[str], **kwargs: Any) -> Any:
+        if "agent-worktrees embody" in argv[-1]:
+            raise error
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", raising)
+    try:
+        rc = _detach()
+    except BaseException as raised:
+        assert raised is error
+        rc = 130 if isinstance(error, KeyboardInterrupt) else 1
+    events = [e for e in ct.finish(rc) if e["stage"] == "exec"]
+    assert [(e["outcome"], e["reason"]) for e in events] == [("failure", reason)]
+
+
+@pytest.mark.parametrize("error, reason", [
+    (OSError("spawn failed"), "connect_failed"),
+    (KeyboardInterrupt(), "interrupted"),
+])
+def test_a_raised_attached_connect_is_a_connect_failure(
+    monkeypatch: pytest.MonkeyPatch, error: BaseException, reason: str,
+) -> None:
+    def raising(*a: Any, **k: Any) -> Any:
+        raise error
+
+    with pytest.raises(type(error)):
+        _venue_tests._call(
+            _venue_tests._args(no_relay=True), target=_venue_tests._target(),
+            monkeypatch=monkeypatch, subprocess_run=raising,
+        )
+    shapes = _shapes(130 if isinstance(error, KeyboardInterrupt) else 1)
+    assert ("container_connect", "failure", reason) in shapes

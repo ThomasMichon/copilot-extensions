@@ -355,6 +355,10 @@ class _ContainerAdapter:
                 ct.note("exec", "timeout", "transport_failed", started=exec_started,
                         limit_ms=int(timeout * 1000))
                 raise
+            except BaseException as exc:
+                ct.note("exec", "failure", ct.transport_reason(exc, "transport_failed"),
+                        started=exec_started)
+                raise
             _note_launch_exec(proc.returncode, proc.stdout or "", proc.stderr or "", exec_started)
             if self.target is not None and auth_env:
                 try:

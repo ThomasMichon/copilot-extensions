@@ -352,9 +352,14 @@ def cmd_copilot(
                 env = auth.without_inference_token({**os.environ, **relay_env})
                 inputs_safe_to_cleanup = auth_env is None
                 connect_started = ct.clock()
-                rc = subprocess.run(
-                    spawn_cmd, env=env, creationflags=creation_flags()
-                ).returncode
+                try:
+                    rc = subprocess.run(
+                        spawn_cmd, env=env, creationflags=creation_flags()
+                    ).returncode
+                except BaseException as exc:
+                    ct.note("container_connect", "failure",
+                            ct.transport_reason(exc, "connect_failed"), started=connect_started)
+                    raise
                 # The interactive session's own exit status is not a connect
                 # failure; only OpenSSH's reserved transport status is. The
                 # staged preparation runs inside that interactive channel and
