@@ -11,6 +11,7 @@ import venv
 
 import pytest
 
+from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees import repository_vault as vault
 from agent_worktrees import _peer_launch, peer_launch_adapter, reconcile
 from agent_worktrees.repository_setup import SetupError
@@ -285,7 +286,7 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(
         original = path.read_bytes()
         try:
             path.write_bytes(b"2" * 32 if path.name == "runtime-generation" else original + b"\n")
-            refused = repository_ssh_setup.run_caller_owned(
+            refused = run_caller_owned(
                 [*invocation.argv, "probe"], env=invocation.environment, timeout=20,
                 max_stdout_bytes=16384, max_stderr_bytes=16384,
             )
