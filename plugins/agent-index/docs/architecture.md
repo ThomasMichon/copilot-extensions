@@ -969,6 +969,16 @@ slot. POSIX permits only the standard `bin/python` venv symlink after validating
 its owned parent slot and resolved executable; all other linked/reparse runtime
 artifacts remain rejected. A partial or corrupt slot is never dispatched.
 
+The cell validator admits each package-origin probe through one prepared-only,
+offline UV lookup of that exact interpreter before importing application code.
+The explicit smoke builder's site-directory probe uses the same boundary.
+Both reuse the bundled stdlib process helpers and caller-owned capture, with a
+ten-second execution bound and 64 KiB limit on each output stream. Missing UV
+or helper support refuses rather than acquiring prerequisites or selecting a
+different environment. Unconfirmed native cleanup propagates with its original
+process/Job/resource custody and cannot trigger failed-candidate deletion.
+Other construction commands retain their existing installation owners.
+
 The default durable tier now registers the same stable launchers with the
 lowest-privilege host mechanism that satisfies "restart on next logon without a
 live Copilot session": Windows writes HKCU Run entries for the service and

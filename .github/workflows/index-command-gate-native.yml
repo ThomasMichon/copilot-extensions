@@ -8,10 +8,17 @@ on:
       - .github/workflows/index-command-gate-native.yml
       - plugins/agent-index/scripts/runtime-gate.sh
       - plugins/agent-index/scripts/runtime-gate.ps1
+      - plugins/agent-index/scripts/cell-runtime.py
+      - plugins/agent-index/scripts/cell_runtime_processes.py
+      - plugins/agent-index/scripts/daemon_instance_runtime.pyz
       - plugins/agent-index/tests/test_managed_command_gate.py
+      - plugins/agent-index/tests/test_managed_cell_probes.py
       - plugins/agent-index/tests/test_runtime_gate.py
       - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
       - libs/payload-invocation/tests/test_index_command_gate_source.py
+      - libs/payload-invocation/tests/test_index_cell_probes_source.py
+      - libs/agent-procutil/src/agent_procutil/managed_python.py
+      - libs/agent-procutil/src/agent_procutil/owned_process.py
       - libs/payload-invocation/bootstrap_python.py
       - libs/payload-invocation/templates/bootstrap-python-*.tmpl
       - libs/installer-engine/bootstrap-uv.sh
@@ -53,6 +60,30 @@ jobs:
           --test-file tests/test_index_command_gate_source.py --allow-explicit-tiers
           -k "${{ env.GATE_SELECTOR }}"
           --junit-dir qualification-evidence/index-command-gate
+      - name: Qualify cell-runtime application probes
+        env:
+          PYTEST_ADDOPTS: "--tb=short -vv"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_cell_probes_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/index-cell-probes
+      - name: Require every cell-probe control and offline report
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-cell-probes').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==len({c.attrib['name'] for c in cases})==14;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_cell_probe_performance'];
+          assert len(reports)==14;
+          assert all(r['network']=='disabled' and r['status']=='measured' and
+          r['completed']==len(r['samples_seconds']) and
+          r['completed']==(2 if r['scenario'] in ('origin','site') else 1) and
+          r['uv_lookups']==r['application_probes']==
+          (0 if r['scenario'] in ('missing-uv','missing-support','missing-runtime')
+          else r['completed']) for r in reports);
+          print(json.dumps({'index_cell_probe_performance':reports},sort_keys=True))"
       - name: Require every native control and repeated offline report
         run: >-
           python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;

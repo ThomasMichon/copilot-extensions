@@ -1178,27 +1178,9 @@ def _build_runtime(
             runtime_version,
             label="smoke runtime interpreter",
         )
-        site_probe = subprocess.run(
-            [
-                str(interpreter),
-                "-I",
-                "-X",
-                "utf8",
-                "-c",
-                "import site; print(next(p for p in site.getsitepackages() "
-                "if p.endswith(('site-packages','dist-packages'))))",
-            ],
-            cwd=slot,
-            env=_isolated_environment(),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+        site_packages = _cell_process_helpers().runtime_site_packages(
+            interpreter, slot, error_type=CellError, isolated_environment=_isolated_environment,
         )
-        if site_probe.returncode != 0:
-            raise CellError("smoke runtime could not resolve site-packages")
-        site_packages = Path(site_probe.stdout.strip())
         for package, source in (
             ("agent_index", snapshot_root / "src" / "agent_index"),
             ("zdd", snapshot_root / "libs" / "zdd" / "src" / "zdd"),
@@ -4202,7 +4184,9 @@ def _provision_constructed(
                 context, marketplace_id, durable_home, version, runtime_version,
                 slot, validated, role,
             )
-        except BaseException:
+        except BaseException as exc:
+            if _cell_process_helpers().cleanup_pending(exc):
+                raise
             if slot.exists() and not any(_lexists(slot / name) for name in (
                 ".install-complete.json", ".runtime-slot-completion.json",
             )):
