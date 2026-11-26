@@ -99,9 +99,12 @@ def load_versioned_runtime(
 
 def run_checked(command: list[str], *, error_type: type[Exception],
                 environment: dict[str, str] | None = None, cwd: Path | None = None) -> None:
+    # CREATE_NO_WINDOW needs explicit handles to retain inherited redirected output.
     result = subprocess.run(
         command, env=environment, cwd=cwd, text=True, encoding="utf-8",
         errors="replace", check=False, creationflags=_HEADLESS,
+        stdout=sys.stdout if os.name == "nt" else None,
+        stderr=sys.stderr if os.name == "nt" else None,
     )
     if result.returncode != 0:
         raise error_type(
@@ -143,6 +146,74 @@ def install_dependency(
             'invoke_uv_pip_install_resilient "$@"',
             "cell-dependency", str(engine), uv, *arguments,
         ]
+    execute(command, environment=isolated_environment(), cwd=cwd)
+
+
+def construct_runtime(
+    payload_root: Path, uv: str, slot: Path, cwd: Path, *, python_version: str,
+    error_type: type[Exception], validate_file: Callable[[Path, str], None],
+    quote: Callable[[str], str], isolated_environment: Callable[..., dict[str, str]],
+    execute: Callable[..., None],
+) -> None:
+    """Construct a cell through the existing managed UV owner without retiring its slot."""
+    uv_path = Path(uv)
+    if (
+        not uv_path.is_absolute() or not uv_path.is_file()
+        or (os.name != "nt" and not os.access(uv_path, os.X_OK))
+        or (os.name == "nt" and "windowsapps" in {part.casefold() for part in uv_path.parts})
+    ):
+        raise error_type("runtime construction requires the selected UV executable; use explicit setup")
+    suffix = "ps1" if os.name == "nt" else "sh"
+    engine = payload_root / "scripts" / f"installer-engine.{suffix}"
+    if not engine.is_file():
+        engine = payload_root.parent.parent / "libs" / "installer-engine" / engine.name
+    bootstrap = engine.with_name(f"bootstrap-uv.{suffix}")
+    validate_file(engine, "canonical constructor engine")
+    validate_file(bootstrap, "canonical constructor bootstrap")
+    arguments = ["--python", python_version, "--managed-python", "--no-project", "--allow-existing"]
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            raise error_type("PowerShell is required for canonical runtime construction")
+        quoted = ",".join(quote(argument) for argument in arguments)
+        # Modern Core preserves empty values; null overrides must remove provider entries.
+        body = (
+            "$ErrorActionPreference='Stop'; "
+            f". {quote(str(engine))}; . {quote(str(bootstrap))}; "
+            "function Write-Warn($message) { [Console]::Error.WriteLine($message) }; "
+            "foreach ($entry in (Get-UvBootstrapEnvironment).GetEnumerator()) { "
+            "if ($null -eq $entry.Value) { "
+            "Remove-Item -LiteralPath ('Env:'+[string]$entry.Key) -ErrorAction SilentlyContinue "
+            "} else { "
+            "[Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,'Process') } }; "
+            "Remove-Item -LiteralPath Env:UV_CONFIG_FILE -ErrorAction SilentlyContinue; "
+            "[Environment]::SetEnvironmentVariable('UV_NO_CONFIG','1','Process'); "
+            f"$cellUv={quote(uv)}; "
+            "function Invoke-CellConstructionUv { "
+            "param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments) "
+            "& $cellUv @UvArguments }; "
+            f"$result=Invoke-UvVenvResilient -VenvDir {quote(str(slot))} "
+            f"-UvCommand Invoke-CellConstructionUv -Arguments @({quoted}); "
+            "if ($result.Output) { [Console]::Error.WriteLine($result.Output) }; "
+            "exit $result.ExitCode"
+        )
+        command = [shell, "-NoProfile", "-NonInteractive", "-Command", body]
+    else:
+        shell = shutil.which("bash")
+        if not shell:
+            raise error_type("Bash is required for canonical runtime construction")
+        command = [
+            shell, "-c",
+            'engine="$1"; bootstrap="$2"; uv="$3"; slot="$4"; shift 4; '
+            'source "$engine"; source "$bootstrap"; '
+            '_warn() { printf "%s\\n" "$*" >&2; }; '
+            'unset UV_CONFIG_FILE; export UV_NO_CONFIG=1; '
+            '_cell_construct_uv() { invoke_uv_bootstrap_environment "$uv" "$@"; }; '
+            'invoke_uv_venv_resilient _cell_construct_uv "$slot" "$@" >&2',
+            "cell-construction", str(engine), str(bootstrap), uv, str(slot), *arguments,
+        ]
+    # Bind relative PATH results before the native child changes its CWD.
+    command[0] = str(Path(command[0]).absolute())
     execute(command, environment=isolated_environment(), cwd=cwd)
 
 
