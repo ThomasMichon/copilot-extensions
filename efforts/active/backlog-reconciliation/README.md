@@ -2,6 +2,24 @@
 
 ## Goal
 
+On 2026-11-26, after the fixed half-backlog checkpoint was independently
+verified and its factual outcome merged, the operator selected:
+
+> Continue evidence-backed cleanup
+
+The offered alternative was to hold further intake at the achieved
+checkpoint. No optional priority or new numerical target was supplied.
+The question explicitly retained the existing research/tracker scope and
+all source, ownership, review and resource limits.
+
+**Current execution interpretation (agent synthesis, not additional authority):**
+resume evidence-backed cleanup toward the useful-unfinished-bugs objective
+below. This guidance releases the achieved-threshold intake pause within
+that existing class; it is not a per-batch allowance renewal. Retain the
+fixed baseline/checkpoint history and every remaining Plan/Validation gate.
+Do not invent a lower target, reset spent limits, release a held source or
+resource, implement fixes or infer deployment authority from continuation.
+
 The operator clarified the cleanup objective on 2026-11-24:
 
 > The goal here is to reduce the bug set down to actual, useful bugs: ones which aren't tracking already completed work or which request changes to obsolete things. Plus tasks to deploy outdated versions, perform already-completed maintenance items, etc, can all be cleaned up. So that kind of sweep
@@ -325,6 +343,26 @@ startup signatures remain finite and independently owned. Canonical OPEN,
 claimed Phase 1, conditional-trigger and source-specific handoff gates survive.
 
 ## Request
+
+### Post-checkpoint continuation - 2026-11-26
+
+After reporting the independently verified 725-open census, the 729 fixed
+checkpoint, the later 724 provider-counter hint and the merged #14699
+outcome, the coordinator requested the original Phase 3 guidance.
+The material question wording was:
+
+> The plan reserved guidance here. I recommend continuing evidence-backed cleanup under the existing research/tracker scope, with all source, ownership, review and resource limits unchanged.
+
+The operator selected **Continue evidence-backed cleanup** over
+**Hold further intake at the achieved checkpoint**. The optional
+priorities/next-checkpoint field was empty. No new numerical target,
+expiry, attempt allowance or resource grant was supplied.
+
+This is actual continuation guidance for the existing cleanup class, not
+technical completion, an execution waiver or clearance of source/copy and
+ownership restrictions. The full original framing is retained in the
+operator's authority record; this public capture omits its non-substantive
+in-character line.
 
 ### Approved repository-automation report cleanup - 2026-11-24
 
@@ -5629,8 +5667,9 @@ at 20:51:53 PST is 725 whole open, 293 original-cohort and 432 inflow:
 observed net reduction 733, four below fixed 729. Forty campaign departures,
 three metadata-only arrivals and one unrelated departure are distinguished.
 Only four new local gates and independent checkpoint verification resolve;
-all other incumbent parent/global states remain. Further intake is stopped
-pending the original operator threshold guidance, not a new campaign stretch.
+all other incumbent parent/global states remain. Intake was stopped at that
+checkpoint; the subsequent continuation guidance in Goal/Request governs
+renewed research without resetting limits or closing the Active effort.
 
 ### Phase 2b - Vision-linked stabilization roadmap
 
@@ -5752,18 +5791,18 @@ pending the original operator threshold guidance, not a new campaign stretch.
 
 - [x] Re-query the provider, reconcile new inflow and unrelated closures, and
   independently confirm the fixed checkpoint.
-- [ ] Report the evidence-backed reduction and retained work to the operator;
+- [x] Report the evidence-backed reduction and retained work to the operator;
   request guidance before another campaign stretch.
 - [ ] Resolve campaign documentation and coordination obligations through the
   normal publication flow.
 
 The [complete checkpoint observation](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md#independently-verified-fixed-checkpoint)
 independently confirms 725 whole open against fixed 729, with inflow and
-unrelated departures reconciled. Further intake is stopped. Report the
-observed reduction and retained work, finish the current factual-outcome
-publication, and obtain the original operator guidance before another
-stretch. This verification does not resolve other parent/global gates or
-declare the Active effort complete.
+unrelated departures reconciled. Intake was stopped, the factual outcome
+merged in #14699 and the operator received the reduction/retained-work report.
+The actual 2026-11-26 continuation in Goal/Request supplies the originally
+reserved guidance before renewed research. It does not resolve other
+parent/global gates or declare the Active effort complete.
 
 ## Validation Plan
 
