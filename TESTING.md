@@ -1236,6 +1236,22 @@ issue #9448 F9 until the venue owner supplies matching HOME/unit search paths,
 bus/cgroup lifetime and authoritative cleanup. Their separate
 `UPDATE_DRIVER_NATIVE_LINUX_SERVICE=1` selector is not proof of those conditions.
 
+## Opt-in Windows native-crypto long-prefix regression
+
+Prepare a disposable numbered Vault SSH runtime through the canonical
+Source/profile constructor at a long physical prefix. Set
+`COPILOT_EXTENSIONS_TEST_LONG_PREFIX_VAULT_PYTHON` to that fixture's absolute
+`.venv\Scripts\python.exe`, then explicitly run
+`tools/run-tests.ps1 agent-vault --test-file tests/native/test_native_crypto_long_prefix.py --allow-explicit-tiers --subsuite-timeout 120 --plugin-timeout 180`.
+This native file is excluded from default discovery and required unit CI.
+An absent selection skips; an unavailable, short-prefix or wrong-origin runtime
+fails. All DLL filenames must exceed the ordinary Win32 threshold before both
+fresh consumers run through ordinary and extended package-path spellings.
+The controls retain byte-preservation checks without copying DLLs, creating key
+files or starting a service. The fixture owner retains runtime cleanup; the
+runner owns each bounded child. This is native loading evidence, not service
+lifetime or the complete installed setup journey.
+
 ## Select the evidence first
 
 Agent SSH's `tests/test_health_observation_native.py` has an explicitly selected

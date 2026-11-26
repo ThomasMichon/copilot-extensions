@@ -1,0 +1,9 @@
+{
+  "comment": "Bind retained Vault invocation metadata and launch arguments to one fresh peer resolution while preserving effect-boundary checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

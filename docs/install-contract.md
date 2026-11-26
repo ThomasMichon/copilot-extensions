@@ -6249,6 +6249,13 @@ Preparation preserves the application's original bytes, including development
 `closed-wheels` selects only the application as local source while the existing
 freezer, retained-input and construction owners use the independently inspected
 runtime wheels. No rewritten manifest or handwritten lock is involved.
+Source extraction prefetches metadata and canonical dependency/resource hints,
+then exports only the unchanged canonical validator's complete application
+closure. Hints never admit inputs or execute candidate code. All archive entries,
+including excluded ones, retain path/type/collision checks; archive identity and
+bytes stay bound across passes under the original absolute deadline. Development
+metadata outside that build-export contract retains the original full, data-only
+extraction under the same deadline, never a fallback around archive refusal.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
 Generated projects carrying a complete admitted construction profile omit the

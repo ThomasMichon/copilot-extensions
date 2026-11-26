@@ -10,8 +10,12 @@ import secrets
 import struct
 import time
 
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import pad, unpad
+from .native_crypto import prepare_native_crypto
+
+prepare_native_crypto()
+
+from Cryptodome.Cipher import AES  # noqa: E402
+from Cryptodome.Util.Padding import pad, unpad  # noqa: E402
 
 
 class AesGcm:

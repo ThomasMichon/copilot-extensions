@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .identity_key import SERVICE_FAILURE_HINTS, IdentityKeyError
+from .native_crypto import prepare_native_crypto
 
 if TYPE_CHECKING:
     from .config import ResolvedVault
@@ -31,6 +32,7 @@ MAX_RECORD_BYTES = 16384
 
 def _crypto() -> Any:
     try:
+        prepare_native_crypto()
         return __import__("Cryptodome.PublicKey", fromlist=["ECC"]).ECC
     except ImportError as exc:
         raise IdentityKeyError("crypto_unavailable", FAILURE_HINTS["crypto_unavailable"]) from exc

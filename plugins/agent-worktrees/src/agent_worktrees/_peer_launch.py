@@ -493,10 +493,11 @@ def validate_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, An
     return own
 
 
-def _resolve_peer(
+def _resolve_peer_observation(
     owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
     pinned_python: Path | None = None,
-) -> tuple[dict[str, Any], dict[str, str], Path | None]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str], Path | None]:
+    """Return both owners from one fresh before/after peer observation."""
     if plugin not in PEERS:
         raise ValueError(f"Unsupported peer: {plugin}")
     own = validate_owner(owner, own_root, raw_context)
@@ -540,6 +541,17 @@ def _resolve_peer(
         raise ValueError("Installation governance changed during peer resolution")
     if pinned_python is None and not allow_native and _peer_python_inprocess(peer) != python:
         raise ValueError("Peer runtime selection changed during observation")
+    return own, peer, environment, python
+
+
+def _resolve_peer(
+    owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
+    pinned_python: Path | None = None,
+) -> tuple[dict[str, Any], dict[str, str], Path | None]:
+    _own, peer, environment, python = _resolve_peer_observation(
+        owner, own_root, raw_context, plugin,
+        allow_native=allow_native, pinned_python=pinned_python,
+    )
     return peer, environment, python
 
 

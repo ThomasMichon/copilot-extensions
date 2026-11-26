@@ -51,7 +51,7 @@
       "payloadDir": "scripts/runtime-input-provider/tools",
       "files": [
         "prepare_manager_application.py", "manager_application_provider.json",
-        "local_install_source.py", "local_install_profile.py", "local_install_closed_wheels.py", "source_preparation_process.py",
+        "local_install_source.py", "local_install_export.py", "local_install_profile.py", "local_install_closed_wheels.py", "source_preparation_process.py",
         "runtime_application_project.py", "daemon_lifecycle_assets.py",
         "application_sources.py", "python_project_inventory.py",
         "prepare_runtime_source.py", "materialize_main.py", "materialize_source_applications.py", "materialize_payload_invocation.py",
@@ -385,6 +385,7 @@
         "launch_wrapper_assets_ref.py",
         "local_install_profile.py",
         "local_install_source.py",
+        "local_install_export.py",
         "local_install_closed_wheels.py",
         "local_runtime_promotion.py",
         "manager_application_provider.json",

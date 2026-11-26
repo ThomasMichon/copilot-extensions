@@ -252,12 +252,21 @@ def compose(
     source.mkdir()
     file_pointer_candidates: list[Path] = []
     with _source_phase(observer, 2, started):
-        preparation._extract_archive(
-            archive, source, deadline=deadline,
-            file_pointer_candidates=file_pointer_candidates,
-            **cast(_ExtractionOptions, {"include_paths": composition.export_paths}
-                   if composition is not None and composition.export_paths is not None else {}),
-        )
+        if closed_wheel_source:
+            from local_install_export import extract_application
+
+            assert projects is not None and project_paths is not None
+            extract_application(
+                archive, source, project_paths=project_paths, projects=projects,
+                deadline=deadline, select=_application_export_paths,
+            )
+        else:
+            preparation._extract_archive(
+                archive, source, deadline=deadline,
+                file_pointer_candidates=file_pointer_candidates,
+                **cast(_ExtractionOptions, {"include_paths": composition.export_paths}
+                       if composition is not None and composition.export_paths is not None else {}),
+            )
     _verify_project_declaration(repository, commit, source, deadline)
     if closed_wheel_source:
         from versioned_runtime_source import SOURCE_FILE

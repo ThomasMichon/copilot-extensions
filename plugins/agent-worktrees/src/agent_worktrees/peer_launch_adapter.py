@@ -19,33 +19,36 @@ def explicit_context() -> bool:
     return bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""))
 
 
-def validate_context() -> dict[str, Any] | None:
-    """Validate the current agent-worktrees owner context, if explicit."""
+def context_reference() -> tuple[Path, str] | None:
+    """Parse the explicit owner reference; the caller must still validate it."""
     if not explicit_context():
         return None
+    context = os.environ["COPILOT_EXTENSIONS_CONTEXT"]
+    stripped = context.lstrip()
+    if stripped.startswith(("{", "[")) or stripped == "null":
+        decoded = json.loads(context)
+        if not isinstance(decoded, dict):
+            raise ValueError("Explicit inline context must be a JSON object")
+        pointer = decoded.get("installReceipt")
+    else:
+        pointer = context
+    if not isinstance(pointer, str) or not pointer:
+        raise ValueError("Explicit context must name its installation receipt")
+    # A captured reference may belong to another OS; preserve its parent.
+    if "\\" in pointer:
+        root = Path(str(PureWindowsPath(pointer).parent))
+    else:
+        root = Path(pointer).expanduser().parent
+    return root, context
+
+
+def validate_context() -> dict[str, Any] | None:
+    """Validate the current agent-worktrees owner context, if explicit."""
     try:
-        context = os.environ["COPILOT_EXTENSIONS_CONTEXT"]
-        stripped = context.lstrip()
-        if stripped.startswith(("{", "[")) or stripped == "null":
-            decoded = json.loads(context)
-            if not isinstance(decoded, dict):
-                raise ValueError("Explicit inline context must be a JSON object")
-            pointer = decoded.get("installReceipt")
-        else:
-            pointer = context
-        if not isinstance(pointer, str) or not pointer:
-            raise ValueError("Explicit context must name its installation receipt")
-        # The receipt may describe another OS's cell (e.g. a Windows-style
-        # `N:\...` path surfacing in a POSIX CI runner's captured context).
-        # A backslash never appears in a genuine POSIX path component, so its
-        # presence is an unambiguous signal to parse with `PureWindowsPath`
-        # instead -- a plain `Path(pointer)` on POSIX treats the whole
-        # backslash-separated string as one opaque component and silently
-        # collapses `.parent` to `.`.
-        if "\\" in pointer:
-            root = Path(str(PureWindowsPath(pointer).parent))
-        else:
-            root = Path(pointer).expanduser().parent
+        reference = context_reference()
+        if reference is None:
+            return None
+        root, context = reference
         return validate_owner(_OWNER, root, context)
     except (OSError, ValueError, ImportError) as error:
         raise ContextRefused(f"agent-worktrees installation context refused: {error}") from error

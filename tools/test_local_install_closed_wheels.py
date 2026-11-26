@@ -454,7 +454,7 @@ def test_original_flat_package_discovery_is_bound_to_the_actual_wheel(
 
 @pytest.mark.parametrize("layout", ["runtime-input-provider", "runtime-source-tools"])
 def test_packaged_provider_completes_preparation_without_checkout_imports(
-    application: dict[str, Any], tmp_path: Path, layout: str,
+    tmp_path: Path, layout: str, request: pytest.FixtureRequest,
 ) -> None:
     import materialize_launch_wrapper_assets as wrappers
 
@@ -467,6 +467,8 @@ def test_packaged_provider_completes_preparation_without_checkout_imports(
     )
     assert report and all(line.startswith("OK") for line in report), report
     tools = destination / "scripts" / layout / "tools"
+    # Packaging is test setup, not part of the preparation invocation's budget.
+    application = cast(dict[str, Any], request.getfixturevalue("application"))
     options = dict(application)
     options["repository"] = str(options["repository"])
     options["output"] = str(options["output"])
@@ -490,4 +492,4 @@ def test_packaged_provider_completes_preparation_without_checkout_imports(
         cwd=tmp_path, capture_output=True, text=True, deadline=application["deadline"],
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert Path(result.stdout.strip()) == application["output"] / "snapshot"
+    assert Path(result.stdout.strip()).samefile(application["output"] / "snapshot")

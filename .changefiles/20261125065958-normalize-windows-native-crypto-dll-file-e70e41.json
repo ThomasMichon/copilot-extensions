@@ -1,0 +1,9 @@
+{
+  "comment": "Normalize Windows native crypto DLL filenames without modifying optional dependency bytes.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

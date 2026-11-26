@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 import json
 import os
 import shutil
@@ -11,16 +12,19 @@ import venv
 import pytest
 
 from agent_worktrees import repository_vault as vault
+from agent_worktrees import _peer_launch, peer_launch_adapter, reconcile
 from agent_worktrees.repository_setup import SetupError
 
 
 @pytest.mark.parametrize("failure", [None, "missing", "foreign", "migration", "no-runtime", "no-retention"])
-def test_legacy_vault_uses_selected_completed_retained_runtime(tmp_path, monkeypatch, failure):
+def test_legacy_vault_uses_selected_completed_retained_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     payload, root = tmp_path / "payload", tmp_path / "runtime"
     python = root / "versions" / "1.0" / "Scripts" / "python.exe"
     monkeypatch.setattr(
-        vault.reconcile, "core_installed_payload_dir",
+        reconcile, "core_installed_payload_dir",
         lambda name: None if failure == "missing" else payload,
     )
     installation = SimpleNamespace(
@@ -28,19 +32,19 @@ def test_legacy_vault_uses_selected_completed_retained_runtime(tmp_path, monkeyp
         desired_mode="namespaced" if failure == "migration" else "legacy",
         status="ready", context=None, runtime_root=root,
     )
-    monkeypatch.setattr(vault.reconcile, "resolve_runtime_installation", lambda *_: installation)
+    monkeypatch.setattr(reconcile, "resolve_runtime_installation", lambda *_: installation)
     monkeypatch.setattr(
-        vault._peer_launch, "_peer_python_inprocess", lambda _: None if failure == "no-runtime" else python,
+        _peer_launch, "_peer_python_inprocess", lambda _: None if failure == "no-runtime" else python,
     )
 
-    def identity(*_):
+    def identity(*_: object) -> str:
         if failure == "no-retention":
             raise ValueError("No immutable build")
         return "original-build"
 
-    monkeypatch.setattr(vault._peer_launch, "retained_runtime_identity", identity)
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", identity)
     monkeypatch.setattr(
-        vault._peer_launch, "retained_runtime_prefix",
+        _peer_launch, "retained_runtime_prefix",
         lambda selected_root, selected_python, module, **kw: [
             str(selected_python), "-I", module, kw["runtime_identity"],
         ],
@@ -68,48 +72,107 @@ def test_legacy_vault_uses_selected_completed_retained_runtime(tmp_path, monkeyp
         selected.verify()
 
 
-@pytest.mark.parametrize("failure", [None, "empty", "foreign", "missing-peer"])
-def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("failure", [None, "empty", "foreign", "missing-peer", "no-runtime", "no-retention"])
+def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "" if failure == "empty" else "owner-receipt")
     own = {"pluginRoot": str(tmp_path / "agent-worktrees"), "installReceipt": "owner-receipt"}
+    reference_root = tmp_path / "reference" / "agent-worktrees"
     peer = {"pluginRoot": str(tmp_path / "agent-vault"), "installReceipt": "peer-receipt"}
     python = tmp_path / "python"
+    resolutions: list[str] = []
 
-    def owner():
-        if failure == "foreign":
-            raise vault._peer_launch.ContextRefused("foreign owner")
-        return None if failure == "empty" else own
+    def reference() -> tuple[Path, str] | None:
+        return None if failure == "empty" else (reference_root, own["installReceipt"])
 
-    def prefix(owner_id, root, receipt, plugin):
+    def resolve(
+        owner_id: str, root: Path, receipt: str, plugin: str, *, allow_native: bool,
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str], Path | None]:
         assert (owner_id, root, receipt, plugin) == (
-            "agent-worktrees", Path(own["pluginRoot"]), own["installReceipt"], "agent-vault",
+            "agent-worktrees", reference_root, own["installReceipt"], "agent-vault",
         )
+        assert allow_native is False
+        resolutions.append(plugin)
+        if failure == "foreign":
+            raise _peer_launch.ContextRefused("foreign owner")
         if failure == "missing-peer":
             raise ValueError("No peer")
-        return [str(python), "retained-build"], python
+        return own, peer, {}, None if failure == "no-runtime" else python
 
-    monkeypatch.setattr(vault.peer_launch_adapter, "validate_context", owner)
-    monkeypatch.setattr(vault._peer_launch, "pinned_launch_prefix", prefix)
-    monkeypatch.setattr(vault._peer_launch, "_resolve_peer", lambda *_a, **_kw: (peer, {}, python))
+    def identity(root: Path, selected_python: Path, module: str) -> str:
+        assert (root, selected_python, module) == (Path(peer["pluginRoot"]), python, "agent_vault")
+        if failure == "no-retention":
+            raise ValueError("No immutable build")
+        return "retained-build"
+
+    monkeypatch.setattr(peer_launch_adapter, "context_reference", reference)
     monkeypatch.setattr(
-        vault.reconcile, "core_installed_payload_dir", lambda *_: pytest.fail("legacy fallback"),
+        peer_launch_adapter, "validate_context", lambda: pytest.fail("redundant owner validation"),
+    )
+    monkeypatch.setattr(_peer_launch, "_resolve_peer_observation", resolve)
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", identity)
+    monkeypatch.setattr(
+        reconcile, "core_installed_payload_dir", lambda *_: pytest.fail("legacy fallback"),
     )
     if failure:
         with pytest.raises(SetupError, match="owner is unavailable or refused"):
             vault.selected()
         return
     selected = vault.selected()
+    assert resolutions == ["agent-vault"]
+    assert selected.argv[6:10] == ("--pinned-runtime", str(python), "--runtime-identity", "retained-build")
+    assert selected.argv[11:13] == (own["pluginRoot"], own["installReceipt"])
     selected.verify()
+    assert resolutions == ["agent-vault", "agent-vault"]
     peer["installReceipt"] = "changed"
     with pytest.raises(SetupError, match="selection changed"):
         selected.verify()
+
+
+@pytest.mark.parametrize("boundary", ["before", "after"])
+def test_namespaced_runtime_change_is_refused_at_both_child_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    from agent_worktrees import repository_ssh_setup
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "owner-receipt")
+    own = {"pluginRoot": str(tmp_path / "agent-worktrees"), "installReceipt": "owner-receipt"}
+    peer = {"pluginRoot": str(tmp_path / "agent-vault"), "installReceipt": "peer-receipt"}
+    python = tmp_path / "python"
+    generation = ["original"]
+    launched: list[bool] = []
+    monkeypatch.setattr(
+        peer_launch_adapter, "context_reference", lambda: (Path(own["pluginRoot"]), own["installReceipt"]),
+    )
+    monkeypatch.setattr(_peer_launch, "_resolve_peer_observation", lambda *_a, **_kw: (own, peer, {}, python))
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *_: generation[0])
+    invocation = vault.selected()
+
+    def child(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        launched.append(True)
+        generation[0] = "changed"
+        return SimpleNamespace(returncode=0, stdout='{"version":1}')
+
+    monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
+    if boundary == "before":
+        generation[0] = "changed"
+    with pytest.raises(SetupError):
+        repository_ssh_setup._vault_call(
+            SimpleNamespace(configuration_root=str(tmp_path), argv=()),
+            ["invocation-contract", "--json"], timeout=20, invocation=invocation,
+        )
+    assert launched == ([True] if boundary == "after" else [])
 
 
 @pytest.mark.skipif(
     sys.platform != "win32" and not sys.platform.startswith("linux"),
     reason="Native Vault peer invocation supports Windows and Linux only",
 )
-def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed_owner", ["agent-worktrees", "agent-vault"])
+def test_native_installed_vault_binding_rechecks_receipt_before_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed_owner: str,
+) -> None:
     from agent_worktrees import _installation_context as primitive, repository_ssh_setup, repository_setup
 
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -125,7 +188,7 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, 
             "fingerprint": "sha256:9caa0da95f327099983348a3d2353fa93e57ef6428b69f354cc3bdc76ada0894",
         }, "locators": [], "generation": 1, "state": "active",
     }))
-    environment, _ = primitive._current_environment(
+    environment, _ = getattr(primitive, "_current_environment")(
         environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
     )
     for plugin in ("agent-worktrees", "agent-vault"):
@@ -192,7 +255,18 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, 
     )
     monkeypatch.setenv("KPDB", str(tmp_path / "foreign.kdbx"))
     monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "foreign")
+    owner_observations: list[dict[str, Any]] = []
+    validate_owner = _peer_launch.validate_owner
+
+    def observe_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, Any]:
+        value = validate_owner(owner, own_root, raw_context)
+        owner_observations.append(value)
+        return value
+
+    monkeypatch.setattr(_peer_launch, "validate_owner", observe_owner)
+    monkeypatch.setattr(peer_launch_adapter, "validate_owner", observe_owner)
     invocation = vault.selected()
+    assert len(owner_observations) == 2
     selection = repository_setup.SSHKeySelection(
         (), str(tmp_path), "-SSH/example", str(tmp_path / "keys"), "SHA256:" + "A" * 43,
         owner="agent-vault",
@@ -206,12 +280,13 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, 
     assert observed["env"]["AGENT_VAULT_HOME"] == str(root)
     assert observed["env"]["AGENT_VAULT_NO_SELFPROVISION"] == "1"
     assert "KPDB" not in observed["env"] and "AGENT_VAULT_ENDPOINT" not in observed["env"]
-    receipt = root / "install.json"
+    changed_root = cell / "plugins" / changed_owner
+    receipt = changed_root / "install.json"
     original_receipt = receipt.read_text()
     changed = json.loads(original_receipt)
     changed["generation"] = 2
     receipt.write_text(json.dumps(changed))
-    activation = root / "installation-activation.json"
+    activation = changed_root / "installation-activation.json"
     original_activation = activation.read_text()
     changed = json.loads(original_activation)
     changed.update(installGeneration=2, generation=2)
