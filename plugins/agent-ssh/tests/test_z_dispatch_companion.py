@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -20,10 +21,11 @@ COMPANION = PLUGIN / "scripts" / "dtssh-companion.ps1"
 DECLARATION = (
     PLUGIN / "references" / "agent-dispatch" / "registrar" / "agent-ssh-dtssh-host.json"
 )
-PWSH = shutil.which("pwsh") or shutil.which("powershell.exe")
+PWSH: str = shutil.which("pwsh") or shutil.which("powershell.exe") or ""
+NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def _module(path: Path, name: str):
+def _module(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -36,6 +38,7 @@ def _write_host_install(
     *,
     healthy_after_start: bool = True,
     include_backup_root: bool = True,
+    watchdog_pid: int = 123,
 ) -> tuple[Path, Path]:
     install_root.mkdir(parents=True, exist_ok=True)
     config = install_root / "dispatch-companion.json"
@@ -72,10 +75,15 @@ def _write_host_install(
                 ")",
                 "$ErrorActionPreference = 'Stop'",
                 "$state = Join-Path (Split-Path $PSCommandPath -Parent) 'running.txt'",
+                (
+                    "Add-Content -LiteralPath "
+                    "(Join-Path (Split-Path $PSCommandPath -Parent) 'actions.log') -Value $Action"
+                ),
                 "switch ($Action) {",
                 "  'stop' {",
                 "    if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Force }",
-                "    'stopped' | Out-Null",
+                # Like the real installer, report on stdout; it must not corrupt the exit code.
+                "    Write-Host 'Stopped launcher watchdog (pid 1)'",
                 "    exit 0",
                 "  }",
                 "  'start' {",
@@ -93,7 +101,7 @@ def _write_host_install(
                 (
                     "      Write-Host 'host running: 321'; "
                     "Write-Host 'sshd serving: 127.0.0.1:2222 (SSH banner OK)'; "
-                    "Write-Host 'watchdog running: 123'; "
+                    f"Write-Host 'watchdog running: {watchdog_pid}'; "
                     "Write-Host 'dispatch companion config: configured'; "
                     "Write-Host 'tunnel example: 1 host connection(s)'; "
                     "Write-Host 'durable host identity: C:\\backup'"
@@ -118,7 +126,9 @@ def _write_host_install(
     return config, state
 
 
-def test_provider_is_inactive_without_config(tmp_path: Path, monkeypatch) -> None:
+def test_provider_is_inactive_without_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_inactive")
     monkeypatch.setattr(module.platform, "system", lambda: "Windows")
     # The pwsh prerequisite is host-dependent; this test pins the config logic.
@@ -128,7 +138,9 @@ def test_provider_is_inactive_without_config(tmp_path: Path, monkeypatch) -> Non
     assert module._active_environment({"machine": "primary"}) is None
 
 
-def test_provider_activates_for_windows_install(tmp_path: Path, monkeypatch) -> None:
+def test_provider_activates_for_windows_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_active")
     install_root = tmp_path / "agent-ssh-dtssh"
     config, _state = _write_host_install(install_root)
@@ -143,7 +155,7 @@ def test_provider_activates_for_windows_install(tmp_path: Path, monkeypatch) -> 
 
 
 def test_provider_reports_malformed_config_as_indeterminate(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_bad")
     install_root = tmp_path / "agent-ssh-dtssh"
@@ -160,7 +172,7 @@ def test_provider_reports_malformed_config_as_indeterminate(
 
 
 def test_session_hook_publishes_attributed_registrar_candidate(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module(REGISTER, "agent_ssh_register_dispatch_companion")
     dropins = tmp_path / "registrar.d"
@@ -194,7 +206,7 @@ def test_registrar_hook_wrapper_publishes_candidate(tmp_path: Path, shell: str) 
             str(PLUGIN / "scripts" / "register-dispatch-companion.sh"),
         ]
     else:
-        if PWSH is None:
+        if not PWSH:
             pytest.skip("PowerShell registrar hook test")
         command = [
             PWSH,
@@ -254,7 +266,7 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
             assert hook["timeoutSec"] == 10
 
 
-@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
 def test_companion_restores_presence_without_startup_shortcut(tmp_path: Path) -> None:
     install_root = tmp_path / "local" / "agent-ssh-dtssh"
     config, state = _write_host_install(install_root)
@@ -324,7 +336,56 @@ def test_companion_restores_presence_without_startup_shortcut(tmp_path: Path) ->
             process.wait(timeout=10)
 
 
-@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
+def test_companion_start_adopts_healthy_host_without_restart(tmp_path: Path) -> None:
+    watchdog = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        creationflags=NO_WINDOW,
+    )
+    install_root = tmp_path / "local" / "agent-ssh-dtssh"
+    config, state = _write_host_install(install_root, watchdog_pid=watchdog.pid)
+    state.write_text("running", encoding="utf-8")
+    actions = install_root / "actions.log"
+    env = {
+        **os.environ,
+        "LOCALAPPDATA": str(tmp_path / "local"),
+        "AGENT_SSH_DTSSH_COMPANION_CONFIG": str(config),
+        "AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS": "0.2",
+    }
+
+    process = subprocess.Popen(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(COMPANION), "start"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline and not actions.exists():
+            time.sleep(0.1)
+        time.sleep(3)
+        assert process.poll() is None, "companion must stay up while the adopted host lives"
+        assert state.exists(), "a healthy host must not be stopped"
+        assert actions.read_text(encoding="utf-8-sig").split() == ["status"]
+
+        watchdog.kill()
+        watchdog.wait(timeout=10)
+        stdout, stderr = process.communicate(timeout=20)
+        assert process.returncode == 0, stderr
+        assert "adopted healthy dtssh host" in stdout
+        assert actions.read_text(encoding="utf-8-sig").split() == ["status"]
+    finally:
+        if watchdog.poll() is None:
+            watchdog.kill()
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
 def test_companion_handles_missing_backup_root_in_config(tmp_path: Path) -> None:
     install_root = tmp_path / "local" / "agent-ssh-dtssh"
     config, state = _write_host_install(install_root, include_backup_root=False)
@@ -361,3 +422,131 @@ def test_companion_handles_missing_backup_root_in_config(tmp_path: Path) -> None
         )
         if process.poll() is None:
             process.wait(timeout=10)
+
+
+def _run_companion(script: Path, action: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), action],
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=30,
+        creationflags=NO_WINDOW,
+    )
+
+
+def _start_companion(script: Path, env: dict[str, str]) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "start"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=NO_WINDOW,
+    )
+
+
+def _wait_for(predicate, timeout: float = 20) -> bool:  # type: ignore[no-untyped-def]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
+def test_companion_generation_cutover_keeps_adopted_host(tmp_path: Path) -> None:
+    """A Dispatch generation cutover (stop old payload, start new payload)
+    must reach the live companion without stopping the healthy adopted host."""
+    watchdog = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        creationflags=NO_WINDOW,
+    )
+    install_root = tmp_path / "local" / "agent-ssh-dtssh"
+    config, state = _write_host_install(install_root, watchdog_pid=watchdog.pid)
+    state.write_text("running", encoding="utf-8")
+    actions = install_root / "actions.log"
+    adoption = install_root / "dispatch-companion.adoption.json"
+    generations = []
+    for name in ("generation-a", "generation-b"):
+        payload = tmp_path / name / "scripts"
+        payload.mkdir(parents=True)
+        shutil.copy2(COMPANION, payload / COMPANION.name)
+        generations.append(payload / COMPANION.name)
+    env = {
+        **os.environ,
+        "LOCALAPPDATA": str(tmp_path / "local"),
+        "AGENT_SSH_DTSSH_COMPANION_CONFIG": str(config),
+        "AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS": "0.2",
+    }
+
+    first = _start_companion(generations[0], env)
+    second = None
+    try:
+        assert _wait_for(adoption.exists), "generation A did not adopt the host"
+        assert json.loads(adoption.read_text(encoding="utf-8-sig"))["companion_pid"] == first.pid
+
+        stopped = _run_companion(generations[0], "stop", env)
+        assert stopped.returncode == 0, stopped.stderr
+        assert "released adopted dtssh host" in stopped.stdout
+        first.communicate(timeout=10)
+        assert first.returncode == 0
+        assert state.exists(), "the cutover must not stop the adopted host"
+        assert "stop" not in actions.read_text(encoding="utf-8-sig").split()
+        assert watchdog.poll() is None
+
+        second = _start_companion(generations[1], env)
+        assert _wait_for(
+            lambda: adoption.exists()
+            and json.loads(adoption.read_text(encoding="utf-8-sig"))["companion_pid"] == second.pid
+        ), "generation B did not take over the live host"
+        assert json.loads(adoption.read_text(encoding="utf-8-sig"))["adopted_pids"] == [watchdog.pid]
+        assert "stop" not in actions.read_text(encoding="utf-8-sig").split()
+
+        watchdog.kill()
+        watchdog.wait(timeout=10)
+        stdout, stderr = second.communicate(timeout=20)
+        assert second.returncode == 0, stderr
+        assert "adopted healthy dtssh host" in stdout
+        assert not adoption.exists()
+    finally:
+        if watchdog.poll() is None:
+            watchdog.kill()
+        for process in (first, second):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
+def test_companion_stop_ignores_stale_adoption_and_stops_host(tmp_path: Path) -> None:
+    install_root = tmp_path / "local" / "agent-ssh-dtssh"
+    config, state = _write_host_install(install_root)
+    state.write_text("running", encoding="utf-8")
+    adoption = install_root / "dispatch-companion.adoption.json"
+    gone = subprocess.Popen([sys.executable, "-c", "pass"], creationflags=NO_WINDOW)
+    gone.wait(timeout=10)
+    adoption.write_text(
+        json.dumps(
+            {"schema_version": 1, "companion_pid": gone.pid, "companion_start": "1", "adopted_pids": [1]}
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "LOCALAPPDATA": str(tmp_path / "local"),
+        "AGENT_SSH_DTSSH_COMPANION_CONFIG": str(config),
+    }
+
+    result = _run_companion(COMPANION, "stop", env)
+
+    assert result.returncode == 0, result.stderr
+    assert not adoption.exists()
+    assert not state.exists()
+    assert (install_root / "actions.log").read_text(encoding="utf-8-sig").split() == ["stop"]

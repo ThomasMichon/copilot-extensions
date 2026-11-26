@@ -584,6 +584,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    from .posix_fd_state import scrub_posix_fd_state
+
+    # An SSH-hosted carrier/daemon must not pass sshd's descriptor carrier on.
+    scrub_posix_fd_state()
     parser = build_parser()
     args = parser.parse_args(argv)
     _set_project_override(getattr(args, "project", None))

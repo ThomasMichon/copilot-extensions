@@ -163,6 +163,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
              check_cancelled: Callable[[], None] = lambda: None,
              runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
              authentication: Callable[[dict[str, Any], Mapping[str, str], Path], dict[str, str]] | None = None,
+             cache_root: Path | None = None,
              ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     check_cancelled()
     name, marketplace = identity(source)
@@ -227,7 +228,8 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
     with _installation_workspace(retain_failed=runner is not None) as neutral:
         if Path(neutral).resolve().is_relative_to(repo.resolve()):
             raise ValueError("Native installation commands require a neutral cwd outside the target checkout")
-        cache_root = Path(neutral) / "cache"
+        if cache_root is None:
+            cache_root = Path(neutral) / "cache"
         env = {
             **_environment(environment), "COPILOT_HOME": str(home),
             "COPILOT_CACHE_HOME": str(cache_root), "COPILOT_AUTO_UPDATE": "false",
@@ -462,85 +464,100 @@ def prepare(
     roots = {}
     enabled = {}
     publications = {}
-    for item in selection:
-        check_cancelled()
-        source = item["source"]
-        if source in payloads:
-            continue
-        _name, marketplace = identity(source)
-        if inventory is not None and "marketplace" in item:
-            available = inventory_item(
-                source, *inventory, definition=item["marketplace"],
-                environment=environment, execution_cwd=execution_cwd,
-            )
-            if available is not None:
-                item = {**item, **available}
-        if item.get("resolve_on_target"):
-            if marketplace not in native_settings.marketplaces:
-                if inventory is None:
-                    raise ValueError(f"Required target marketplace is undeclared: {marketplace}")
-                item = {**item, **installed_item(source, *inventory)}
-                item.pop("resolve_on_target")
-            else:
-                item = cast(dict[str, Any], _plan_item(
-                    item, (repo, native_settings), native_settings.marketplaces,
-                    allow_external=True, existing_root=staging,
-                    local_mode=local_mode,
-                ))
-            if item.get("resolve_on_target"):
-                raise ValueError(f"Required target plugin could not be resolved: {source}")
-        if "inventory" in item:
-            payloads[source] = item["inventory"]["payload"]
-            enabled[source] = item["enable"]
-            publications[source] = item
-            continue
-        reference = item.get("reference")
-        if reference is not None:
-            if local_mode != "reference" and not item.get("target_owned") and not item.get("native_local"):
-                raise ValueError("Filesystem references require explicit reference mode")
-            payload = Path(reference["payload"]).resolve(strict=True)
-            root = Path(reference["marketplace_root"]).resolve(strict=True)
-            payload.relative_to(root)
-            roots[marketplace] = str(root)
-            payloads[source] = str(payload)
-            enabled[source] = item["enable"]
-            publications[source] = {
-                **item, "native_marketplace": native_settings.marketplaces.get(marketplace),
-            }
-            continue
-        root = staging / marketplace
-        root.resolve().relative_to(state_dir.resolve())
-        roots[marketplace] = str(root)
-        root.mkdir(parents=True, exist_ok=True)
-        # Per-marketplace install/copy serialization does not hold the checkout
-        # registration lock across a network fetch.
-        with checkout_lock(root):
-            if "local_path" in item:
-                payload = Path(item["local_path"]).resolve(strict=True)
-                payload.relative_to(root.resolve())
-            elif "archive" in item:
-                content = base64.b64decode(item["archive"])
-                if hashlib.sha256(content).hexdigest() != item["digest"]:
-                    raise ValueError("Reflected payload digest mismatch")
-                destination = root / "snapshots" / item["digest"]
-                destination.resolve().relative_to(root.resolve())
-                _unpack(content, destination)
-                payload = destination / item["relative"]
-            else:
-                install_home = _installation_home(staging, source, item["marketplace"])
-                payload, item["catalog"], item["entry"] = _install(
-                    source, item["marketplace"], install_home, repo,
-                    copilot_command,
+    # One native cache per marketplace origin for this preparation: each
+    # fresh cache re-clones the whole marketplace, which dominates install time.
+    native_caches = contextlib.ExitStack()
+    shared_caches: dict[str, Path] = {}
+
+    def native_cache(definition: dict[str, Any]) -> Path:
+        key = hashlib.sha256(json.dumps(definition, sort_keys=True).encode()).hexdigest()
+        if key not in shared_caches:
+            shared_caches[key] = Path(native_caches.enter_context(
+                tempfile.TemporaryDirectory(prefix="copilot-venue-cache-"),
+            ))
+        return shared_caches[key]
+
+    with native_caches:
+        for item in selection:
+            check_cancelled()
+            source = item["source"]
+            if source in payloads:
+                continue
+            _name, marketplace = identity(source)
+            if inventory is not None and "marketplace" in item:
+                available = inventory_item(
+                    source, *inventory, definition=item["marketplace"],
                     environment=environment, execution_cwd=execution_cwd,
-                    check_cancelled=check_cancelled,
                 )
-            payloads[source] = str(payload)
-            enabled[source] = item["enable"]
-            publications[source] = {
-                **item, "native_marketplace": native_settings.marketplaces.get(marketplace),
-            }
-        manifest = plugin_manifest(payload)
-        item["requirements"] = dependencies(manifest, marketplace)
+                if available is not None:
+                    item = {**item, **available}
+            if item.get("resolve_on_target"):
+                if marketplace not in native_settings.marketplaces:
+                    if inventory is None:
+                        raise ValueError(f"Required target marketplace is undeclared: {marketplace}")
+                    item = {**item, **installed_item(source, *inventory)}
+                    item.pop("resolve_on_target")
+                else:
+                    item = cast(dict[str, Any], _plan_item(
+                        item, (repo, native_settings), native_settings.marketplaces,
+                        allow_external=True, existing_root=staging,
+                        local_mode=local_mode,
+                    ))
+                if item.get("resolve_on_target"):
+                    raise ValueError(f"Required target plugin could not be resolved: {source}")
+            if "inventory" in item:
+                payloads[source] = item["inventory"]["payload"]
+                enabled[source] = item["enable"]
+                publications[source] = item
+                continue
+            reference = item.get("reference")
+            if reference is not None:
+                if local_mode != "reference" and not item.get("target_owned") and not item.get("native_local"):
+                    raise ValueError("Filesystem references require explicit reference mode")
+                payload = Path(reference["payload"]).resolve(strict=True)
+                root = Path(reference["marketplace_root"]).resolve(strict=True)
+                payload.relative_to(root)
+                roots[marketplace] = str(root)
+                payloads[source] = str(payload)
+                enabled[source] = item["enable"]
+                publications[source] = {
+                    **item, "native_marketplace": native_settings.marketplaces.get(marketplace),
+                }
+                continue
+            root = staging / marketplace
+            root.resolve().relative_to(state_dir.resolve())
+            roots[marketplace] = str(root)
+            root.mkdir(parents=True, exist_ok=True)
+            # Per-marketplace install/copy serialization does not hold the checkout
+            # registration lock across a network fetch.
+            with checkout_lock(root):
+                if "local_path" in item:
+                    payload = Path(item["local_path"]).resolve(strict=True)
+                    payload.relative_to(root.resolve())
+                elif "archive" in item:
+                    content = base64.b64decode(item["archive"])
+                    if hashlib.sha256(content).hexdigest() != item["digest"]:
+                        raise ValueError("Reflected payload digest mismatch")
+                    destination = root / "snapshots" / item["digest"]
+                    destination.resolve().relative_to(root.resolve())
+                    _unpack(content, destination)
+                    payload = destination / item["relative"]
+                else:
+                    install_home = _installation_home(staging, source, item["marketplace"])
+                    payload, item["catalog"], item["entry"] = _install(
+                        source, item["marketplace"], install_home, repo,
+                        copilot_command,
+                        environment=environment, execution_cwd=execution_cwd,
+                        check_cancelled=check_cancelled,
+                        cache_root=native_cache(item["marketplace"]),
+                    )
+                payloads[source] = str(payload)
+                enabled[source] = item["enable"]
+                publications[source] = {
+                    **item, "native_marketplace": native_settings.marketplaces.get(marketplace),
+                }
+            manifest = plugin_manifest(payload)
+            item["requirements"] = dependencies(manifest, marketplace)
     # Generated settings are repository-local preferences, not product changes.
     check_cancelled()
     exclude = Path(_git(repo, "rev-parse", "--git-path", "info/exclude", environment=environment))

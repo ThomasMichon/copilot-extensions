@@ -239,6 +239,27 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
     }
 
 
+def _same_marketplace_definition(registration: Any, definition: Any) -> bool:
+    """Compare marketplace definitions, treating GitHub owner/repo case-insensitively."""
+    if registration == definition:
+        return True
+    if not isinstance(registration, dict) or not isinstance(definition, dict):
+        return False
+    left, right = registration.get("source"), definition.get("source")
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    if left.get("source") != "github" or right.get("source") != "github":
+        return False
+    left_repo, right_repo = left.get("repo"), right.get("repo")
+    if not isinstance(left_repo, str) or not isinstance(right_repo, str):
+        return False
+    if left_repo.casefold() != right_repo.casefold():
+        return False
+    return (
+        {**registration, "source": {**left, "repo": right_repo}} == definition
+    )
+
+
 def inventory_item(
     source: str, home: Path, cache: Path, *, definition: dict[str, Any] | None = None,
     environment: Mapping[str, str] | None = None, execution_cwd: Path | None = None,
@@ -250,7 +271,7 @@ def inventory_item(
     registration = _settings_document(home / "settings.json", jsonc_header=True).get(
         "extraKnownMarketplaces", {},
     ).get(marketplace)
-    if registration == definition:
+    if _same_marketplace_definition(registration, definition):
         if not (home / "installed-plugins" / marketplace / name).is_dir():
             return None
         return {**installed_item(source, home, cache), "marketplace": definition}

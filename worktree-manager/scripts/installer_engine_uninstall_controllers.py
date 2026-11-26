@@ -32,9 +32,9 @@ def parse_cli(argv: Sequence[str] | None = None, *, description: str | None = No
 
 @contextmanager
 def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_check: Callable[[Path, Path], None], load: Callable[[Path], ModuleType], error: type[RuntimeError]) -> Iterator[Any]:
-    if os.name != "nt" or plugin != "agent-vault" or (
-        os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin
-    ):
+    # Every native participant's finite removal must carry its driver custody;
+    # without it the foreground driver (which names --root) is refused as a consumer.
+    if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin:
         yield None
         return
     root_check(payload, root)
@@ -42,7 +42,7 @@ def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_ch
     driver.bootstrap(payload)
     with driver.custody() as owner:
         if owner is None:
-            raise error("Native Vault removal requires its authenticated execution owner")
+            raise error("Native runtime removal requires its authenticated execution owner")
         yield owner
 
 
@@ -253,6 +253,11 @@ try {
                 raise UninstallRefused("Worktrees controller requires an external bootstrap interpreter")
             result["-bootstrappython"] = str(python)
         return result
+
+    def _same_windows_path(left: str, right: str) -> bool:
+        import ntpath
+
+        return ntpath.isabs(left) and ntpath.normcase(ntpath.normpath(left)) == ntpath.normcase(ntpath.normpath(right))
 
     def _controller_python(row: dict[str, Any], root: Path) -> list[str]:
         arguments = _windows_argv(row["command"])
@@ -486,8 +491,9 @@ try {
             raise UninstallRefused("Worktrees native request changed during inspection")
         return {row["pid"] for row in chain[1:]}
 
-    def _native_plugin_controllers(rows: list[dict[str, Any]], payload: Path, root: Path, shell: str, custody: Any) -> set[int]:
-        """Recognize only Vault's authenticated native uninstall ancestry."""
+    def _native_plugin_controllers(rows: list[dict[str, Any]], payload: Path, root: Path, shell: str, custody: Any,
+                                   plugin: str = "agent-vault") -> set[int]:
+        """Recognize only the plugin's authenticated native uninstall ancestry."""
         engine = sys.modules.get("installer_engine")
         core = sys.modules.get("update_driver.core")
         participant = sys.modules.get("update_driver.participant")
@@ -495,7 +501,7 @@ try {
                 or Path(cast(str, engine.__file__)) != payload / "scripts/installer_engine.py"):
             raise UninstallRefused("Native Vault removal source is unavailable")
         packages = {engine._package_name(path): path for path in engine._package_roots(payload)}
-        if not {"agent-vault", "agent-update-driver", "agent-procutil"} <= packages.keys():
+        if not {plugin, "agent-update-driver", "agent-procutil"} <= packages.keys():
             raise UninstallRefused("Native Vault removal source closure is incomplete")
         driver = packages["agent-update-driver"] / "src/update_driver"
         for module, name in ((core, "core.py"), (participant, "participant.py")):
@@ -541,8 +547,13 @@ try {
                         raise UninstallRefused("Unexpected native Vault controller argument")
                 index += 1
             source = Path(cast(str, options.pop("--payload", "")))
+            # The foreground host forwards its own launch spelling of these Windows
+            # paths (e.g. a lower-cased PATH entry); identity is case-insensitive.
+            for flag, value in (("--root", str(root)), ("--shell", shell)):
+                if flag in options and _same_windows_path(cast(str, options[flag]), value):
+                    options[flag] = value
             expected: dict[str, str | bool] = {
-                "--root": str(root), "--shell": shell, "--plugin": "agent-vault", "--action": "uninstall",
+                "--root": str(root), "--shell": shell, "--plugin": plugin, "--action": "uninstall",
             }
             if role:
                 expected["--" + role] = True
@@ -595,7 +606,7 @@ try {
             if (arguments[1:3] != ["-I", "-B"]
                     or Path(arguments[3]) != payload / "scripts/installer_engine_uninstall.py"
                     or Path(sys.argv[0]) != Path(arguments[3])
-                    or flags.get("--payload-root") != str(payload) or flags.get("--plugin-id") != "agent-vault"
+                    or flags.get("--payload-root") != str(payload) or flags.get("--plugin-id") != plugin
                     or flags.get("--root") != str(root) or flags.get("--shell") != shell
                     or not (flags.get("--remove-runtime") or flags.get("--check-consumers"))):
                 raise UninstallRefused("Native Vault finite removal callback changed")
@@ -625,8 +636,8 @@ try {
         native_shell(take(), payload)
         if payload != original:
             parent = take()
-            if (payload.name != "agent-vault"
-                    or payload.parent.parent != Path.home() / ".agent-vault/.install-stage"
+            if (payload.name != plugin
+                    or payload.parent.parent != Path.home() / f".{plugin}" / ".install-stage"
                     or re.fullmatch(r"[0-9]{8}T[0-9]{9}-" + str(parent["pid"]), payload.parent.name) is None):
                 raise UninstallRefused("Native Vault source is not its owned stage")
             native_shell(parent, original)
