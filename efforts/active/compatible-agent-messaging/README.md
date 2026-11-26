@@ -149,7 +149,7 @@ not additional operator requirements or live-effect authority.
 
 ### Finite #14606 - Durable producer acceptance
 
-- [ ] Review this amendment before the broader acceptance implementation.
+- [x] Review this amendment before the broader acceptance implementation.
 - [ ] Establish controlled failures before changing each affected producer:
   valid represented targets with unavailable/currently inadmissible consumers,
   known ACP targets with unavailable carriers, and exact pending native forms.
@@ -164,7 +164,7 @@ not additional operator requirements or live-effect authority.
   deregistration and registration cleanup. Bind or adopt delivery only through
   the owning ACP Session Host or CLI receiver; unavailable delivery remains
   queued with an observable reason.
-- [ ] Keep pending form answers in their independent queue, not the prompt
+- [x] Keep pending form answers in their independent queue, not the prompt
   consumer. Preserve exact request validation, expiration, one-shot effects and
   original audit outcomes through timeout and registration churn.
 - [ ] Qualify the producer-first compatibility window, current/prior supported
@@ -211,6 +211,27 @@ will follow reconciliation with the existing owners; no implementation or live
 rollout is claimed by this draft.
 
 ## Journal
+
+### 2026-11-25 - Represented producer expansion
+
+- The prerequisite amendment and independent native-answer repair merged in
+  #14633 and #14627 respectively. The broader completion gate remains open.
+- Eight controlled failures across both database layouts established that
+  current frontend, epoch, enrollment and heartbeat state blocked a valid
+  represented target's producer. The provider expansion now durably accepts
+  ordinary input before consumer selection, using the existing inbox and
+  original-key receipt owner.
+- Schema 50 retains immutable producer-target observations through registration
+  cleanup; supported receivers bind delivery on poll, retaining original
+  handoffs and unknown effects. Unsupported legacy message semantics remain
+  queued, never delivered or acknowledged through the legacy reader.
+- The initial source packet passes 232 tests; a further review-fix packet
+  passes 213 tests, including mixed unsupported/supported input, consistent
+  historical schema, exact target assertions and real two-owner ordering.
+  Whole-file strict checks pass for all 24 touched Python files on Linux and
+  Windows. Dormant-agent resolution, ACP queue adoption and their
+  end-to-end controls remain outstanding. This records source validation, not
+  release, installed adoption or live-queue repair.
 
 ### 2026-11-25 - Durable acceptance requirement received
 

@@ -139,7 +139,7 @@ async def test_real_inbox_api_admits_one_exact_original_message(
 
 
 @pytest.mark.parametrize("fault", ["duplicate", "changed-body", "alias", "takeover", "stale"])
-def test_real_inbox_keeps_key_conflicts_and_current_native_fence(
+def test_real_inbox_keeps_key_conflicts_and_exact_target_assertions(
     api: Any, tmp_db: Any, monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
     from agent_bridge.remote_live_prompt import _submit
@@ -185,6 +185,12 @@ def test_real_inbox_keeps_key_conflicts_and_current_native_fence(
         )
     else:
         tmp_db.execute_write("UPDATE live_sessions SET updated_at=0 WHERE session_id='live-1'")
+        accepted = _submit(lambda: client, selected)
+        assert accepted["message_id"] is not None
+        stored, = tmp_db.execute_read("SELECT * FROM live_messages")
+        assert stored["producer_target_json"] is not None
+        assert stored["delivered_at"] is None and stored["consumed_at"] is None
+        return
     with pytest.raises(RemoteBridgeError) as error:
         _submit(lambda: client, selected)
     assert error.value.code == "exact_live_prompt_admission_unknown"

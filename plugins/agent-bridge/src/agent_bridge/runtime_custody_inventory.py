@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from typing import Any
 
 from .runtime_custody import RuntimeCustodyError
-from .inbox_custody import decode_handoff
+from .inbox_custody import original_handoff
 from .turn_custody import original_handoff as original_turn_handoff
 from .acquisition_custody import launch_observation
 from .creation_custody import original_creation
@@ -35,7 +36,7 @@ COHORTS = {
     "bridge_inbox_consumers": ("incarnation", "installation", "epoch", "session_id",
                               "consumer_json", "predecessor", "current", "enrolled_at"),
     "live_messages": ("id", "session_id", "kind", "claimed_at", "outcome", "delivered_at", "consumed_at",
-                      "runtime_custody_json", "handoff_json", "handoff_started_at"),
+                      "runtime_custody_json", "handoff_json", "handoff_started_at", "producer_target_json"),
     "cli_mode_reservations": ("worktree_id", "reservation_id", "claimed_by_session_id"),
     "worktree_ownership": ("worktree_id", "session_id"),
     "remote_acp_relationships": ("id", "session_id", "phase", "uncertain"),
@@ -67,7 +68,7 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
     )}
     blockers = [f"unmediated:{name}" for name in UNMEDIATED]
     missing = []
-    rows_by_table = {}
+    rows_by_table: dict[str, list[dict[str, Any]] | None] = {}
     epoch = producers = None
     if {"bridge_runtime_epoch", "bridge_runtime_producers"} <= tables:
         row = conn.execute("SELECT * FROM bridge_runtime_epoch WHERE singleton=1").fetchone()
@@ -111,9 +112,12 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
                 ):
                     raise RuntimeCustodyError("Acquisition launch lost its original handoff")
                 if table == "live_messages" and row["handoff_json"] is not None:
-                    handoff = decode_handoff(row["handoff_json"])
-                    if handoff["message_id"] != row["id"] or handoff["admission"] != association:
-                        raise RuntimeCustodyError("Inbox handoff disagrees with its original admission")
+                    handoff = original_handoff(row)
+                    association = handoff["admission"]
+                if table == "live_messages" and row["producer_target_json"] is not None and association is None:
+                    if row["claimed_at"] is not None:
+                        blockers.append(f"native-outcome-unqualified:{table}:{row[columns[0]]}")
+                    continue
                 if association is None:
                     blockers.append(f"unassociated:{table}:{row[columns[0]]}")
                     continue

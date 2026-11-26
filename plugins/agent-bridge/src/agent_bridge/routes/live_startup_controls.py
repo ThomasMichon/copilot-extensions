@@ -24,6 +24,16 @@ class ReadinessWaiter(Protocol):
     ) -> PluginReadinessResult: ...
 
 
+def require_original_control_target(db: Database, session_id: str) -> None:
+    if db.resolve_live_session_id(session_id) != session_id and db.execute_read(
+        "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? LIMIT 1", (session_id,),
+    ):
+        raise HTTPException(409, detail={
+            "code": "retained_inbox_requires_admission",
+            "message": "A retained original cannot transfer control admission through a routing alias",
+        })
+
+
 def startup_readiness(db: Database, session_id: str, kind: str) -> dict[str, Any] | None:
     """Return only the original startup control's selected observation inputs."""
     if not kind.startswith("startup:prompt:"):
@@ -72,6 +82,7 @@ async def startup_message(
     existing_kind: Callable[[Database, str, PluginReadinessRequest], str | None],
     wait_readiness: ReadinessWaiter,
 ) -> tuple[str, str]:
+    require_original_control_target(db, session_id)
     if body.kind != "prompt" or body.delivery != "queue" or not body.idempotency_key:
         raise HTTPException(400, detail="owned startup requires a queued prompt and operation key")
     if target is None:
@@ -104,6 +115,7 @@ async def set_live_mode(
     db: Database, session_id: str, body: SetModeRequest, *, wait_readiness: ReadinessWaiter,
     poll_seconds: float, claimed_grace_seconds: float, mode_control: str, ready_mode_control: str,
 ) -> SetModeResult:
+    require_original_control_target(db, session_id)
     expected_mode_session = body.expected_session_id
     control_kind = mode_control
     control_body: str = body.mode

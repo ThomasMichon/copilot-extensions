@@ -10,17 +10,22 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from typing import Any, cast
 
 import pytest
 
 from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_adoption import open_existing_writable
 from agent_bridge.inbox_custody import InboxConsumer
-from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeInstallation, RuntimeProducer
+from agent_bridge.runtime_custody import (
+    RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, RuntimeProducer,
+)
+
+Inbox = tuple[Database, RuntimeInstallation, RuntimeProducer, RuntimeAdmission, InboxConsumer]
 
 
 @pytest.fixture
-def inbox(tmp_db):
+def inbox(tmp_db: Database) -> Inbox:
     owner = RuntimeInstallation(
         "installation-a", "source-a", str(tmp_db.db_path.parent), str(tmp_db.db_path.absolute()),
     )
@@ -33,7 +38,7 @@ def inbox(tmp_db):
     return tmp_db, owner, producer, admission, consumer
 
 
-def register(db, consumer, *, now=10.0):
+def register(db: Database, consumer: InboxConsumer, *, now: float = 10.0) -> None:
     assert db.register_live_session(
         consumer.session_id, machine="machine-a", cwd=".", worktree_id=None,
         repo="repo-a", branch=None, pid=consumer.pid, role=None, now=now,
@@ -41,7 +46,7 @@ def register(db, consumer, *, now=10.0):
     ) == "live"
 
 
-def enqueue(inbox, *, associated=True):
+def enqueue(inbox: Inbox, *, associated: bool = True) -> int:
     db, _, _, admission, consumer = inbox
     return db.enqueue_live_message(
         consumer.session_id, "sender", "original body", 10.0,
@@ -49,19 +54,19 @@ def enqueue(inbox, *, associated=True):
     )
 
 
-def poll(inbox):
+def poll(inbox: Inbox) -> list[dict[str, Any]]:
     db, owner, _, admission, consumer = inbox
     return db.poll_live_message_handoffs(owner, admission, consumer, now=11.0)
 
 
-def begin(inbox, row):
+def begin(inbox: Inbox, row: dict[str, Any]) -> bool:
     db, owner, _, admission, consumer = inbox
     return db.begin_live_message_handoff(
         owner, admission, consumer, row["id"], row["handoff"]["id"], now=12.0,
     )
 
 
-def close(inbox, *, db=None):
+def close(inbox: Inbox, *, db: Database | None = None) -> Any:
     original, owner, producer, _, _ = inbox
     db = db or original
     return db.close_runtime_epoch(
@@ -70,14 +75,14 @@ def close(inbox, *, db=None):
     )
 
 
-def outcome(inbox, row, value, *, now=13.0):
+def outcome(inbox: Inbox, row: dict[str, Any], value: str, *, now: float = 13.0) -> str:
     db, _, _, _, consumer = inbox
     return db.record_live_message_handoff(
         consumer, row["id"], row["handoff"]["id"], outcome=value, now=now,
     )
 
 
-def test_poll_retains_original_attempt_before_body_and_never_grants_replay(inbox):
+def test_poll_retains_original_attempt_before_body_and_never_grants_replay(inbox: Inbox) -> None:
     db, owner, _, _, consumer = inbox
     message_id = enqueue(inbox)
     before = db.runtime_epoch(owner)
@@ -97,7 +102,7 @@ def test_poll_retains_original_attempt_before_body_and_never_grants_replay(inbox
     assert poll(inbox)[0]["handoff_stage"] == "sending"
 
 
-def test_restart_and_unknown_sdk_outcome_keep_the_same_attempt(inbox):
+def test_restart_and_unknown_sdk_outcome_keep_the_same_attempt(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -117,7 +122,7 @@ def test_restart_and_unknown_sdk_outcome_keep_the_same_attempt(inbox):
 
 
 @pytest.mark.parametrize("first", ["sdk_accepted", "consumed"])
-def test_acceptance_consumption_and_late_reports_remain_distinct_after_closure(inbox, first):
+def test_acceptance_consumption_and_late_reports_remain_distinct_after_closure(inbox: Inbox, first: str) -> None:
     db, owner, _, _, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -125,20 +130,21 @@ def test_acceptance_consumption_and_late_reports_remain_distinct_after_closure(i
     close(inbox)
     assert outcome(inbox, row, first) == first
     stored = db.live_message_receipt(consumer.session_id, row["id"])
+    assert stored is not None
     assert stored["sdk_accepted_at"] == (13.0 if first == "sdk_accepted" else None)
     assert stored["consumed_at"] == (13.0 if first == "consumed" else None)
     second = "consumed" if first == "sdk_accepted" else "sdk_accepted"
     assert outcome(inbox, row, second, now=14.0) == "consumed"
     assert outcome(inbox, row, first, now=15.0) == "consumed"
     assert outcome(inbox, row, "unknown", now=16.0) == "consumed"
-    report = db.runtime_custody_inventory(owner)
+    report = cast(dict[str, Any], db.runtime_custody_inventory(owner))
     retained, = report["rows"]["live_messages"]
     assert retained["id"] == row["id"] and retained["handoff_json"] == row["handoff_json"]
     assert report["restore_qualified"] is False and report["acknowledged"] is False
     assert "inbox/control SDK handoffs" in report["unmediated_cohorts"]
 
 
-def test_closure_before_final_admission_refuses_and_retains_original_body(inbox):
+def test_closure_before_final_admission_refuses_and_retains_original_body(inbox: Inbox) -> None:
     db, _, _, _, _ = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -153,7 +159,7 @@ def test_closure_before_final_admission_refuses_and_retains_original_body(inbox)
 
 @pytest.mark.parametrize("method", ["ordinary", "fresh"])
 @pytest.mark.parametrize("associated", [False, True])
-def test_closed_epoch_fences_actual_inbox_insertions(inbox, method, associated):
+def test_closed_epoch_fences_actual_inbox_insertions(inbox: Inbox, method: str, associated: bool) -> None:
     db, _, _, admission, consumer = inbox
     close(inbox)
     with pytest.raises(sqlite3.IntegrityError, match="admission_closed"):
@@ -167,7 +173,7 @@ def test_closed_epoch_fences_actual_inbox_insertions(inbox, method, associated):
     assert db.execute_read("SELECT id FROM live_messages") == []
 
 
-def test_legacy_and_partially_claimed_batches_roll_back_without_fabricating_custody(inbox):
+def test_legacy_and_partially_claimed_batches_roll_back_without_fabricating_custody(inbox: Inbox) -> None:
     db, _, _, _, _ = inbox
     associated = enqueue(inbox)
     legacy = enqueue(inbox, associated=False)
@@ -184,7 +190,7 @@ def test_legacy_and_partially_claimed_batches_roll_back_without_fabricating_cust
     {"incarnation": "consumer-b"}, {"pid": 103}, {"process_started_at": 2.0},
     {"session_id": "native-b"},
 ])
-def test_wrong_consumer_never_inherits_original_attempt(inbox, change):
+def test_wrong_consumer_never_inherits_original_attempt(inbox: Inbox, change: dict[str, Any]) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -200,7 +206,7 @@ def test_wrong_consumer_never_inherits_original_attempt(inbox, change):
         )
 
 
-def test_missing_expired_and_aliased_registration_cannot_mint_final_authority(inbox):
+def test_missing_expired_and_aliased_registration_cannot_mint_final_authority(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -224,7 +230,7 @@ def test_missing_expired_and_aliased_registration_cannot_mint_final_authority(in
 
 
 @pytest.mark.parametrize("cleanup", ["deregister", "takeover", "reap"])
-def test_registration_cleanup_preserves_associated_and_handed_off_rows(inbox, cleanup):
+def test_registration_cleanup_preserves_associated_and_handed_off_rows(inbox: Inbox, cleanup: str) -> None:
     db, owner, _, _, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -238,7 +244,7 @@ def test_registration_cleanup_preserves_associated_and_handed_off_rows(inbox, cl
     else:
         db.execute_write("UPDATE live_sessions SET status='expired'")
         db.reap_stale_live_sessions(now=1000000.0, pid_alive=lambda _: False)
-    rows = db.runtime_custody_inventory(owner)["rows"]["live_messages"]
+    rows = cast(dict[str, Any], db.runtime_custody_inventory(owner))["rows"]["live_messages"]
     assert {item["id"] for item in rows} == {row["id"], second_id}
     assert outcome(inbox, row, "sdk_accepted") == "sdk_accepted"
     assert db.list_pending_live_messages(consumer.session_id) == []
@@ -251,7 +257,7 @@ def test_registration_cleanup_preserves_associated_and_handed_off_rows(inbox, cl
     "UPDATE live_messages SET handoff_started_at=NULL",
     "UPDATE live_messages SET body='replacement input'",
 ])
-def test_original_history_and_final_attempt_cannot_be_reset(inbox, sql):
+def test_original_history_and_final_attempt_cannot_be_reset(inbox: Inbox, sql: str) -> None:
     db, _, _, _, _ = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -262,7 +268,7 @@ def test_original_history_and_final_attempt_cannot_be_reset(inbox, sql):
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), 0, -1, True])
-def test_invalid_observation_time_cannot_leave_a_replayable_attempt(inbox, value):
+def test_invalid_observation_time_cannot_leave_a_replayable_attempt(inbox: Inbox, value: Any) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -274,7 +280,7 @@ def test_invalid_observation_time_cannot_leave_a_replayable_attempt(inbox, value
 
 
 @pytest.mark.parametrize("winner", ["begin", "closure"])
-def test_real_two_owner_sqlite_final_admission_and_closure_serialize(inbox, winner):
+def test_real_two_owner_sqlite_final_admission_and_closure_serialize(inbox: Inbox, winner: str) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -282,9 +288,9 @@ def test_real_two_owner_sqlite_final_admission_and_closure_serialize(inbox, winn
     entered, release = threading.Event(), threading.Event()
     timeouts = []
 
-    def operate(selected, action, *, pause=False):
+    def operate(selected: Database, action: str, *, pause: bool = False) -> Any:
         conn = selected._get_conn()
-        def trace(statement):
+        def trace(statement: str) -> None:
             if pause and statement == "COMMIT":
                 entered.set()
                 if not release.wait(5):
@@ -314,7 +320,7 @@ def test_real_two_owner_sqlite_final_admission_and_closure_serialize(inbox, winn
             else:
                 second.result(timeout=5)
             assert not timeouts
-        retained = db.runtime_custody_inventory(owner)["rows"]["live_messages"][0]
+        retained = cast(dict[str, Any], db.runtime_custody_inventory(owner))["rows"]["live_messages"][0]
         assert (retained["handoff_started_at"] is not None) == (winner == "begin")
         assert retained["handoff_json"] == row["handoff_json"]
     finally:
@@ -323,10 +329,11 @@ def test_real_two_owner_sqlite_final_admission_and_closure_serialize(inbox, winn
 
 
 @pytest.mark.parametrize("damage", ["column", "guard"])
-def test_current_schema_adoption_never_repairs_missing_handoff_storage(inbox, damage):
+def test_current_schema_adoption_never_repairs_missing_handoff_storage(inbox: Inbox, damage: str) -> None:
     db, _, _, _, _ = inbox
     if damage == "column":
         db.execute_write("DROP TRIGGER live_messages_handoff_handoff_started_at_monotonic")
+        db.execute_write("DROP TRIGGER live_messages_disposition_sdk")
         db.execute_write("ALTER TABLE live_messages DROP COLUMN handoff_started_at")
     else:
         db.execute_write("DROP TRIGGER live_messages_handoff_immutable")
@@ -335,7 +342,7 @@ def test_current_schema_adoption_never_repairs_missing_handoff_storage(inbox, da
             Database(db.db_path, read_only=readonly)
 
 
-def test_existing_writable_adoption_preserves_handoff_without_bootstrap(inbox):
+def test_existing_writable_adoption_preserves_handoff_without_bootstrap(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -353,7 +360,7 @@ def test_existing_writable_adoption_preserves_handoff_without_bootstrap(inbox):
         passive.close()
 
 
-def test_real_process_exit_after_final_admission_cannot_authorize_a_second_send(inbox):
+def test_real_process_exit_after_final_admission_cannot_authorize_a_second_send(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     row, = poll(inbox)
@@ -375,14 +382,15 @@ os._exit(0)
         [sys.executable, "-c", child, json.dumps(asdict(owner)), admission.document(),
          json.dumps(consumer.document()), str(row["id"]), row["handoff"]["id"]],
         check=True, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     assert begin(inbox, row) is False
     assert poll(inbox)[0]["handoff_stage"] == "sending"
-    assert db.live_message_receipt(consumer.session_id, row["id"])["stage"] == "admitted"
+    receipt = db.live_message_receipt(consumer.session_id, row["id"])
+    assert receipt is not None and receipt["stage"] == "admitted"
 
 
-def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
+def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path: Path) -> None:
     path = tmp_path / "legacy.db"
     frozen = Path(__file__).with_name("fixtures") / "pre-custody-schema27.sql"
     with sqlite3.connect(path) as conn:
@@ -411,12 +419,12 @@ def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
         with pytest.raises(RuntimeCustodyError, match="Legacy or foreign"):
             db.poll_live_message_handoffs(owner, admission, consumer, now=11.0)
         assert any("unassociated:live_messages" in item
-                   for item in db.runtime_custody_inventory(owner)["blockers"])
+                   for item in cast(list[str], db.runtime_custody_inventory(owner)["blockers"]))
     finally:
         db.close()
 
 
-def test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation(inbox):
+def test_v46_migration_retains_original_begun_handoff_and_requires_writable_preparation(inbox: Inbox) -> None:
     from legacy_inbox_schema import restore_prior_inbox_guards
 
     db, _, _, _, _ = inbox
@@ -437,7 +445,7 @@ def test_v46_migration_retains_original_begun_handoff_and_requires_writable_prep
         migrated.close()
 
 
-def test_legacy_poll_and_lost_ack_cannot_expose_an_associated_body_before_handoff(inbox):
+def test_legacy_poll_and_lost_ack_cannot_expose_an_associated_body_before_handoff(inbox: Inbox) -> None:
     db, _, _, _, consumer = inbox
     message_id = enqueue(inbox)
     assert db.list_pending_live_messages(consumer.session_id) == []
@@ -450,7 +458,7 @@ def test_legacy_poll_and_lost_ack_cannot_expose_an_associated_body_before_handof
     assert row["id"] == message_id and begin(inbox, row)
 
 
-def test_mixed_enrolled_producers_preserve_each_original_association(inbox):
+def test_mixed_enrolled_producers_preserve_each_original_association(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     first_id = enqueue(inbox)
     replacement = db.enroll_runtime_producer(
@@ -474,7 +482,7 @@ def test_mixed_enrolled_producers_preserve_each_original_association(inbox):
     assert begin(inbox, rows[1]) is True
 
 
-def test_unknown_original_producer_refuses_the_entire_mixed_batch(inbox):
+def test_unknown_original_producer_refuses_the_entire_mixed_batch(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     enqueue(inbox)
     missing = db.enroll_runtime_producer(
@@ -492,13 +500,13 @@ def test_unknown_original_producer_refuses_the_entire_mixed_batch(inbox):
 @pytest.mark.parametrize("original,retry", [
     ("legacy", "first"), ("first", "legacy"), ("first", "second"), ("first", "first"),
 ])
-def test_keyed_retry_requires_the_same_original_custody_association(inbox, original, retry):
+def test_keyed_retry_requires_the_same_original_custody_association(inbox: Inbox, original: str, retry: str) -> None:
     db, owner, _, admission, consumer = inbox
     second = db.enroll_runtime_producer(
         owner, admission.epoch, RuntimeProducer("frontend-b", 103, "birth-b"),
     )
     admissions = {"legacy": None, "first": admission, "second": second}
-    def keyed(value):
+    def keyed(value: str) -> tuple[int | None, str | None]:
         return db.enqueue_live_message_if_fresh(
             consumer.session_id, sender="sender", body="same body", now=10.0,
             idempotency_key="original-key", report_duplicate=True,
@@ -517,14 +525,14 @@ def test_keyed_retry_requires_the_same_original_custody_association(inbox, origi
 
 
 @pytest.mark.parametrize("adopted", [False, True])
-def test_custody_commit_is_full_sync_and_ordinary_writes_keep_normal_policy(inbox, adopted):
+def test_custody_commit_is_full_sync_and_ordinary_writes_keep_normal_policy(inbox: Inbox, adopted: bool) -> None:
     original, owner, producer, admission, consumer = inbox
     passive = Database(original.db_path, read_only=True) if adopted else None
     db = open_existing_writable(passive) if passive else original
     selected = (db, owner, producer, admission, consumer)
     conn = db._get_conn()
     observed = []
-    def trace(statement):
+    def trace(statement: str) -> None:
         if statement == "COMMIT":
             observed.append(conn.execute("PRAGMA synchronous").fetchone()[0])
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1
@@ -548,12 +556,13 @@ def test_custody_commit_is_full_sync_and_ordinary_writes_keep_normal_policy(inbo
         conn.set_trace_callback(None)
         if adopted:
             db.close()
+            assert passive is not None
             passive.close()
 
 
 @pytest.mark.parametrize("method", ["ordinary", "fresh"])
 @pytest.mark.parametrize("kind", ["control:mode", "CONTROL:MODE"])
-def test_associated_controls_refuse_before_either_enqueue_can_admit(inbox, method, kind):
+def test_associated_controls_refuse_before_either_enqueue_can_admit(inbox: Inbox, method: str, kind: str) -> None:
     db, _, _, admission, consumer = inbox
     with pytest.raises(RuntimeCustodyError, match="qualified control handoff"):
         if method == "ordinary":
@@ -570,7 +579,7 @@ def test_associated_controls_refuse_before_either_enqueue_can_admit(inbox, metho
 
 
 @pytest.mark.parametrize("kind", ["control:mode", "CONTROL:MODE"])
-def test_sql_owner_cannot_admit_an_associated_control(inbox, kind):
+def test_sql_owner_cannot_admit_an_associated_control(inbox: Inbox, kind: str) -> None:
     db, _, _, admission, consumer = inbox
     with pytest.raises(sqlite3.IntegrityError, match="control_custody_unsupported"):
         db.execute_write(
@@ -581,7 +590,7 @@ def test_sql_owner_cannot_admit_an_associated_control(inbox, kind):
     assert db.execute_read("SELECT id FROM live_messages") == []
 
 
-def test_associated_prompt_cannot_be_reclassified_as_a_legacy_control(inbox):
+def test_associated_prompt_cannot_be_reclassified_as_a_legacy_control(inbox: Inbox) -> None:
     db, _, _, _, _ = inbox
     message_id = enqueue(inbox)
     with pytest.raises(sqlite3.IntegrityError, match="control_custody_unsupported"):
@@ -590,7 +599,7 @@ def test_associated_prompt_cannot_be_reclassified_as_a_legacy_control(inbox):
 
 
 @pytest.mark.parametrize("claimed", [False, True])
-def test_legacy_controls_cannot_settle_unsupported_retained_custody(inbox, claimed):
+def test_legacy_controls_cannot_settle_unsupported_retained_custody(inbox: Inbox, claimed: bool) -> None:
     db, _, _, _, consumer = inbox
     message_id = enqueue(inbox)
     ordinary_id = db.enqueue_live_message(

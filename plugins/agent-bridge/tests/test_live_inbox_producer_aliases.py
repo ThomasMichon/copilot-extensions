@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
+from typing import Any
 
 import pytest
 
 from agent_bridge.live_inbox_runtime import LiveInboxRuntime
 from test_live_inbox_producer import PAYLOAD
-from test_live_inbox_runtime import enroll, installation as installation, serving as serving
+from test_live_inbox_runtime import (
+    Serving, attempt, current, enroll, installation as installation,
+    request as consumer_request, serving as serving,
+)
+
+Renamed = tuple[Serving, str, dict[str, Any], dict[str, Any]]
 
 
 @pytest.fixture
-def renamed(serving):
+def renamed(serving: Serving) -> Renamed:
     app, client, db, consumer = serving
     assert db.create_cli_mode_reservation("worktree-a", now=time.time())
     registration = {
@@ -34,7 +41,7 @@ def renamed(serving):
     return serving, url, admitted.json(), original
 
 
-def test_active_alias_retains_original_receipt_and_rejects_successor_recovery(renamed) -> None:
+def test_active_alias_retains_original_receipt_and_rejects_successor_recovery(renamed: Renamed) -> None:
     (_, client, db, consumer), url, admitted, original = renamed
     retry = client.post(url, json=PAYLOAD)
     assert retry.status_code == 200, retry.text
@@ -53,8 +60,10 @@ def test_active_alias_retains_original_receipt_and_rejects_successor_recovery(re
 
 
 @pytest.mark.parametrize("frontend", ["serving", "missing", "closed"])
-def test_active_alias_never_downgrades_original_enrollment_to_legacy(renamed, frontend) -> None:
-    (app, client, db, _), url, _, original = renamed
+def test_active_alias_never_downgrades_original_enrollment_to_legacy(
+    renamed: Renamed, frontend: str,
+) -> None:
+    (app, client, db, consumer), url, _, original = renamed
     if frontend == "missing":
         app.state.live_inbox_runtime = LiveInboxRuntime()
     elif frontend == "closed":
@@ -63,12 +72,27 @@ def test_active_alias_never_downgrades_original_enrollment_to_legacy(renamed, fr
             owner, db.runtime_epoch(owner), transition_id="transition-a",
             target_assembly="target-a", predecessor=app.state.live_inbox_runtime._producer,
         )
-    rejected = client.post(url, json={**PAYLOAD, "idempotency_key": "new-operation"})
-    assert rejected.status_code == 409, rejected.text
-    assert rejected.json()["detail"]["code"] == "retained_inbox_refused"
-    assert len(db.execute_read("SELECT * FROM live_messages")) == 1
+    accepted = client.post(url, json={**PAYLOAD, "idempotency_key": "new-operation"})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["session_id"] == "native-b"
+    assert len(db.execute_read("SELECT * FROM live_messages")) == 2
     assert dict(db.execute_read("SELECT * FROM live_messages")[0]) == original
-    assert db.list_pending_live_messages("native-b") == []
+    assert [row["message_id"] for row in db.inspect_live_inbox("native-b", 10)] == [
+        accepted.json()["message_id"],
+    ]
+    successor = replace(consumer, session_id="native-b", incarnation="consumer-b")
+    prefix = "/api/v1/live-sessions/native-b/retained-inbox"
+    body = {**consumer_request(successor), "receiving_api": "native-sdk-v1"}
+    observation = client.post(prefix + "/negotiate", json=body)
+    assert observation.status_code == 200, observation.text
+    body.update(observation.json())
+    assert client.post(prefix + "/enroll", json=body).status_code == 200
+    offered = client.post(prefix + "/poll", json=current(body))
+    assert offered.status_code == 200, offered.text
+    row, = offered.json()["messages"]
+    assert row["id"] == accepted.json()["message_id"]
+    assert client.post(prefix + "/begin", json=attempt(body, row)).json() == {"begin": True}
+    assert dict(db.execute_read("SELECT * FROM live_messages")[0]) == original
     for kind in ("control:set-mode", "startup:prompt:1"):
         mid, reason = db.enqueue_live_message_if_fresh(
             "native-a", sender="sender", body="unsupported", kind=kind, now=time.time(),
@@ -78,12 +102,12 @@ def test_active_alias_never_downgrades_original_enrollment_to_legacy(renamed, fr
 
 @pytest.mark.parametrize("operation", ["startup", "readiness", "mode-ready", "mode"])
 def test_active_alias_refuses_control_admission_before_any_readiness_wait(
-    renamed, monkeypatch, operation,
+    renamed: Renamed, monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
     (_, client, db, _), url, _, original = renamed
     waits = []
 
-    def waiting(*args, **kwargs):
+    def waiting(*args: Any, **kwargs: Any) -> None:
         waits.append(True)
         raise AssertionError("retained refusal must precede the control/readiness waiter")
 
@@ -99,7 +123,7 @@ def test_active_alias_refuses_control_admission_before_any_readiness_wait(
     elif operation == "readiness":
         response = client.post(base + "/plugin-readiness", json=readiness)
     else:
-        payload = {"mode": "autopilot"}
+        payload: dict[str, Any] = {"mode": "autopilot"}
         if operation == "mode-ready":
             payload["plugin_readiness"] = readiness
         response = client.post(base + "/mode", json=payload)
