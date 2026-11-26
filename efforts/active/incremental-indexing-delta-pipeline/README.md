@@ -343,11 +343,15 @@ separately budgeted reconciliation; this proposal authorizes no live operation.
   coalesced with bounded unique-item fetches.
 - [x] Prove no-op rounds produce zero embedding requests, content/vector writes
   and derived-maintenance runs.
-- [ ] Exercise both built-in and external-provider compatibility, including
-  old producers/consumers and incomplete-page refusal.
-- [ ] Retain the existing checkpoint, source-lock, incremental-FTS and
+- [x] Exercise both built-in and external-provider compatibility, including
+  old producers/consumers and incomplete-page refusal. The
+  [compatibility reconciliation](journal/2026/11.25%20delta-acceptance.md)
+  separates supported-contract qualification from provider coverage and repair.
+- [x] Retain the existing checkpoint, source-lock, incremental-FTS and
   processing-full/trailing-incremental tests. Add small contract tests to
   required CI; keep scale/native composition in existing bounded opt-in lanes.
+  The [retained portfolio map](journal/2026/11.25%20delta-acceptance.md#retained-regression-portfolio)
+  distinguishes source retention, required actor-free cases and native execution.
 - [ ] Require separate consumer evidence: shared-engine calls, exact vendored
   provenance, stable retrieval results and measured stage counts on real deltas.
 
@@ -361,12 +365,22 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-25 - Compatibility and retained-regression acceptance
+
+The [acceptance reconciliation](journal/2026/11.25%20delta-acceptance.md)
+closes only the supported-contract compatibility and regression-retention
+Validation items under #14697. Current external page/snapshot/required-page
+controls pass 154 cases; existing built-in, mixed-version and native evidence
+retains its stated limits. Eight parent items remain open, without a new runtime
+mechanism, broader provider-coverage claim or rollout.
+
 ### 2026-11-25 - Explicit point binding through service entry
 
 The [service-entry journal](journal/2026/11.25%20point-service-entry.md)
 records the existing factory's synchronous entrypoint composition, native
-active/passive startup and invalid-binding refusal. This is not a serialized
-selector, ordinary CLI migration, automatic activation or parent completion.
+active/passive startup and invalid-binding refusal, merged in #14694. This is
+not a serialized selector, ordinary CLI migration, automatic activation or
+parent completion.
 
 ### 2026-11-25 - Native alias-revert recovery qualification
 
