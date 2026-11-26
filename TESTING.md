@@ -1,7 +1,8 @@
 # Testing copilot-extensions
 
-Controls: [Containers](plugins/agent-containers/tests/README.md),
-[SSH](plugins/agent-ssh/tests/README.md), [Logger](plugins/agent-logger/tests/README.md).
+Tests: [Containers](plugins/agent-containers/tests/README.md),
+[SSH](plugins/agent-ssh/tests/README.md), [Logger](plugins/agent-logger/tests/README.md),
+[Machines](plugins/agent-machines/tests/README.md).
 
 Bridge's `tests/test_installer_watchdog.py` exercises the shared PowerShell
 self-stage block in fresh synthetic homes under both Windows shell hosts.
@@ -18,8 +19,8 @@ Eight controls execute the Worktrees and Dispatch preambles under both hosts,
 distinguishing built-in inactivity budgets from explicit elapsed-time overrides.
 These are native integration controls, not installed-service qualification.
 
-`tools/test_local_install_closed_wheels.py` checks ordinary and
-configuration-disabled closed-wheel Source application preparation followed by
+`tools/test_local_install_closed_wheels.py` tests config variants of
+closed-wheel Source prep and
 the actual offline `uv lock --check` with normal project discovery. The retained
 lock must remain unchanged, and no application `.venv` is created. These
 periodic/source controls do not qualify installed readiness or run a backend.

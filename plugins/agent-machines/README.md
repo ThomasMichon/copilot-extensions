@@ -11,6 +11,18 @@ The engine is generic and public. Sensitive modules (install SSH, change power
 settings, bootstrap WSL, install package managers, and similar machine-specific
 actions) and per-machine data stay in the consuming repo.
 
+The foreground command admits its selected complete application interpreter
+through prepared UV with managed-only, no-download lookup. It never substitutes
+the payload's bootstrap version or an ambient Python. Missing UV or admission
+support fails before application import; use explicit setup to prepare it.
+Installation-context selection, first-use provisioning and its lock remain
+with their existing owners. Configuration and health collection still require
+an already provisioned runtime. Health capability checks and isolated readiness
+probes retain their separate entrypoints; PowerShell Legacy argument forwarding
+preserves empty, quoted and Unicode values plus native string conversion of
+numeric variables for both script and module entries.
+See the [inert command controls](tests/README.md) for qualification and limits.
+
 The PowerShell installer's declared, captured human output initializes UTF-8
 only when requested by its admitting parent. Construction diagnostics use
 the existing dual-stream helper; the finite Python lifecycle producer honors
