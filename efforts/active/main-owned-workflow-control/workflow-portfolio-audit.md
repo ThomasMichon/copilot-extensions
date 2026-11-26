@@ -32,6 +32,14 @@ Fatal Ruff and strict Linux/Windows whole-file typing pass.
 Current-head review, fresh full CI, normal merge and persistence remain;
 no parent completion, installed/native adoption or whole-flow saving is claimed.
 
+Initial #14708 receives clean exact-head approval and required green CI.
+A later Bridge merge changes one existing `client_prompt.py` binding and
+causes a real manifest conflict. Complete semantic reconciliation preserves
+that refresh, every ordered peer item and the exact 27-source local
+observation union without replay. Counts/bytes/helpers/deadline remain
+unchanged. Fresh current-head review and complete hosted CI still precede
+normal merge and persistent readback.
+
 ## November 26 original pure topology controls
 
 **Superseded candidate, not an admission:** #14700 is closed unmerged under

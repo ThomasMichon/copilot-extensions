@@ -513,6 +513,12 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   Existing combined control-plane/identity admission remains unchanged;
   no redundant candidate cases are present. Fatal Ruff and strict
   Linux/Windows whole-file typing pass; review/full CI/merge/persistence remain.
+  Initial #14708 receives clean exact-head approval and required green CI,
+  but a later Bridge merge causes a real manifest conflict. Reconciliation
+  retains its one `client_prompt.py` hash refresh and every other peer item;
+  all 27 locally observed input hashes remain exact without replay.
+  Inventory and limits are unchanged. Fresh current-head review and complete
+  hosted CI must qualify this union before normal merge and persistence.
 - [x] Disposition the proposed control-plane/identity expansion as duplicate,
   not new assurance. Review #14700 identifies that all 28 proposed cases
   already run through the admitted combined adapter from merged #14611.
