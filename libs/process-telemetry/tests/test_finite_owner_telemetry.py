@@ -356,6 +356,26 @@ def test_drain_settles_a_committed_marker_left_after_its_append(
     assert hook_journal.drain(tmp_path) == []
 
 
+def test_retained_markers_do_not_count_as_freed_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hook_journal, "MARKER_LIMIT", 2)
+    stalled = [hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart") for _ in range(2)]
+    assert all(run.marker is not None for run in stalled)
+    real_unlink = _failing_marker_unlink(monkeypatch)
+    for _ in range(3):
+        refused = hook_journal.HookRun.begin(
+            tmp_path, "agent-vault", "sessionStart", stale_after_ms=0,
+        )
+        assert refused.marker is None
+    assert len(list(tmp_path.glob("*.start"))) == 2
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    admitted = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert admitted.marker is not None
+    outcomes = [event["outcome"] for event in hook_journal.drain(tmp_path)]
+    assert outcomes == ["unfinished", "unfinished"]
+
+
 def test_drain_retains_a_record_while_its_marker_cannot_be_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

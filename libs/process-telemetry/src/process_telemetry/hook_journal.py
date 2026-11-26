@@ -208,8 +208,14 @@ def _finalize(
         if not _append_held(directory, [record]):
             # Full: the committed marker is reported by a later start.
             return False
-    with contextlib.suppress(OSError):
+    try:
         marker.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        # Retained: its committed record keeps a later report deduplicated,
+        # but it still occupies capacity and must not count as freed.
+        return False
     return True
 
 
