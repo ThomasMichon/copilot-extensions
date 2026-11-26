@@ -135,3 +135,23 @@ def test_constructor_retains_callback_environment_and_cwd(
     assert kwargs["environment"] is environment
     assert kwargs["cwd"] == root / "snapshot"
     assert environment == {"retained": "caller configuration"}
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+def test_headless_constructor_retains_redirected_streams(
+    cell: Any, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    helper = cell._cell_process_helpers()
+    calls = []
+    monkeypatch.setattr(helper, "os", SimpleNamespace(name=platform))
+
+    def run(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(returncode=2)
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    with pytest.raises(cell.CellError, match="command failed with exit 2"):
+        helper.run_checked(["selected-shell"], error_type=cell.CellError)
+    assert len(calls) == 1
+    assert calls[0]["stdout"] is (sys.stdout if platform == "nt" else None)
+    assert calls[0]["stderr"] is (sys.stderr if platform == "nt" else None)

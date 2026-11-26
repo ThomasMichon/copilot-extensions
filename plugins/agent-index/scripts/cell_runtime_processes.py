@@ -99,9 +99,12 @@ def load_versioned_runtime(
 
 def run_checked(command: list[str], *, error_type: type[Exception],
                 environment: dict[str, str] | None = None, cwd: Path | None = None) -> None:
+    # CREATE_NO_WINDOW needs explicit handles to retain inherited redirected output.
     result = subprocess.run(
         command, env=environment, cwd=cwd, text=True, encoding="utf-8",
         errors="replace", check=False, creationflags=_HEADLESS,
+        stdout=sys.stdout if os.name == "nt" else None,
+        stderr=sys.stderr if os.name == "nt" else None,
     )
     if result.returncode != 0:
         raise error_type(

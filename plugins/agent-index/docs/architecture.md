@@ -989,8 +989,9 @@ project/selector settings. Canonical bootstrap-environment helpers isolate
 the constructor child; UV storage, caller CWD/environment, slot receipts,
 health/profile checks and cleanup remain with their existing owners.
 Selected UV and shell paths are bound before the native child changes CWD.
-Progress goes to stderr, preserving coordinator JSON stdout. Missing
-prerequisites or failed requested construction has no helper/system-Python or
+Progress goes to stderr, preserving coordinator JSON stdout. Windows headless
+commands explicitly retain the coordinator's redirected standard handles.
+Missing prerequisites or failed requested construction has no helper/system-Python or
 unversioned fallback. Explicit setup retains its acquisition policy; completed
 runtime use does not construct an environment. The smoke-test builder remains
 separate, and full declared-project/environment adoption is not implied.
