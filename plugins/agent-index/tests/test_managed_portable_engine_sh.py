@@ -30,6 +30,9 @@ def _wait_for_absence(probe: Callable[[], object], deadline: float) -> None:
             probe()
         except ProcessLookupError:
             return
+        except PermissionError:
+            # Darwin can report EPERM for an exiting, unreaped process group.
+            pass
         time.sleep(.01)
 
 

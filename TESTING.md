@@ -224,13 +224,17 @@ An explicit post-release gate kills the actual caller before stdout consumption
 and still requires group and temporary-file settlement. `ps` is poisoned:
 production custody and the test's exit observations use native null-signal probes.
 Caller-loss observations poll within the existing finite cleanup allowance,
-without accepting permission errors or extending the launch observation bound.
+waiting through transient permission errors but accepting only actual process
+disappearance, never extending the launch observation bound. Two deterministic
+source-adapter controls require eventual disappearance and reject persistent
+permission errors at that same deadline.
 Setup controls deliver TERM after FIFO allocation but before guardian creation,
 requiring temporary-file cleanup, no UV execution and the original signal status.
 Linux exercises generated portable Bash, not Darwin
-supervision; a separate five-minute Ubuntu/macOS job matrix requires all
+supervision; separate five-minute Ubuntu/macOS jobs require all
 thirty-four controls and measurement properties on each native host. Seven serial
-batches contain at most six fixtures. The existing Linux service job and
+batches contain at most six fixtures; the observation controls retain their own
+two-case no-skip report check. The existing Linux service job and
 deadlines are unchanged. These inert children do not qualify installed
 supervision, production models, CPU or latency tails.
 The existing Linux native job also runs the canonical nested-engine removal
@@ -336,15 +340,14 @@ selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments
 environment, CWD and immutable slots. Activation-role reading uses the prepared
 bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
 Actual repository-role/ensure entry also accepts private prepared UV without
-changing PATH or acquiring anything. The existing Windows command-bootstrap job
-requires all sixteen controls and ten repeated
-selection reports in serial batches of at most four, with no added worker or
-larger eight-minute limit. These fixtures do not start a service, enroll tasks,
+changing PATH or acquiring anything. The dedicated Windows Index job requires
+all sixteen controls and ten repeated selection reports in serial batches of
+at most four, retaining its eight-minute limit. These fixtures do not start a service, enroll tasks,
 qualify actual detached lifetime or measure child CPU, full install or latency
-tails. The intact packet moved from the launch job after it exhausted eight
-minutes during final cleanup despite passing every step. That run measured
-43 seconds for this packet and 5m10s for command-bootstrap; the relocation adds
-no worker, removes no control and changes no deadline or native process.
+tails. Index management and engine packets were split intact from the broader
+command-bootstrap jobs after aggregate Windows work exhausted eight minutes.
+Static Windows/Linux sibling jobs share the same preparation and preserve every
+command, report, assertion and original deadline; no native process is pooled.
 Existing lifecycle and scheduling controls remain independent.
 
 Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
