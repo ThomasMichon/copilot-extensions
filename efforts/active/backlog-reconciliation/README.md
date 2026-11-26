@@ -522,6 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [materialization repair and ten retained cases](journal/2026/11.26-materialization-repair-and-ten-retained-cases.md)
+proposes nine conditional completed-source dispositions against the precise
+merged multi-package emitter repair, seven further independently OPEN
+installed-TTY cases and three independently OPEN source-preparation cases.
+#14310 retains its human-owned parent completion boundary despite the
+subsequently delivered sibling-fallback source correction. No tracker
+effect or parent checkbox completion is claimed by this proposal.
+
 The [eighteen later TTY-case outcome](journal/2026/11.26-eighteen-later-tty-cases.md)
 retains eighteen separate unresolved execution identities in existing #11966
 after reviewed #14760 and whole actual receiving. Eighteen redundant leaf
@@ -531,7 +539,7 @@ workflow metadata heads. #13660's verifier failure and #14053's two human
 repair claims, original mux-safety refusal and later missing-component report
 stay separately OPEN. Two equal complete censuses measure 653 whole OPEN:
 293 original-cohort and 360 inflow, with exactly eighteen departures and no
-arrival since 671. The factual outcome still owes publication; every
+arrival since 671. The factual outcome merged in #14762; every
 incumbent parent Plan/Validation state remains unchanged.
 
 The [further publication and installed-TTY outcome](journal/2026/11.26-further-publication-and-tty-evidence.md)
