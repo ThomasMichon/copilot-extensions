@@ -140,6 +140,10 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   a fresh actual receipt-file consumer and all 119 focused unit controls pass.
   The only change among the other 38 owned paths is an upstream Dispatch
   README addition; the remaining 37 retain their qualified bytes.
+  A later catalog-only rebase preserves all 10,382 nodes from target
+  `3c9f2140dc39`, yielding 10,399 nodes and 698,471 stored bytes with the same
+  119 Bridge controls, bindings, targets and budget. All 38 other owned paths
+  retain their published bytes before this status update.
   Fresh published-head review, required CI, native qualification, merge and
   normal release remain open. Effectful lifecycle selectors and potential
   targets remain separate.
