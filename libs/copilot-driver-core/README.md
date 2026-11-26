@@ -51,15 +51,18 @@ A preferred launch whose retained selection is missing also refuses; missing
 launch state is not a legacy capability advertisement.
 No new CLI option, installed setting or global plugin migration is involved.
 
-For that selected launch, the real Bridge and floor Driver facades validate their
-own roots and remain passive. The staged Driver entrypoint owns the one SDK join,
+For that selected launch, Core validates the real Bridge and floor Driver support
+roots in the original command, then omits only their support-only plugin arguments
+from the native child command. Their assets remain retained, but do not start
+independent extension bootstraps that would time out without an SDK join.
+Other plugin arguments and native input stay unchanged. The staged Driver entrypoint owns the one SDK join,
 including Bridge's existing hooks and `/peer`, and binds that exact native object
 to the common headed adapter. Retained Bridge sends pass through the same adapter's
 startup, input-ownership and auth-wait fences rather than another SDK sender or
 Host attachment. Metadata names the actual Driver connector root. The Host
-binds the facade roots to the original native command before staging or process
-creation. The selected facades validate their own executing module roots and
-do not join. The connector validates its own module root and observes the
+binds the support roots to the original native command before staging or process
+creation, while startup admission retains that original command. The connector
+validates its own module root and observes the
 live session extension registry: its source-qualified plugin identity must
 name its actual running PID, with no duplicate connector or running/starting
 Bridge or Driver extension. A same-named global installation record is not

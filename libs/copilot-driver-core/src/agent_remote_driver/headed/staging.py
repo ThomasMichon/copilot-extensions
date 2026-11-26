@@ -51,15 +51,18 @@ def connector_selection(
 
 def selected_connector_roots(
     selected: dict[str, object], argv: list[str], *, value_options: set[str],
-) -> None:
+) -> list[str]:
+    """Validate original support roots and omit their independent SDK bootstraps."""
     expected = {
         "agent-bridge": Path(str(selected["bridgePluginRoot"])).resolve(strict=True),
         "agent-remote-driver": Path(str(selected["driverPluginRoot"])).resolve(strict=True),
     }
     found: dict[str, Path] = {}
     seen: set[Path] = set()
+    support_arguments: set[int] = set()
     index = 1
     while index < len(argv):
+        start = index
         argument = argv[index]
         if argument == "--":
             break
@@ -88,11 +91,13 @@ def selected_connector_roots(
                 if plugin_name in found or path != expected[plugin_name]:
                     raise ValueError("Selected native plugin root changed or duplicated")
                 found[plugin_name] = path
+                support_arguments.update(range(start, index + 1))
             elif plugin_name == "copilot-driver-headed":
                 raise ValueError("The native connector must be staged by its original Host")
         index += 1
     if found != expected:
         raise ValueError("Selected native plugin roots are missing from the original command")
+    return [argument for index, argument in enumerate(argv) if index not in support_arguments]
 
 
 def stage_extension(attempt_directory: Path, *, native_connector: bool = False) -> Path:
