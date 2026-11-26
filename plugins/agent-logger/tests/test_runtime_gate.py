@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,20 @@ def _copy_payload(tmp_path: Path, name: str) -> Path:
             "*.egg-info",
         ),
     )
+    repo = PLUGIN.parents[1]
+    previous = sys.path[:]
+    try:
+        owner = runpy.run_path(str(repo / "tools/materialize_payload_invocation.py"))
+        changes = owner["materialize"](payload, canonical_root=repo, source_consumer=PLUGIN)
+        assets = runpy.run_path(str(repo / "tools/materialize_installer_engine.py"))
+        for origin, target in assets["derived_file_pairs"](
+            repo, payload.parents[1], copied_consumer=(PLUGIN, payload),
+        ):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(origin, target)
+    finally:
+        sys.path[:] = previous
+    assert changes and not any(line.startswith("SKIP") for line in changes), changes
     return payload
 
 
@@ -202,6 +217,7 @@ def _clean_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     for name in _PYTHON_REDIRECT_ENV_VARS:
         env.pop(name, None)
+    env.update(UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1")
     return env
 
 
@@ -318,7 +334,7 @@ def _run_payload_command(
         env=env,
         cwd=cwd,
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
