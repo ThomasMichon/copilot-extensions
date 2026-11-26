@@ -122,6 +122,8 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
     load(provider, "resolver", "agent-containers")
     for child in ("hosting_policy", "copilot_process_auth"):
         module(f"{provider}.{child}")
+    # The opt-in consumer-telemetry wrapper is inert without a policy; keep it so.
+    module(f"{provider}.consumer_telemetry", instrument=lambda entry: entry)
     for child, names in {
         "claim_provider_cli": ["add_claim_provider_parsers"],
         "rescue_capture_cli": ["add_rescue_capture_parser"],
