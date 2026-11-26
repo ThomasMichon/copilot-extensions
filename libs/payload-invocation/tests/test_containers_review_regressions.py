@@ -145,6 +145,9 @@ def test_fresh_provision_publishes_binding_without_prior_stamp(
         " print('\\t'.join(list(result.values())[:4]) if '--tsv' in sys.argv else json.dumps(result))\n",
         encoding="utf-8",
     )
+    admission_path = environment["PATH"]
+    bootstrap_python = environment.get("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON")
+    environment["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = fixture["managed_runtime_python"]
     tool = fixture["home"] / "test-bin" / ("uv.cmd" if os.name == "nt" else "uv")
     tool.parent.mkdir(exist_ok=True)
     tool.write_text("@exit /b 97\n" if os.name == "nt" else "#!/bin/sh\nexit 97\n", encoding="utf-8")
@@ -160,6 +163,11 @@ def test_fresh_provision_publishes_binding_without_prior_stamp(
     pointer = root / "payload-dir"
     assert pointer.is_file(), "fresh provision did not publish its payload binding"
     assert Path(pointer.read_text(encoding="utf-8-sig").strip()) == fixture["payload"].resolve()
+    environment["PATH"] = admission_path
+    if bootstrap_python is None:
+        environment.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", None)
+    else:
+        environment["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = bootstrap_python
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     result = _global_command(fixture, environment, powershell_host)
     assert result.returncode == 0 and result.stdout.strip() == "fresh-ready", result.stdout + result.stderr

@@ -19,6 +19,8 @@ def test_payload_manifest_describes_agent_containers_runtime() -> None:
         "module": "agent_containers",
         "legacyRuntimeRoot": ".agent-containers",
         "installationContext": "required",
+        "bootstrapPython": "3.11.18",
+        "bootstrapLauncher": "uv",
         "installerLifecycle": True,
         "inProcessCatalog": True,
         "noSelfProvisionEnv": "AGENT_CONTAINERS_NO_SELFPROVISION",

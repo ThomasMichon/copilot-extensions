@@ -44,7 +44,7 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.2.350-dev1",
+      "version": "0.2.351-dev1",
       "source": "plugins/agent-containers"
     },
     {
@@ -129,7 +129,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.3.236-dev1",
+      "version": "0.3.237-dev1",
       "source": "plugins/agent-machines"
     },
     {
