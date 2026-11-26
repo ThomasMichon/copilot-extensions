@@ -4,7 +4,10 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 from typing import Any, cast
+
+import pytest
 
 _source = (
     Path(__file__).resolve().parents[3]
@@ -26,3 +29,28 @@ test_portable_engine_uses_prepared_selection_and_foreground_exec = (
     _original.test_portable_engine_uses_prepared_selection_and_foreground_exec
 )
 test_portable_engine_nested_helper_uninstall = _original.test_portable_engine_nested_helper_uninstall
+
+
+@pytest.mark.parametrize("eventual_absence", [False, True])
+def test_cleanup_observation_requires_absence_after_permission_error(
+    monkeypatch: pytest.MonkeyPatch, eventual_absence: bool,
+) -> None:
+    ticks = iter([0.0, 0.1, 0.2, 1.0])
+    monkeypatch.setattr(_original, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks), sleep=lambda _: None,
+    ))
+    calls = 0
+
+    def probe() -> None:
+        nonlocal calls
+        calls += 1
+        if eventual_absence and calls == 3:
+            raise ProcessLookupError
+        raise PermissionError
+
+    if eventual_absence:
+        _original._wait_for_absence(probe, 0.5)
+    else:
+        with pytest.raises(AssertionError, match="cleanup deadline"):
+            _original._wait_for_absence(probe, 0.5)
+    assert calls == 3

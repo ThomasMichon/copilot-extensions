@@ -64,11 +64,25 @@ def _qualify_probe(path: Path) -> None:
 
 
 def _fixture_bootstrap_selector(scripts: Path) -> None:
+    outputs = runpy.run_path(str(PLUGIN.parents[1] / "libs/payload-invocation/bootstrap_python.py"))[
+        "expected_files"
+    ](
+        scripts.parent / "payload-invocation.json",
+        {"bootstrapPython": "3.11.18", "bootstrapLauncher": "uv"},
+    )
+    for path, content in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+    shutil.copy2(
+        _procutil_src() / "agent_procutil/native_capture.sh", scripts / "native_capture.sh",
+    )
     selector = scripts / "_bootstrap_python/select.sh"
-    selector.parent.mkdir()
     selector.write_text(
         "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(sys.executable) + "\n",
         encoding="utf-8",
+    )
+    (selector.parent / "select.ps1").write_text(
+        "'" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
     )
 
 
@@ -119,7 +133,10 @@ def test_adopted_configuration_reader_ignores_path_python(
         for name in ("python", "python3"):
             (tools / name).write_text("#!/bin/sh\nexit 98\n", encoding="utf-8")
             (tools / name).chmod(0o755)
-        for name in ("bash", "dirname", "basename", "wc", "cat", "git", "id", "cut", "awk", "sed", "grep", "tr", "date"):
+        for name in (
+            "bash", "dirname", "basename", "wc", "cat", "git", "id", "cut", "awk", "sed", "grep", "tr", "date",
+            "mktemp", "mkfifo", "sleep", "rm", "rmdir",
+        ):
             executable = shutil.which(name)
             assert executable
             shutil.copy2(executable, tools / name)
@@ -371,6 +388,7 @@ printf '{"pluginRoot":"%s","versionsRoot":"%s/versions","snapshotsRoot":"%s/snap
         ).as_posix()
         return scripts / "runtime-gate.sh", env
     shutil.copy2(PLUGIN / "scripts" / "runtime-gate.ps1", scripts / "runtime-gate.ps1")
+    _fixture_bootstrap_selector(scripts)
     context_dir = scripts / "installation-context"
     context_dir.mkdir()
     (context_dir / "installation-context.ps1").write_text(
@@ -745,8 +763,7 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     suffix = "sh" if shell == "bash" else "ps1"
-    if shell == "bash":
-        _fixture_bootstrap_selector(scripts)
+    _fixture_bootstrap_selector(scripts)
     bootstrap = scripts / f"bootstrap-check.{suffix}"
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
@@ -1050,12 +1067,11 @@ def test_readiness_qualifies_early_readers_and_runtime_before_import(
     )
     early = tmp_path / "early-reader-executed"
     reader = script.parent / "resolve_effective_config.py"
-    reader.write_text(
-        f"from pathlib import Path\nPath({str(early)!r}).touch()\n"
-        + reader.read_text(encoding="utf-8").replace(
-            "from __future__ import annotations", "",
-        ), encoding="utf-8",
-    )
+    reader.write_text(reader.read_text(encoding="utf-8").replace(
+        "from __future__ import annotations",
+        "from __future__ import annotations\n"
+        f"from pathlib import Path\nPath({str(early)!r}).touch()",
+    ), encoding="utf-8")
     if qualification == "bootstrap-missing":
         (script.parent / "versioned_runtime_probe.py").unlink()
     elif qualification == "payload-missing":
@@ -1284,6 +1300,7 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         encoding="utf-8",
     )
     shutil.copy2(PLUGIN / "scripts" / "runtime-gate.ps1", scripts / "runtime-gate.ps1")
+    _fixture_bootstrap_selector(scripts)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
@@ -1574,11 +1591,20 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
     tmp_path: Path,
     shell: str,
     command: str,
+    monkeypatch: pytest.MonkeyPatch,
     record_property: Callable[[str, object], None],
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
+    env["HOME"] = str(tmp_path)
+    if sys.platform != "win32":
+        import pwd
+
+        account = pwd.getpwuid(os.getuid())
+        monkeypatch.setattr(pwd, "getpwuid", lambda uid: pwd.struct_passwd(
+            (*account[:5], str(tmp_path), *account[6:]),
+        ))
     from agent_index import _installation_context as installation_module, _peer_launch
 
     installation: ModuleType = installation_module
@@ -1604,15 +1630,20 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         return subprocess.run(
             [
                 sys.executable, "-I", "-B", "-c",
-                "import json, sys; from pathlib import Path; "
-                "sys.path.insert(0, sys.argv[1]); "
-                "from agent_index import _peer_launch; "
+                "import json, os, sys\nfrom pathlib import Path\n"
+                "if os.name != 'nt':\n"
+                " import pwd\n account = pwd.getpwuid(os.getuid())\n"
+                " pwd.getpwuid = lambda uid: pwd.struct_passwd("
+                "(*account[:5], sys.argv[4], *account[6:]))\n"
+                "sys.path.insert(0, sys.argv[1])\n"
+                "from agent_index import _peer_launch\n"
                 "print(json.dumps(_peer_launch.validate_owner("
                 "'agent-index', Path(sys.argv[2]), sys.argv[3])))",
                 str(script.parents[1] / "src"), str(cell_root),
                 value if isinstance(value, str) else json.dumps(value),
+                str(tmp_path),
             ],
-            env=env, capture_output=True, text=True, timeout=20,
+            env=env, cwd=tmp_path, capture_output=True, text=True, timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
