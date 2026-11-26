@@ -25,6 +25,10 @@ both samples for successful entries. This packet is not default unit CI.
 `test_health_job_payload.py` separately retains real health-capability refusal
 and rollback checks; `test_configuration_payload_readonly.py` retains cold
 configuration/health refusal without installer execution.
+`test_machines_provisioning_source.py` exposes the retained Windows installer
+streaming, failure/retry and warm-launch controls through the same lightweight
+suite. Both Windows jobs require their three cases without skips, using the
+real prepared application and admission support rather than `PYTHONPATH`.
 
 These controls perform no real machine module, configuration mutation, health
 resource collection, scheduling, service, network or credential operation.
