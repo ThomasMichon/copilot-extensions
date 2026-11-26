@@ -115,11 +115,25 @@ replace the request, caller CWD/environment and unrelated environments remain
 unchanged, preallocated ownership receipts survive construction/refusal, and
 constructor progress cannot corrupt JSON stdout. The same
 path-gated native jobs require every applicable case/report within unchanged
-eight-minute deadlines. Thirteen actor-free units cover the actual builder's
+eight-minute deadlines. Fifteen actor-free units cover the actual builder's
 current `3.11` policy, existing-interpreter constructor bypass, original failure
-propagation, callback ownership and pre-execution prerequisite refusal.
+propagation, callback ownership, redirected headless handles and pre-execution
+prerequisite refusal.
 The smoke-test builder and full project declarations remain separate; no
 installed service, model or host setup is qualified by these fixtures.
+
+Index's `tests/test_managed_cell_dependencies.py` exercises native dependency
+ingress through the existing Installer Engine wrapper with an explicitly inert
+policy observer, not a package installation. Eight Bash controls on each of
+Ubuntu/macOS and sixteen controls across the two Windows PowerShell hosts
+retain raw/materialized layouts, relative UV/shell bindings, independent
+3.11.18 helper and 3.10.20 application interpreters, missing UV/helper and native
+policy refusal. The observer retains actual resolver settings and verifies
+application argv/CWD, stderr diagnostics and exit fidelity without invoking
+package resolution. Prepared controls run twice. Exact lookup/observation counts,
+unchanged caller/payload state and offline elapsed reports are required in the
+same path-gated eight-minute native jobs. Nine actor-free units retain
+pre-effect refusal, callback/CWD and original uncertain-cleanup custody.
 
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
