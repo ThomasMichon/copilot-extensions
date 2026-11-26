@@ -22,6 +22,9 @@ selection changes during admission refuse before application entry. Long-body
 controls retain 25,000 characters, including non-BMP Unicode, without Base64
 command-line expansion or consuming stdin. Temporary argument environment values
 are removed before application entry and the caller's prior values are restored.
+Each invocation uses an independent chunk namespace. Controls retain caller
+values during native launch and keep a sibling invocation's transport out of
+the application without changing its parent values.
 Inert applications are precompiled before snapshots; operational isolation and
 bytecode flags remain unchanged. Materialized controls use payload-embedded
 process support and packaged capture, not a canonical-checkout import.

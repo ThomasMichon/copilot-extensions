@@ -50,6 +50,7 @@ function Invoke-PythonEntry {
         $json = ConvertTo-Json -InputObject @($Arguments) -Compress
         $previous = @{}
         $count = 0
+        $prefix = 'COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_' + [Guid]::NewGuid().ToString('N') + '_'
         try {
             for ($offset = 0; $offset -lt $json.Length; $offset += $length) {
                 $length = [Math]::Min(8192, $json.Length - $offset)
@@ -58,20 +59,20 @@ function Invoke-PythonEntry {
                     [char]::IsHighSurrogate($json[$offset + $length - 1])) {
                     $length--
                 }
-                $name = 'COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_' + $count
+                $name = $prefix + $count
                 $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
                 [Environment]::SetEnvironmentVariable($name, $json.Substring($offset, $length), 'Process')
                 $count++
             }
-            $decode = "arguments=json.loads(''.join(os.environ.pop('COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_'+str(i)) for i in range(int(sys.argv[2]))));"
+            $decode = "prefix=sys.argv[3];arguments=json.loads(''.join(os.environ.pop(prefix+str(i)) for i in range(int(sys.argv[2]))));[os.environ.pop(k) for k in tuple(os.environ) if k.startswith('COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_')];"
             if ($ScriptEntry) {
                 $entry = 'import json,os,runpy,sys;script=sys.argv[1];' + $decode +
                     "sys.argv=[script,'--']+arguments;runpy.run_path(script,run_name='__main__')"
-                & $Python -I -c $entry $Target $count
+                & $Python -I -c $entry $Target $count $prefix
             } else {
                 $entry = 'import json,os,runpy,sys;module=sys.argv[1];' + $decode +
                     "sys.argv=[module]+arguments;runpy.run_module(module,run_name='__main__',alter_sys=True)"
-                & $Python -c $entry $Target $count
+                & $Python -c $entry $Target $count $prefix
             }
             $invocationExit = $LASTEXITCODE
         } finally {

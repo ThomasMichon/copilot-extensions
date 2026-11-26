@@ -71,6 +71,16 @@ def test_ready_command_admits_exact_prepared_application(
     else:
         (scripts / "native_capture.sh").unlink(missing_ok=True)
     isolate_selection(payload)
+    if host != "bash":
+        entry = scripts / "invoke-payload-runtime.ps1"
+        original = entry.read_text(encoding="utf-8")
+        invocation = "            if ($ScriptEntry) {\n"
+        assert original.count(invocation) == 1
+        entry.write_text(original.replace(
+            invocation,
+            '            [IO.File]::AppendAllText($env:PULL_REQUESTS_TRANSPORT_LOG, '
+            '$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0 + "`n")\n' + invocation,
+        ), encoding="utf-8")
     suffix = "sh" if host == "bash" else "ps1"
     provider = scripts / "_bootstrap_python" / f"bootstrap-uv.{suffix}"
     invocation = '    exec "$@"\n' if host == "bash" else "    $result = & $InvokeCaptured @options\n"
@@ -129,6 +139,7 @@ def test_ready_command_admits_exact_prepared_application(
     if scenario == "lkg":
         (root / "current-version").write_text("incomplete\n", encoding="utf-8")
     uv_log, proof = tmp_path / "uv-calls", tmp_path / "application.json"
+    transport_log = tmp_path / "transport-calls"
     bootstrap_proof = tmp_path / "bootstrap.json"
     context = root / "install.json"
     env.update(
@@ -138,6 +149,7 @@ def test_ready_command_admits_exact_prepared_application(
         PULL_REQUESTS_TEST_ROOT=str(root), PULL_REQUESTS_TEST_PYTHON=str(python),
         PULL_REQUESTS_TEST_CONTEXT=str(context), PULL_REQUESTS_TEST_SCENARIO=scenario,
         PULL_REQUESTS_UV_LOG=str(uv_log), APPLICATION_PROOF=str(proof),
+        PULL_REQUESTS_TRANSPORT_LOG=str(transport_log),
         BOOTSTRAP_PROOF=str(bootstrap_proof), AMBIENT_MARKER=str(tmp_path / "ambient-ran"),
         UV_PYTHON="unrelated-python", UV_NO_MANAGED_PYTHON="1",
         UV_CONFIG_FILE="missing-relative.toml", UV_NO_CONFIG="false",
@@ -188,10 +200,12 @@ def test_ready_command_admits_exact_prepared_application(
         harness.write_text(
             "$PSNativeCommandArgumentPassing='Legacy'\n"
             "$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0='caller-owned'\n"
+            "$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_sibling_0='other-command'\n"
             + values +
             f"& '{str(payload / 'bin/agent-pull-requests.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
             "$code=$LASTEXITCODE\n"
             "if ($env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0 -cne 'caller-owned') { throw 'caller argument environment changed' }\n"
+            "if ($env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_sibling_0 -cne 'other-command') { throw 'sibling argument environment changed' }\n"
             "exit $code\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]
@@ -219,6 +233,12 @@ def test_ready_command_admits_exact_prepared_application(
         assert result.returncode == (37 if positive else 126), result.stdout + result.stderr
         lookups = uv_log.read_text(encoding="utf-8").splitlines() if uv_log.exists() else []
         assert lookups == expected_lookups * (cycle + 1), result.stdout + result.stderr
+        if host != "bash":
+            transports = transport_log.read_text(encoding="utf-8").splitlines() if transport_log.exists() else []
+            expected_transports = (
+                cycle + 1 if positive or scenario in ("cell-changed", "cell-missing-admission") else 0
+            )
+            assert transports == ["caller-owned"] * expected_transports
         if not positive:
             assert result.stderr and not result.stdout and not proof.exists(), result.stdout + result.stderr
             continue
