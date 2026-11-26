@@ -345,6 +345,12 @@ sys.exit(17)
         EXPECTED_RUNTIME_PYTHON=str(slot / "Scripts" / "python.exe"),
         POWERSHELL_TELEMETRY_OPTOUT="1",
     )
+    uv = shutil.which("uv")
+    assert uv is not None, "prepared UV is required for application admission"
+    tools = tmp_path / "prepared tools"
+    tools.mkdir()
+    shutil.copy2(uv, tools / Path(uv).name)
+    env["BRIDGE_TEST_UV_TOOLS"] = str(tools)
     installer = (plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
     start = installer.index("function Publish-RuntimeHelperFile {")
     end = installer.index("\nfunction Resolve-SnapshotInstallerEngineSource {", start)
@@ -387,9 +393,10 @@ def _assert_generated_windows_binary_frames(
     bin_dir = plugin / "bin" if surface == "payload" else legacy_bin
     if entrypoint.endswith("51"):
         system32 = Path(os.environ["SystemRoot"]) / "System32"
-        # Select the legacy shell without removing its declared Python prerequisite.
+        # Select the legacy shell without removing prepared application admission.
         env["PATH"] = os.pathsep.join(
-            (sys.base_prefix, str(system32), str(system32 / "WindowsPowerShell" / "v1.0"))
+            (base_env["BRIDGE_TEST_UV_TOOLS"], sys.base_prefix,
+             str(system32), str(system32 / "WindowsPowerShell" / "v1.0"))
         )
     if entrypoint.startswith("powershell"):
         host = (

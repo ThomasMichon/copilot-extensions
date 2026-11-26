@@ -314,7 +314,7 @@ Bash accepts `COMMAND SOURCE CAUSE RESULT [DIRECTORY]`, using literal `null`
 when the final result is unknown. PowerShell's nullable `-ExitCode` defaults to
 unknown; `-Directory` is optional. Directory overrides must already be
 owner-qualified local absolute paths. Defaults match the Python SDK's private
-user-local store. The Bash binding requires Linux, Bash, GNU `stat`/`date`,
+user-local store. The Bash binding requires Linux, Bash with `BASHPID`, GNU `stat`/`date`,
 `flock`, `mkdir`, `mv`, `tail` and `/proc`; Windows uses existing PowerShell
 5.1/Core and native .NET filesystem/security APIs. Unsupported prerequisites
 produce a fixed unavailable-evidence warning, not interpreter acquisition.

@@ -15,7 +15,9 @@ from typing import cast
 
 import pytest
 
-_fixture = import_module(".managed_command_fixture", __package__)
+_fixture = import_module(
+    ".managed_command_fixture", __package__,
+) if __package__ else import_module("managed_command_fixture")
 HEADLESS = cast(int, _fixture.HEADLESS)
 PLUGIN = cast(Path, _fixture.PLUGIN)
 REPO = cast(Path, _fixture.REPO)
