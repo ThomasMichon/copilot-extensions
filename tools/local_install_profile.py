@@ -357,6 +357,7 @@ def _write_snapshot(
     (prepared / source_inputs.MANIFEST).write_text(
         json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
     )
+    emitted_wheel_directories = [project["wheel_inputs"]]
     with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
         if observed.identity != selected.identity:
             raise ProfileError("prepared snapshot source changed during readback")
@@ -399,6 +400,7 @@ def _write_snapshot(
                       if row["name"] not in root_names),
                 ],
             )
+            emitted_wheel_directories.append(application.relative_to(prepared).as_posix() + "/wheels")
             _lock_application(application, uv=uv, deadline=deadline)
             project["application"] = application.relative_to(prepared).as_posix()
         (prepared / source_inputs.MANIFEST).write_text(
@@ -410,15 +412,16 @@ def _write_snapshot(
         if profile_path.read_bytes() != profile.canonical:
             raise ProfileError("prepared snapshot profile changed during emission")
         # The inspected scope owns private copies, not these emitted files.
-        with retain_wheel_inputs(
-            {
-                name: source_inputs._member(prepared, project["wheel_inputs"] + "/" + name)
-                for name in retained.archives
-            },
-            retained.digests, max_wheels=256, max_archive_bytes=128 << 20,
-            max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
-        ) as emitted:
-            emitted.verify()
+        for directory in emitted_wheel_directories:
+            with retain_wheel_inputs(
+                {
+                    name: source_inputs._member(prepared, directory + "/" + name)
+                    for name in retained.archives
+                },
+                retained.digests, max_wheels=256, max_archive_bytes=128 << 20,
+                max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
+            ) as emitted:
+                emitted.verify()
         inputs.verify()
     if source_in_place:
         if (

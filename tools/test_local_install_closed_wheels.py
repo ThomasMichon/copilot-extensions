@@ -225,7 +225,7 @@ def test_in_place_snapshot_refuses_changed_generated_source_inputs(
         closed.prepare(**application)
 
 
-@pytest.mark.parametrize("changed", ["profile", "wheel", "source"])
+@pytest.mark.parametrize("changed", ["profile", "wheel", "application-wheel", "source"])
 def test_snapshot_retained_scope_refuses_changes_during_real_lock(
     application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
 ) -> None:
@@ -243,6 +243,8 @@ def test_snapshot_retained_scope_refuses_changes_during_real_lock(
             path = (
                 prepared / "wheels" / "demo-app" / "helper-1.0.0-py3-none-any.whl"
                 if changed == "wheel"
+                else directory / "wheels" / "helper-1.0.0-py3-none-any.whl"
+                if changed == "application-wheel"
                 else prepared / "source" / "app" / "src" / "demo_app" / "__init__.py"
             )
             before = path.stat()

@@ -6279,8 +6279,9 @@ The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
 One inspected-wheel scope remains open through emission, offline locking and
 final readback. The emitted profile and Source record must stay exact, and
-the emitted wheel files are independently recaptured against the inspected
-digests before completion. Retained private copies never stand in for that
+the emitted snapshot wheel files and separate application-lock wheel copies
+are independently recaptured against the inspected digests before completion.
+Retained private copies never stand in for that
 final emitted-byte check; all checks share the original absolute deadline.
 One constructor-fact call derives its Source hash and wheel-qualified payload
 hash from the same fresh file read. Later calls and the enclosing Source and
