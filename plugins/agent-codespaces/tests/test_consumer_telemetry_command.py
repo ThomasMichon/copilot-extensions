@@ -454,3 +454,30 @@ def test_a_portable_launch_with_an_oversized_seed_is_observed(
     assert flow.invoke() == 1
     assert _portable_stage("seed_validation") == [("failure", "seed_too_long")]
     assert ct._last_reason == "seed_too_long"
+
+def test_an_interrupted_delivery_keeps_the_product_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    def interrupted_offer(events: Any) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ct, "_offer", interrupted_offer)
+
+    def fails() -> int:
+        ct.note("ssh", "failure", "transport_failed")
+        return 7
+
+    assert ct.instrument(fails)() == 7
+
+    def cancelled_offer(events: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(ct, "_offer", cancelled_offer)
+
+    def exits() -> int:
+        ct.note("claim", "failure", "claim_busy")
+        raise SystemExit(4)
+
+    with pytest.raises(SystemExit) as raised:
+        ct.instrument(exits)()
+    assert raised.value.code == 4
