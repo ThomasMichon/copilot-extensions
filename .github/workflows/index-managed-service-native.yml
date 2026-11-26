@@ -27,6 +27,8 @@ on:
       - libs/versioned-runtime/resolve-runtime.sh
       - libs/agent-procutil/src/agent_procutil/native_owned.sh
       - libs/agent-procutil/src/agent_procutil/native_capture.sh
+      - libs/agent-procutil/tests/test_native_capture_settlement.py
+      - libs/payload-invocation/tests/test_native_capture_settlement_source.py
       - libs/agent-procutil/src/agent_procutil/native_child.py
       - tools/installer_engine_ref.py
 
@@ -49,6 +51,18 @@ jobs:
         run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 cpython@3.10.20
       - name: Record native process-tool privilege metadata
         run: ls -l /bin/ps
+      - name: Qualify native capture settlement diagnostics
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_native_capture_settlement_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/native-capture-stages
+      - name: Require all five capture diagnostic controls without skips
+        run: >-
+          tools/run-python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-capture-stages').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==5 and len({c.attrib['name'] for c in cases})==5;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify fail-closed cleanup observation
         run: >-
           tools/run-tests payload-invocation
@@ -139,6 +153,7 @@ jobs:
           name: index-portable-engine-${{ runner.os }}
           path: |
             qualification-evidence/portable-engine
+            qualification-evidence/native-capture-stages
             qualification-evidence/portable-cleanup-observation
           if-no-files-found: error
   portable-engine-macos:

@@ -162,6 +162,7 @@ copy	libs/agent-procutil/tests/test_managed_venv_construction.py	libs/agent-proc
 copy	libs/agent-procutil/tests/test_metrics.py	libs/agent-procutil/tests/test_metrics.py
 copy	libs/agent-procutil/tests/test_metrics_accounting.py	libs/agent-procutil/tests/test_metrics_accounting.py
 copy	libs/agent-procutil/tests/test_metrics_native.py	libs/agent-procutil/tests/test_metrics_native.py
+copy	libs/agent-procutil/tests/test_native_capture_settlement.py	libs/agent-procutil/tests/test_native_capture_settlement.py
 copy	libs/agent-procutil/tests/test_native_child.py	libs/agent-procutil/tests/test_native_child.py
 copy	libs/agent-procutil/tests/test_native_daemon.py	libs/agent-procutil/tests/test_native_daemon.py
 copy	libs/agent-procutil/tests/test_native_daemon_cleanup.py	libs/agent-procutil/tests/test_native_daemon_cleanup.py
