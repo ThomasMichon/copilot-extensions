@@ -2,25 +2,40 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 import json
+import importlib
 import os
 from pathlib import Path
 import shutil
+import runpy
 import struct
 import subprocess
 import sys
 import time
 import uuid
-import venv
+from typing import Any, cast
 from xml.etree import ElementTree as ET
 
 import pytest
 
 from agent_machines import health_jobs, health_run, health_slots
 from agent_procutil import no_window_kwargs, windowless_python
-from test_health_observe_consumer import QUALIFYING_BODY, listener, response
+_observe = importlib.import_module("test_health_observe_consumer")
+QUALIFYING_BODY = _observe.QUALIFYING_BODY
+listener = _observe.listener
+response = _observe.response
+_admission = runpy.run_path(str(Path(__file__).parents[1] / "managed_command_fixture.py"))
+admission_support = cast(Callable[[Path, Path], None], _admission["admission_support"])
+materialize_command = cast(Callable[[Path], Path], _admission["materialize_command"])
+prepare_application = cast(
+    Callable[[Path, Path, Path, dict[str, str]], Path], _admission["prepare_application"],
+)
+prepared_python_inputs = cast(
+    Callable[[str], tuple[Path, Path, Path]], _admission["prepared_python_inputs"],
+)
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -40,11 +55,11 @@ OWNER = Path(__file__).with_name("health_task_owner.ps1")
 NS = {"t": health_jobs.NS}
 
 
-def _ps(value):
+def _ps(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _control(operation, name="", definition=None):
+def _control(operation: str, name: str = "", definition: Path | None = None) -> dict[str, Any]:
     host = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     command = [str(host), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                "-File", str(OWNER), "-Operation", operation]
@@ -57,10 +72,11 @@ def _control(operation, name="", definition=None):
         **no_window_kwargs(),
     )
     assert child.returncode == 0, (operation, child.stdout, child.stderr)
-    return json.loads(child.stdout)
+    result: dict[str, Any] = json.loads(child.stdout)
+    return result
 
 
-def _until(predicate, seconds, description):
+def _until(predicate: Callable[[], Any], seconds: float, description: str) -> Any:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         result = predicate()
@@ -71,7 +87,7 @@ def _until(predicate, seconds, description):
 
 
 @contextmanager
-def _task(tmp_path, definition):
+def _task(tmp_path: Path, definition: ET.Element) -> Iterator[tuple[str, dict[str, Any]]]:
     name = "ce-health-fixture-" + uuid.uuid4().hex
     uri = ET.Element(f"{{{health_jobs.NS}}}RegistrationInfo")
     ET.SubElement(uri, f"{{{health_jobs.NS}}}Description").text = (
@@ -93,10 +109,26 @@ def _task(tmp_path, definition):
             assert receipt["removed"] and receipt["instances"] == 0
 
 
-def _payload(tmp_path, *, delay_seconds=0):
+def _payload(tmp_path: Path, *, delay_seconds: int = 0) -> Path:
     runtime = tmp_path / "selected-runtime"
-    venv.EnvBuilder(with_pip=False).create(runtime)
-    python = runtime / "Scripts/python.exe"
+    uv, application, store = prepared_python_inputs(
+        f"cpython@{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    tools = tmp_path / "admission-tools"
+    tools.mkdir()
+    shutil.copy2(uv, tools / uv.name)
+    environment = {
+        **os.environ, "UV_PYTHON_INSTALL_DIR": str(store),
+        "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1", "UV_NO_CONFIG": "1",
+        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+    }
+    python = prepare_application(uv, application, runtime, environment)
+    selected = subprocess.run(
+        [str(uv), "python", "find", "--no-project", "--managed-python",
+         "--no-python-downloads", str(python)],
+        env=environment, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert selected.returncode == 0 and selected.stdout.strip() == str(python), selected.stderr
     site = runtime / "Lib/site-packages"
     shutil.copytree(PLUGIN / "src/agent_machines", site / "agent_machines")
     shutil.copytree(REPO / "libs/agent-procutil/src/agent_procutil", site / "agent_procutil")
@@ -125,6 +157,7 @@ def _payload(tmp_path, *, delay_seconds=0):
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     (scripts / "installation-context").mkdir(parents=True)
+    admission_support(payload, materialize_command(tmp_path / "admission-payload"))
     (payload / "bin").mkdir()
     (payload / "plugin.json").write_text('{"name":"agent-machines"}', encoding="utf-8")
     for relative in (
@@ -150,13 +183,31 @@ def _payload(tmp_path, *, delay_seconds=0):
         f"Start-Sleep -Seconds {delay_seconds}\n"
         "$env:COPILOT_EXTENSIONS_CONTEXT = $null\n"
         f"$env:USERPROFILE = {_ps(home)}\n$env:HOME = {_ps(home)}\n"
-        f"$AgentRtPy = {_ps(python)}\n",
+        f"$env:PATH = {_ps(tools)} + [IO.Path]::PathSeparator + $env:PATH\n"
+        + "".join(f"$env:{key} = {_ps(environment[key])}\n" for key in (
+            "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_DOWNLOADS", "UV_OFFLINE", "UV_NO_CONFIG", "UV_CACHE_DIR",
+        ))
+        + f"$AgentRtPy = {_ps(python)}\n",
         encoding="utf-8-sig",
     )
     return payload
 
 
-def _definition(payload, store, sid, *, enabled, calendar=True):
+def _node(root: ET.Element, path: str) -> ET.Element:
+    node = root.find(path, NS)
+    assert node is not None, path
+    return node
+
+
+def _text(root: ET.Element, path: str) -> str:
+    text = _node(root, path).text
+    assert text is not None, path
+    return text
+
+
+def _definition(
+    payload: Path, store: Path, sid: str, *, enabled: bool, calendar: bool = True,
+) -> ET.Element:
     prepared = health_jobs.prepare(
         platform="win32", payload=str(payload), store=str(store),
         policy_token=health_run.policy_preview(store)[2], user_id=sid,
@@ -168,27 +219,27 @@ def _definition(payload, store, sid, *, enabled, calendar=True):
     )
     root = ET.fromstring(prepared["artifacts"]["agent-machines-health.xml"])
     now = datetime.now(timezone.utc)
-    trigger = root.find("t:Triggers/t:TimeTrigger", NS)
-    trigger.find("t:StartBoundary", NS).text = (
+    trigger = _node(root, "t:Triggers/t:TimeTrigger")
+    _node(trigger, "t:StartBoundary").text = (
         now + timedelta(seconds=12)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Native Windows repetition has a one-minute minimum; this is test cadence.
-    trigger.find("t:Repetition/t:Interval", NS).text = "PT1M"
+    _node(trigger, "t:Repetition/t:Interval").text = "PT1M"
     end = ET.Element(f"{{{health_jobs.NS}}}EndBoundary")
     end.text = (
         now + timedelta(minutes=3)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
-    trigger.insert(list(trigger).index(trigger.find("t:Enabled", NS)), end)
-    settings = root.find("t:Settings", NS)
+    trigger.insert(list(trigger).index(_node(trigger, "t:Enabled")), end)
+    settings = _node(root, "t:Settings")
     ET.SubElement(settings, f"{{{health_jobs.NS}}}DeleteExpiredTaskAfter").text = "PT1M"
-    for node in (trigger.find("t:Enabled", NS), settings.find("t:Enabled", NS)):
+    for node in (_node(trigger, "t:Enabled"), _node(settings, "t:Enabled")):
         node.text = "true" if enabled else "false"
     if not calendar:
-        trigger.find("t:Enabled", NS).text = "false"
+        _node(trigger, "t:Enabled").text = "false"
     return root
 
 
-def _assert_gui_entry(executable):
+def _assert_gui_entry(executable: str | Path) -> None:
     with Path(executable).open("rb") as stream:
         dos = stream.read(64)
         assert dos[:2] == b"MZ"
@@ -201,16 +252,19 @@ def _assert_gui_entry(executable):
     assert struct.unpack_from("<H", header, 24 + 68)[0] == 2
 
 
-def _exercise_cycles(tmp_path, observation, *, observed_session=None):
+def _exercise_cycles(
+    tmp_path: Path, observation: AbstractContextManager[Any], *, observed_session: int | None = None,
+) -> Any:
     identity = _control("identity")
     assert identity["interactive"]
     if observed_session is not None and identity["session"] != observed_session:
-        from sdk_desktop_observer import ObservationBlocked
-
-        raise ObservationBlocked("optional desktop/controller session mismatch")
+        observer_api = importlib.import_module("sdk_desktop_observer")
+        raise observer_api.ObservationBlocked("optional desktop/controller session mismatch")
     payload = _payload(tmp_path)
     if observed_session is not None:
-        observation.api.prepare_task_observation(tmp_path)
+        observation_api = getattr(observation, "api", None)
+        assert observation_api is not None
+        observation_api.prepare_task_observation(tmp_path)
     store = tmp_path / "store"
     store.mkdir()
     unrelated = tmp_path / "unrelated-data"
@@ -229,13 +283,14 @@ def _exercise_cycles(tmp_path, observation, *, observed_session=None):
             assert registered["configured"] and not registered["enabled"]
             assert registered["instances"] == []
             readback = ET.fromstring(registered["xml"])
-            assert readback.find("t:Principals/t:Principal/t:LogonType", NS).text == "InteractiveToken"
+            assert _text(readback, "t:Principals/t:Principal/t:LogonType") == "InteractiveToken"
             level = readback.find("t:Principals/t:Principal/t:RunLevel", NS)
             assert level is None or level.text == "LeastPrivilege"
-            assert readback.find("t:Settings/t:ExecutionTimeLimit", NS).text == "PT1M"
-            _assert_gui_entry(readback.find("t:Actions/t:Exec/t:Command", NS).text)
+            assert _text(readback, "t:Settings/t:ExecutionTimeLimit") == "PT1M"
+            _assert_gui_entry(_text(readback, "t:Actions/t:Exec/t:Command"))
         definition = _definition(payload, store, identity["sid"], enabled=True)
-        samples, hours = [], {}
+        samples: list[dict[str, Any]] = []
+        hours: dict[int, int] = {}
         with observation as observer:
             with _task(tmp_path, definition) as (name, registered):
                 assert registered["configured"] and registered["enabled"]
@@ -265,9 +320,8 @@ def _exercise_cycles(tmp_path, observation, *, observed_session=None):
                     if observed_session is not None and any(
                         row["session"] != observed_session for row in identities
                     ):
-                        from sdk_desktop_observer import ObservationBlocked
-
-                        raise ObservationBlocked("optional desktop/task session mismatch")
+                        observer_api = importlib.import_module("sdk_desktop_observer")
+                        raise observer_api.ObservationBlocked("optional desktop/task session mismatch")
                     consoles = [
                         json.loads(line)
                         for line in (tmp_path / "console.jsonl").read_text(encoding="utf-8").splitlines()
@@ -288,11 +342,11 @@ def _exercise_cycles(tmp_path, observation, *, observed_session=None):
 
 
 @pytest.mark.timeout(240)
-def test_scheduler_functional_two_real_calendar_cycles_and_exact_cleanup(tmp_path):
+def test_scheduler_functional_two_real_calendar_cycles_and_exact_cleanup(tmp_path: Path) -> None:
     _exercise_cycles(tmp_path, nullcontext())
 
 
-def _store(tmp_path, port):
+def _store(tmp_path: Path, port: int) -> Path:
     store = tmp_path / "store"
     store.mkdir()
     (store / "policy.json").write_text(json.dumps({
@@ -304,20 +358,21 @@ def _store(tmp_path, port):
     return store
 
 
-def _resolver_identity(tmp_path):
+def _resolver_identity(tmp_path: Path) -> dict[str, Any] | None:
     try:
         lines = (tmp_path / "resolver.jsonl").read_text(encoding="utf-8-sig").splitlines()
     except FileNotFoundError:
         return None
-    return json.loads(lines[0]) if lines else None
+    result: dict[str, Any] | None = json.loads(lines[0]) if lines else None
+    return result
 
 
 @pytest.mark.timeout(90)
-def test_native_ignore_new_reuses_one_instance_and_one_collection(tmp_path, monkeypatch):
+def test_native_ignore_new_reuses_one_instance_and_one_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.syspath_prepend(str(REPO / "libs/agent-procutil/tests"))
-    from sdk_native_win32 import NativeProcessAPI
-
-    api = NativeProcessAPI()
+    api = importlib.import_module("sdk_native_win32").NativeProcessAPI()
     payload = _payload(tmp_path, delay_seconds=8)
     identity = _control("identity")
     assert identity["interactive"]
@@ -356,11 +411,11 @@ def test_native_ignore_new_reuses_one_instance_and_one_collection(tmp_path, monk
 
 @pytest.mark.timeout(115)
 @pytest.mark.parametrize("outer_ceiling", [False, True])
-def test_native_deadline_settles_the_exact_console_descendant(tmp_path, monkeypatch, outer_ceiling):
+def test_native_deadline_settles_the_exact_console_descendant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outer_ceiling: bool,
+) -> None:
     monkeypatch.syspath_prepend(str(REPO / "libs/agent-procutil/tests"))
-    from sdk_native_win32 import NativeProcessAPI
-
-    api = NativeProcessAPI()
+    api = importlib.import_module("sdk_native_win32").NativeProcessAPI()
     # Delay only the copied selector, below the unchanged production launch chain.
     payload = _payload(tmp_path, delay_seconds=90)
     if outer_ceiling:
@@ -402,7 +457,7 @@ def test_native_deadline_settles_the_exact_console_descendant(tmp_path, monkeypa
 
 
 @pytest.mark.timeout(60)
-def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(tmp_path):
+def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(tmp_path: Path) -> None:
     payload = _payload(tmp_path)
     identity = _control("identity")
     assert identity["interactive"]
@@ -430,7 +485,7 @@ def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(t
 
 
 @pytest.mark.timeout(60)
-def test_native_unicode_payload_and_store_paths_survive_powershell_decoding(tmp_path):
+def test_native_unicode_payload_and_store_paths_survive_powershell_decoding(tmp_path: Path) -> None:
     root = tmp_path / "unicode-\u00e9"
     root.mkdir()
     payload = _payload(root)
@@ -441,7 +496,7 @@ def test_native_unicode_payload_and_store_paths_survive_powershell_decoding(tmp_
         definition = _definition(payload, store, identity["sid"], enabled=True, calendar=False)
         with _task(root, definition) as (name, registered):
             xml = ET.fromstring(registered["xml"])
-            assert xml.find("t:Actions/t:Exec/t:WorkingDirectory", NS).text == str(payload)
+            assert _text(xml, "t:Actions/t:Exec/t:WorkingDirectory") == str(payload)
             _control("run", name)
             completed = _until(
                 lambda: (row if (row := _control("read", name))["state"] == 3

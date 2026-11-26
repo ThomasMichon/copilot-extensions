@@ -5,7 +5,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -13,6 +12,11 @@ from pathlib import Path
 import pytest
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
+from .managed_command_fixture import (
+    admission_support, packaged_command, prepare_application, prepared_python,
+)
+
+__all__ = ["packaged_command", "prepared_python"]
 
 PLUGIN = Path(__file__).resolve().parents[1]
 HOSTS = [
@@ -47,6 +51,7 @@ FIRST_USE_CASES = (
 )
 def test_first_use_preserves_installer_output_and_exit_codes(
     tmp_path: Path, host: str, mode: str, attempts: tuple[str, ...],
+    prepared_python: tuple[Path, Path, Path], packaged_command: Path,
 ) -> None:
     is_ps5 = Path(host).stem.lower() == "powershell"
     timeout = (45 if len(attempts) == 1 else 60) if is_ps5 else (
@@ -65,6 +70,7 @@ def test_first_use_preserves_installer_output_and_exit_codes(
     scripts = payload / "scripts"
     context_scripts = scripts / "installation-context"
     context_scripts.mkdir(parents=True)
+    admission_support(payload, packaged_command)
     home.mkdir()
     runtime = home / (".agent-machines" if mode == "legacy" else "cell runtime")
     context = home / "cell context.json"
@@ -121,11 +127,6 @@ def test_first_use_preserves_installer_output_and_exit_codes(
         "exit 0\n",
         encoding="utf-8",
     )
-    modules = tmp_path / "modules"
-    modules.mkdir()
-    (modules / "agent_machines.py").write_text(
-        "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8",
-    )
     temporary = tmp_path / "temporary"
     temporary.mkdir()
     calls = tmp_path / "calls"
@@ -147,10 +148,20 @@ def test_first_use_preserves_installer_output_and_exit_codes(
             "runtimeRoot": str(runtime), "context": str(context),
             "marketplaceId": "example--0123456789abcdef",
         }),
-        "FIXTURE_CONTEXT": str(context), "FIXTURE_PYTHON": sys.executable,
-        "FIXTURE_CALLS": str(calls), "PYTHONPATH": str(modules),
+        "FIXTURE_CONTEXT": str(context), "FIXTURE_CALLS": str(calls),
         "FIXTURE_PROGRESS_ACK": str(tmp_path / "progress-ack"),
     })
+    uv, application, store = prepared_python
+    env.update(
+        UV_PYTHON_INSTALL_DIR=str(store), UV_OFFLINE="1", UV_NO_CONFIG="1",
+        UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+    )
+    application_root = tmp_path / "prepared application"
+    python = prepare_application(uv, application, application_root, env)
+    (application_root / "Lib/site-packages/agent_machines.py").write_text(
+        "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8",
+    )
+    env["FIXTURE_PYTHON"] = str(python)
     launcher = tmp_path / "launch.ps1"
     launcher.write_text(
         "$previousEncoding = [Console]::OutputEncoding\n"
@@ -225,9 +236,9 @@ def test_first_use_preserves_installer_output_and_exit_codes(
         for action in expected:
             assert f"native stderr: {action}" in result.stderr
             assert f"installer stdout: {action}" in result.stderr
-        for stream in ("stdout", "stderr"):
+        for stream_name in ("stdout", "stderr"):
             for index in range(1, 221):
-                assert result.stderr.count(f"{stream} {index} " + "x" * 1024) == len(expected)
+                assert result.stderr.count(f"{stream_name} {index} " + "x" * 1024) == len(expected)
         assert "stderr caf\u00e9" in result.stderr
         assert "stdout caf\u00e9" in result.stderr
         assert len(result.stderr.splitlines()) == 2 + 446 * len(expected) + bool(fail_action)
