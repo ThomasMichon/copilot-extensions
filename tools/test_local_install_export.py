@@ -143,9 +143,13 @@ def test_export_never_falls_back_around_archive_or_deadline_refusals(
     def extract(
         archive: Path, target: Path, *, deadline: float,
         include_paths: tuple[str, ...] | None = None,
+        archive_stream: tarfile.TarFile | None = None,
     ) -> None:
         calls.append(include_paths)
-        real_extract(archive, target, deadline=deadline, include_paths=include_paths)
+        real_extract(
+            archive, target, deadline=deadline, include_paths=include_paths,
+            archive_stream=archive_stream,
+        )
         if fault == "changed":
             with archive.open("ab") as stream:
                 stream.write(b"changed")

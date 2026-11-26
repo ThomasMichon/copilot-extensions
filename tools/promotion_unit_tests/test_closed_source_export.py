@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -48,9 +49,13 @@ def test_export_never_writes_unrelated_payloads(
     def extract(
         archive: Path, target: Path, *, deadline: float,
         include_paths: tuple[str, ...] | None = None,
+        archive_stream: tarfile.TarFile | None = None,
     ) -> None:
         assert include_paths is not None
-        real_extract(archive, target, deadline=deadline, include_paths=include_paths)
+        real_extract(
+            archive, target, deadline=deadline, include_paths=include_paths,
+            archive_stream=archive_stream,
+        )
         writes.update(path.relative_to(target).as_posix() for path in target.rglob("*") if path.is_file())
         assert not (target / "unrelated").exists()
 
@@ -147,3 +152,82 @@ def test_selector_source_preparation_error_never_becomes_a_compatibility_fallbac
             deadline=time.monotonic() + 30, select=refuse,
         )
     assert not list(destination.iterdir())
+
+
+def _streamed_archive(path: Path) -> None:
+    with tarfile.open(path, "w") as stream:
+        for name, content in (
+            ("app/pyproject.toml", b'[project]\nname="app"\nversion="1.0"\n'),
+            ("app/data.txt", b"selected bytes"),
+            ("unrelated/data.txt", b"excluded bytes"),
+        ):
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            stream.addfile(member, io.BytesIO(content))
+    with path.open("ab") as output:
+        output.write(bytes(2 << 20))
+
+
+def test_streamed_export_keeps_final_rechecks_without_rereading_each_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "source.tar"
+    _streamed_archive(archive)
+    original = export._archive_digest
+    reads = []
+
+    def digest(path: Path, deadline: float) -> bytes:
+        reads.append(path)
+        return original(path, deadline)
+
+    monkeypatch.setattr(export, "_archive_digest", digest)
+    destination = tmp_path / "source"
+    destination.mkdir()
+    export.extract_application(
+        archive, destination, project_paths=("app",), projects=("app",),
+        deadline=time.monotonic() + 30, select=lambda *_args: ("app",),
+    )
+    assert (destination / "app/data.txt").read_bytes() == b"selected bytes"
+    assert not (destination / "unrelated").exists()
+    assert reads == [archive, archive]
+
+
+@pytest.mark.parametrize("changed", ["excluded", "trailing"])
+def test_streamed_export_binds_unselected_and_trailing_bytes_with_unchanged_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    archive = tmp_path / "source.tar"
+    _streamed_archive(archive)
+    with tarfile.open(archive, "r:") as stream:
+        offset = stream.getmember("unrelated/data.txt").offset_data
+    if changed == "trailing":
+        offset = archive.stat().st_size - 1
+    original = preparation._extract_archive
+    changed_once: list[bool] = []
+
+    def extract(
+        archive: Path, target: Path, *, deadline: float,
+        include_paths: tuple[str, ...] | None = None,
+        archive_stream: tarfile.TarFile | None = None,
+    ) -> None:
+        original(
+            archive, target, deadline=deadline, include_paths=include_paths,
+            archive_stream=archive_stream,
+        )
+        if not changed_once:
+            before = archive.stat()
+            with archive.open("r+b") as output:
+                output.seek(offset)
+                output.write(b"X")
+            os.utime(archive, ns=(before.st_atime_ns, before.st_mtime_ns))
+            changed_once.append(True)
+
+    monkeypatch.setattr(preparation, "_extract_archive", extract)
+    destination = tmp_path / "source"
+    destination.mkdir()
+    with pytest.raises(preparation.SourcePreparationError, match="archive changed"):
+        export.extract_application(
+            archive, destination, project_paths=("app",), projects=("app",),
+            deadline=time.monotonic() + 30, select=lambda *_args: ("app",),
+        )
+    assert changed_once and not list(destination.iterdir())

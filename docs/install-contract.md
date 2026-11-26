@@ -6256,6 +6256,13 @@ including excluded ones, retain path/type/collision checks; archive identity and
 bytes stay bound across passes under the original absolute deadline. Development
 metadata outside that build-export contract retains the original full, data-only
 extraction under the same deadline, never a fallback around archive refusal.
+Metadata discovery and selected extraction use sequential digesting archive
+passes instead of header seeks followed by another full read. Each pass binds
+all bytes, including excluded payloads and trailing padding, while the same
+entry validator retains its path/type/collision checks. Final archive identity
+and full-byte rechecks still precede publication and completion; parsing,
+draining and rechecks share the original deadline. No accepted Source cache or
+metadata-only substitute for byte validation is introduced.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
 Generated projects carrying a complete admitted construction profile omit the
