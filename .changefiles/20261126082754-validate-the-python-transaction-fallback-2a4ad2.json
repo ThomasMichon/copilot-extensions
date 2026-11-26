@@ -1,0 +1,9 @@
+{
+  "comment": "Validate the Python transaction fallback against the native held-file identity.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

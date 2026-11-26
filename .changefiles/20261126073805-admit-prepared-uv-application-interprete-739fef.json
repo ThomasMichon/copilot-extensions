@@ -1,0 +1,9 @@
+{
+  "comment": "Admit prepared UV application interpreters before foreground commands.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
