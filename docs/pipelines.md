@@ -2099,6 +2099,14 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > changes still require the consumer entries described above. Do not
 > hand-edit library manifests or weaken a consumer's minimum dependency.
 >
+> Source-test composition reuses the release-owned `promotion_versions`
+> seed/compute/admitted-apply seam, not the complete promotion command.
+> Its scoped metadata-only application writes library versions in existing
+> contained test inputs without consuming checkout changefiles, rewriting source
+> bodies, publishing artifacts or altering Main. Candidate version identity
+> remains distinct from an actually published compatible distribution; see
+> `TESTING.md` for retained constraints and fail-closed cache/preparation rules.
+>
 > **Before editing a shared lib, find every consumer first — two commands,
 > not one.** `tools/run-python tools/check-vendored-libs-sync.py --list` enumerates
 > every REAL, physical vendored copy (`plugins/*/libs/*` and a standalone

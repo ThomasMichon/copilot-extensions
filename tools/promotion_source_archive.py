@@ -59,11 +59,20 @@ def git_timeout_options(cap: float | None = None) -> dict[str, float]:
     return {"timeout": remaining if cap is None else min(cap, remaining)}
 
 
-def git_environment(**overrides: str) -> dict[str, str]:
+def git_environment(*, repository: Path | None = None, **overrides: str) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
-    return {**environment, **overrides}
+    result = {
+        **environment, "GIT_NO_LAZY_FETCH": "1", "GIT_NO_REPLACE_OBJECTS": "1",
+        **overrides,
+    }
+    if repository is not None:
+        result.update({
+            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(repository.resolve()),
+        })
+    return result
 
 
 def run_composition_child(argv: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
@@ -78,8 +87,10 @@ def run_composition_child(argv: list[str], **options: Any) -> subprocess.Complet
 def git_text(
     repo: Path, args: list[str], *, check: bool = True,
     env: dict[str, str] | None = None, input_text: str | None = None,
+    index_file: Path | None = None,
+    errors: str = "strict",
 ) -> str:
-    environment = git_environment()
+    environment = git_environment(repository=repo)
     if env is not None:
         candidate_identity = {
             f"GIT_{role}_{field}"
@@ -89,6 +100,8 @@ def git_text(
             key: value for key, value in env.items()
             if not key.upper().startswith("GIT_") or key in candidate_identity
         })
+    if index_file is not None:
+        environment["GIT_INDEX_FILE"] = str(index_file)
     result = run_composition_child(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"] if os.name == "nt" else []),
@@ -100,11 +113,11 @@ def git_text(
     )
     if check and result.returncode:
         raise ValueError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
-    return cast(str, result.stdout.decode("utf-8").strip())
+    return cast(str, result.stdout.decode("utf-8", errors).strip())
 
 
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
-    env = git_environment()
+    env = git_environment(repository=repo)
     result = run_composition_child(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
         cwd=repo, env=env, input=data,
@@ -120,7 +133,7 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     result = run_composition_child(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "merge-base", "--is-ancestor", ancestor, descendant],
-        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(repository=repo),
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         **git_timeout_options(),
     )
@@ -132,7 +145,7 @@ def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     result = run_composition_child(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "cat-file", "-e", f"{rev}:.changefiles/{name}"],
-        cwd=str(repo), capture_output=True, text=True, env=git_environment(),
+        cwd=str(repo), capture_output=True, text=True, env=git_environment(repository=repo),
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         **git_timeout_options(),
     )

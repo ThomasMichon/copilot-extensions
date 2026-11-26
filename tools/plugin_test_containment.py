@@ -9,6 +9,7 @@ launch state; intentional interactive child launches are not rewritten.
 from __future__ import annotations
 
 import os as os
+from math import isfinite
 import shutil as shutil  # Retain the shared adapter seam for existing callers.
 import signal as signal
 import subprocess as subprocess
@@ -17,7 +18,7 @@ import time as time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor as ThreadPoolExecutor, wait as wait
 from dataclasses import dataclass
 from pathlib import Path
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
 from typing import TYPE_CHECKING, Any, BinaryIO, Callable, Mapping, Sequence, TypeVar, cast
 from weakref import finalize
 
@@ -81,6 +82,7 @@ class Limits:
     max_memory_mb: int = 4096
     max_temp_mb: int = 2048
     poll_seconds: float = 0.25
+    absolute_deadline: float | None = None
 
     def validate(self) -> None:
         values = {
@@ -93,6 +95,8 @@ class Limits:
         invalid = [name for name, value in values.items() if value <= 0]
         if invalid:
             raise ValueError(f"containment limits must be positive: {', '.join(invalid)}")
+        if self.absolute_deadline is not None and not isfinite(self.absolute_deadline):
+            raise ValueError("absolute containment deadline must be finite")
 
 
 class ContainmentError(RuntimeError):
@@ -110,9 +114,10 @@ class TestSandbox(NativeTemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
     _finalizer: finalize[..., object]
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, cleanup_deadline: float | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.retained = False
+        self.cleanup_deadline = cleanup_deadline
 
     def retain(self, reason: str = "Unreaped process tree") -> None:
         if not self.retained:
@@ -134,6 +139,7 @@ class TestSandbox(NativeTemporaryDirectory):
         try:
             return plugin_test_cleanup._cleanup_with_windows_retry(
                 lambda: exit_sandbox(exc_type, exc_value, traceback),
+                **({"deadline": self.cleanup_deadline} if getattr(self, "cleanup_deadline", None) is not None else {}),
             )
         except OSError as cleanup_error:
             if isinstance(cleanup_error, SandboxCleanupError):
@@ -299,8 +305,10 @@ def _posix_group_usage(pgid: int) -> tuple[int, int] | None:
     return _linux_group_usage(pgid) or _ps_group_usage(pgid)
 
 
-def _posix_live_group_usage(pgid: int) -> tuple[int, int] | None:
+def _posix_live_group_usage(pgid: int, *, deadline: float | None = None) -> tuple[int, int] | None:
     if sys.platform == "darwin":
+        if deadline is not None:
+            return _darwin_group_usage(pgid, live_only=True, deadline=deadline)
         return _darwin_group_usage(pgid, live_only=True)
     return _linux_group_usage(pgid, live_only=True) or _ps_group_usage(pgid, live_only=True)
 
@@ -322,7 +330,7 @@ def _posix_group_identity(pid: int) -> tuple[int, int]:
     return cast(Callable[[int], int], getattr(os, "getpgid"))(pid), cast(Callable[[int], int], getattr(os, "getsid"))(pid)
 
 
-def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
+def _terminate_posix_group(pgid: int, identity: tuple[int, int], *, deadline: float | None = None) -> None:
     def verify_identity() -> None:
         try:
             current = _posix_group_identity(pgid)
@@ -332,20 +340,20 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
             raise UnreapedProcessError("Refusing stale or reused POSIX process-group identity")
 
     def wait_until_empty(seconds: float, *, remaining: int = 0) -> bool:
-        deadline = time.monotonic() + seconds
+        until = min(time.monotonic() + seconds, deadline) if deadline is not None else time.monotonic() + seconds
         while True:
             try:
-                usage = _posix_live_group_usage(pgid)
+                usage = _posix_live_group_usage(pgid, **({"deadline": until} if deadline is not None else {}))
             except GroupObservationChanged as exc:
                 if sys.platform != "darwin":
                     raise UnreapedProcessError("Cannot verify POSIX process-group termination") from exc
-                if time.monotonic() >= deadline:
+                if time.monotonic() >= until:
                     if remaining:
                         return False
                     raise UnreapedProcessError(
                         "Darwin process-group termination remained unknown after observation churn"
                     ) from exc
-                time.sleep(0.05)
+                time.sleep(max(0.0, min(0.05, until - time.monotonic())) if deadline is not None else 0.05)
                 continue
             except (OSError, ValueError, IndexError, subprocess.TimeoutExpired) as exc:
                 raise UnreapedProcessError(
@@ -355,9 +363,9 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
                 raise UnreapedProcessError("Cannot verify POSIX process-group termination")
             if usage[0] <= remaining:
                 return True
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= until:
                 return False
-            time.sleep(0.05)
+            time.sleep(max(0.0, min(0.05, until - time.monotonic())) if deadline is not None else 0.05)
 
     verify_identity()
     try:
@@ -513,7 +521,7 @@ class _WindowsJob:
         finally:
             self._kernel32.CloseHandle(process)
 
-    def close(self, *, qualification: Qualification | None = None) -> None:
+    def close(self, *, qualification: Qualification | None = None, deadline: float | None = None) -> None:
         owner = getattr(self, "_retirement_owner", None)
         if owner is None:
             if not self._handle:
@@ -521,10 +529,11 @@ class _WindowsJob:
             owner = self._retirement_owner = JobHandle(self._handle)
         elif not owner.handle and not getattr(owner, "_native_retirement", None):
             return
-        deadline = (
+        selected_deadline = (
             min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
             if qualification is not None else time.monotonic() + 5.0
         )
+        deadline = min(selected_deadline, deadline) if deadline is not None else selected_deadline
         accounting_error = None
         try:
             try:
@@ -699,34 +708,10 @@ def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int
         time.sleep(0.05)
 
 
-def _reap_controller(proc: subprocess.Popen[bytes], *, qualification: Qualification | None = None) -> None:
-    def remaining() -> float:
-        return (
-            max(0, min(5, qualification.boundary.whole_deadline - time.monotonic()))
-            if qualification is not None else 5
-        )
-    try:
-        proc.wait(timeout=remaining())
-    except subprocess.TimeoutExpired:
-        if qualification is not None:
-            qualification.forced_termination = True
-        try:
-            proc.kill()
-            proc.wait(timeout=remaining())
-        except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-            raise UnreapedProcessError("Controller process could not be reaped") from exc
-    except (OSError, KeyboardInterrupt) as exc:
-        raise UnreapedProcessError("Controller process could not be reaped") from exc
-    if qualification is not None:
-        qualification.worker_reaped = True
-        handle = getattr(proc, "_handle", None)
-        if handle is not None and not qualification.worker_handle_closed:
-            try:
-                handle.Close()
-                qualification.worker_handle_closed = True
-            except OSError as exc:
-                raise UnreapedProcessError("Original controller handle could not be closed") from exc
-        qualification.boundary.require(time.monotonic)
+def _reap_controller(
+    proc: subprocess.Popen[bytes], *, qualification: Qualification | None = None, deadline: float | None = None,
+) -> None:
+    plugin_test_cleanup.reap_controller(SimpleNamespace(**globals()), proc, qualification=qualification, deadline=deadline)
 
 
 def _run_contained_process(
@@ -742,6 +727,14 @@ def _run_contained_process(
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
+    absolute = limits.absolute_deadline
+    origin = time.monotonic() if absolute is not None else 0.0
+    work_deadline = (
+        min(origin + limits.wall_seconds, absolute - min(5.0, max(0.0, absolute - origin) / 2))
+        if absolute is not None else None
+    )
+    if work_deadline is not None and origin >= work_deadline:
+        return 124
     if qualification is not None:
         if os.name != "nt":
             raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
@@ -816,11 +809,15 @@ def _run_contained_process(
                     ) from exc
                 if qualification is not None:
                     _reap_controller(proc, qualification=qualification)
+                elif absolute is not None:
+                    _reap_controller(proc, deadline=absolute)
                 else:
                     _reap_controller(proc)
                 raise
         else:
             posix_identity = _posix_group_identity(proc.pid)
+        if work_deadline is not None and time.monotonic() >= work_deadline:
+            return 124
         if qualification is not None:
             qualification.boundary.require(time.monotonic, work=True)
         ready.write_text("assigned\n", encoding="ascii")
@@ -840,10 +837,12 @@ def _run_contained_process(
             now = time.monotonic()
             remaining = (
                 qualification.phase_remaining(time.monotonic) if qualification is not None
-                else started + limits.wall_seconds - now
+                else (work_deadline if work_deadline is not None else started + limits.wall_seconds) - now
             )
             cycle_deadline = min(now + limits.poll_seconds, now + remaining)
-            if qualification is None and now - started > limits.wall_seconds:
+            if qualification is None and (
+                remaining <= 0 if absolute is not None else now - started > limits.wall_seconds
+            ):
                 print(
                     f"[LIMIT] wall-clock limit exceeded ({limits.wall_seconds:g}s)",
                     file=sys.stderr,
@@ -887,7 +886,7 @@ def _run_contained_process(
             if violation is not None:
                 print(f"[LIMIT] {violation}", file=sys.stderr)
                 return 124
-            if qualification is not None or sys.platform == "darwin":
+            if qualification is not None or absolute is not None or sys.platform == "darwin":
                 time.sleep(max(0.0, cycle_deadline - time.monotonic()))
             else:
                 time.sleep(limits.poll_seconds)
@@ -900,12 +899,14 @@ def _run_contained_process(
                 if job is not None:
                     if qualification is not None:
                         job.close(qualification=qualification)
+                    elif absolute is not None:
+                        job.close(deadline=absolute)
                     else:
                         job.close()
             else:
                 if posix_identity is None:
                     raise UnreapedProcessError("POSIX ownership identity was not captured")
-                _terminate_posix_group(proc.pid, posix_identity)
+                _terminate_posix_group(proc.pid, posix_identity, **({"deadline": absolute} if absolute is not None else {}))
         except (OSError, KeyboardInterrupt) as exc:
             raise UnreapedProcessError("Process-tree teardown could not be verified") from exc
         finally:
@@ -919,6 +920,8 @@ def _run_contained_process(
             finally:
                 if qualification is not None:
                     _reap_controller(proc, qualification=qualification)
+                elif absolute is not None:
+                    _reap_controller(proc, deadline=absolute)
                 else:
                     _reap_controller(proc)
         ready.unlink(missing_ok=True)

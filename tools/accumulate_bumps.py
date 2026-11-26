@@ -37,11 +37,11 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
-try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
-    # 3.10 support floor -- see uv_editable_ref.py's own identical fallback.
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+else:
     import tomli as tomllib
 
 REPO = Path(__file__).resolve().parent.parent
@@ -446,8 +446,10 @@ def compute(grouped: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
     return result
 
 
-def apply(result: dict[str, tuple[str, str]]) -> list[str]:
+def apply(result: dict[str, tuple[str, str]], *, metadata_only: bool = False) -> list[str]:
     """Write the computed versions; return the list of successfully-applied consumers."""
+    if metadata_only and any(not library_roots(consumer) for consumer in result):
+        raise VersionError("source-test version preparation accepts shared libraries only")
     _validate_version_destinations(result)
     applied: list[str] = []
     for consumer, (old, new_version) in result.items():
@@ -456,7 +458,7 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
             for root in roots:
                 previous = read_pyproject_project_version(root)
                 written.append(_write_project_version(root / "pyproject.toml", new_version))
-                if previous is not None:
+                if previous is not None and not metadata_only:
                     _write_source_fallbacks(root, previous, new_version)
             if all(written):
                 applied.append(consumer)
@@ -530,11 +532,12 @@ def _validate_version_destinations(result: dict[str, tuple[str, str]]) -> None:
                             _check_library_path(root / entry["template"])
 # --- --from-diff: derive the required bumps from the branch itself ----------
 
-def _version_bump_guard():
+def _version_bump_guard() -> Any:
     """tools/check-version-bump.py, the single definition of what needs a bump."""
     spec = importlib.util.spec_from_file_location(
         "check_version_bump", Path(__file__).resolve().parent / "check-version-bump.py",
     )
+    assert spec is not None and spec.loader is not None, "version-bump guard is unavailable"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -677,7 +680,7 @@ def lib_bumps_from_diff(base: str, changed: list[str]) -> dict[Path, tuple[str, 
         )
         new = _next_after_base(current, base_version) if current else None
         for copy in copies:
-            if new:
+            if new and current is not None:
                 result[copy] = (current, new)
     return result
 
@@ -699,12 +702,12 @@ def compute_from_diff(base: str) -> tuple[dict[str, tuple[str, str]], dict[Path,
         else:
             base_version = _version_at(base, f"plugins/{consumer}/plugin.json", _JSON_VERSION_RE)
         new = _next_after_base(current, base_version) if current else None
-        if new:
+        if new and current is not None:
             plugins[consumer] = (current, new)
     return plugins, lib_bumps_from_diff(base, changed)
 
 
-def _consume_changefiles(pending: list[tuple[Path, dict]] | None = None) -> None:
+def _consume_changefiles(pending: list[tuple[Path, dict[str, Any]]] | None = None) -> None:
     for path, _data in read_changefiles() if pending is None else pending:
         path.unlink()
 

@@ -40,6 +40,9 @@ dependencies = [
     "agent-dropin-registry",
 ]
 
+[tool.copilot-extensions.application-sources]
+fleet-manager = "standalone:fleet-manager"
+
 [tool.uv.sources]
 agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator

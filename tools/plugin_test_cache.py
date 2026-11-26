@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
+import json
 import os
 import re
 import shutil
@@ -40,6 +42,11 @@ FLEET_TEST_CONSUMERS = frozenset({
     "agent-vault", "gateway-entra",
 })
 PREPARATION_GENERATION = ".preparation-generation"
+
+
+def interpreter_version() -> str:
+    """Keep marker evaluation and cached installs on the exact runner binding."""
+    return f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
 
 def preparation_generation(path: Path) -> str | None:
@@ -148,31 +155,40 @@ def _dependency_sources(name: str, plugin: Path, repo: Path) -> set[Path]:
     return roots
 
 
-def _bind_extra(marker: str, extra: str) -> str:
-    tokens = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|(?P<extra>\bextra\b)""")
-    matches = list(tokens.finditer(marker))
-    replacements = {}
-    for index, token in enumerate(matches):
-        if token.lastgroup != "extra":
-            continue
-        replacements[token.span()] = repr(extra)
-        literal = False
-        for offset in (-1, 1):
-            neighbor_index = index + offset
-            if not 0 <= neighbor_index < len(matches):
+def _bind_extra(marker: str, extra: str) -> str | None:
+    if not marker:
+        return ""
+    from packaging.markers import Marker
+
+    def bind(node: Any) -> str | bool:
+        if isinstance(node, tuple):
+            left, operation, right = (part.serialize() for part in node)
+            text = f"{left} {operation} {right}"
+            if left == "extra" or right == "extra":
+                other = right if left == "extra" else left
+                if other[:1] not in {"'", '"'}:
+                    raise ValueError("Extra markers require a named literal comparison")
+                return Marker(text).evaluate({"extra": extra})
+            return text
+        groups: list[list[str | bool]] = [[]]
+        for item in node:
+            if item == "or":
+                groups.append([])
+            elif item != "and":
+                groups[-1].append(bind(item))
+        alternatives = []
+        for group in groups:
+            if any(value is False for value in group):
                 continue
-            neighbor = matches[neighbor_index]
-            left, right = (neighbor, token) if offset < 0 else (token, neighbor)
-            if not re.fullmatch(r"\s*(?:===|==|!=|~=|<=|>=|<|>|in|not\s+in)\s*",
-                                marker[left.end():right.start()]):
-                continue
-            if neighbor.lastgroup != "extra":
-                value = re.sub(r"[-_.]+", "-", neighbor[0][1:-1]).lower()
-                replacements[neighbor.span()] = repr(value)
-                literal = True
-        if not literal:
-            raise ValueError("Extra markers require a named literal comparison")
-    return tokens.sub(lambda token: replacements.get(token.span(), token[0]), marker)
+            terms = [value for value in group if isinstance(value, str)]
+            if not terms:
+                return True
+            alternatives.append(" and ".join(f"({value})" for value in terms))
+        return " or ".join(f"({value})" for value in alternatives) if alternatives else False
+
+    # Fold only declaring-extra predicates; keep target predicates for UV.
+    result = bind(Marker(marker)._markers)
+    return None if result is False else "" if result is True else result
 
 
 def _active_library_constraints(
@@ -216,6 +232,8 @@ def _active_library_constraints(
             specification = match[3].strip()
             # Bind the declaring extra, but let UV evaluate markers for its selected target.
             marker = _bind_extra((match[4] or "").strip(), extra)
+            if marker is None:
+                continue
             predicates = inherited | ({marker} if marker else set())
             if package in canonical:
                 if "@" in specification:
@@ -250,7 +268,7 @@ def _require_unconditional_sources(roots: set[Path]) -> None:
 
 
 def canonical_test_sources(
-    name: str, plugin: Path, repo: Path,
+    name: str, plugin: Path, repo: Path, *, include_unique: bool = False,
 ) -> tuple[dict[str, Path], tuple[str, ...]]:
     roots = _dependency_sources(name, plugin, repo)
     sources: dict[str, set[Path]] = {}
@@ -263,7 +281,7 @@ def canonical_test_sources(
             key = re.sub(r"[-_.]+", "-", package).lower()
             sources.setdefault(key, set()).add(root)
     duplicates = {key for key, paths in sources.items() if len(paths) > 1}
-    if not duplicates:
+    if not duplicates and not include_unique:
         return {}, ()
     canonical: dict[str, Path] = {}
     for manifest in sorted((repo / "libs").glob("*/pyproject.toml")):
@@ -271,7 +289,7 @@ def canonical_test_sources(
         if not isinstance(package, str):
             continue
         key = re.sub(r"[-_.]+", "-", package).lower()
-        if key in duplicates:
+        if key in duplicates or (include_unique and key in sources):
             if key in canonical:
                 raise ValueError(f"Test library has multiple canonical sources: {key}")
             _package_roots(manifest.parent)
@@ -292,19 +310,23 @@ def canonical_test_sources(
 
 
 def source_resolution_arguments(name: str, plugin: Path, repo: Path, venv: Path) -> list[str]:
-    overrides, constraints = canonical_test_sources(name, plugin, repo)
-    if not overrides:
+    overrides, _ = canonical_test_sources(name, plugin, repo)
+    _, constraints = canonical_test_sources(name, plugin, repo, include_unique=True)
+    if not overrides and not constraints:
         return []
-    override_file = venv / ".source-overrides.txt"
-    override_file.write_text("".join(
-        f"{package} @ {source.as_uri()}\n" for package, source in sorted(overrides.items())
-    ), encoding="utf-8")
+    arguments = []
+    if overrides:
+        override_file = venv / ".source-overrides.txt"
+        override_file.write_text("".join(
+            f"{package} @ {source.as_uri()}\n" for package, source in sorted(overrides.items())
+        ), encoding="utf-8")
+        arguments.extend(["--override", str(override_file)])
     # UV overrides also replace version requirements; retain those bounds separately.
     constraint_file = venv / ".source-constraints.txt"
     constraint_file.write_text("".join(
         requirement + "\n" for requirement in constraints
     ), encoding="utf-8")
-    return ["--override", str(override_file), "--constraint", str(constraint_file)]
+    return [*arguments, "--constraint", str(constraint_file)]
 
 
 def dependency_fingerprint(
@@ -326,11 +348,127 @@ def dependency_fingerprint(
         digest.update(b"native-bootstrap-uv-cache-v1\n")
     for dependency in runner_dependencies:
         digest.update(f"runner:{dependency}\n".encode("utf-8"))
+    inputs = source_version_inputs(name, plugin, repo)
+    if inputs is not None:
+        import json
+        digest.update(json.dumps(inputs, sort_keys=True).encode("utf-8"))
     return digest.hexdigest()
 
 
+def source_version_inputs(name: str, plugin: Path, repo: Path) -> dict[str, Any] | None:
+    overrides, constraints = canonical_test_sources(name, plugin, repo, include_unique=True)
+    if not overrides or not any(re.search(r"[<>=!~]", value.split(";")[0]) for value in constraints):
+        return None
+    from plugin_test_source_versions import version_inputs
+    roots = _dependency_sources(name, plugin, repo)
+    selected, _ = canonical_test_sources(name, plugin, repo)
+    for path in roots:
+        manifest = path / "pyproject.toml"
+        if manifest.is_file():
+            package = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]["name"]
+            key = re.sub(r"[-_.]+", "-", package).lower()
+            if key in overrides:
+                selected.setdefault(key, path)
+    for package, path in overrides.items():
+        selected.setdefault(package, path)
+        roots.update(_package_roots(path))
+    return version_inputs(
+        repo, overrides, constraints, _source_files(tuple(sorted(roots))), selected=selected,
+    )
+
+
+def prepare_version_sources(
+    name: str, plugin: Path, repo: Path, venv: Path, *, deadline: float | None,
+) -> tuple[Path, Path, dict[str, Any] | None]:
+    from plugin_test_source_versions import prepare_sources
+    from promotion_source_archive import composition_budget
+    with composition_budget(deadline):
+        inputs = source_version_inputs(name, plugin, repo)
+        if inputs is None:
+            return repo, plugin, None
+        if deadline is None:
+            raise ValueError("source version preparation requires the caller's aggregate deadline")
+        roots = _dependency_sources(name, plugin, repo)
+        overrides, _ = canonical_test_sources(name, plugin, repo, include_unique=True)
+        for path in overrides.values():
+            roots.update(_package_roots(path))
+        return prepare_sources(
+            repo, plugin, venv, inputs, _source_files(tuple(sorted(roots))), deadline=deadline,
+        )
+
+
+def read_preparation_stamp(
+    name: str, plugin: Path, repo: Path, venv: Path, *, deadline: float | None,
+) -> str:
+    previous = (venv / ".dep-fingerprint").read_text(encoding="utf-8").strip()
+    if not previous.startswith("{"):
+        return previous
+    record = json.loads(previous)
+    if deadline is None:
+        raise ValueError("prepared source reuse requires the caller's deadline")
+    if record["source_versions"]["inputs"] != source_version_inputs(name, plugin, repo):
+        raise ValueError("prepared source provenance differs from current inputs")
+    from plugin_test_source_versions import validate_prepared
+    validate_prepared(venv, record["source_versions"], deadline=deadline)
+    fingerprint = record["fingerprint"]
+    if not isinstance(fingerprint, str):
+        raise ValueError("prepared source fingerprint is not a string")
+    return fingerprint
+
+
+def write_preparation_stamp(
+    venv: Path, fingerprint: str, record: dict[str, Any] | None, *, private_state: str | None,
+    deadline: float | None = None, current_fingerprint: str | None = None,
+) -> None:
+    if record is None:
+        if (venv / ".dep-fingerprint.pending").exists():
+            from plugin_test_source_versions import stage_ready
+            stage_ready(venv, fingerprint)
+        else:
+            (venv / ".dep-fingerprint").write_text(fingerprint, encoding="utf-8")
+        return
+    from plugin_test_source_versions import stage_ready, validate_prepared
+    if deadline is None:
+        raise ValueError("prepared source completion requires the caller's deadline")
+    validate_prepared(venv, record, deadline=deadline)
+    if current_fingerprint != fingerprint:
+        raise ValueError("test source inputs changed during preparation")
+    record["preparation_owner"] = {
+        "private_state": private_state, "leased_environment": str(venv),
+    }
+    stage_ready(venv, json.dumps({
+        "fingerprint": fingerprint, "source_versions": record,
+    }, sort_keys=True))
+
+
+def stage_cached_preparation(venv: Path) -> None:
+    if (venv / ".dep-fingerprint.pending").exists():
+        from plugin_test_source_versions import stage_ready
+        stage_ready(venv, (venv / ".dep-fingerprint").read_text(encoding="utf-8"))
+
+
+def run_with_test_tooling(entry: Callable[[], int]) -> int:
+    if {"-h", "--help"} & set(sys.argv[1:]):
+        return entry()
+    try:
+        from importlib.metadata import version
+        from packaging.version import Version
+        ready = Version(version("packaging")) >= Version("23")
+    except ImportError:
+        ready = False
+    if ready:
+        return entry()
+    from run_python_with import main
+    return main([
+        "--with", "packaging>=23", "--",
+        str(Path(__file__).with_name("run-plugin-tests.py")), *sys.argv[1:],
+    ])
+
+
 def clear_cache_contents(
-    path: Path, *, preserve: frozenset[str] = frozenset({PREPARATION_GENERATION}),
+    path: Path, *, preserve: frozenset[str] = frozenset({
+        PREPARATION_GENERATION, ".dep-fingerprint.pending",
+    }),
 ) -> None:
     """Clear a leased environment, preserving its mutation generation by default."""
     root = native_test_path(ordinary_cache_root(path))

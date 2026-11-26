@@ -396,7 +396,8 @@ def test_promotion_passes_its_selected_git_identity_to_the_source_application(
         "promote_materialize_main": materializer,
     }
     monkeypatch.setattr(promotion, "_load_module", lambda _path, name: modules[name])
-    monkeypatch.setattr(promotion, "_seed_versions_from_main", lambda *_args, **_kwargs: None)
+    import promotion_versions
+    monkeypatch.setattr(promotion_versions, "seed_versions", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(promotion, "_sync_instruction_projections", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(promotion_control, "preserve_control", lambda *_args, **_kwargs: None)
     calls = []

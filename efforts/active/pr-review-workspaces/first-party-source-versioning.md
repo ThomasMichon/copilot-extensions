@@ -1,7 +1,8 @@
 # First-party source versions and dependency-first observer acceptance
 
 Parent: [PR Review Workspaces](README.md), coordinated under #9535.
-**Agent-recommended source plan, proposed before policy implementation.**
+**Agent-recommended source plan, independently reviewed and merged in #14629
+before policy implementation.**
 The existing #11084 observer implementation and its open dependency-upgrade
 finding remain separate. This proposal does not resolve that finding.
 
@@ -102,6 +103,22 @@ its failure evidence. Cleanup uses that owner, not a new age-based sweep.
 Normal tests whose requirements already resolve retain their behavior.
 No production installer is taught to ignore or reinterpret package minima.
 
+Required declaration-audit corrections use the existing explicit
+`application-sources` owner for application edges the test runner already
+selects. Names, canonical selectors, actual versions and requested extras must
+match; dependency literals remain unchanged. This is factual source attribution,
+not a new packaging contract, a package-name exemption or a future release floor.
+
+Keep the preparation coordinator in its caller: the existing native process
+owner contains each build command. Do not serialize an unsettled native error
+across a Python worker and lose its Job, resources or settlement callbacks.
+The existing dependency-retention transaction closes after confirmed execution,
+or remains attached to that original native error's settlement callbacks.
+Keep the caller's original resource caps on build commands and its remaining
+deadline on metadata reads. A retained bounded diagnostic after verified
+settlement is not an unsettled producer; finalization failure after confirmed
+cleanup must invalidate readiness without trapping the next attempt.
+
 Keep the existing wire protocol, strict legacy discovery, single-frame replies,
 fresh-challenge authentication, generation scope and absolute CLI lifetime.
 CLI 60 seconds; Gateway body/frame/response 32 KiB/64 KiB/8 MiB, control burst/rate
@@ -109,12 +126,66 @@ CLI 60 seconds; Gateway body/frame/response 32 KiB/64 KiB/8 MiB, control burst/r
 
 ## Dependency-ordered implementation and acceptance
 
-- [ ] Obtain independent assessment and merge this plan under the **current**
+### Proposed native scratch deadline prerequisite — not yet accepted
+
+The opt-in native scratch path exposes a remaining existing-owner boundary.
+Actual source-callable argument binding rejects `deadline` for
+`artifact_scratch.settle_after_cleanup()`, `dispose_consumed()` and Procutil's
+`scratch._clear()`. The existing provider declares allocation/retention support
+but no deadline capability; its root lock has a separate ten-second wait, and
+the recursive clear helper has no caller deadline. The diagnostic invoked no
+allocation, ledger or cleanup body. It does not qualify contention timing or
+prove that every possible sanctioned mechanism is unavailable.
+
+The ordinary sandbox's sharing-retry and process-census fixes do not close this
+different native-provider contract. Detecting an overrun afterward is not a
+bounded cleanup API. Keep preparation source acceptance open rather than
+silently substituting another provider, dropping custody or extending a budget.
+
+Two source sequencing options need explicit review before additional API code:
+
+1. Extend the existing Procutil scratch and Worktrees provider contracts with
+   an optional shared deadline and truthful capability discovery, preserving
+   original tokens, record/physical custody and older callers. Cover root-lock,
+   record-operation and recursive-clear expiry and partial/uncertain cleanup,
+   then adopt that accepted owner contract here through normal source delivery.
+2. Explicitly review a bounded-composition compatibility/refusal rule for older
+   native scratch owners, without silently changing ordinary tests or falling
+   back to another allocation owner.
+
+Neither option is selected or implemented by this proposal. A wrapper worker,
+invented provider, larger timeout, guessed version or installed update is not
+an alternative. This is a proposed prerequisite to complete source acceptance,
+not admission to change the library API or an operational rollout.
+
+### Accepted implementation sequence and remaining gates
+
+- [x] Obtain independent assessment and merge this plan under the **current**
   repository review/CI/merge rules, then adopt it before policy code.
+  #14629, approval `6065623920` on `1ac2a9ddc79d1322b42eec0d721fd076a0bbe63c`,
+  required CI `45709564044`, merge `e9915d57e3743b191b6f9781c20a2b24ab6a46a2`.
   This proposal does not govern or weaken its own acceptance.
 - [ ] Implement and qualify only the shared release-owned preparation seam
   and existing source-test composition/fingerprint integration.
-- [ ] Prove the original frozen-source rejection remains a negative control;
+  Implemented in #14650 with contained source controls. Review corrections
+  retain ordinary preparation's process-tree owner and complete the relocated
+  Manager and snapshot-index contracts. Fresh Linux consumer qualification,
+  exact-head required CI, independent review and merge remain open.
+  The preserved same-caller candidate `ce283b5acd` passed all 209 Linux
+  consumers and the exact admitted unit packet in `45742930282`; the overall
+  run still failed its separate application-declaration dependency-age audit.
+  The subsequent marker/declaration candidate `f021295f18` passed full source
+  CI `45755627325` and Linux/macOS native acceptance `45755646426`, including
+  source consumers. Later focused corrections preserve pre-allocation retry,
+  uncertain allocation custody and disconnected tooling-cache behavior.
+  Final assessment, exact-head required checks and actual mergeability remain
+  publication gates. Compare the live target ref with the head: ancestry of a
+  cached advertised PR base alone does not disprove actual Dev drift. Reconcile
+  real target advances normally; never use a provider-state contradiction to
+  bypass a merge gate.
+  The newly identified native scratch deadline prerequisite above remains
+  unresolved; do not mark this component accepted or merge past it.
+- [x] Prove the original frozen-source rejection remains a negative control;
   prove a normal owner-allocated candidate can resolve a genuinely satisfied
   minimum without changing the source checkout or the requirement.
 - [ ] Publish the smallest dependency-layer source slice: Procutil borrowed
@@ -145,20 +216,22 @@ additional agent-hosting session or infrastructure is required.
 
 ## Validation and rollback
 
-- [ ] Compare promotion and test preparation on the same pinned inputs: same
+- [x] Compare promotion and test preparation on the same pinned inputs: same
   allocation, consumed-changefile boundary and canonical/physical versions.
-- [ ] A consumer minimum above the owner's computed candidate version refuses;
+- [x] A consumer minimum above the owner's computed candidate version refuses;
   changing the minimum must not influence the allocated version.
-- [ ] A same-version source-body change, different Main boundary/tooling,
+- [x] A same-version source-body change, different Main boundary/tooling,
   edited or already-consumed changefile, target marker/extra change, or altered
   build resource invalidates reuse or produces the existing explicit refusal.
-- [ ] Missing Main/history, conflicting/symlinked source roots, unsafe metadata
+- [x] Missing Main/history, conflicting/symlinked source roots, unsafe metadata
   destinations, incomplete preparation and cancellation fail closed without
   checkout writes, partial-cache success or hidden process/resource release.
 - [ ] Prove the generated metadata delta is version-owner-only and every
   source/requirement/provenance binding matches; a forged API-compatible version
   or missing `_native_types`/borrowed-stream implementation fails real consumer
   qualification even if numeric resolution succeeds.
+  Preparation's metadata/source/provenance and tampering controls pass;
+  actual borrowed-stdio API qualification remains with the dependency slice.
 - [ ] Keep old-caller/new-Procutil behavior; cover old/new optional compact
   helpers, new application/old dependency rejection, compatible upgrade and
   supported rollback with real serialized CLI delivery and buffered-state

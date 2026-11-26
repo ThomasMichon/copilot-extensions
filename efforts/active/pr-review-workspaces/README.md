@@ -13,8 +13,9 @@
 
 Let one reviewer obtain PR data, analyze exact source, synchronize subsequent
 changes, and submit its selected comments and verdict through one PR-domain
-toolset. The current source amendment plans truthful first-party test-source
-version identity and dependency-first acceptance of the CLI observer, while
+toolset. The current source continuation implements the reviewed first-party
+test-source version preparation prerequisite for dependency-first observer
+acceptance, while
 retaining its reviewed negotiated bulk contract and unchanged 60-second
 invocation lifetime. Independently review, merge and adopt the
 [source-version plan](first-party-source-versioning.md) before policy code;
@@ -119,6 +120,9 @@ contained tests and normal isolated source PR delivery. The
 agent-recommended design, not an already implemented compatibility mechanism.
 Its independent plan gate precedes metadata/test-policy code; no future
 compatible version, operational release or runtime effect is selected by it.
+That gate cleared in #14629 before the preparation source continuation.
+Preparation source acceptance is separate from the later library API release,
+truthful compatible minimum and actual installed-dependency upgrade.
 
 ## Plan
 
@@ -265,6 +269,89 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-26 - Qualify source preparation without waiving publication gates
+
+- Source CI `45763146705` and required PR CI `45763545089` passed after preserving
+  older lifecycle owners' optional-deadline compatibility and every original
+  positive control. Further review corrections bound ordinary sandbox retries,
+  forward the Darwin census deadline and preserve the original preparation
+  isolation/configuration assertions; 119 focused controls and strict typing
+  pass. Actual macOS qualification of the new census path remains separate.
+- A read-only native-owner API control identified a sequencing boundary:
+  Worktrees scratch settlement/removal and Procutil recursive clear reject a
+  deadline argument, while the provider has a separate ten-second root-lock
+  wait. The [unaccepted source prerequisite](first-party-source-versioning.md#proposed-native-scratch-deadline-prerequisite--not-yet-accepted)
+  records existing-owner extension versus an explicit compatibility/refusal
+  decision. No API effect body, new owner, runtime change or larger budget was
+  used. Preparation acceptance remains open rather than claiming all modes
+  meet a contract their current owner cannot receive.
+- Candidate `f021295f18` passed exact-input unit coverage and all source guards
+  in `45755627325`, and the existing Linux/macOS native acceptance workflow
+  `45755646426`, including its manual Linux source-consumer packet. The full
+  dependency-age audit now accepts the canonical application associations.
+- Extra-marker folding preserves target predicates and actual resolver bounds.
+  Further source fixes distinguish confirmed constructor/readiness refusal from
+  uncertain allocation, retaining the latter's pending owner; the disconnected
+  container pass uses the same conditional tooling entrypoint as preparation.
+  Focused retry, uncertainty and installed-tooling/empty-cache controls pass.
+- Follow-up absolute-deadline controls carry startup, execution and native
+  settlement within one preparation budget, preserving ordinary caller clocks.
+  Six actual Windows controls pass: delayed startup, file-holding descendant
+  timeout, ordinary descendant exit/timeout, cancellation and temp-cap refusal.
+  Linux/macOS qualification and deterministic provenance work counts remain
+  separate from installed, desktop or representative tail-latency proof.
+- Source publication remains open: fresh independent assessment, all exact-head
+  required checks, resolved blocking threads and provider-confirmed mergeability
+  are required. The provider has reported a conflict while immutable Git
+  ancestry proves the advertised target is an ancestor; do not bypass that
+  contradiction or repeatedly rewrite unchanged source to hide it.
+  The advertised PR base can lag the live Dev ref, so that ancestry observation
+  alone is not proof of a provider defect. Subsequent actual Dev advances were
+  reconciled with backups and preservation of both positive admission packets.
+- The preparation item, dependency API/release/minimum/application-upgrade work
+  and existing observer acceptance remain open. No runtime or rollout proof is
+  inferred from source qualification.
+
+### 2026-11-26 - Retain preparation review and qualification gates
+
+- The retained same-caller source candidate `ce283b5acd` passed its exact unit
+  packet and all 209 Linux consumer controls in run `45742930282`, including
+  real UV/PEP517 backend-descendant timeout, original native settlement callback
+  custody, and genuine clean-interpreter tooling dispatch. These are source
+  qualifications, not a merge, release or installed application upgrade.
+- #14650 remains the preparation-only source vehicle; it is not merged and
+  #11084's actual dependency-upgrade High is not resolved.
+- Addressed pending-owner ordering, native cleanup custody, existing reader
+  fixtures, all supported tooling entrypoints and bounded prepare-only reuse.
+  Further source assessment identified the relocated Manager tool closure,
+  ordinary build-descendant settlement and complete snapshot-index forwarding.
+  Their focused corrections preserve the existing owners and budgets.
+- The reconciled candidate's exact admitted unit packet passed in the existing
+  Linux CI owner. Manual consumer qualification exposed genuine snapshot/test
+  contract failures, retained as failures and corrected before another attempt.
+  The same run's dependency-age audit separately refused five optional
+  first-party application declarations lacking public release metadata.
+  No check is waived; current required CI/review and Linux consumer outcomes
+  remain source-acceptance gates, separate from API/release/upgrade acceptance.
+
+### 2026-11-25 - Implement the reviewed source preparation prerequisite
+
+- Factored the release-owned Main seed/changefile computation/admitted apply
+  seam and reused it for contained source-test metadata. No full promotion,
+  source-body rewrite or new allocation/cache owner is involved.
+- Existing source-test composition retains numeric bounds for both canonical
+  and materialized sources, binds pinned source/Main/changefile/tool/build
+  inputs, preserves the aggregate deadline, and publishes readiness only after
+  the existing preparation scope's cleanup. Unsettled preparation retains the
+  original owner and failure evidence.
+- Real offline UV controls cover raw frozen-source rejection, owner-allocated
+  resolution and above-candidate refusal independently of the requested floor.
+  Source/cache, promotion parity, markers, input invalidation and cleanup
+  controls pass locally; exact-head source CI/review/publication remain gates.
+- No Procutil/Core API extraction, compatible release floor or actual
+  application-only dependency upgrade is claimed. Existing #11084 and its
+  dependency High remain open; the broader effort stays Active.
 
 ### 2026-11-25 - Propose first-party source-version composition before code
 

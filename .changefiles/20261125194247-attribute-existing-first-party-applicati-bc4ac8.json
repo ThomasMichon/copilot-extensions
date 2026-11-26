@@ -1,0 +1,21 @@
+{
+  "comment": "Attribute existing first-party application dependencies to their canonical sources",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

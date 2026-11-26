@@ -30,6 +30,9 @@ dependencies = [
     "agent-update-driver",
 ]
 
+[tool.copilot-extensions.application-sources]
+fleet-manager = "standalone:fleet-manager"
+
 [tool.uv.sources]
 agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 agent-update-driver = { path = "../../libs/update-driver", editable = true }

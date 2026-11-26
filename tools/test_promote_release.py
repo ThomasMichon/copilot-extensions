@@ -28,6 +28,7 @@ _REQUIRED_TOOLS = (
     "nested_uv_editable_ref.py",
     "standalone_consumers.py",
     "promotion_source_archive.py", "promotion_complete_source.py", "promotion_unit_contract.py",
+    "promotion_versions.py",
     "installer_engine_ref.py",
     "launch_wrapper_assets_ref.py",
     "materialize_installer_engine.py",
@@ -1422,11 +1423,14 @@ def test_required_tools_bundle_is_self_contained(tmp_path: Path) -> None:
         shutil.copy(_TOOLS / name, isolated / name)
 
     proc = subprocess.run(
-        [sys.executable, "-c", "import materialize_main"],
+        [sys.executable, "-c",
+         "import materialize_main,promotion_versions; from pathlib import Path; "
+         "assert Path(promotion_versions.__file__).resolve().parent == Path.cwd()"],
         cwd=isolated,
         env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(isolated)},
         capture_output=True,
         text=True,
         timeout=30,
+        creationflags=_CREATION_FLAGS,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr

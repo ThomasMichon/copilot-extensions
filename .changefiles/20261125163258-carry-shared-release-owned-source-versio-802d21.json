@@ -1,0 +1,9 @@
+{
+  "comment": "Carry shared release-owned source version preparation and test-runner compatibility helpers",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

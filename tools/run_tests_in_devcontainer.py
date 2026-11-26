@@ -526,7 +526,9 @@ _MINIMAL_GIT_CONFIG = (
 )
 
 
-def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -> Path:
+def _materialized_git_dir(
+    stack: contextlib.ExitStack, passthrough: list[str], *, paths: list[str] | None = None,
+) -> Path:
     """Return a path to a self-contained ``.git`` directory to copy into
     the container, containing ONLY the object closure of ``HEAD`` and the
     ``--changed`` diff base -- never the full repository history (every
@@ -590,6 +592,9 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
         if base_resolves and _changed_mode_active(passthrough)
         else ["HEAD"]
     )
+    pinned_main = _git_rev_parse("refs/remotes/origin/main")
+    if pinned_main is not None:
+        bundle_refs.append(pinned_main)
 
     bundle_res = subprocess.run(
         ["git", "-C", str(REPO), "bundle", "create", str(bundle_file), *bundle_refs],
@@ -615,6 +620,10 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
 
     (merged / "config").write_text(_MINIMAL_GIT_CONFIG)
     shutil.rmtree(merged / "hooks", ignore_errors=True)
+    if pinned_main is not None:
+        from devcontainer_source_identity import pin_source_inputs
+        source_paths = _tracked_paths(include_untracked=False) if paths is None else paths
+        pin_source_inputs(merged, REPO, pinned_main, source_paths, _scrubbed_git_env())
     return merged
 
 
@@ -640,8 +649,9 @@ def _write_tar_of_repo(dest: Path, passthrough: list[str], *, include_untracked:
     _warn_about_hidden_tracked_file_flags()
     real_repo = Path(os.path.realpath(REPO))
     with tarfile.open(dest, mode="w") as tar, contextlib.ExitStack() as stack:
-        tar.add(_materialized_git_dir(stack, passthrough), arcname=".git")
-        for rel_path in _tracked_paths(include_untracked=include_untracked):
+        source_paths = _tracked_paths(include_untracked=include_untracked)
+        tar.add(_materialized_git_dir(stack, passthrough, paths=source_paths), arcname=".git")
+        for rel_path in source_paths:
             abs_path = REPO / rel_path
             if not os.path.lexists(abs_path):
                 continue

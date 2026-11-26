@@ -162,6 +162,7 @@ def run_contained(
     native_application: bool,
 ) -> int:
     # Keep the original owner's native operations and instrumentation seams.
+    absolute_deadline = getattr(limits, "absolute_deadline", None)
     if type(native_application) is not bool:
         raise ValueError("native application testing must be explicitly selected")
     if native_application:
@@ -206,7 +207,10 @@ def run_contained(
                 lease=daemon_lease,
                 **(
                     {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                    if qualification is not None else {"cleanup_results": lifecycle_results}
+                    if qualification is not None else {
+                        "cleanup_results": lifecycle_results,
+                        **({"deadline": absolute_deadline} if absolute_deadline is not None else {}),
+                    }
                 ),
             ) as daemon_environment:
                 if pins is not None:
@@ -263,6 +267,8 @@ def run_contained(
             ) from unreaped
     if changed:
         return 125
+    if absolute_deadline is not None and owner.time.monotonic() >= absolute_deadline:
+        return 124
     if qualification is not None:
         qualification.registry_unchanged = True
         qualification.require_settled(owner.time.monotonic)
