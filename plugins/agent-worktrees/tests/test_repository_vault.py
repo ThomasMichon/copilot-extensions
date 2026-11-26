@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import venv
 
 import pytest
@@ -15,6 +16,91 @@ from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees import repository_vault as vault
 from agent_worktrees import _peer_launch, peer_launch_adapter, reconcile
 from agent_worktrees.repository_setup import SetupError
+
+
+@pytest.mark.parametrize("failure", [None, "source-before", "owner-before", "source-after", "owner-after"])
+def test_key_application_joins_all_fresh_source_and_owner_barriers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    import base64
+    import hashlib
+
+    from agent_worktrees import repository_setup, repository_ssh_setup
+
+    public = "ssh-ed25519 " + base64.b64encode(
+        b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"k" * 32,
+    ).decode("ascii")
+    fingerprint = "SHA256:" + base64.b64encode(
+        hashlib.sha256(base64.b64decode(public.split()[1])).digest(),
+    ).decode("ascii").rstrip("=")
+    directory = tmp_path / "key"
+    selection = repository_setup.SSHKeySelection(
+        (), str(tmp_path), "SSH/node", str(directory), fingerprint, owner="agent-vault",
+    )
+    description = {"key_files": {
+        "identity_file": str(directory / "id_ed25519"),
+        "public_key_file": str(directory / "id_ed25519.pub"),
+    }}
+    barriers = [threading.Barrier(2) for _ in range(4)]
+    source_checks: list[int] = []
+    owner_checks: list[int] = []
+    settled: list[tuple[str, int]] = []
+    calls: list[list[str]] = []
+
+    def source_verify() -> None:
+        index = len(source_checks)
+        source_checks.append(index)
+        try:
+            barriers[index].wait(timeout=3)
+            if failure == ("source-after" if index == 3 else "source-before") and index in (0, 3):
+                raise SetupError("source changed")
+        finally:
+            settled.append(("source", index))
+
+    def owner_verify() -> None:
+        index = len(owner_checks)
+        owner_checks.append(index)
+        try:
+            if index in (0, 2, 4, 5):
+                barriers[(0, 2, 4, 5).index(index)].wait(timeout=3)
+            if failure == ("owner-after" if index == 5 else "owner-before") and index in (0, 5):
+                raise SetupError("owner changed")
+        finally:
+            settled.append(("owner", index))
+
+    def child(argv: list[str], **_kwargs: Any) -> SimpleNamespace:
+        arguments = argv[3:]
+        calls.append(arguments)
+        assert len(source_checks) == len(calls)
+        assert len(owner_checks) == 2 * len(calls) - 1
+        assert ("source", len(calls) - 1) in settled
+        assert ("owner", 2 * len(calls) - 2) in settled
+        value: dict[str, Any]
+        if arguments == ["invocation-contract", "--json"]:
+            value = {"schema": "agent-vault.invocation", "version": 1,
+                     "capabilities": ["configuration-root-v1", "ssh-key-install-pin-v1"]}
+        else:
+            value = {"version": 1, "status": "reused", "public_key": public, "fingerprint": fingerprint}
+            if arguments[1] == "install":
+                value.update(private_key_path=description["key_files"]["identity_file"],
+                             public_key_path=description["key_files"]["public_key_file"])
+        return SimpleNamespace(returncode=0, stdout=json.dumps(value))
+
+    monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
+    invocation = SimpleNamespace(argv=("peer-python",), environment={}, verify=owner_verify)
+    arguments = (
+        SimpleNamespace(verify=source_verify), SimpleNamespace(ssh_key=selection), description,
+    )
+    if failure:
+        with pytest.raises(SetupError, match="changed"):
+            repository_ssh_setup.prepare_key(*arguments, invocation=invocation)
+    else:
+        assert repository_ssh_setup.prepare_key(*arguments, invocation=invocation) is None
+    before_failure = failure is not None and failure.endswith("-before")
+    assert len(calls) == (0 if before_failure else 3)
+    assert len(source_checks) == (1 if before_failure else 4)
+    assert len(owner_checks) == (1 if before_failure else 6)
+    assert len(settled) == len(source_checks) + len(owner_checks)
 
 
 @pytest.mark.parametrize("failure", [None, "missing", "foreign", "migration", "no-runtime", "no-retention"])

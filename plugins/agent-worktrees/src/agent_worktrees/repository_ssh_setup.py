@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import base64
 import binascii
@@ -14,10 +15,14 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil.owned_process import run_caller_owned
 
 from . import repository_setup as protocol
+
+if TYPE_CHECKING:
+    from .repository_vault import VaultInvocation
 
 CAPABILITY = "continuity-ssh-setup-v1"
 PIN_CAPABILITY = "continuity-ssh-setup-pin-v1"
@@ -75,9 +80,25 @@ def key_binding(context, description: dict) -> None:
         raise protocol.SetupError("Selected Vault directory differs from the SSH request's exact key references.")
 
 
-def _vault_call(selection, arguments: list[str], *, timeout: int, invocation=None) -> tuple[int, dict]:
-    if invocation is not None:
+def _verify_vault_boundary(
+    source: protocol.Setup | None, invocation: VaultInvocation | None,
+) -> None:
+    if source is not None and invocation is not None:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            checks = [workers.submit(source.verify), workers.submit(invocation.verify)]
+            for check in checks:
+                check.result()
+    elif source is not None:
+        source.verify()
+    elif invocation is not None:
         invocation.verify()
+
+
+def _vault_call(
+    selection, arguments: list[str], *, timeout: int, invocation: VaultInvocation | None = None,
+    source: protocol.Setup | None = None, verify_source_after: bool = False,
+) -> tuple[int, dict]:
+    _verify_vault_boundary(source, invocation)
     environment = (
         dict(invocation.environment) if invocation is not None else protocol._environment(attended=False)
     )
@@ -92,12 +113,13 @@ def _vault_call(selection, arguments: list[str], *, timeout: int, invocation=Non
              "--configuration-root", str(Path(selection.configuration_root).expanduser()), *arguments],
             env=environment, timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
         )
-        if invocation is not None:
-            invocation.verify()
+        _verify_vault_boundary(source if verify_source_after else None, invocation)
         value = json.loads(completed.stdout, object_pairs_hook=protocol._object)
         if not isinstance(value, dict):
             raise ValueError
         return completed.returncode, value
+    except protocol.SetupError:
+        raise
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, UnicodeError):
         raise protocol.SetupError(
             "Selected Vault outcome is unconfirmed; preserve the original entry and key location for reconciliation."
@@ -132,14 +154,18 @@ def prepare_key(setup, context, description: dict, *, invocation=None) -> protoc
             raise OSError
     except OSError:
         raise protocol.SetupError("Selected Vault configuration root is unavailable.") from None
-    setup.verify()
-    invocation_options = {}
+    invocation_options: dict[str, Any] = {}
     if selection.owner is not None:
         if invocation is None:
+            setup.verify()
             from . import repository_vault
 
             invocation = repository_vault.selected()
+        else:
+            invocation_options["source"] = setup
         invocation_options["invocation"] = invocation
+    else:
+        setup.verify()
     code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30, **invocation_options)
     if (
         code != 0 or contract.get("schema") != "agent-vault.invocation"
@@ -157,9 +183,13 @@ def prepare_key(setup, context, description: dict, *, invocation=None) -> protoc
                 "--directory", str(Path(selection.directory).expanduser()),
                 "--expected-fingerprint", selection.fingerprint,
             ])
-        setup.verify()
+        if invocation_options:
+            invocation_options["source"] = setup
+            invocation_options["verify_source_after"] = operation == "install"
+        else:
+            setup.verify()
         code, result = _vault_call(selection, arguments, timeout=120, **invocation_options)
-        if operation == "install":
+        if operation == "install" and not invocation_options:
             setup.verify()
         if code != 0:
             error = result.get("error")

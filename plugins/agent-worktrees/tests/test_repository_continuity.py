@@ -222,7 +222,17 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     monkeypatch.setattr(ssh_setup, "status", status)
     monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
 
-    def vault_runtime(selection, arguments, *, timeout, invocation=None):
+    def vault_runtime(
+        selection, arguments, *, timeout, invocation=None, source=None, verify_source_after=False,
+    ):
+        if source is not None:
+            source.verify()
+        result = vault_outcome(selection, arguments, timeout=timeout, invocation=invocation)
+        if source is not None and verify_source_after:
+            source.verify()
+        return result
+
+    def vault_outcome(selection, arguments, *, timeout, invocation=None):
         assert timeout <= 120
         assert (invocation is not None) == data_only
         assert selection.entry == "SSH/node-a" and selection.configuration_root == str(tmp_path)
