@@ -116,7 +116,9 @@ def extract_application(
             unchanged()
             try:
                 exported = select(candidate, projects)
-            except compatibility_errors:
+            except preparation.SourcePreparationError:
+                raise
+            except (*compatibility_errors, RuntimeError):
                 pass
         preparation._remaining(deadline)
         unchanged()

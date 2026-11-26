@@ -124,6 +124,29 @@ def test_non_windows_preparation_does_not_import_optional_backend(
     native_crypto.prepare_native_crypto()
 
 
+def _package_spelling(root: str, extended: bool) -> str:
+    if root.startswith("\\\\?\\UNC\\"):
+        root = "\\\\" + root[8:]
+    elif root.startswith("\\\\?\\"):
+        root = root[4:]
+    if not extended:
+        return root
+    return "\\\\?\\UNC\\" + root[2:] if root.startswith("\\\\") else "\\\\?\\" + root
+
+
+@pytest.mark.parametrize("root, ordinary, extended", [
+    ("C:\\package", "C:\\package", "\\\\?\\C:\\package"),
+    ("\\\\server\\share\\package", "\\\\server\\share\\package", "\\\\?\\UNC\\server\\share\\package"),
+    ("\\\\?\\C:\\package", "C:\\package", "\\\\?\\C:\\package"),
+    ("\\\\?\\UNC\\server\\share\\package", "\\\\server\\share\\package", "\\\\?\\UNC\\server\\share\\package"),
+])
+def test_backend_package_spelling_preserves_drive_and_unc_namespaces(
+    root: str, ordinary: str, extended: str,
+) -> None:
+    assert _package_spelling(root, False) == ordinary
+    assert _package_spelling(root, True) == extended
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="real Windows DLL loading")
 @pytest.mark.parametrize("extended", [False, True])
 @pytest.mark.parametrize("first_consumer", ["ssh", "protected"])
@@ -140,7 +163,7 @@ def test_fresh_crypto_consumers_with_native_path_spelling(
     assert before
     source = str(Path(native_crypto.__file__).resolve().parents[1])
     root = str(original.parent)
-    spelling = "\\\\?\\" + root if extended else root
+    spelling = _package_spelling(root, extended)
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", """
 import sys

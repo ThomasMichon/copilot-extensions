@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the complete canonical application Source closure without copying unrelated payloads.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

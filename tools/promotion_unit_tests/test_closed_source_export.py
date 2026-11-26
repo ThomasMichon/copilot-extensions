@@ -88,3 +88,62 @@ def test_unsupported_export_retains_data_without_executing_setup(tmp_path: Path)
     )
     assert {path.relative_to(destination).as_posix() for path in destination.rglob("*") if path.is_file()} == files.keys()
     assert all((destination / name).read_bytes() == content for name, content in files.items())
+
+
+def test_standalone_include_group_retains_data_only_source(tmp_path: Path) -> None:
+    files = {
+        "worktree-manager/pyproject.toml": (
+            b'[project]\nname="worktree-manager"\nversion="1.0"\ndependencies=[]\n'
+            b'[build-system]\nrequires=["setuptools>=77"]\nbuild-backend="setuptools.build_meta"\n'
+            b'[dependency-groups]\nfirst-party-core=[{include-group="shared"}]\nshared=[]\n'
+        ),
+        "worktree-manager/setup.py": (ROOT / "worktree-manager/setup.py").read_bytes(),
+        "worktree-manager/src/worktree_manager/__init__.py": b"VALUE = 1\n",
+        "libs/versioned-runtime/retained.txt": b"build owner\n",
+        "libs/installer-engine/retained.txt": b"build owner\n",
+        "fleet-manager/src/fleet_manager/retained.txt": b"build owner\n",
+        "unrelated/retained.txt": b"original data-only source\n",
+    }
+    original = tmp_path / "original"
+    for name, content in files.items():
+        path = original / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    with pytest.raises(RuntimeError, match="first-party-core must be a flat requirement list") as error:
+        source._application_export_paths(original, ("standalone:worktree-manager",))
+    assert type(error.value) is RuntimeError
+    archive = tmp_path / "source.tar"
+    with tarfile.open(archive, "w") as stream:
+        for name, content in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            stream.addfile(member, io.BytesIO(content))
+    destination = tmp_path / "source"
+    destination.mkdir()
+    export.extract_application(
+        archive, destination, project_paths=("worktree-manager",),
+        projects=("standalone:worktree-manager",), deadline=time.monotonic() + 30,
+        select=source._application_export_paths,
+    )
+    assert all((destination / name).read_bytes() == content for name, content in files.items())
+
+
+def test_selector_source_preparation_error_never_becomes_a_compatibility_fallback(tmp_path: Path) -> None:
+    archive = tmp_path / "source.tar"
+    with tarfile.open(archive, "w") as stream:
+        member = tarfile.TarInfo("app/pyproject.toml")
+        content = b'[project]\nname="app"\nversion="1.0"\n'
+        member.size = len(content)
+        stream.addfile(member, io.BytesIO(content))
+    destination = tmp_path / "source"
+    destination.mkdir()
+
+    def refuse(_source: Path, _projects: tuple[str, ...]) -> tuple[str, ...]:
+        raise preparation.SourcePreparationError("selected Source deadline or integrity refusal")
+
+    with pytest.raises(preparation.SourcePreparationError, match="deadline or integrity"):
+        export.extract_application(
+            archive, destination, project_paths=("app",), projects=("app",),
+            deadline=time.monotonic() + 30, select=refuse,
+        )
+    assert not list(destination.iterdir())
