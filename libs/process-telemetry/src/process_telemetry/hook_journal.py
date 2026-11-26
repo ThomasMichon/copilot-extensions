@@ -33,6 +33,9 @@ PENDING_LIMIT = 65536
 DRAIN_LIMIT = 128
 STALE_AFTER_MS = 120_000
 LOCK_WAIT_S = 0.25
+# Directory entries and markers one start may examine; the rest wait for later starts.
+SCAN_LIMIT = 256
+RECOVER_LIMIT = 8
 
 
 def _now_ms() -> int:
@@ -101,10 +104,11 @@ def _append(directory: Path, event: dict[str, Any]) -> bool:
         if not held:
             return False
         try:
-            if path.stat().st_size + len(line) > PENDING_LIMIT:
-                return False
+            size = path.stat().st_size
         except FileNotFoundError:
-            pass
+            size = 0
+        if size + len(line) > PENDING_LIMIT:
+            return False
         append_bytes(path, line, mode=0o600)
     return True
 
@@ -160,9 +164,17 @@ class HookRun:
         }), "ascii")
         os.replace(scratch, marker)
         self.marker = marker
-        for stale in self.directory.glob(f"{self.plugin}.{self.entry}.*.start"):
-            if stale == marker:
-                continue
+        prefix, examined = f"{self.plugin}.{self.entry}.", 0
+        with os.scandir(self.directory) as entries:
+            candidates: list[Path] = []
+            for item in entries:
+                examined += 1
+                if examined > SCAN_LIMIT or len(candidates) >= RECOVER_LIMIT:
+                    break
+                name = item.name
+                if name.startswith(prefix) and name.endswith(".start") and name != marker.name:
+                    candidates.append(self.directory / name)
+        for stale in candidates:
             try:
                 prior = json.loads(stale.read_text("ascii"))
                 started = prior["started_ms"]
@@ -177,9 +189,11 @@ class HookRun:
                     continue
             if type(started) is not int or self.started_ms - started < stale_after_ms:
                 continue
+            # Renaming claims the marker, so concurrent starts report it once.
+            claimed = self.directory / f".{uuid.uuid4().hex}.recovering"
             try:
-                stale.unlink()
-            except FileNotFoundError:
+                os.replace(stale, claimed)
+            except OSError:
                 continue
             event: dict[str, Any] = {
                 "kind": "hook", "plugin": self.plugin, "entry": self.entry,
@@ -189,7 +203,11 @@ class HookRun:
                 event["run_sequence"] = sequence
             if type(started) is int and started > 0:
                 event["started_at"] = _stamp(started)
-            _append(self.directory, event)
+            if not _append(self.directory, event):
+                # The journal is full or busy: keep the marker for a later start.
+                os.replace(claimed, stale)
+                break
+            claimed.unlink()
 
     def finish(
         self, *, outcome: str, failure_category: str = "none", exit_code: int | None = None,

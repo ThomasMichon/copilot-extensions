@@ -227,6 +227,29 @@ def test_concurrent_writers_never_exceed_capacity(
     assert all(event["outcome"] == "success" for event in hook_journal.drain(tmp_path))
 
 
+def test_marker_recovery_is_bounded_per_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hook_journal, "RECOVER_LIMIT", 3)
+    for _ in range(7):
+        hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert len(hook_journal.drain(tmp_path)) == 3
+    assert len(list(tmp_path.glob("*.start"))) == 5
+
+
+def test_full_journal_keeps_stale_markers_for_a_later_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    monkeypatch.setattr(hook_journal, "PENDING_LIMIT", 0)
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert len(list(tmp_path.glob("*.start"))) == 2
+    monkeypatch.setattr(hook_journal, "PENDING_LIMIT", 65536)
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"] * 2
+
+
 def test_hook_duration_ignores_wall_clock_adjustments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
