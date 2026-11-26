@@ -996,6 +996,16 @@ unversioned fallback. Explicit setup retains its acquisition policy; completed
 runtime use does not construct an environment. The smoke-test builder remains
 separate, and full declared-project/environment adoption is not implied.
 
+Cell dependency installation binds UV and the native shell before changing CWD,
+then admits the already selected application interpreter through the prepared
+process-helper capsule's exact-runtime UV owner. Missing prerequisites and
+ordinary admission failures become cell errors before dependency execution;
+uncertain native cleanup retains its original custody. The existing Installer
+Engine dependency-policy/resilience functions still own seasoning, captured
+resolver settings, retries and native execution. Only the admission lookup
+isolates UV selectors; package resolution keeps its actual configuration.
+Dependency progress uses stderr so it cannot contaminate coordinator JSON.
+
 The default durable tier now registers the same stable launchers with the
 lowest-privilege host mechanism that satisfies "restart on next logon without a
 live Copilot session": Windows writes HKCU Run entries for the service and

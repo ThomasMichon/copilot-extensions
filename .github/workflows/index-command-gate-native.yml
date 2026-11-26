@@ -14,11 +14,13 @@ on:
       - plugins/agent-index/tests/test_managed_command_gate.py
       - plugins/agent-index/tests/test_managed_cell_probes.py
       - plugins/agent-index/tests/test_managed_cell_construction.py
+      - plugins/agent-index/tests/test_managed_cell_dependencies.py
       - plugins/agent-index/tests/test_runtime_gate.py
       - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
       - libs/payload-invocation/tests/test_index_command_gate_source.py
       - libs/payload-invocation/tests/test_index_cell_probes_source.py
       - libs/payload-invocation/tests/test_index_cell_construction_source.py
+      - libs/payload-invocation/tests/test_index_cell_dependencies_source.py
       - libs/agent-procutil/src/agent_procutil/managed_python.py
       - libs/agent-procutil/src/agent_procutil/owned_process.py
       - libs/payload-invocation/bootstrap_python.py
@@ -42,6 +44,7 @@ jobs:
       GATE_SELECTOR: bash
       EXPECTED_CASES: "14"
       EXPECTED_CONSTRUCTION_CASES: "8"
+      EXPECTED_DEPENDENCY_CASES: "8"
     steps: &command-gate-steps
       - uses: actions/checkout@v4
         with:
@@ -98,6 +101,33 @@ jobs:
           r['uv_venv_calls']==(2 if r['scenario']=='prepared' else
           1 if r['scenario']=='failed-request' else 0) for r in reports);
           print(json.dumps({'index_cell_construction_performance':reports},sort_keys=True))"
+      - name: Qualify cell dependency ingress with inert policy observation
+        env:
+          PYTEST_ADDOPTS: "--tb=short -vv"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_cell_dependencies_source.py --allow-explicit-tiers
+          -k "${{ env.GATE_SELECTOR }}"
+          --junit-dir qualification-evidence/index-cell-dependencies
+      - name: Require every dependency ingress control and offline report
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-cell-dependencies').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          expected=int(os.environ['EXPECTED_DEPENDENCY_CASES']);
+          assert len(cases)==len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_cell_dependency_performance'];
+          assert len(reports)==expected;
+          assert all(r['network']=='disabled' and r['status']=='measured' and
+          r['caller_environment']=='unchanged' and
+          r['completed']==len(r['samples_seconds'])==
+          (2 if r['scenario']=='prepared' else 1) and
+          r['runtime_uv_lookups']==r['policy_observations']==(
+          r['completed'] if r['scenario'] in ('prepared','policy-refusal') else 0)
+          for r in reports);
+          print(json.dumps({'index_cell_dependency_performance':reports},sort_keys=True))"
       - name: Require every cell-probe control and offline report
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
@@ -143,6 +173,7 @@ jobs:
       GATE_SELECTOR: bash
       EXPECTED_CASES: "14"
       EXPECTED_CONSTRUCTION_CASES: "8"
+      EXPECTED_DEPENDENCY_CASES: "8"
     steps: *command-gate-steps
   index-command-gate-windows:
     runs-on: windows-latest
@@ -151,4 +182,5 @@ jobs:
       GATE_SELECTOR: not bash
       EXPECTED_CASES: "28"
       EXPECTED_CONSTRUCTION_CASES: "16"
+      EXPECTED_DEPENDENCY_CASES: "16"
     steps: *command-gate-steps
