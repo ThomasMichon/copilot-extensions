@@ -522,6 +522,11 @@ the non-public approval conversation.
 
 ## Plan
 
+The [raced-authority fixtures and hosted SSH baselines](journal/2026/11.26-raced-authority-fixtures-and-hosted-ssh-baselines.md)
+map six conditional source-completion candidates and preserve four whole
+keepers. Review and separate final assessments precede all dispositions;
+the failed immutable-release portfolio and every parent gate remain OPEN.
+
 The [legacy fixture correspondence and retained publication gates](journal/2026/11.26-legacy-fixtures-and-publication-gates.md)
 qualify eight complete originals and all four discussions, record two
 separately spent final assessments after reviewed #14807, and record one
@@ -530,7 +535,8 @@ assessment remains unmet and OPEN, alongside six other reports and carried
 #6556/#6557 gaps. Two equal complete censuses measure 594 whole OPEN,
 with exactly that departure and no arrival or unrelated departure.
 No execution, publication/adoption completion or unit renewal is claimed;
-every parent Plan/Validation state remains.
+the factual outcome merged in #14810 and every parent Plan/Validation
+state remains.
 
 The [later workflow-status intake and keeper boundaries](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
 qualify six complete originals and all six discussions, preserve the
