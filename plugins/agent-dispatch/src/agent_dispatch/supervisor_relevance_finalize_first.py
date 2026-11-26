@@ -43,6 +43,10 @@ STATUS_TIMEOUT_SECONDS = 15.0
 SELECT_DEADLINE_SECONDS = 20.0
 IN_FLIGHT_DETAIL = "finalize in flight; effect unknown until reconciled"
 _clock = time.monotonic
+#: One-shot (``supervise --once``) budget to carry selection, finalization and
+#: publication to an outcome; an unfinished finalize stays in-flight custody.
+DRAIN_DEADLINE_SECONDS = SELECT_DEADLINE_SECONDS + FINALIZE_TIMEOUT_SECONDS + 40.0
+DRAIN_MAX_STEPS = 8
 #: Candidate pages read per sweep; the cursor carries the rest to later cycles.
 MAX_PAGES = 4
 
@@ -280,6 +284,41 @@ def sweep(owner: Supervisor) -> dict[str, Any] | None:
     job = _Job("", "", "select")
     _start(owner, job, lambda: _select(owner, job, candidates, start_cursor))
     return {"action": "selecting", "kind": "select", "candidates": len(candidates)}
+
+
+def drain(
+    owner: Supervisor, *, budget: float = DRAIN_DEADLINE_SECONDS, max_steps: int = DRAIN_MAX_STEPS,
+) -> list[dict[str, Any]]:
+    """Run finalize-first to an outcome for a one-shot supervisor, within ``budget``.
+
+    The recurring poll only advances one background job per cycle, so a
+    process that polls once and exits would never fence or finalize. This
+    waits for each job and sweeps again until one outcome is recorded (or
+    left unrecorded), nothing is left to do, or the budget expires; a running
+    finalize then keeps its durable in-flight fence for later reconciliation.
+    """
+    deadline = _clock() + budget
+    results: list[dict[str, Any]] = []
+    for _ in range(max_steps):
+        job = _job(owner)
+        if job is not None and not job.done.is_set():
+            remaining = deadline - _clock()
+            if remaining <= 0 or not job.done.wait(remaining):
+                results.append({"task_id": job.task_id, "action": "running", "kind": job.kind})
+                break
+        elif job is None and _clock() >= deadline:
+            break
+        try:
+            result = sweep(owner)
+        except Exception as exc:  # The one-shot drain stays as additive as the cycle sweep.
+            log.error("relevance finalize-first drain failed: %s", type(exc).__name__)
+            break
+        if result is None:
+            break
+        results.append(result)
+        if result.get("action") not in ("selecting", "started", "running"):
+            break
+    return results
 
 
 def _admit(owner: Supervisor, candidate: dict[str, Any] | None) -> dict[str, Any] | None:

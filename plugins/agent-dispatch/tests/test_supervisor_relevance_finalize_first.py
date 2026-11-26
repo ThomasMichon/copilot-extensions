@@ -14,6 +14,10 @@ import pytest
 from agent_dispatch import supervisor_relevance_finalize_first as sweep_mod
 from agent_dispatch.client_errors import DispatchError, DispatchUpgradeRequired
 from agent_dispatch.queue_relevance_finalize_first import FINALIZE_RUNNER
+from tests import test_pool_placement_client as controls
+
+q = controls.q
+api = controls.api
 
 
 def _done(rc: int, payload: Any, stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -394,3 +398,59 @@ def test_sweep_is_a_no_op_against_a_coordinator_without_finalize_first() -> None
     client = Old([_candidate()])
     assert sweep_mod.sweep(_owner(client, runner=_accepting)) is None  # type: ignore[arg-type]
     assert client.calls == []
+
+
+def test_one_shot_drain_carries_a_started_selection_through_settlement() -> None:
+    client = _Client([_candidate()])
+    owner = _owner(client, runner=_accepting)
+    # The single poll's sweep only starts background selection.
+    assert sweep_mod.sweep(owner)["action"] == "selecting"  # type: ignore[arg-type,index]
+    results = sweep_mod.drain(owner, budget=10)  # type: ignore[arg-type]
+    assert [r["action"] for r in results] == ["started", "settled"]
+    assert [name for name, _ in client.calls] == ["fence", "retain", "settle"]
+
+
+def test_one_shot_drain_stops_at_its_budget_with_in_flight_custody_retained() -> None:
+    release = threading.Event()
+
+    def slow(project: str, worktree_id: str) -> subprocess.CompletedProcess[str]:
+        release.wait(10)
+        return _accepting(project, worktree_id)
+
+    client = _Client([_candidate()])
+    owner = _owner(client, runner=slow)
+    sweep_mod.sweep(owner)  # type: ignore[arg-type]
+    started = time.monotonic()
+    try:
+        results = sweep_mod.drain(owner, budget=0.5)  # type: ignore[arg-type]
+    finally:
+        release.set()
+    assert time.monotonic() - started < 5
+    assert results[-1] == {"task_id": "t1", "action": "running", "kind": "finalize"}
+    assert [name for name, _ in client.calls] == ["fence", "retain"]
+
+
+def test_supervise_once_finalizes_an_eligible_closeout_in_one_invocation(
+    monkeypatch: pytest.MonkeyPatch, q: Any, api: Any, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch.supervisor import Supervisor
+
+    monkeypatch.setattr("agent_dispatch.supervise_cli.configure_file_logging", lambda *_: None)
+    fake = _Client([_candidate()])
+
+    def poll_once(self: Supervisor) -> list[str]:
+        stub = _owner(fake, runner=_accepting)
+        for name in ("client", "finalize_liveness_fn", "finalize_runner", "_recheck_governance"):
+            setattr(self, name, getattr(stub, name))
+        sweep_mod.sweep(self)
+        return []
+
+    with controls.connected(api, []) as client:
+        monkeypatch.setattr(cli, "_client", lambda *args, **kwargs: client)
+        monkeypatch.setattr(Supervisor, "poll_once", poll_once)
+        args = cli.build_parser().parse_args(["supervise", "--all-repos", "--once"])
+        assert args.func(args) == 0
+    emitted = json.loads(capsys.readouterr().out)
+    assert [r["action"] for r in emitted["finalize_first"]] == ["started", "settled"]
+    assert [name for name, _ in fake.calls] == ["fence", "retain", "settle"]

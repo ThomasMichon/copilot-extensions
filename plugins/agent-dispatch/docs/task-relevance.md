@@ -119,7 +119,10 @@ permitted `abandon` decision can retire obsolete SUBMITTED work directly.
   --project <project> record`) — `finalized` settles, an unfinalized active
   checkout releases to the fallback, and a missing record or any other
   status keeps custody. The supervisor runs at most one finalize-first job
-  at a time.
+  at a time. Because `supervise --once` exits after one poll, it then drains
+  that job synchronously, within a bounded budget, to one recorded outcome
+  (reported as `finalize_first`); a finalize still running at the budget
+  keeps its in-flight fence for a later reconciliation.
 - **Retirement abandonment.** When retiring a reservation abandons its task,
   the retire endpoint publishes `task.abandoned` (with handoff-release and
   lifecycle telemetry) once, alongside `spawn.retired`.
