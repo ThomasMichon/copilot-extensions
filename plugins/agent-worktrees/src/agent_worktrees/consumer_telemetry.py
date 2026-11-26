@@ -46,8 +46,35 @@ _PR_NAMESPACE = {"create": "create-pr", "merge": "pr-merge"}
 # Only these lease subcommands mutate; inspect/status/list stay unobserved.
 _MUTATING_LEASE = frozenset({"acquire", "borrow", "renew", "release"})
 _HELP = frozenset({"-h", "--help"})
-# Read-only/preview modes of an observed verb publish or land nothing, so they
-# are never recorded as activity (flags from each verb's owning parser).
+# Every long option of the parsers whose modes change the observed record.
+# argparse accepts any unambiguous prefix of these, so a token is resolved
+# against the verb's complete option set (pinned to the parsers by a test).
+_CREATE_PR_OPTIONS = frozenset({
+    "--help", "--title", "--publication-origin", "--publication-label", "--branch",
+    "--topic", "--repo", "--from-branch", "--new", "--source-workspace",
+    "--expected-head", "--body", "--body-file", "--no-open", "--draft", "--hold",
+    "--no-attribution", "--confirm-fork", "--dry-run", "--json", "--config",
+})
+_LONG_OPTIONS: dict[str, frozenset[str]] = {
+    "create-pr": _CREATE_PR_OPTIONS,
+    "pr-create": _CREATE_PR_OPTIONS,
+    "push-changes": frozenset({
+        "--help", "--publication-origin", "--publication-label", "--rewrite-pr",
+        "--break-glass-reason", "--confirm-break-glass", "--title", "--title-only",
+        "--dry-run", "--allow-unsquashed", "--json", "--config",
+    }),
+    "pr-merge": frozenset({
+        "--help", "--all", "--dry-run", "--loop", "--interval", "--max-passes",
+        "--host", "--token", "--now", "--json", "--config",
+    }),
+    "finalize": frozenset({
+        "--help", "--worktree-id", "--dry-run", "--retain-checkout",
+        "--recover-retired-owner", "--abandon", "--handoff-to", "--force-open-pr",
+        "--explain-landing", "--json", "--config", "--dispatch-task-id",
+        "--dispatch-reservation-key", "--dispatch-native-id",
+    }),
+}
+# Read-only/preview modes publish or land nothing, so they are never recorded.
 _PREVIEW_FLAGS: dict[str, frozenset[str]] = {
     "create-pr": frozenset({"--dry-run"}),
     "pr-create": frozenset({"--dry-run"}),
@@ -55,21 +82,27 @@ _PREVIEW_FLAGS: dict[str, frozenset[str]] = {
     "pr-merge": frozenset({"--dry-run"}),
     "finalize": frozenset({"--dry-run", "--explain-landing"}),
 }
-# Shortest unambiguous argparse abbreviation accepted for each preview flag.
-_PREVIEW_PREFIX = {"--dry-run": "--dr", "--title-only": "--title-", "--explain-landing": "--ex"}
 
 
-def _is_preview(verb: str, rest: list[str]) -> bool:
-    flags = _PREVIEW_FLAGS.get(verb)
-    if not flags:
-        return False
+def _options(verb: str, rest: list[str]) -> set[str]:
+    """Long options in ``rest`` as the verb's parser resolves them."""
+    known = _LONG_OPTIONS.get(verb)
+    if not known:
+        return set()
+    resolved: set[str] = set()
     for token in rest:
         if token == "--":
             break
-        for flag in flags:
-            if token == flag or (token.startswith(_PREVIEW_PREFIX[flag]) and flag.startswith(token)):
-                return True
-    return False
+        if not token.startswith("--"):
+            continue
+        name = token.split("=", 1)[0]
+        if name in known:
+            resolved.add(name)
+            continue
+        matches = [option for option in known if option.startswith(name)]
+        if len(matches) == 1:
+            resolved.add(matches[0])
+    return resolved
 
 
 def _verb_index(args: list[str]) -> int | None:
@@ -140,9 +173,10 @@ def classify(argv: list[str]) -> tuple[str, str] | None:
         return None
     if verb == "lease" and _lease_subcommand(rest) not in _MUTATING_LEASE:
         return None
-    if _is_preview(verb, rest):
+    options = _options(verb, rest)
+    if options & _PREVIEW_FLAGS.get(verb, frozenset()):
         return None
-    if verb == "finalize" and "--abandon" in rest:
+    if verb == "finalize" and "--abandon" in options:
         return ("pr", "abandon")
     return observed
 

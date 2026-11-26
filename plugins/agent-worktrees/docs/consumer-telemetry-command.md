@@ -24,8 +24,9 @@ Without the file the run is unchanged: an observed verb reads only that one
 path and starts no child. Unobserved verbs (status, listing, read-only lease
 subcommands, `--help`) and preview modes that publish or land nothing
 (`create-pr --dry-run`, `push-changes --dry-run` / `--title-only`,
-`pr-merge --dry-run`, `finalize --dry-run` / `--explain-landing`, and their
-namespace aliases) never look it up. A present invalid file refuses export
+`pr-merge --dry-run`, `finalize --dry-run` / `--explain-landing`, their
+namespace aliases, and any unambiguous abbreviation the verb's parser accepts)
+never look it up. A present invalid file refuses export
 for the run; it never borrows another route. No CLI argument, environment
 variable, repository or current directory selects a root or a command.
 

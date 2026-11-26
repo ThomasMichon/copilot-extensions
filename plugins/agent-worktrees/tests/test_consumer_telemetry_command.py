@@ -89,6 +89,13 @@ def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str], main: Any) -> Any:
     (["finalize", "--explain-landing", "--json"], None), (["finalize", "--dry-run"], None),
     (["worktree", "finalize", "--explain-landing"], None),
     (["pr-merge", "1", "--dry-run"], None), (["pr", "merge", "--all", "--dry-run"], None),
+    (["push-changes", "--d"], None), (["worktree", "push", "--title-o"], None),
+    (["finalize", "--e", "--json"], None), (["worktree", "finalize", "--dr"], None),
+    (["create-pr", "--dry"], None), (["create-pr", "--dr"], ("pr", "create")), (["pr", "merge", "1", "--d"], None),
+    (["push-changes", "--title", "t"], ("pr", "push")),
+    (["finalize", "--", "--dry-run"], ("pr", "merge")),
+    (["finalize", "--ab", "--handoff-to", "x"], ("pr", "abandon")),
+    (["worktree", "finalize", "--a", "--h", "x"], ("pr", "abandon")),
 ])
 def test_classify_observes_only_mutating_lifecycle_verbs(
     argv: list[str], expected: tuple[str, str] | None,
@@ -110,15 +117,64 @@ def test_legacy_install_runs_unchanged_and_starts_nothing(
     ["create-pr", "--dry-run"], ["pr", "create", "--dry-run"],
     ["worktree", "push", "--title-only"], ["push-changes", "--dry-run"],
     ["finalize", "--explain-landing", "--json"], ["worktree", "finalize", "--explain-landing"],
+    ["push-changes", "--d"], ["finalize", "--e", "--json"],
 ])
 def test_unobserved_verbs_never_read_the_policy(
-    monkeypatch: pytest.MonkeyPatch, argv: list[str],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str],
 ) -> None:
-    def fail() -> Path:
-        raise AssertionError("policy lookup on an unobserved verb")
+    lookups: list[str] = []
 
-    monkeypatch.setattr(config, "install_dir", fail)
+    def record() -> Path:
+        lookups.append("install_dir")
+        return tmp_path
+
+    monkeypatch.setattr(config, "install_dir", record)
     assert _run(monkeypatch, argv, lambda: 7) == 7
+    assert lookups == []
+
+
+def test_observed_verbs_do_read_the_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lookups: list[str] = []
+
+    def record() -> Path:
+        lookups.append("install_dir")
+        return tmp_path
+
+    monkeypatch.setattr(config, "install_dir", record)
+    assert _run(monkeypatch, ["push-changes"], lambda: 0) == 0
+    assert lookups
+
+
+def _parser_options(parser: Any) -> frozenset[str]:
+    return frozenset(
+        option for action in parser._actions for option in action.option_strings
+        if option.startswith("--")
+    )
+
+
+def test_option_tables_match_the_owning_parsers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prefix resolution is only right if every competing long option is known."""
+    import argparse
+
+    from agent_worktrees import finalize_cli, pr_merge_cli
+
+    root = argparse.ArgumentParser()
+    finalize_cli.add_parsers(root.add_subparsers())
+    choices: dict[str, Any] = root._subparsers._group_actions[0].choices  # type: ignore[union-attr,assignment]
+    for verb in ("create-pr", "pr-create", "push-changes", "finalize"):
+        assert consumer_telemetry._LONG_OPTIONS[verb] == _parser_options(choices[verb]), verb
+
+    captured: list[frozenset[str]] = []
+
+    def capture(self: argparse.ArgumentParser, *args: Any, **kwargs: Any) -> Any:
+        captured.append(_parser_options(self))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", capture)
+    assert pr_merge_cli.cmd_pr_merge_dispatch(["1"]) == 0
+    assert captured == [consumer_telemetry._LONG_OPTIONS["pr-merge"]]
 
 
 class _LabelProvider:
