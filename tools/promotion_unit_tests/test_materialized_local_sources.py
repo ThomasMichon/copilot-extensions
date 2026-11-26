@@ -12,6 +12,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import materialize_main as materializer
+import materialize_installer_engine as installer_assets
+import materialize_payload_invocation as invocation_assets
+import installer_engine_ref as contract
 import uv_editable_ref as editable
 
 
@@ -23,7 +26,7 @@ def _write(path: Path, text: str) -> None:
 @pytest.mark.parametrize(
     "kind", ["missing", "editable", "escape", "conditional-route", "reentry"]
 )
-def test_materialized_closure_refuses_incomplete_sources(tmp_path, kind):
+def test_materialized_closure_refuses_incomplete_sources(tmp_path: Path, kind: str) -> None:
     consumer = tmp_path / "plugins" / "example"
     first = consumer / "libs" / "first"
     _write(first / "pyproject.toml", '[project]\nname = "first"\nversion = "1"\n')
@@ -59,7 +62,7 @@ def test_materialized_closure_refuses_incomplete_sources(tmp_path, kind):
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_materialized_closure_refuses_retained_workspace_sources(tmp_path, nested):
+def test_materialized_closure_refuses_retained_workspace_sources(tmp_path: Path, nested: bool) -> None:
     consumer = tmp_path / "plugins" / "example"
     package = consumer / "libs" / "nested" if nested else consumer
     if nested:
@@ -77,7 +80,7 @@ def test_materialized_closure_refuses_retained_workspace_sources(tmp_path, neste
 
 
 @pytest.mark.parametrize("kind", ["git", "url"])
-def test_materialized_closure_refuses_file_uri_sources(tmp_path, kind):
+def test_materialized_closure_refuses_file_uri_sources(tmp_path: Path, kind: str) -> None:
     for nested in (False, True):
         consumer = tmp_path / str(nested) / "plugins" / "example"
         package = consumer / "libs" / "nested" if nested else consumer
@@ -97,9 +100,8 @@ def test_materialized_closure_refuses_file_uri_sources(tmp_path, kind):
 
 
 @pytest.mark.parametrize("foreign", [False, True], ids=["owned-preimage", "foreign-preimage"])
-def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path, foreign):
+def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path: Path, foreign: bool) -> None:
     source, candidate = tmp_path / "source", tmp_path / "candidate"
-    contract = materializer.mie.ier
     names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
     library = source / "libs/update-driver"
     for name in names:
@@ -115,7 +117,7 @@ def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path,
               for path in nested.rglob("*") if path.is_file()}
     original = {path.relative_to(source): path.read_bytes()
                 for path in source.rglob("*") if path.is_file()}
-    log = materializer.mie.materialize_derived_files(
+    log = installer_assets.materialize_derived_files(
         candidate, canonical_root=source, copied_consumer=(library, nested),
     )
     if foreign:
@@ -130,21 +132,20 @@ def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path,
                         for path in source.rglob("*") if path.is_file()}
 
 
-def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
+def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path: Path) -> None:
     source, candidate = tmp_path / "source", tmp_path / "candidate"
-    contract = materializer.mie.ier
     owners = ("agent-containers", "agent-machines", "budget-guidance")
     names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
     for owner in owners:
         names.update(contract.native_files(source / "plugins" / owner, source))
     for name in names:
-        _write(source / "libs/installer-engine" / name, f"# canonical {name}\n")
+        _write(contract.native_source(source / "libs/installer-engine", name), f"# canonical {name}\n")
         for owner in owners:
             for root in (source, candidate):
                 _write(root / "plugins" / owner / "scripts" / name, f"# previous {name}\n")
     original = {path.relative_to(source): path.read_bytes()
                 for path in source.rglob("*") if path.is_file()}
-    log = materializer.mie.materialize_derived_files(candidate, canonical_root=source)
+    log = installer_assets.materialize_derived_files(candidate, canonical_root=source)
     assert log and not any(line.startswith("SKIP") for line in log), log
     for owner in owners:
         expected_names = set(contract.native_files(source / "plugins" / owner, source))
@@ -152,7 +153,7 @@ def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
             expected_names.update(contract.PYTHON_FILES)
         for name in expected_names:
             assert (candidate / "plugins" / owner / "scripts" / name).read_bytes() == (
-                source / "libs/installer-engine" / name
+                contract.native_source(source / "libs/installer-engine", name)
             ).read_bytes()
         if "runtime_launcher.py" not in expected_names:
             assert (candidate / "plugins" / owner / "scripts/runtime_launcher.py").read_bytes() == (
@@ -162,31 +163,35 @@ def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
                         for path in source.rglob("*") if path.is_file()}
 
 
-def test_unrelated_library_copy_does_not_read_installer_inputs(tmp_path, monkeypatch):
+def test_unrelated_library_copy_does_not_read_installer_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source, candidate = tmp_path / "source", tmp_path / "candidate"
     library = source / "libs/unrelated"
     copied = candidate / "plugins/sample/libs/unrelated"
     library.mkdir(parents=True)
     copied.mkdir(parents=True)
 
-    def refuse_read(*args, **kwargs):
+    def refuse_read(*args: object, **kwargs: object) -> None:
         raise AssertionError("An unrelated library must not acquire Installer inputs")
 
-    monkeypatch.setattr(materializer.mie.ier, "support_files", refuse_read)
-    assert materializer.mie.materialize_derived_files(
+    monkeypatch.setattr(contract, "support_files", refuse_read)
+    assert installer_assets.materialize_derived_files(
         candidate, canonical_root=source, copied_consumer=(library, copied),
     ) == []
 
 
-def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch):
+def test_materializer_refuses_missing_standalone_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     (tmp_path / "worktree-manager").mkdir()
     (tmp_path / "plugins" / "skill-only").mkdir(parents=True)
 
-    def refuse_copy(*args, **kwargs):
+    def refuse_copy(*args: object, **kwargs: object) -> None:
         raise AssertionError("A missing standalone manifest must refuse before copying")
 
     monkeypatch.setattr(materializer, "materialize_installer_engine_refs", refuse_copy)
-    monkeypatch.setattr(materializer.mpiv, "materialize", refuse_copy)
+    monkeypatch.setattr(invocation_assets, "materialize", refuse_copy)
     log = materializer.materialize(tmp_path, canonical_root=tmp_path)
     assert (
         len(log) == 1 and log[0].startswith("SKIP local source") and "missing" in log[0]
@@ -194,7 +199,7 @@ def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("copied", [False, True], ids=["in-place", "promotion-copy"])
-def test_whole_snapshot_materializes_declared_project_closure(tmp_path, copied):
+def test_whole_snapshot_materializes_declared_project_closure(tmp_path: Path, copied: bool) -> None:
     source = tmp_path / "source"
     _write(source / "pyproject.toml", (
         '[tool.copilot-extensions.python-projects]\nexample = "applications/example"\n'
@@ -230,7 +235,7 @@ def test_whole_snapshot_materializes_declared_project_closure(tmp_path, copied):
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_materialized_closure_audits_every_requirement_surface(tmp_path, nested):
+def test_materialized_closure_audits_every_requirement_surface(tmp_path: Path, nested: bool) -> None:
     requirement = '"missing [extra] @ file:///unavailable/package"'
     surfaces = [
         '[project]\ndependencies = ["missing[] @ file:///unavailable/package"]\n',
@@ -269,8 +274,8 @@ def test_materialized_closure_audits_every_requirement_surface(tmp_path, nested)
 
 
 def test_materialized_closure_accepts_siblings_archives_and_registry_requirements(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     consumer = tmp_path / "plugins" / "example"
     _write(
         consumer / "pyproject.toml",

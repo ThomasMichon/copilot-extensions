@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Legacy whole-action mutex. Never replace a live lock inode or malformed receipt.
 __install_lock_fd=""
+__install_lock_python=""
 
 _validate_install_root() {
     local cursor="$INSTALL_DIR"
@@ -82,9 +83,33 @@ while True:
 verify()
 # No LOCK_UN: the parent retains this same open file description after exit.
 PY
+    local result=$?
+    [[ "$result" == 0 ]] || return "$result"
+    __install_lock_python="$python"
+}
+
+_install_lock_names_descriptor() {
+    if [[ -z "$__install_lock_python" ]]; then
+        [[ "$INSTALL_DIR/.install.lock" -ef /dev/fd/8 ]]
+        return
+    fi
+    # Darwin's descriptor filesystem does not expose the held file's stat identity.
+    "$__install_lock_python" -I -B -S - "$INSTALL_DIR/.install.lock" 8>&8 <<'PY'
+import os
+import stat
+import sys
+
+opened = os.fstat(8)
+named = os.stat(sys.argv[1], follow_symlinks=False)
+raise SystemExit(not (
+    stat.S_ISREG(named.st_mode)
+    and (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)
+))
+PY
 }
 
 _enter_install_lock() {
+    __install_lock_python=""
     local __timeout="${1:-$(_install_lock_timeout)}"
     case "$__timeout" in ''|*[!0-9]*) return 1 ;; esac
     [[ "$__timeout" -gt 0 ]] || return 1
@@ -98,7 +123,7 @@ _enter_install_lock() {
         exec 8>&-
         return 1
     fi
-    if ! [[ "$INSTALL_DIR/.install.lock" -ef /dev/fd/8 ]] ||
+    if ! _install_lock_names_descriptor ||
         ! _validate_install_root || ! _legacy_install_receipts_clear; then
         exec 8>&-
         return 1

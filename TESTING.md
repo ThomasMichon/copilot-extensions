@@ -1,5 +1,7 @@
 # Testing copilot-extensions
 
+Containers' [command controls](plugins/agent-containers/tests/README.md) are backend-free.
+
 Bridge's `tests/test_installer_watchdog.py` exercises the shared PowerShell
 self-stage block in fresh synthetic homes under both Windows shell hosts.
 The contained selection is `tools/run-tests.ps1 agent-bridge --test-file

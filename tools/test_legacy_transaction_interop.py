@@ -52,8 +52,49 @@ def _run(script: Path, fallback: bool) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed owned gate fixture
         [BASH, _posix(script)], env=_environment(fallback), capture_output=True,
         input="", text=True, timeout=10,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+
+
+@pytest.mark.skipif(os.name == "nt" or BASH is None, reason="Native POSIX descriptor identity")
+@pytest.mark.parametrize("product", PRODUCTS)
+def test_python_backend_admits_the_held_persistent_inode(tmp_path: Path, product: str) -> None:
+    root = tmp_path.resolve() / "runtime"
+    root.mkdir()
+    lock = root / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_ino, lock.read_bytes()
+    result = _run(_script(tmp_path, product, root, "\n".join((
+        "_enter_install_lock 1",
+        "_install_lock_names_descriptor",
+        "printf 'admitted\\n'",
+    ))), True)
+    assert result.returncode == 0 and result.stdout.strip() == "admitted", result.stdout + result.stderr
+    assert (lock.stat().st_ino, lock.read_bytes()) == before
+
+
+@pytest.mark.skipif(os.name == "nt" or BASH is None, reason="Native POSIX descriptor identity")
+@pytest.mark.parametrize("product", PRODUCTS)
+@pytest.mark.parametrize("replacement", ("file", "symlink"))
+def test_python_backend_refuses_a_replaced_or_linked_name(
+    tmp_path: Path, product: str, replacement: str,
+) -> None:
+    root = tmp_path.resolve() / "runtime"
+    root.mkdir()
+    replace = (
+        ': > "$INSTALL_DIR/.install.lock"' if replacement == "file" else
+        'ln -s retained-lock "$INSTALL_DIR/.install.lock"'
+    )
+    result = _run(_script(tmp_path, product, root, "\n".join((
+        "_enter_install_lock 1",
+        'mv "$INSTALL_DIR/.install.lock" "$INSTALL_DIR/retained-lock"',
+        replace,
+        "if _install_lock_names_descriptor; then exit 9; fi",
+        "printf 'refused\\n'",
+    ))), True)
+    assert result.returncode == 0 and result.stdout.strip() == "refused", result.stdout + result.stderr
+    assert (root / "retained-lock").is_file()
+    assert (root / ".install.lock").is_symlink() == (replacement == "symlink")
 
 
 @pytest.mark.skipif(not LINUX_FLOCK, reason="Real Linux flock/fcntl interoperability")
@@ -62,6 +103,7 @@ def _run(script: Path, fallback: bool) -> subprocess.CompletedProcess[str]:
 def test_actual_native_and_python_backends_contend_in_both_directions(
     tmp_path: Path, product: str, holder_fallback: bool,
 ) -> None:
+    assert BASH is not None
     root = tmp_path / "runtime"
     root.mkdir()
     lock = root / ".install.lock"
@@ -76,6 +118,7 @@ def test_actual_native_and_python_backends_contend_in_both_directions(
         [BASH, str(holder_script)], env=_environment(holder_fallback),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
+    assert holder.stdout is not None
     try:
         assert select.select([holder.stdout], [], [], 5)[0], "Holder failed to report admission"
         assert holder.stdout.readline().strip() == "held"
@@ -175,6 +218,7 @@ def test_owned_gate_releases_after_failure_or_stdin_eof(
 def test_actual_init_stamp_publisher_obeys_opposite_backend_holder(
     tmp_path: Path, product: str, publisher_fallback: bool,
 ) -> None:
+    assert BASH is not None
     root = tmp_path / "runtime"
     root.mkdir()
     home = tmp_path / "home"
@@ -188,6 +232,7 @@ def test_actual_init_stamp_publisher_obeys_opposite_backend_holder(
         [BASH, str(holder_script)], env=_environment(not publisher_fallback),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
+    assert holder.stdout is not None
     try:
         assert select.select([holder.stdout], [], [], 5)[0]
         assert holder.stdout.readline().strip() == "held"
