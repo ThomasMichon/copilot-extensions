@@ -15,7 +15,7 @@ _TEMPLATE = _PLUGIN / "instructions" / "blocker-review-fallback.instructions.md"
 _SKILL = _PLUGIN / "skills" / "reviewing-blockers-skeptically" / "SKILL.md"
 
 
-def test_projection_declaration_shape():
+def test_projection_declaration_shape() -> None:
     declaration = json.loads(_DECLARATION.read_text(encoding="utf-8"))
     assert declaration["schema"] == "copilot-extensions.instruction-projections"
     projections = [
@@ -34,7 +34,7 @@ def test_projection_declaration_shape():
     assert projection["legacyMarkers"] == []
 
 
-def test_template_is_reviewable_static_fallback():
+def test_template_is_reviewable_static_fallback() -> None:
     content = _TEMPLATE.read_bytes()
     assert content.startswith(b'---\napplyTo: "**"\n---\n')
     assert b"reviewing-blockers-skeptically" in content
@@ -51,7 +51,7 @@ def test_template_is_reviewable_static_fallback():
         assert forbidden not in content
 
 
-def test_skill_keeps_hard_stops_and_negative_scope():
+def test_skill_keeps_hard_stops_and_negative_scope() -> None:
     content = _SKILL.read_text(encoding="utf-8")
     assert content.startswith("---\nname: reviewing-blockers-skeptically\n")
     frontmatter = content.split("---", 2)[1]
