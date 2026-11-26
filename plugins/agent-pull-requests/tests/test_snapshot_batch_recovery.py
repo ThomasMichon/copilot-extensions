@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -142,8 +143,8 @@ def test_lost_committed_response_can_only_be_reconciled_by_readback(
     original = _pending(store)
     write = storage._atomic_write_json
 
-    def lose_response(*args: Any) -> None:
-        write(*args)
+    def lose_response(*args: Any, **kwargs: Any) -> None:
+        write(*args, **kwargs)
         raise OSError("synthetic lost result after durable commit")
 
     with monkeypatch.context() as patch:
@@ -206,3 +207,50 @@ def test_commit_rechecks_current_lifecycle_and_clock_without_clearing(
             store, original, lifecycle_checkpoint=lifecycle, expires_at=EXPIRES,
         )
     assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["withdrawn", "expired", "backwards", "lock"])
+def test_staged_recovery_cannot_replace_after_its_authority_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from single_instance_lease import OperationOwnershipError
+
+    clock = [1000.]
+    store = _store(tmp_path, clock)
+    store.provision()
+    original = _pending(store)
+    before = store.path.read_bytes()
+    fsync = os.fsync
+    staged = withdrawn = False
+
+    def interrupt_staging(descriptor: int) -> None:
+        nonlocal staged, withdrawn
+        fsync(descriptor)
+        if staged:
+            return
+        staged = True
+        if failure == "withdrawn":
+            withdrawn = True
+        elif failure == "expired":
+            clock[0] = EXPIRES
+        elif failure == "backwards":
+            clock[0] = 999.
+        else:
+            replacement = tmp_path / "replacement.lock"
+            replacement.write_bytes(b"")
+            replacement.replace(tmp_path / "watch-replay.lock")
+
+    def lifecycle() -> None:
+        if withdrawn:
+            raise PermissionError("fixture owner withdrawn during staging")
+
+    expected = {
+        "withdrawn": PermissionError, "expired": ReplayCallerExpired,
+        "backwards": ValueError, "lock": OperationOwnershipError,
+    }
+    monkeypatch.setattr(os, "fsync", interrupt_staging)
+    with pytest.raises(expected[failure]):
+        recovery.recover(
+            store, original, lifecycle_checkpoint=lifecycle, expires_at=EXPIRES,
+        )
+    assert staged and store.path.read_bytes() == before

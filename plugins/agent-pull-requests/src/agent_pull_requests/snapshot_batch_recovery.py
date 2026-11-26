@@ -139,7 +139,9 @@ def recover(
         row.update(pending=None, observed_at=now)
         return result
 
-    return store._review_transaction(transition, expires_at=expires_at, checkpoint=current)
+    return store._review_transaction(
+        transition, expires_at=expires_at, checkpoint=current, before_replace=current,
+    )
 
 
 def read_recovery(
