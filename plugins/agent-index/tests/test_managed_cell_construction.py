@@ -111,6 +111,12 @@ def execute(command,**options):
     )
     assert command[position].count(anchor)==1
     command[position]=command[position].replace(anchor,prefix+anchor)
+    if os.name=='nt':
+        command[position]=command[position].replace(
+            'if ($result.Output)',
+            '[IO.File]::WriteAllText(($env:CELL_CONSTRUCTION_TRACE+\'.json\'),'
+            '($result | ConvertTo-Json -Compress)); if ($result.Output)',
+        )
     cell._run_checked(command,**options)
 before=dict(os.environ); original_cwd=os.getcwd()
 try:
@@ -132,6 +138,9 @@ try:
     report={'status':'created','application':json.loads(result.stdout)}
 except cell.CellError as error:
     report={'status':'refused','error':str(error)}
+native_report=Path(os.environ['CELL_CONSTRUCTION_TRACE']+'.json')
+if native_report.exists():
+    report['native_result']=json.loads(native_report.read_text(encoding='utf-8-sig'))
 report.update(calls=calls,caller_unchanged=before==dict(os.environ) and original_cwd==os.getcwd(),
               bootstrap=list(sys.version_info[:3]))
 print(json.dumps(report))
