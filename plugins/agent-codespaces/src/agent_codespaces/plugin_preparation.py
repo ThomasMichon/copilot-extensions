@@ -8,6 +8,8 @@ import json
 import logging
 import shlex
 import time
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any, cast
 
 from plugin_resolve.reflection import (
     build_plan, build_prepare_script, parse_execution_checkout, parse_prepared, parse_prepared_context,
@@ -24,11 +26,11 @@ from .codespace_plugins import (
 from .config import repo_copilot_settings
 
 
-def _registered_target_binding(repository: str) -> dict:
+def _registered_target_binding(repository: str) -> dict[str, Any]:
     from .coordination import _run
     from .config import _normalize_repository_remote
 
-    def query(arguments):
+    def query(arguments: list[str]) -> dict[str, Any] | None:
         result = _run(arguments, timeout=30)
         if result is None:
             return None
@@ -68,7 +70,10 @@ def _registered_target_binding(repository: str) -> dict:
     return {"target_repository": identity or repository, "target_source_roots": roots} if roots else {}
 
 
-def checkout_provision_command(config, repo, *, requested_repo=None, repo_remote=None) -> str:
+def checkout_provision_command(
+    config: Any, repo: str | None, *, requested_repo: str | None = None,
+    repo_remote: str | None = None,
+) -> str:
     if requested_repo is None or not repo_remote:
         return ""
     folder, prepopulated = config.workspace_folder_for_request(repo, requested_repo)
@@ -80,7 +85,10 @@ def checkout_provision_command(config, repo, *, requested_repo=None, repo_remote
     )
 
 
-def checkout_acp_command(config, repo, *, requested_repo=None, repo_remote=None) -> str:
+def checkout_acp_command(
+    config: Any, repo: str | None, *, requested_repo: str | None = None,
+    repo_remote: str | None = None,
+) -> str:
     from .config import _WORKSPACE_CD
     copilot = "copilot --acp --stdio --allow-all --experimental"
     if requested_repo is not None:
@@ -93,12 +101,15 @@ def checkout_acp_command(config, repo, *, requested_repo=None, repo_remote=None)
         command = f"cd {shlex.quote(folder)} && {copilot}"
         return f"{clone} && {command}" if clone else command
     if config.acp_command:
-        return config.acp_command
+        return cast(str, config.acp_command)
     folder = config.workspace_folder_for(repo)
     return f"cd {folder} && {copilot}" if folder else f"{_WORKSPACE_CD} && {copilot}"
 
 
-def plugin_plan(repo: str | None, config, sources=(), *, repo_roots=()) -> dict:
+def plugin_plan(
+    repo: str | None, config: Any, sources: Iterable[Any] = (), *,
+    repo_roots: Iterable[Any] = (),
+) -> dict[str, Any]:
     settings_roots = list(dict.fromkeys(
         Path(root) for root in [*(getattr(config, "source_paths", ()) or ()), *repo_roots]
     ))
@@ -120,20 +131,50 @@ def plugin_plan(repo: str | None, config, sources=(), *, repo_roots=()) -> dict:
             if spec.get("allow_missing"):
                 selected[spec["source"]]["allow_missing"] = True
     binding = {}
-    if repo and requires_repository_binding(selected.values(), roots):
+    if repo and requires_repository_binding(list(selected.values()), roots):
         binding = _registered_target_binding(repo)
     return build_plan(list(selected.values()), roots,
                       marketplaces=settings.get("extraKnownMarketplaces"), **binding)
 
 
-async def prepare_plugins(manager, name: str, repo: str | None, config, workspace: str,
-                          sources=(), *, worktree_id: str | None = None, repo_roots=(),
+async def prepare_plugins(manager: Any, name: str, repo: str | None, config: Any, workspace: str,
+                          sources: Iterable[Any] = (), *, worktree_id: str | None = None,
+                          repo_roots: Iterable[Any] = (),
                           prelude: str = "", relay_port: int | None = None,
-                          prepared_context: dict | None = None,
+                          prepared_context: dict[str, Any] | None = None,
                           include_compiled_context: bool = True,
                           live_attachment: bool = False,
                           hosting_required: bool = True,
                           receiving_context: str | None = None) -> list[str]:
+    """Prepare the venue's plugins, noting one `plugin_preparation` stage record."""
+    from . import consumer_telemetry as ct
+
+    started = ct.clock()
+    try:
+        prepared = await _prepare_plugins(
+            manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
+            repo_roots=repo_roots, prelude=prelude, relay_port=relay_port,
+            prepared_context=prepared_context,
+            include_compiled_context=include_compiled_context,
+            live_attachment=live_attachment, hosting_required=hosting_required,
+            receiving_context=receiving_context,
+        )
+    except BaseException as exc:
+        ct.note("plugin_preparation", "failure", ct.preparation_reason(exc), started=started)
+        raise
+    ct.note("plugin_preparation", "success", "none", started=started)
+    return prepared
+
+
+async def _prepare_plugins(manager: Any, name: str, repo: str | None, config: Any, workspace: str,
+                           sources: Iterable[Any] = (), *, worktree_id: str | None = None,
+                           repo_roots: Iterable[Any] = (),
+                           prelude: str = "", relay_port: int | None = None,
+                           prepared_context: dict[str, Any] | None = None,
+                           include_compiled_context: bool = True,
+                           live_attachment: bool = False,
+                           hosting_required: bool = True,
+                           receiving_context: str | None = None) -> list[str]:
     from ._ssh_retry import exec_with_retry
 
     if receiving_context is not None:
@@ -194,7 +235,7 @@ def attached_launch_command(command: str, workspace: str) -> str:
     return f"bash -lc {shlex.quote(f'cd -- {shlex.quote(workspace)} && {inner}')}"
 
 
-async def require_relay_ready(manager, name: str, port: int) -> None:
+async def require_relay_ready(manager: Any, name: str, port: int) -> None:
     from ssh_manager import EXEC_COMMAND_CLEANUP_TIMEOUT
     from ._ssh_retry import exec_with_retry
     script = (
@@ -223,12 +264,14 @@ async def require_relay_ready(manager, name: str, port: int) -> None:
         await asyncio.sleep(0.25)
 
 
-def disabled_plugin(source: str) -> dict:
+def disabled_plugin(source: str) -> dict[str, Any]:
     return selection_spec({"source": source, "enable": False})
 
 
 async def prepare_attached(
-    args, config, *, on_ready=None, release=None, prepared_context: dict | None = None,
+    args: Any, config: Any, *, on_ready: Callable[[bool], object] | None = None,
+    release: Callable[[], Awaitable[object]] | None = None,
+    prepared_context: dict[str, Any] | None = None,
 ) -> None:
     from ssh_manager import CodespaceConfigSource, ConnectionManager
     from .__main__ import _lookup_codespace_repo
@@ -264,13 +307,17 @@ async def prepare_attached(
             getattr(args, "stage_plugins", []), worktree_id=args.worktree_id,
             repo_roots=getattr(args, "plugin_roots", []),
             prelude=prelude, relay_port=port,
-            **({"prepared_context": prepared_context} if prepared_context is not None else {}),
+            **cast(
+                "dict[str, Any]",
+                {"prepared_context": prepared_context} if prepared_context is not None else {},
+            ),
             include_compiled_context=False,
             live_attachment=rejoining,
         )
         if on_ready is not None:
             on_ready(not args.no_relay)
-            await release()
+            if release is not None:
+                await release()
     finally:
         if relay is not None:
             await relay.stop()

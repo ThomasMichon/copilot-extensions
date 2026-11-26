@@ -323,20 +323,44 @@ _SNAPSHOT_TIMEOUT_SECONDS = 30
 
 
 def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str] | None:
+    from . import consumer_telemetry as ct
+
     explicit = worktrees.explicit_context()
     timeout = _SNAPSHOT_TIMEOUT_SECONDS if strict else _LOOKUP_TIMEOUT_SECONDS
+    started = ct.clock()
     try:
         if explicit:
-            return worktrees.run(*args, timeout=timeout)
-        aw = _agent_worktrees_bin()
-        if not aw:
-            return None
-        return subprocess.run(
-            [aw, *args], capture_output=True, text=True, timeout=timeout,
-            creationflags=_creation_flags(),
-        )
+            result = worktrees.run(*args, timeout=timeout)
+        else:
+            aw = _agent_worktrees_bin()
+            if not aw:
+                return None
+            result = subprocess.run(
+                [aw, *args], capture_output=True, text=True, timeout=timeout,
+                creationflags=_creation_flags(),
+            )
+        if strict and getattr(result, "returncode", 1) != 0:
+            ct.note(
+                "account_resolution", "failure", "account_unresolved",
+                started=started, limit_ms=timeout * 1000,
+            )
+        return result
+    except ContextRefused as exc:
+        # The same-cell adapter wraps its own spawn failure or timeout; observe
+        # the underlying cause, then let the refusal propagate unchanged.
+        if strict:
+            ct.note("account_resolution", *(
+                ("timeout", "snapshot_timeout")
+                if isinstance(exc.__cause__, subprocess.TimeoutExpired)
+                else ("failure", "account_unresolved")
+            ), started=started, limit_ms=timeout * 1000)
+        raise
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
+            ct.note("account_resolution", *(
+                ("timeout", "snapshot_timeout") if isinstance(exc, subprocess.TimeoutExpired)
+                else ("failure", "account_unresolved")
+            ), started=started, limit_ms=timeout * 1000)
             if isinstance(exc, subprocess.TimeoutExpired):
                 reason = f"invocation timed out after {exc.timeout:g} seconds"
             elif isinstance(exc, UnicodeError):
@@ -369,6 +393,9 @@ def _mapped_accounts() -> tuple[str, ...]:
 
 
 def _account_inventory() -> AccountInventory:
+    from . import consumer_telemetry as ct
+
+    started = ct.clock()
     result = _lookup("repos", "account", "list", "--json", "--with-resolutions", strict=True)
     if result is None:
         return AccountInventory()
@@ -377,6 +404,21 @@ def _account_inventory() -> AccountInventory:
             "agent-worktrees could not read its account resolution snapshot "
             f"(exit status {result.returncode})",
         )
+    # A zero exit is resolved only once the snapshot itself validates.
+    limit_ms = _SNAPSHOT_TIMEOUT_SECONDS * 1000
+    try:
+        inventory = _parse_account_inventory(result)
+    except AccountInventoryError:
+        ct.note(
+            "account_resolution", "failure", "account_unresolved",
+            started=started, limit_ms=limit_ms,
+        )
+        raise
+    ct.note("account_resolution", "success", "none", started=started, limit_ms=limit_ms)
+    return inventory
+
+
+def _parse_account_inventory(result: subprocess.CompletedProcess[str]) -> AccountInventory:
     try:
         data = json.loads(result.stdout)
     except (ValueError, TypeError) as exc:

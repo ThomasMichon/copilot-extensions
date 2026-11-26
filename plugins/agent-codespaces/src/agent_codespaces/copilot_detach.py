@@ -33,9 +33,11 @@ import shlex
 import sys
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from remote_login_shell import wrap_login_shell
+
+from . import consumer_telemetry as ct
 from venue_copilot import (
     MAX_SEED_CHARS,  # noqa: F401 -- re-exported: callers/tests read detach.MAX_SEED_CHARS
     _TRUST_FOLDER,  # noqa: F401 -- re-exported for the trust-folder snippet test
@@ -44,13 +46,13 @@ from venue_copilot import (
     last_json,
     observe_commands,
     pending_seed_report,
-    read_seed,
+    read_seed as read_seed,
     reserve_with_retry,
     trust_folder_command,
     with_new_session,
 )
 
-from .model_launch import model_copilot_args
+from venue_copilot.models import model_copilot_args
 from . import copilot_detach_startup
 from .copilot_detach_startup import ssh_namespace as _ssh_namespace
 from venue_copilot.resume_claim import resume_target, settle_resumed_claim
@@ -441,6 +443,16 @@ def _reserve(plan: dict[str, Any], ttl: float = _RESERVATION_TTL) -> dict[str, A
     )
 
 
+def embody_reason(stdout: str, stderr: str) -> str:
+    """Closed remote-embody failure reason; the text itself is never offered."""
+    text = f"{stderr}\n{stdout}"
+    if "agent-worktrees: command not found" in text or "owning installer is unavailable" in text:
+        return "installer_unavailable"
+    if "python3: command not found" in text or "No such file or directory: 'python3'" in text:
+        return "bootstrap_python_unavailable"
+    return "other"
+
+
 def _fail(message: str, plan: dict[str, Any], **extra: Any) -> int:
     print(f"[FAIL] {message}", file=sys.stderr)
     print(json.dumps({"ok": False, "error": message, **plan, **extra}, indent=2))
@@ -456,13 +468,20 @@ def cmd_detach(
     from . import connection_owner as owner
     from .config import load_merged_config
     from .session_forwards import await_owner_bridge_forward
-    from .worktrees import ContextRefused
+    from ._peer_launch import ContextRefused
 
     config = load_merged_config()
+    ct.start_launch()
+    ct.begin("codespace_lookup")
     try:
         codespace = _codespace(args.name)
     except RuntimeError:
         codespace = False  # listing unavailable: unknown, not missing
+        ct.fail("listing_failed")
+    if codespace is None:
+        ct.fail("not_found")
+    else:
+        ct.succeed()
     plan = plan_for(args, config, codespace)
     plan["venue"] = with_supervisor(plan["venue"])  # successor can find this worker
     if codespace is None:
@@ -482,10 +501,13 @@ def cmd_detach(
         from .portable_mux_launch import cmd_launch
 
         return cmd_launch(args, plan, config, codespace, ssh_session=ssh_session)
+    ct.begin("seed_validation")
     try:
         seed = read_seed(args)
     except (OSError, ValueError) as exc:
+        ct.fail("seed_too_long" if "(max" in str(exc) else "seed_invalid")
         return _fail(str(exc), plan)
+    ct.succeed()
     from . import launch_memory
 
     # A resume that names only the session (Harness Board's wake, say) keeps
@@ -525,6 +547,10 @@ def cmd_detach(
 
     if not getattr(args, "no_relay", False):
         github_auth = github_credential_preflight(args.name)
+        ct.note("credential_relay", *(
+            ("success", "none") if github_auth.ok
+            else ("failure", ct.relay_reason(github_auth.reason_code))
+        ))
         if not github_auth.ok:
             print(
                 f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
@@ -564,7 +590,10 @@ def cmd_detach(
     prior_session = dict((held.sessions.get(plan["tenant"]) if held else None) or {}) or None
     pending = owner.get_pending_delivery(args.name, plan["tenant"])
     if pending:
-        return copilot_detach_startup.recover_pending_delivery(
+        recover_pending_delivery = cast(
+            "Callable[..., int]", copilot_detach_startup.recover_pending_delivery,
+        )
+        return recover_pending_delivery(
             args.name, plan, pending, owner,
             remote=_remote, release_cli_mode=release_cli_mode, busy_exit=_BUSY_EXIT,
             await_forward=await_owner_bridge_forward, bridge_path_ok=_bridge_path_ok,
@@ -580,8 +609,8 @@ def cmd_detach(
     owner.hold(
         args.name, plan["tenant"], daemon_port=daemon_port,
         mux_session=plan["mux_session"], fresh=True,
-        **({"reverse_forwards": reverse_forwards} if reverse_forwards else {}),
-        **({"local_forwards": local_forwards} if local_forwards else {}),
+        **cast("dict[str, Any]", {"reverse_forwards": reverse_forwards} if reverse_forwards else {}),
+        **cast("dict[str, Any]", {"local_forwards": local_forwards} if local_forwards else {}),
     )
     ok = False
     pending_delivery = False
@@ -593,9 +622,12 @@ def cmd_detach(
         _progress("prepare", "agent-bridge plugin + registration credentials on the venue")
         _ensure_agent_bridge_plugin(args.name)
         _progress("forward", "waiting for the Owner's bridge forward")
+        ct.begin("codespace_connect")
         if not asyncio.run(await_owner_bridge_forward(args.name, timeout=90.0)):
+            ct.fail("connect_failed")
             return _fail("the Connection Owner did not bring up the bridge forward", plan)
         if not _bridge_path_ok(args.name, daemon_port):
+            ct.fail("connect_failed")
             return _fail(
                 "the CodeSpace cannot reach the host bridge through the forward "
                 "(authenticated probe failed)", plan,
@@ -625,29 +657,38 @@ def cmd_detach(
         seed_ready_timeout = max(args.register_timeout, 180.0)
 
         def builder(plugin_dirs: list[str]) -> str:
-            return copilot_detach_startup.build_owned_command(
+            build_owned_command = cast("Callable[..., str]", copilot_detach_startup.build_owned_command)
+            return build_owned_command(
                 plugin_dirs, captured=captured, plan=plan, args=args,
                 seed_ready_timeout=seed_ready_timeout, copilot_args=copilot_args,
                 reservation=reservation, seed=seed, build_command=build_copilot_remote_command,
                 tooling=_VENUE_TOOLING, trust_folder=trust_folder_command,
             )
 
+        def exec_started() -> None:
+            captured["exec_started"] = ct.clock()
+
         def sink(result: Any) -> int:
             captured["result"] = result
+            if "exec_started" in captured:
+                captured["exec_ms"] = ct.elapsed_ms(captured["exec_started"])
             return int(getattr(result, "exit_code", 1))
 
         _progress("launch", "venue prep + `agent-worktrees embody` (can take minutes on first use)")
         # `embody` is idempotent (it rejoins a running session and never
         # re-seeds it), so a launch whose *transport* failed is retried.
         uncertain = False
+        ct.begin("ssh")
         for attempt in range(_LAUNCH_ATTEMPTS):
-            captured.pop("result", None)
+            for key in ("result", "exec_started", "exec_ms"):
+                captured.pop(key, None)
             captured["prepared_context"] = {}
             try:
                 ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
                 ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
                 ssh_args.plugin_prepared_context = captured["prepared_context"]
                 ssh_args.hosting_live_attachment = rejoining
+                ssh_args.remote_exec_started = exec_started
                 rc = ssh_session(
                     ssh_args,
                     remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=False,
@@ -658,9 +699,11 @@ def cmd_detach(
             except (RuntimeError, ValueError, KeyError, OSError) as exc:
                 if attempt + 1 < _LAUNCH_ATTEMPTS and _transient(str(exc)):
                     uncertain = True
+                    ct.retry("transport_retry")
                     _progress("launch-retry", f"transient connection failure: {str(exc)[:200]}")
                     time.sleep(10.0)
                     continue
+                ct.fail_with_cause("transport_failed" if _transient(str(exc)) else "connect_failed")
                 return _fail(f"could not connect to the CodeSpace ({exc}); retry the same command", plan)
             result = captured.get("result")
             if (
@@ -669,17 +712,39 @@ def cmd_detach(
                 and _is_transient_result(result)
             ):
                 uncertain = True
+                ct.retry("transport_retry")
                 _progress("launch-retry", f"transient SSH failure (exit {getattr(result, 'exit_code', '?')})")
                 time.sleep(10.0)
                 continue
             break
         if rc in (_BUSY_EXIT, _COORDINATION_EXIT) and "result" not in captured:
+            # A refused claim ends the SSH session without a remote command.
+            ct.fail_with_cause("connect_failed")
             return rc
         result = captured.get("result")
         stdout = getattr(result, "stdout", "") or ""
         stderr = getattr(result, "stderr", "") or ""
         embodied = _last_json(stdout)
         created = bool(embodied.get("created"))
+        if result is None:
+            # A relay refusal or an exhausted connect deadline already noted
+            # its own cause; keep it rather than a generic connect failure.
+            ct.fail_with_cause("connect_failed")
+        elif getattr(result, "timed_out", False):
+            # Partial output from an exhausted deadline is not a completed embody.
+            ct.ssh_timed_out(launch_timeout)
+        elif _is_transient_result(result) and not embodied:
+            ct.fail("transport_failed")
+        else:
+            # The embody stage is the remote command itself, measured around
+            # its exec, not the connect and preparation that preceded it.
+            ct.succeed()
+            embody_ok = bool(embodied.get("ok")) and rc == 0
+            ct.note(
+                "remote_embody", "success" if embody_ok else "failure",
+                "none" if embody_ok else embody_reason(stdout, stderr),
+                attempt=attempt + 1, duration_ms=captured.get("exec_ms"),
+            )
         if "agent-worktrees: command not found" in stderr + stdout:
             return _fail(
                 "agent-worktrees is not installed on the CodeSpace and could not be "
@@ -737,9 +802,12 @@ def cmd_detach(
         # lost attempt may have delivered the worktree's pending seed -- unless
         # this retry reports a concrete outcome for it, which then stands.
         seed_unconfirmed = False  # Every attempt used the explicit never-TTY ownership contract.
+        ct.succeed()
         _progress("register", "waiting for the session to register with the host bridge")
+        ct.begin("bridge_registration")
         session_id = _await_claim(plan["scope_id"], reservation["reservation_id"], args.register_timeout)
         if not session_id:
+            ct.fail("session_unrepresented")
             return _fail(
                 "the session is running but never registered with the host bridge "
                 "(unrepresented). If it was started without --detach, attach with "
@@ -754,8 +822,10 @@ def cmd_detach(
             claimed=session_id, timeout=min(args.register_timeout, 75.0), ttl_seconds=_RESERVATION_TTL,
         )
         if not session_id:  # its placeholder registered, then exited; the resumed id never did
+            ct.fail("session_unregistered")
             return _fail("the resumed session never registered with the host bridge (the placeholder that "
                          "claimed the launch exited)", plan, pane_tail=_pane_tail(args.name, plan["mux_session"]))
+        ct.succeed()
         owner.hold(
             args.name, plan["tenant"], daemon_port=daemon_port,
             mux_session=plan["mux_session"], confirmed=True,
@@ -766,8 +836,9 @@ def cmd_detach(
         # session was launched -- it may still be resuming -- so it always does.
         from venue_copilot import LIVE_SESSION_ALIAS_PROTOCOL
 
-        alias_floor = {"min_daemon_protocol": max(41, LIVE_SESSION_ALIAS_PROTOCOL)}
+        alias_floor: dict[str, Any] = {"min_daemon_protocol": max(41, LIVE_SESSION_ALIAS_PROTOCOL)}
         if seed_needs_bridge:
+            assert seed is not None  # seed_needs_bridge is bool(seed)
             from venue_copilot.refs import deliver_note, owned_result, owned_delivery_journal
             ledger = owned_delivery_journal(
                 session_id, seed, captured["plugin_context"], operation=operation, plan=plan,
