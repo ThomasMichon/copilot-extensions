@@ -320,7 +320,9 @@ def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
                     kind, name, code=code, interrupted=interrupted,
                     duration_ms=int((time.monotonic() - started) * 1000),
                 ))
-            except Exception:
+            except BaseException:
+                # Delivery never replaces the command's own result or exception,
+                # including an interrupt or cancellation raised while offering.
                 pass
 
     return run

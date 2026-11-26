@@ -313,3 +313,25 @@ def test_packaged_descriptor_names_only_the_worktrees_schema() -> None:
     assert json.loads(path.read_text(encoding="utf-8")) == capability([
         consumer_telemetry.SOURCE_SCHEMA,
     ])
+
+
+def test_an_interrupted_delivery_keeps_the_product_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    def interrupted_offer(event: Any) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(consumer_telemetry, "_offer", interrupted_offer)
+    assert _run(monkeypatch, ["create"], lambda: 7) == 7
+
+    def cancelled_offer(event: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(consumer_telemetry, "_offer", cancelled_offer)
+
+    def exits() -> int:
+        raise SystemExit(4)
+
+    with pytest.raises(SystemExit) as raised:
+        _run(monkeypatch, ["push-changes"], exits)
+    assert raised.value.code == 4
