@@ -17,7 +17,8 @@ import pytest
 from agent_remote_driver.headed import launcher
 from agent_remote_driver.headed import receipt
 from agent_remote_driver.headed import caller
-from agent_remote_driver.headed.staging import CONNECTOR_ENV, connector_selection
+from agent_remote_driver.headed.staging import CONNECTOR_ENV, connector_selection, selected_connector_roots
+from agent_remote_driver.native_arguments import VALUE_OPTIONS
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host import launcher as host_launcher
 from agent_remote_driver.session_host.host import SessionHost
@@ -64,10 +65,10 @@ def test_selected_connector_binds_facade_roots_to_the_original_native_command(
         argv += ["--plugin-dir", roots["other"]]
     if change == "matching":
         assert connector_selection(env, session_id="chosen", cwd=str(tmp_path)) == selected
-        launcher.selected_connector_roots(selected, argv, value_options=launcher.VALUE_OPTIONS)
+        selected_connector_roots(selected, argv, value_options=VALUE_OPTIONS)
     else:
         with pytest.raises(ValueError):
-            launcher.selected_connector_roots(selected, argv, value_options=launcher.VALUE_OPTIONS)
+            selected_connector_roots(selected, argv, value_options=VALUE_OPTIONS)
 
 
 @pytest.mark.asyncio
