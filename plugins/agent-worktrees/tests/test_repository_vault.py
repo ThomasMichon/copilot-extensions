@@ -29,6 +29,7 @@ def test_initial_source_and_vault_selection_overlap_and_settle(
 
     source = tmp_path / "source"
     source.mkdir()
+    arguments: tuple[str, ...]
     for arguments in (
         ("init", "-q"), ("config", "core.autocrlf", "false"),
         ("remote", "add", "origin", "https://example.invalid/team/sample.git"),
