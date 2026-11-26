@@ -59,6 +59,37 @@ markers and independent owner samples remain separate evidence, not a
 reconstruction.
 Clock bookkeeping and deferred output still perturb the fixture; this is not
 an accepted overhead or cold-start bound.
+The full non-report-only profile can separately opt into
+`notification_diagnostics` for the original send-only read and mutation test
+families. It instruments only their fixture-owned copied sender, not production
+or normal-mode scripts, and excludes the separate prepared-cell routing test
+whose original helper freezes its clock. The sender retains ten fixed scalar
+fields, capped at 4 KiB: phase, return reason, four copies of the original
+remaining-budget values, fixed exception class, numeric HRESULT/socket status
+and write-completion boolean. It adds no clock read or timer reset. Allocation,
+connect, write, waits and disposal keep their original order and 100 ms budget.
+Terminal serialization occurs only after the original entry elapsed value;
+a killed child may therefore have no sender summary.
+
+Sender reasons distinguish discovery/capability (2), port (3), IPv4 (4),
+size (5), allocation budget (6), connect wait/budget (7), pre-write budget (8),
+write-setup budget (9), write completion (10), incomplete write (11) and
+exception (12). Zero is the initial state, not successful delivery.
+The existing budget values distinguish exhaustion from a pending connect
+without an extra task or socket query. Phase IDs identify validation (0),
+request construction (1), encoding (2), allocation (3), the four original
+remaining-budget assignments (4-7), and returned write wait (8).
+
+The corresponding real receiver adapter forwards the original bytes, limits,
+exceptions and dispatch arguments. Its additional 4 KiB report retains at most
+64 classified frames plus saturated counters and explicit truncation. It never
+retains raw frames: only size, framing, JSON shape, version, authentication
+match and a fixed kind classification are recorded. Sender output contains
+neither payload nor endpoint/token/path/exception prose. Neither write
+completion nor callback entry proves policy admission. These adapters add
+unaccepted diagnostic overhead and leave the original arrival assertions,
+receiver lock, RPC and child/test/runner/job deadlines unchanged. A passing
+instrumented case is not normal qualification or a historical diagnosis.
 The pre-tool resident request reuses the complete event already decoded for
 native checks; raw-only transport callers retain their existing decoder.
 `test_native_pretool_reuses_decoded_event` rejects a second decode at that
