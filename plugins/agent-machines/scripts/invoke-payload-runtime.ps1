@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $forwardArgs = @($args)
 $configurationEntry = $forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installation-configuration'
 $healthRunEntry = $forwardArgs.Count -gt 1 -and $forwardArgs[0] -ceq 'health' -and $forwardArgs[1] -cin @('run', 'prepare-job', 'job')
@@ -181,19 +183,70 @@ function Resolve-AgentMachinesRuntime {
     return $AgentRtPy
 }
 
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $scriptDir '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-machines] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
 function Invoke-AgentMachinesRuntime([string]$Python) {
+    $Python = Get-AdmittedRuntimePython $Python
     if ($context) { $env:COPILOT_EXTENSIONS_CONTEXT = $context }
     # Relax EAP for just this forwarding call: the wrapped module's own
     # exit code is the only contract this dispatcher relays, so a
     # legitimate stderr diagnostic from a non-zero exit must never become
     # a terminating exception here (copilot-extensions#5494).
     $previousEap = $ErrorActionPreference
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    $pythonFlags = @()
+    $entryPath = ''
+    $entryArgs = @($forwardArgs)
+    if ($healthRunEntry) {
+        $pythonFlags = @('-I')
+        $entryPath = Join-Path $scriptDir 'health-collection-entry.py'
+    } elseif ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        $pythonFlags = @('-I', '-B', '-X', 'utf8')
+        $entryPath = Join-Path $scriptDir 'versioned_runtime_probe.py'
+        $entryArgs = @('--plugin', 'agent-machines', '--module', 'agent_machines', '--') + $forwardArgs
+    }
     $ErrorActionPreference = 'Continue'
     try {
-        if ($healthRunEntry) {
-            & $Python -I (Join-Path $scriptDir 'health-collection-entry.py') @forwardArgs
-        } elseif ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
-            & $Python -I -B -X utf8 (Join-Path $scriptDir 'versioned_runtime_probe.py') --plugin agent-machines --module agent_machines -- @forwardArgs
+        if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+            $json = ConvertTo-Json -InputObject @($entryPath, $entryArgs) -Depth 4 -Compress
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+            $runtimeBootstrap = "import base64,json,runpy,sys;path,args=json.loads(base64.b64decode(sys.argv[1]));sys.argv=[path or 'agent_machines']+args;runpy.run_path(path,run_name='__main__') if path else runpy.run_module('agent_machines',run_name='__main__',alter_sys=True)"
+            & $Python @pythonFlags -c $runtimeBootstrap $encoded
+        } elseif ($entryPath) {
+            & $Python @pythonFlags $entryPath @entryArgs
         } else {
             & $Python -m agent_machines @forwardArgs
         }

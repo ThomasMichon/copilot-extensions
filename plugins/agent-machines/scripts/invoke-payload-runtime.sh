@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONUTF8=1
+unset PYTHONPATH PYTHONHOME
 CONFIGURATION_ENTRY=0
 HEALTH_RUN_ENTRY=0
 READ_ONLY_RUNTIME_ENTRY=0
@@ -71,16 +73,50 @@ profile_home() {
 }
 
 resolve_runtime() {
+    local result
     AGENT_RT_PY=""
     if [[ -f "$RUNTIME_RESOLVER" ]]; then
         AGENT_RT_ROOT="$RUNTIME_ROOT"
         export AGENT_RT_ROOT
+        set +e
         # shellcheck source=/dev/null
         . "$RUNTIME_RESOLVER"
+        result=$?
+        set -e
+        if [[ "$result" -ne 0 ]]; then
+            printf '[agent-machines] runtime resolver failed; update the owning installation.\n' >&2
+            exit 126
+        fi
     fi
 }
 
+admit_runtime_python() (
+    local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    local capture="$SCRIPT_DIR/native_capture.sh" uv
+    exec 5>&- 6>&- 7>&- 8>&- 9>&-
+    if [[ ! -f "$capture" ]]; then
+        capture="$PAYLOAD_ROOT/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    fi
+    if [[ ! -f "$provider" || ! -f "$capture" ]]; then
+        printf '%s\n' '[agent-machines] application runtime admission support is unavailable; use explicit setup.' >&2
+        return 126
+    fi
+    uv="$(command -v uv)" || {
+        printf '%s\n' '[agent-machines] uv is unavailable; prepare the command prerequisites through explicit setup.' >&2
+        return 126
+    }
+    . "$capture"
+    if ! capture_native_process 10 "$BASH" -c \
+        '. "$1"; resolve_uv_runtime_python "$2" "$3"' \
+        machines-runtime-admission "$provider" "$expected" "$uv"; then
+        printf '%s\n' '[agent-machines] application runtime admission failed; use explicit setup.' >&2
+        return 126
+    fi
+    printf '%s\n' "$__native_capture_output"
+)
+
 run_runtime() {
+    AGENT_RT_PY="$(admit_runtime_python "$AGENT_RT_PY")" || exit 126
     if [[ -n "$CONTEXT" ]]; then
         export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
     else

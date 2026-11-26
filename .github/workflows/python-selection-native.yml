@@ -39,6 +39,12 @@ on:
       - libs/payload-invocation/tests/test_containers_ready_source.py
       - libs/payload-invocation/tests/test_ssh_ready_source.py
       - libs/payload-invocation/tests/test_logger_ready_source.py
+      - libs/payload-invocation/tests/test_machines_ready_source.py
+      - plugins/agent-machines/scripts/invoke-payload-runtime.sh
+      - plugins/agent-machines/scripts/invoke-payload-runtime.ps1
+      - plugins/agent-machines/tests/managed_command_fixture.py
+      - plugins/agent-machines/tests/test_managed_command_gate.py
+      - plugins/agent-machines/tests/test_health_job_payload.py
       - plugins/agent-logger/scripts/runtime-gate.sh
       - plugins/agent-logger/scripts/runtime-gate.ps1
       - plugins/agent-logger/tests/managed_command_fixture.py
@@ -1758,6 +1764,59 @@ jobs:
       LOGGER_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *logger-ready-steps
+
+  machines-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      MACHINES_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &machines-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Machines commands without machine operations
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_ready_source.py --allow-explicit-tiers
+          -k "${{ env.MACHINES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/machines-ready
+      - name: Require all Machines controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.MACHINES_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/machines-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==26 and len({c.attrib['name'] for c in cases})==26;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='machines_command_admission'];
+          assert len(reports)==26 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'machines_command_admission':reports},sort_keys=True))"
+
+  machines-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      MACHINES_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *machines-ready-steps
+
+  machines-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      MACHINES_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *machines-ready-steps
 
   bridge-ready-admission-windows:
     runs-on: windows-latest
