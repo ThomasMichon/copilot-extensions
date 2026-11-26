@@ -270,6 +270,7 @@ def test_code_selection_refuses_ineligible_children_before_claiming(
 
 def unwind_fixture(
     codes: bytes, *, frame: int = 0, instructions: bytes = b"\x90" * 4,
+    entry_code: bytes = b"",
 ) -> tuple[Amd64Unwinder, bytearray, list[int]]:
     image = bytearray(4096)
     image[:2] = b"MZ"
@@ -284,6 +285,7 @@ def unwind_fixture(
     struct.pack_into("<III", image, 512, 1024, 1536, 768)
     image[768:772] = bytes([1, 32, len(codes) // 2, frame])
     image[772:772 + len(codes)] = codes
+    image[1024:1024 + len(entry_code)] = entry_code
     image[1100:1100 + len(instructions)] = instructions
     stack = bytearray(1024)
     registers = [0] * 16
@@ -315,6 +317,54 @@ def test_unwind_partial_prolog_and_reverse_nonvolatile_push(offset: int, expecte
     assert pc == {0: 10001, 5: 10002, 76: 10004}[offset]
     assert restored[4] == expected_rsp and registers[4] == 8192
     assert restored[3] == ({0: 0, 5: 10001, 76: 10003}[offset])
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("operation", [4, 5])
+@pytest.mark.parametrize("offset", [9, 31])
+def test_unwind_frame_register_partial_prolog_refuses_before_stack_reads(
+    operation: int, offset: int,
+) -> None:
+    saved_offset = (4).to_bytes(2, "little") if operation == 4 else (32).to_bytes(4, "little")
+    codes = bytes([14, 3, 9, 0x50 | operation]) + saved_offset + bytes([4, 0x42])
+    entry = bytes.fromhex("48 83 ec 28 48 89 6c 24 20 48 8d 6c 24 20") + b"\x90" * 19
+    unwind, stack, registers = unwind_fixture(codes, frame=0x25, entry_code=entry)
+    registers[5] = 8384 if offset < 14 else 8224
+    struct.pack_into("<Q", stack, 32, 8384)
+    struct.pack_into("<Q", stack, 192, 0xBAD)
+    struct.pack_into("<Q", stack, 40, 0x1234)
+    reads: list[int] = []
+    original = unwind.stack
+
+    def read(address: int, size: int) -> bytes:
+        reads.append(address)
+        return original(address, size)
+
+    unwind.stack = read
+    with pytest.raises(CodeSampleUnavailable, match="partial-frame-register-prolog"):
+        unwind.step(
+            4096, 4096 + 1024 + offset, registers,
+            instruction_frame=True, allow_leaf=False,
+        )
+    assert reads == [] and registers[4:6] == [8192, 8384 if offset < 14 else 8224]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("operation", [4, 5])
+def test_unwind_completed_frame_prolog_uses_fixed_base_with_dynamic_rsp(operation: int) -> None:
+    saved_offset = (1).to_bytes(2, "little") if operation == 4 else (8).to_bytes(4, "little")
+    codes = bytes([15, 0x30 | operation]) + saved_offset + bytes([10, 3, 5, 0x42, 1, 0x50])
+    entry = bytes.fromhex("55 48 83 ec 28 48 8d 6c 24 20 48 89 5c 24 08") + b"\x90" * 18
+    unwind, stack, registers = unwind_fixture(codes, frame=0x25, entry_code=entry)
+    registers[3], registers[5] = 0xAAA, 8288
+    struct.pack_into("<Q", stack, 72, 0x2222)
+    struct.pack_into("<Q", stack, 104, 0x3333)
+    struct.pack_into("<Q", stack, 112, 0x4444)
+    pc, restored = unwind.step(
+        4096, 4096 + 1024 + 32, registers, instruction_frame=True, allow_leaf=False,
+    )
+    assert pc == 0x4444 and restored[3:6] == [0x2222, 8312, 0x3333]
+    assert registers[3:6] == [0xAAA, 8192, 8288]
 
 
 @pytest.mark.guard
