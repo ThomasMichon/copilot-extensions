@@ -13,6 +13,63 @@ from agent_bridge import __main__ as cli
 from agent_bridge.client import BridgeClientError
 
 
+@pytest.mark.parametrize("selection", [[], ["--legacy-selector"]])
+def test_qualified_reply_uses_the_peer_owner_from_the_real_parser(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], selection: list[str],
+) -> None:
+    target = "live:host-b:worker-project:workspace-a"
+    calls: list[tuple[str, Any]] = []
+
+    def resolve(handle: str) -> None:
+        calls.append(("lookup", handle))
+
+    def send(host: str, handle: str, **options: Any) -> dict[str, Any]:
+        calls.append(("submit", (host, handle, options)))
+        return {
+            "message_id": 41, "session_id": "remote-native",
+            "receipt": {"stage": "admitted"}, "duplicate": False,
+        }
+
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: SimpleNamespace(
+        resolve_live_session=resolve, send_remote_live_message=send,
+    ))
+    monkeypatch.setattr(
+        cli, "_resolve_target", lambda *_args, **_kwargs: pytest.fail("peer reached local selection"),
+    )
+    cli.main([
+        "--json", "send", target, "original reply", *selection,
+        "--sender", "controller", "--reply-to", "live:host-a:controller:workspace-b",
+        "--idempotency-key", "original-key",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+    assert calls == [
+        ("lookup", target),
+        ("submit", ("host-b", target, {
+            "sender": "controller", "message": "original reply",
+            "reply_to": "live:host-a:controller:workspace-b", "kind": "prompt",
+            "delivery": "steer", "wait": False, "wait_timeout": 120.0,
+            "expected_session_id": None, "idempotency_key": "original-key",
+            "timeout": 20.0, "qualified_peer": True,
+        })),
+    ]
+    assert payload["session_id"] == "remote-native" and payload["message_id"] == 41
+    assert payload["receipt"]["stage"] == "admitted" and payload["delivered"] is False
+
+
+def test_explicit_bridge_does_not_silently_select_a_qualified_peer_owner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        cli, "_get_client", lambda **_kwargs: pytest.fail("mixed mode accessed a client"),
+    )
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            "--json", "send", "live:host-b:worker-project:workspace-a", "reply", "--bridge",
+        ])
+    assert error.value.code != 0
+    assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
+
+
 def snapshot(index: int, text: str, **changes: Any) -> dict[str, Any]:
     return {
         "identity": {
@@ -83,14 +140,16 @@ def wire(
     return calls
 
 
+@pytest.mark.parametrize("selection", [[], ["--bridge"]])
 @pytest.mark.parametrize("as_json", [False, True])
 def test_admission_only_mode_pins_host_owner_native_and_generated_key(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], as_json: bool,
+    selection: list[str],
 ) -> None:
     calls = wire(monkeypatch, payloads=[AssertionError("admission-only read")])
     cli.main([
         *(["--json"] if as_json else []),
-        "send", "workspace-a", "work", "--bridge", "--host", "host-b", "--no-wait",
+        "send", "workspace-a", "work", *selection, "--host", "host-b", "--no-wait",
     ])
     output = capsys.readouterr().out
     assert calls[0] == ("resolve", ("workspace-a", {
@@ -284,7 +343,10 @@ def test_invalid_host_mode_stops_before_client(
 ) -> None:
     monkeypatch.setattr(cli, "_get_client", lambda **_kw: pytest.fail("invalid host reached client"))
     with pytest.raises(SystemExit, match="host"):
-        cli.main(["send", "workspace-a", "work", "--host", host, *(["--bridge"] if bridge else [])])
+        cli.main([
+            "send", "workspace-a", "work", "--host", host,
+            *(["--bridge"] if bridge else ["--legacy-selector"]),
+        ])
 
 
 def test_admission_unknown_preserves_generated_key_and_original_remote_binding(

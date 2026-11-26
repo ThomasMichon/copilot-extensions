@@ -214,20 +214,23 @@ permissions:
 jobs:
   command-bootstrap-uv-windows:
     runs-on: windows-latest
-    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
     timeout-minutes: 8
     steps: &command-bootstrap-steps
-      - uses: actions/checkout@v4
+      - &command-native-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - &command-native-python
+        uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
-      - uses: astral-sh/setup-uv@v9.0.0
+      - &command-native-uv
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
-      - name: Prepare isolated managed interpreters, including old PATH Python
+      - &command-native-interpreters
+        name: Prepare isolated managed interpreters, including old PATH Python
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'command-bootstrap-python'
@@ -689,6 +692,14 @@ jobs:
           assert all(r['cycles']==2 and r['uv_calls']==(0 if r['scenario']=='missing-uv' else 4)
           and r['network']=='disabled' and r['removal']=='not-invoked' for r in reports)"
 
+  index-engine-uv-windows:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps: &index-engine-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
       - name: Qualify prepared-only Index management on both PowerShell hosts
         if: runner.os == 'Windows'
         env:
@@ -813,9 +824,12 @@ jobs:
 
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
-    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
     timeout-minutes: 8
     steps: *command-bootstrap-steps
+  index-engine-uv-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps: *index-engine-steps
   budget-uv-launch:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.

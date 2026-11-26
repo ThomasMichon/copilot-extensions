@@ -719,12 +719,15 @@ def start(
 
 def observe(handle: dict[str, Any], *, timeout: float = 180) -> subprocess.CompletedProcess[str]:
     """Wait after durable send publication; observation never reallocates an agent."""
+    from .bridge_continuation_cli import observation_environment
+
     prefix = agent_bridge_launch_prefix()
     if not prefix:
         raise BridgeUnavailable("ordinary send was accepted; Bridge observation capability is unavailable")
     session_id = handle["session"].removeprefix("local-body:")
     try:
         return subprocess.run([*prefix, "wait", session_id, "--json"], capture_output=True,
-                              text=True, check=False, timeout=timeout, **no_window_kwargs())
+                              text=True, check=False, timeout=timeout,
+                              env=observation_environment(), **no_window_kwargs())
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise BridgeUnavailable(f"ordinary send was accepted; observation failed for {session_id}: {exc}") from exc

@@ -9,7 +9,10 @@ from typing import Any
 from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 
 
-def spawn_snapshot(task: dict, reservation: dict, worktree: str, prepared: dict, ownership: str, replaced: bool) -> dict:
+def spawn_snapshot(
+    task: dict[str, Any], reservation: dict[str, Any], worktree: str,
+    prepared: dict[str, Any], ownership: str, replaced: bool,
+) -> dict[str, Any]:
     from .session_origin import snapshot
 
     return {
@@ -132,11 +135,14 @@ def acquire(
     if not isinstance(session_id, str) or not session_id:
         raise BridgeCarriedSessionBusy("bridge acquisition returned no session handle")
     if wait and mode == "acp":
+        from .bridge_continuation_cli import observation_environment
+
         observation_error = None
         try:
             settled = subprocess.run(
                 [*prefix, "wait", session_id, "--json"], capture_output=True,
                 text=True, check=False, timeout=timeout, **no_window_kwargs(),
+                env=observation_environment(),
             )
             if settled.returncode:
                 observation_error = settled.stderr or settled.stdout or f"wait exited {settled.returncode}"

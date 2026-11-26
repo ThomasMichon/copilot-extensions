@@ -20,17 +20,15 @@ from test_install_engine_adoption import (
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX bootstrap readers")
 
 
-@pytest.fixture(scope="module")
-def prepared_helper() -> tuple[Path, Path, Path]:
+def find_prepared_helper() -> tuple[Path, Path, Path]:
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("This acquisition-free control requires existing uv")
     probe_env = dict(os.environ)
     if "UV_PYTHON_INSTALL_DIR" not in probe_env:
         # The contained runner redirects HOME after preparing its interpreter.
-        probe_env["UV_PYTHON_INSTALL_DIR"] = str(
-            Path(str(getattr(sys, "_base_executable", sys.executable))).resolve().parents[2]
-        )
+        base = Path(str(getattr(sys, "_base_executable", sys.executable))).resolve()
+        probe_env["UV_PYTHON_INSTALL_DIR"] = str(base.parents[1 if os.name == "nt" else 2])
     result = subprocess.run(
         [uv, "python", "find", "--no-project", "--system", "--managed-python",
          "--no-python-downloads", "cpython@3.11.18"],
@@ -42,6 +40,11 @@ def prepared_helper() -> tuple[Path, Path, Path]:
         [uv, "python", "dir"], text=True, timeout=15, env=probe_env,
     ).strip()
     return Path(uv), Path(result.stdout.strip()).resolve(), Path(root)
+
+
+@pytest.fixture(scope="module")
+def prepared_helper() -> tuple[Path, Path, Path]:
+    return find_prepared_helper()
 
 
 def _environment(
@@ -210,6 +213,10 @@ def test_actual_cold_gate_never_falls_back_when_generated_assets_are_missing(
     elif scenario == "missing-request":
         (gate.parent / "bootstrap-python-version.txt").unlink()
     reader_env = _environment(tmp_path, prepared_helper, scenario)
+    for name in ("mktemp", "mkfifo", "sleep", "rm", "rmdir"):
+        utility = shutil.which(name)
+        assert utility, name
+        (Path(reader_env["PATH"]) / name).symlink_to(utility)
     env.update(reader_env)
     env["AGENT_INDEX_REPO"] = str(tmp_path)
     result = subprocess.run(

@@ -49,6 +49,12 @@ jobs:
         run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 cpython@3.10.20
       - name: Record native process-tool privilege metadata
         run: ls -l /bin/ps
+      - name: Qualify fail-closed cleanup observation
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k cleanup_observation
+          --junit-dir qualification-evidence/portable-cleanup-observation
       - name: Qualify completed engine selection
         run: >-
           tools/run-tests payload-invocation
@@ -120,13 +126,20 @@ jobs:
                      and report["completed"] == (2 if report["selection"] in {
                          "current", "lkg", "newest", "legacy", "background"} else 1)
                      for report in reports)
+          cleanup = [case for path in Path("qualification-evidence/portable-cleanup-observation").rglob("*.xml")
+                     for case in ET.parse(path).iter("testcase")]
+          assert len(cleanup) == 2
+          assert all(case.find(tag) is None for case in cleanup
+                     for tag in ("error", "failure", "skipped"))
           print(json.dumps({"index_portable_engine": reports}, sort_keys=True))
           '
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: index-portable-engine-${{ runner.os }}
-          path: qualification-evidence/portable-engine
+          path: |
+            qualification-evidence/portable-engine
+            qualification-evidence/portable-cleanup-observation
           if-no-files-found: error
   portable-engine-macos:
     runs-on: macos-latest

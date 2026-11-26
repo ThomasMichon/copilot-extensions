@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
+import importlib.util
 import io
 import json
 import time
 import urllib.error
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import urlsplit
 
@@ -44,6 +47,7 @@ def wire(
     row_changes: Any = None,
     after_send: Any = None,
     transport: bool = False,
+    legacy: bool = False,
 ) -> list[tuple[str, str, Any]]:
     client = BridgeClient("http://fixture", token="fixture")
     calls: list[tuple[str, str, Any]] = []
@@ -92,7 +96,10 @@ def wire(
     )
 
     def get_client(**kwargs: Any) -> BridgeClient:
-        assert kwargs in ({"ensure": False}, {"ensure": False, "propagate_errors": True})
+        if legacy:
+            assert kwargs == {}
+        else:
+            assert kwargs in ({"ensure": False}, {"ensure": False, "propagate_errors": True})
         return client
 
     monkeypatch.setattr(cli, "_get_client", get_client)
@@ -140,14 +147,16 @@ def test_initial_health_failure_uses_real_client_factory_and_json_refusal(
     assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
 
 
+@pytest.mark.parametrize("selection", [[], ["--bridge"]])
 def test_selected_registered_send_persists_exact_input_and_original_receipt(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     api: Any,
     tmp_db: Any,
+    selection: list[str],
 ) -> None:
     calls = wire(monkeypatch, api)
-    argv = ["--json", "send", "workspace-a", "work", "--bridge", "--idempotency-key", "original"]
+    argv = ["--json", "send", "workspace-a", "work", *selection, "--idempotency-key", "original"]
     cli.main(argv)
     first = json.loads(capsys.readouterr().out)
     cli.main(argv)
@@ -165,6 +174,69 @@ def test_selected_registered_send_persists_exact_input_and_original_receipt(
     assert all(body["expected_session_id"] == "live-1" and body["exact_session"] for body in posts)
 
 
+def test_explicit_legacy_selector_keeps_existing_registered_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    api: Any,
+    tmp_db: Any,
+) -> None:
+    calls = wire(monkeypatch, api, legacy=True)
+    client = cli._get_client()
+    monkeypatch.setattr(client, "resolve_live_session", lambda _target: {"session_id": "live-1"})
+    cli.main([
+        "--json", "send", "workspace-a", "work", "--legacy-selector",
+        "--idempotency-key", "original",
+    ])
+    result = json.loads(capsys.readouterr().out)
+    assert result["outcome"] == "admitted"
+    (row,) = tmp_db.execute_read("SELECT * FROM live_messages")
+    assert row["session_id"] == "live-1" and row["exact_session"] == 0
+    assert row["body"] == "work" and row["sender"] == "peer"
+    posts = [body for method, _path, body in calls if method == "POST"]
+    assert len(posts) == 1 and not posts[0].get("exact_session")
+    assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
+
+
+@pytest.mark.parametrize("wait", [False, True])
+@pytest.mark.parametrize("caller", [None, "agent-dispatch:controller-a"])
+def test_dispatch_continuation_reaches_real_selector_and_supported_prior_parser(
+    wait: bool, caller: str | None,
+) -> None:
+    from agent_bridge import bridge_send_cli
+
+    path = (
+        Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"
+        / "agent_dispatch" / "bridge_continuation_cli.py"
+    )
+    spec = importlib.util.spec_from_file_location("_dispatch_continuation_contract", path)
+    assert spec is not None and spec.loader is not None
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    argv = producer.continuation_arguments("managed-a", wait=wait, communication=20.0, caller=caller)
+    current = cli.build_parser().parse_args(argv)
+    assert bridge_send_cli.selected(current) is False
+    assert current.target == "managed-a" and current.prompt_file == "-"
+
+    prior = argparse.ArgumentParser()
+    send = prior.add_subparsers(dest="command", required=True).add_parser("send")
+    send.add_argument("target")
+    send.add_argument("--require-agent-hosting", action="store_true")
+    send.add_argument("--prompt-file")
+    send.add_argument("--caller")
+    send.add_argument("--no-wait", action="store_true")
+    send.add_argument("--startup-communication-timeout", type=float)
+    send.add_argument("--startup-process-timeout", type=float)
+    old = prior.parse_args(argv)
+    assert old.target == current.target and old.prompt_file == "-"
+    assert old.caller == current.caller == caller
+    assert old.startup_communication_timeout == 20.0
+    assert old.startup_process_timeout == 300.0
+    assert old.no_wait is not wait
+    with pytest.raises(SystemExit) as unsupported:
+        prior.parse_args([*argv, "--legacy-selector"])
+    assert unsupported.value.code == 2
+
+
 def test_registered_rollover_after_selection_cannot_admit_to_successor(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -180,6 +252,7 @@ def test_registered_rollover_after_selection_cannot_admit_to_successor(
     assert not tmp_db.execute_read("SELECT * FROM live_messages")
 
 
+@pytest.mark.parametrize("selection", [[], ["--bridge"]])
 @pytest.mark.parametrize("capability", [None, False, 0, "1"])
 def test_registered_provider_rollback_refuses_before_post(
     monkeypatch: pytest.MonkeyPatch,
@@ -187,10 +260,11 @@ def test_registered_provider_rollback_refuses_before_post(
     api: Any,
     tmp_db: Any,
     capability: Any,
+    selection: list[str],
 ) -> None:
     calls = wire(monkeypatch, api, capability=capability)
     with pytest.raises(SystemExit) as exc:
-        cli.main(["--json", "send", "workspace-a", "work", "--bridge"])
+        cli.main(["--json", "send", "workspace-a", "work", *selection])
     assert exc.value.code == 69
     assert "live_exact_send" in json.loads(capsys.readouterr().out)["error"]
     assert not any(method == "POST" for method, _path, _body in calls)
