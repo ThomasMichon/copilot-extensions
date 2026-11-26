@@ -487,7 +487,36 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the original explicit-data ownership-decision controls as one
+- [ ] Qualify the original explicit-clock startup controls and whole
+  diagnostic outer-frame refusal function as one coherent source slice.
+  Preserve all four startup functions and all fifteen invalid-budget rows,
+  including exact NaN/Inf/bool types and values; compare collection metadata
+  with exact floating-point bytes before unchanged guarding.
+  Select only the complete four-case diagnostic refusal function, preserving
+  its explicit IDs and exact original module-level contract mark.
+  Exclude both whole diagnostic rendering/selection functions before execution:
+  their shared redactor reads ambient environment values even when a mapping
+  is supplied. No environment patch, source/fixture rewrite, preload or guard
+  exception may substitute. Check original file/function uniqueness and
+  complete metadata, then actual per-case owner calls before exact admission.
+  Retain every prior node/hash/target/helper/limit and refusal.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete metadata collection confirms all eighteen startup cases through
+  four functions and four of ten diagnostic cases through one whole function;
+  both other whole diagnostic functions/six cases remain excluded.
+  Original objects/globals/fixtures, exact parameter types/float bytes,
+  all marks, module-mark identity, IDs and order agree.
+  First unchanged guarded trials pass eighteen in 1.16 pytest / 21.282
+  observation seconds and four in 0.97 pytest / 24.390 observation seconds.
+  All 66 phases pass with zero prohibited effects and sixteen bound reads
+  per trial; every case records actual owner call lines.
+  All four diagnostic traces avoid the ambient redactor's complete source
+  range. Complete observations are read before admission.
+  Only 22 nodes, four bindings and two existing covered targets are added:
+  11,100 nodes, 1,531 sources, 557 targets, unchanged 92 helpers,
+  300 seconds and 734,924 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass; review/full hosted CI/merge/persistence remain.
+- [x] Qualify the original explicit-data ownership-decision controls as one
   coherent source slice: ten whole ZDD claim functions and nine whole
   single-instance reaper functions. Exclude both whole default-current-PID
   tests before collection/execution; preserve assertions, injected liveness/
@@ -523,6 +552,13 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   union is 11,078 nodes, 1,527 sources, unchanged 555 targets,
   92 helpers, 300 seconds and 733,523 bytes. Fresh review and complete
   hosted CI must qualify the replacement head before normal merge.
+  Source #14718 merges at `af7f6cb08b6741fb3acf1bfdd04112ff1c77b4a7`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,078 units in 180.859 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, backup-retaining supported
+  alignment and managed sync, all six owned reviewed/merged/working blobs,
+  exact candidate, all bindings/helpers and all 24 observed inputs verify
+  without replay. Only this nineteen-case leaf is Done; the parent stays active.
 - [x] Qualify all forty complete original local-context functions as one
   coherent source slice: 38 context functions against local execution and
   the two registry-only normalization functions against registry.
