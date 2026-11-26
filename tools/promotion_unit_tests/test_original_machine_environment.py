@@ -1,4 +1,4 @@
-"""Original complete logical-environment tuple table, without OS probing."""
+"""Original complete logical-environment controls, without OS probing."""
 from __future__ import annotations
 
 import importlib.util
@@ -17,5 +17,9 @@ _original = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _original
 _spec.loader.exec_module(_original)
 
-_SELECTED = ("test_logical_and_tuple_forms",)
+_SELECTED = (
+    "test_logical_and_tuple_forms",
+    "test_invalid_or_conflicting_identity_is_explicit",
+    "test_decomposition_does_not_make_native_and_guest_the_same_target",
+)
 globals().update({name: getattr(_original, name) for name in _SELECTED})
