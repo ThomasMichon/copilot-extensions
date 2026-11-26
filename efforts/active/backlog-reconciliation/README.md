@@ -522,13 +522,19 @@ the non-public approval conversation.
 
 ## Plan
 
+The [materialized Codespaces fixture correspondence](journal/2026/11.26-materialized-codespaces-fixture-correspondence.md)
+maps five conditional semantic-fixture candidates and preserves five whole
+keepers. Functional-profile evidence does not establish original-budget,
+whole-portfolio, installed or parent completion; every parent gate remains.
+
 The [raced-authority fixtures and hosted SSH baselines](journal/2026/11.26-raced-authority-fixtures-and-hosted-ssh-baselines.md)
 record reviewed #14815, six separately spent passing final assessments and
 six independently audited `COMPLETED` reports. Four whole keepers and the
 failed immutable-release portfolio remain OPEN. Two equal complete censuses
 measure 589 whole OPEN: six departures and one arrival, with no unrelated
 departure. No execution, rollout, whole-promotion success or parent
-completion is inferred; every parent Plan/Validation state remains.
+completion is inferred; the factual outcome merged in #14817 and every
+parent Plan/Validation state remains.
 
 The [legacy fixture correspondence and retained publication gates](journal/2026/11.26-legacy-fixtures-and-publication-gates.md)
 qualify eight complete originals and all four discussions, record two
