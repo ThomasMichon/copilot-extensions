@@ -200,7 +200,18 @@ def test_native_unversioned_ingress_uses_the_same_listener_and_authorization_own
     from test_gateway_native import peer
 
     provider.peers.append(peer("later-controller", 3))
-    ingress.prepare_update(selected, gateway.inspect())
+    observed = gateway.inspect()
+    value = authorization.projection_from_native(
+        observed, descriptor=selected["native_gateway"], machine=selected["machine"],
+        environment=selected["environment"], public_key_file=selected["public_key_file"],
+    )
+    root = selected["state_dir"]
+    retained = {path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+                for path in root.rglob("*") if path.is_file()}
+    ingress.validate_preparation(selected, value)
+    assert {path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in root.rglob("*") if path.is_file()} == retained
+    ingress.prepare_update(selected, observed)
     assert _key(3) in authorized.read_text(encoding="utf-8")
     assert (native.read_bytes(), native.stat().st_mtime_ns) == before
     assert "policy" not in selected and "directory" not in selected

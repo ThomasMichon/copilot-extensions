@@ -301,8 +301,9 @@ def test_unsupported_foreground_preserves_addressed_incumbent(
     ingress.assert_not_called()
 
 
+@pytest.mark.parametrize("change", ["port", "removed-peer", "peer-key", "missing-receipt"])
 def test_changed_retained_listener_config_preserves_incumbent_and_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:
     from agent_ssh import gateway_authorization, gateway_profile, gateway_sshd
     from agent_ssh_service import local_service
@@ -316,10 +317,25 @@ def test_changed_retained_listener_config_preserves_incumbent_and_files(
         gateway_authorization._windows_create_directory(root)
     else:
         root.mkdir(mode=0o700)
-    projection = {
+    projection: dict[str, Any] = {
         "target": {"machine": "receiver", "environment": "windows"},
         "controller": "gateway-a", "user": "receiver", "host_key": key(7),
     }
+    descriptor = {
+        "schema": 1, "backend": "openssh-reverse", "machine": "receiver",
+        "gateway_user": "receiver", "host_key": key(9), "server_port": 22,
+        "relay_port": 24001, "peers": [
+            {"machine": "receiver", "relay_port": 24001},
+            {"machine": "controller", "relay_port": 24002},
+        ],
+    }
+    peers = [
+        {"machine": "receiver", "user": "receiver", "public_key": key(1), "host_key": key(7)},
+        {"machine": "controller", "user": "controller", "public_key": key(2), "host_key": key(8)},
+    ]
+    projection.update(peers=peers, native_membership={
+        "descriptor": descriptor, "directory": {"peers": peers},
+    })
     ingress: dict[str, Any] = {
         "state_dir": root, "port": 24107, "host_key_file": tmp_path / "host",
         "sshd": tmp_path / "sshd", "ssh_keygen": tmp_path / "keygen",
@@ -338,8 +354,21 @@ def test_changed_retained_listener_config_preserves_incumbent_and_files(
         )),
     ):
         atomic_write_text(path, content)
-    before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in root.iterdir()}
-    ingress["port"] += 1
+    gateway_authorization.apply_projection(projection, root / "authorization")
+    if change == "port":
+        ingress["port"] += 1
+        error = "configuration differs"
+    elif change == "removed-peer":
+        peers.pop()
+        error = "cannot remove or replace"
+    elif change == "peer-key":
+        peers[-1]["public_key"] = key(99)
+        error = "cannot remove or replace"
+    else:
+        (root / "authorization" / gateway_authorization._NATIVE_RECEIPT).unlink()
+        error = "no membership receipt"
+    before = {path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in root.rglob("*") if path.is_file()}
     monkeypatch.setattr(type(selected), "ingress", lambda _: ingress)
     monkeypatch.setattr(native_receiver, "_transport", lambda *a: object())
 
@@ -360,11 +389,12 @@ def test_changed_retained_listener_config_preserves_incumbent_and_files(
     stop, spawn = Mock(), Mock()
     monkeypatch.setattr(local_service, "request", stop)
     monkeypatch.setattr(local_service, "spawn_daemon", spawn)
-    with pytest.raises(ValueError, match="configuration differs"):
+    with pytest.raises(ValueError, match=error):
         local_service.start(source, tmp_path / "policy.json", selected)
     stop.assert_not_called()
     spawn.assert_not_called()
-    assert {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in root.iterdir()} == before
+    assert {path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in root.rglob("*") if path.is_file()} == before
 
 
 def test_service_owns_receiver_lease_through_cleanup_reconciliation(

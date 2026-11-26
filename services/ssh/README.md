@@ -252,7 +252,9 @@ cleanup and native exit precede the replacement listener. Failed preflight
 preserves the predecessor. Preflight checks foreground platform support, the
 incoming listener executable, host private key, admitted login account and
 compatibility with the retained ingress owner, generated configuration and
-authorization receipts. It neither creates/changes retained state nor probes
+authorization receipts. Incoming native membership must also preserve every
+previously accepted identity and its matching receipt before retirement.
+Preflight neither creates/changes retained state nor probes
 the still-occupied listener endpoint. Lost replies remain
 uncertain, and native cleanup
 refusal retains the original owner and lease for reconciliation. This is a

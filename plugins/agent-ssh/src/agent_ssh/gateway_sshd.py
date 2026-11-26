@@ -356,6 +356,8 @@ def _retained_state(
         name: value[name] for name in authorization._BINDING
     }:
         raise ValueError("Authorization state belongs to another target/controller")
+    if "native_membership" in value:
+        authorization.validate_native_projection(value, root / "authorization")
     return root, owner, content
 
 

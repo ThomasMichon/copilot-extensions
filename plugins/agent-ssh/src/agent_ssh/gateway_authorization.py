@@ -382,7 +382,7 @@ def _native_state(root: Path, owner: Document) -> Document | None:
     return {"descriptor": selected.descriptor, "directory": selected.directory}
 
 
-def _accept_native(value: Document, root: Path, owner: Document) -> None:
+def _check_native_membership(value: Document, root: Path, owner: Document) -> None:
     if any(root.glob("gateway-provider-*.json")):
         raise ValueError("Versioned Fleet authorization cannot become unversioned native membership")
     membership = value["native_membership"]
@@ -397,7 +397,17 @@ def _accept_native(value: Document, root: Path, owner: Document) -> None:
         current = {row["machine"]: row for row in observed.directory["peers"]}
         if any(current.get(row["machine"]) != row for row in prior["directory"]["peers"]):
             raise ValueError("Unversioned native membership cannot remove or replace accepted identities")
-    data = gateway_profile._json({**owner, **membership})
+
+
+def validate_native_projection(value: Document, state_dir: Path) -> None:
+    """Check incoming native membership against retained state without writing."""
+    root = _root(state_dir, create=False)
+    _check_native_membership(value, root, {name: value[name] for name in _BINDING})
+
+
+def _accept_native(value: Document, root: Path, owner: Document) -> None:
+    _check_native_membership(value, root, owner)
+    data = gateway_profile._json({**owner, **value["native_membership"]})
     path = root / _NATIVE_RECEIPT
     if not path.exists() or _read(path) != data:
         atomic_write_text(path, data)
