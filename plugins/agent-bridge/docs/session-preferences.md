@@ -181,7 +181,10 @@ Caller-settings mode also checks the returned configuration before emitting
 `model_applied` or a model usage label. A successful RPC with missing or
 mismatched readback records `model_fallback`, not the requested value as applied.
 Later option responses cannot leave an earlier reverted selection reported as
-applied. Caller mode remains degrade-safe: these refusals do not fail startup
+applied. A mutation without usable readback also invalidates earlier application
+claims until a later response confirms the current configuration; strict target
+mode refuses startup if required selections remain unverified.
+Caller mode remains degrade-safe: these refusals do not fail startup
 or override the native model control. Configuration readback confirms the
 session selection, not the model that executes each provider call.
 

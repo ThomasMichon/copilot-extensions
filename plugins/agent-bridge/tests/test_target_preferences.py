@@ -310,7 +310,9 @@ def test_unoffered_and_failed_rpc_are_visible():
     ] == "not-offered"
     value, events = client(model_override="native", context_override="long_context")
     value._connection.set_config_option.side_effect = RuntimeError("test failure")
-    asyncio.run(value._apply_model_config(options(context=True)))
+    with pytest.raises(PreferenceApplicationError, match="required model/effort was not verified"):
+        asyncio.run(value._apply_model_config(options(context=True)))
+    assert not any(kind in {"usage_update", "model_applied"} for kind, _ in events)
     assert next(d for k, d in events if k == "model_fallback")["fallbacks"][0][
         "reason"
     ] == "rpc-failed"

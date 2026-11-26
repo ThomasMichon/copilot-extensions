@@ -11,6 +11,7 @@ from typing import Any, TypeVar, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent_remote_driver.session_preferences import PreferenceApplicationError
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
     AgentMessageChunk,
@@ -1226,6 +1227,37 @@ def test_apply_model_config_rechecks_model_after_effort_readback(
         "config": "model", "requested": "claude-opus-4.8",
         "reason": "not-confirmed", "actual": "gpt-5.6-sol",
     }]
+
+
+@pytest.mark.parametrize("policy", ["caller-settings", "target-settings"])
+@pytest.mark.parametrize("response", [None, RuntimeError("unverified mutation")])
+def test_apply_model_config_invalidates_claims_after_unverified_mutation(
+    monkeypatch: pytest.MonkeyPatch, policy: str, response: Any,
+) -> None:
+    desired = {"model": "claude-opus-4.8", "reasoning_effort": "max"}
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config", lambda: desired,
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    client = _capture_client(events)
+    client.preference_source = policy
+    client.target_preferences = {"status": "resolved", "values": desired}
+    selected = _model_config_options()
+    selected[0]["currentValue"] = desired["model"]
+    _mock_connection(client).set_config_option = AsyncMock(side_effect=[
+        {"configOptions": selected}, response,
+    ])
+    if policy == "target-settings":
+        with pytest.raises(PreferenceApplicationError):
+            _run(client._apply_model_config(_model_config_options()))
+    else:
+        _run(client._apply_model_config(_model_config_options()))
+    assert not any(kind in {"usage_update", "model_applied"} for kind, _ in events)
+    fallback = next(data for kind, data in events if kind == "model_fallback")
+    assert any(
+        item["config"] == "model" and item["reason"] == "readback-unavailable"
+        for item in fallback["fallbacks"]
+    )
 
 
 def test_apply_model_config_already_current_still_records(monkeypatch: pytest.MonkeyPatch) -> None:

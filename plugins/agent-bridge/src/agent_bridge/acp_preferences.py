@@ -180,6 +180,7 @@ class AcpPreferencesMixin:
         applied: dict[str, str] = {}
         fallbacks: list[dict[str, Any]] = []
         unconfirmed: set[str] = set()
+        readback_confirmed = True
         config_ids = [_ACP_MODEL_CONFIG_ID, _ACP_EFFORT_CONFIG_ID]
         if target_mode:
             config_ids.append("context")
@@ -219,6 +220,8 @@ class AcpPreferencesMixin:
             if before_effect is not None:
                 before_effect()
             try:
+                # A mutation can change other options even when its RPC fails.
+                readback_confirmed = False
                 result = await self._connection.set_config_option(
                     config_id=config_id,
                     session_id=self._acp_session_id,
@@ -233,6 +236,7 @@ class AcpPreferencesMixin:
                 if target_mode:
                     self._verified_options = readback
                 advertised = _config_index(readback, grouped=True)
+                readback_confirmed = True
                 unconfirmed.clear()
                 actual = (advertised.get(config_id) or (None, set()))[0]
                 if actual != value:
@@ -253,14 +257,20 @@ class AcpPreferencesMixin:
 
         if not target_mode:
             for key, value in tuple(applied.items()):
-                actual = (advertised.get(key) or (None, set()))[0]
+                actual = (advertised.get(key) or (None, set()))[0] if readback_confirmed else None
                 if actual != value:
                     applied.pop(key)
                     if not any(item["config"] == key for item in fallbacks):
-                        fallbacks.append({"config": key, "requested": value,
-                                          "reason": "not-confirmed", "actual": actual})
+                        fallback: dict[str, Any] = {
+                            "config": key, "requested": value,
+                            "reason": "not-confirmed" if readback_confirmed
+                            else "readback-unavailable",
+                        }
+                        if readback_confirmed:
+                            fallback["actual"] = actual
+                        fallbacks.append(fallback)
         else:
-            effective = self._selected_preferences(self._verified_options)
+            effective = self._selected_preferences(self._verified_options) if readback_confirmed else {}
             final_options = _config_index(self._verified_options, grouped=True)
             for key in unconfirmed:
                 effective.pop(key, None)
@@ -278,7 +288,8 @@ class AcpPreferencesMixin:
                         ) for item in fallbacks
                     ):
                         fallbacks.append({"config": key, "requested": desired[key],
-                                          "reason": "not-offered" if desired[key] not in final_allowed
+                                          "reason": "readback-unavailable" if not readback_confirmed
+                                          else "not-offered" if desired[key] not in final_allowed
                                           else "not-confirmed",
                                           "actual": effective.get(key)})
             failed_keys = {
