@@ -91,15 +91,47 @@ json_type() {
 }
 
 resolve_runtime() {
+    local result
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
     local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
+    # Bash 3.2 must retain LKG fallback through failed current-slot resolution.
+    set +e
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
+    result=$?
+    set -e
+    return "$result"
 }
 
+admit_runtime_python() (
+    local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    local capture="$SCRIPT_DIR/native_capture.sh" uv
+    exec 5>&- 6>&- 7>&- 8>&- 9>&-
+    if [[ ! -f "$capture" ]]; then
+        capture="$PAYLOAD_ROOT/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    fi
+    if [[ ! -f "$provider" || ! -f "$capture" ]]; then
+        printf '%s\n' '[agent-vault] application runtime admission support is unavailable; use explicit setup.' >&2
+        return 126
+    fi
+    uv="$(command -v uv)" || {
+        printf '%s\n' '[agent-vault] uv is unavailable; prepare the command prerequisites through explicit setup.' >&2
+        return 126
+    }
+    . "$capture"
+    if ! capture_native_process 10 "$BASH" -c \
+        '. "$1"; resolve_uv_runtime_python "$2" "$3"' \
+        vault-runtime-admission "$provider" "$expected" "$uv"; then
+        printf '%s\n' '[agent-vault] application runtime admission failed; use explicit setup.' >&2
+        return 126
+    fi
+    printf '%s\n' "$__native_capture_output"
+)
+
 run_runtime() {
+    AGENT_RT_PY="$(admit_runtime_python "$AGENT_RT_PY")" || exit 126
     apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
     if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
         local validated_cache
@@ -257,11 +289,14 @@ fi
 if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     . "$SCRIPT_DIR/runtime-activation.sh"
     activation_code=0
-    activation_scope=()
+    activation_args=(
+        "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT"
+        "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector
+    )
     if [[ "$has_configuration_root" == true ]]; then
-        activation_scope+=(--explicit-configuration-root)
+        activation_args+=(--explicit-configuration-root)
     fi
-    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector "${activation_scope[@]}")" || activation_code=$?
+    activation="$(vault_runtime_activation "${activation_args[@]}")" || activation_code=$?
     if [[ "$activation_code" == 2 ]]; then
         if [[ "${command_arguments[0]:-}" == installer-readiness ]]; then
             printf '%s\n' "$activation"

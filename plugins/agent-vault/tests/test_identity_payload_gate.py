@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import runpy
 import shutil
 import site
 import socket
@@ -47,7 +48,20 @@ def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
                         ignore=shutil.ignore_patterns("__pycache__"))
     for filename in ("bootstrap-uv.sh", "bootstrap-uv.ps1", "installer-instance-python-version.txt"):
         shutil.copyfile(REPO / "libs/installer-engine" / filename, payload / "scripts" / filename)
-    shutil.copy2(PLUGIN / "plugin.json", payload / "plugin.json")
+    for filename in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
+        shutil.copy2(PLUGIN / filename, payload / filename)
+    previous_path = sys.path[:]
+    try:
+        invocation = runpy.run_path(str(REPO / "tools/materialize_payload_invocation.py"))
+        invocation["materialize"](payload, canonical_root=REPO, source_consumer=PLUGIN)
+        assets = runpy.run_path(str(REPO / "tools/materialize_installer_engine.py"))
+        for source, target in assets["derived_file_pairs"](
+            REPO, payload.parent, copied_consumer=(PLUGIN, payload),
+        ):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    finally:
+        sys.path[:] = previous_path
     write_json(home / ".copilot" / "settings.json", {
         "extraKnownMarketplaces": {
             "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
@@ -148,6 +162,12 @@ def test_installed_readiness_does_not_import_checkout_module(tmp_path: Path, hos
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, **no_window_kwargs())
     home, payload, runtime, _, context = prepare_payload(tmp_path, "namespaced")
     prepare_runtime(runtime, payload)
+    cli = payload / "src/agent_vault/cli.py"
+    text = cli.read_text(encoding="utf-8")
+    ping = 'service = send_command({"action": "ping"}, strict_endpoint=True)'
+    assert text.count(ping) == 1
+    # Import isolation must not depend on, or contact, an unrelated host endpoint.
+    cli.write_text(text.replace(ping, "service = None"), encoding="utf-8")
     declaration = {
         "schema": "copilot-extensions.readiness-isolation", "version": 1,
         "plugin": "agent-vault", "module": "agent_vault",

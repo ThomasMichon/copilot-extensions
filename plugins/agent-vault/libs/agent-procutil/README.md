@@ -1351,6 +1351,8 @@ never a saved numeric identity. Two absent-group kernel null-signal probes
 precede reaping and return; permission or unknown errors never count as absence.
 This needs neither a process-table scan nor a potentially privileged `ps` child.
 Unconfirmed settlement refuses with status 125 and never invokes the application.
+Its diagnostic distinguishes an unavailable group observation, a still-present
+group at the cleanup deadline and retained private files; none is success.
 Ordinary timeout returns 124; cancellation retains the conventional signal exit
 status. The guardian unlinks its private files before retiring, even when the
 caller dies after release. A pre-opened caller descriptor retains unread stdout

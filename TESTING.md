@@ -84,6 +84,21 @@ macOS and Windows within eight-minute job limits. These fixtures isolate
 installation-context decisions and do not qualify installed-host lifetime,
 every MCP child producer or complete command latency.
 
+Vault's `tests/test_managed_command_gate.py` runs its actual Bash and PowerShell
+gates with real prepared UV and an inert 3.10.20 application independent of the
+3.11.18 helper. Thirteen raw/materialized scenarios cover current/LKG/newest,
+namespaced and explicit configuration-root selection, real pure pinned-cache
+validation/refusal, readiness and invocation metadata, and missing UV/provider/
+capture before either application or validator entry. Successful paths run
+twice, retaining argv/stdio/exit, isolation/bytecode policy, exact UV work and
+caller/application descriptors. Fixtures precompile their inert application
+and pure validator dependency before unchanged-byte observations; they do not
+disable normal operational bytecode. The four path-gated Ubuntu/macOS/Windows
+shell jobs require all 26 applicable cases and reports per host within the
+existing eight-minute native job limit. No backend, key, credential or service
+operation is performed; these controls do not establish installed adoption or
+complete command latency.
+
 Index's `tests/test_managed_command_gate.py` runs the actual Bash and PowerShell
 gates with independent prepared 3.11.18 bootstrap and 3.10.20 application
 interpreters. Fourteen scenarios per shell cover current/LKG/newest, namespaced
