@@ -1,13 +1,18 @@
 """Supervisor finalize-first sweep for obsolete tasks awaiting a relevance closeout.
 
-For each candidate whose worker is confirmed absent on this machine the
-supervisor fences start/resume, runs a real ``agent-worktrees finalize`` on the
-task's managed worktree in a bounded background job, and on a later cycle
-records the outcome: accepted evidence settles the task as abandoned, a
-confirmed refusal lifts the fence so the worker closes out itself, and an
-unknown effect (timeout, unavailable CLI, malformed result) keeps the fence and
-custody until a later worktree status read reconciles it. An error is never
-treated as acceptance, and unknown liveness is never treated as absence.
+Bridge liveness reads and finalization both run in bounded background jobs;
+the supervision cycle only reads coordinator pages and records results. A
+background selection job picks a local candidate whose worker is confirmed
+absent. The supervisor then fences start/resume and durably marks the fence
+in flight (effect unknown until proven) *before* running a real
+``agent-worktrees finalize`` in a second background job, so a restart can never
+lose custody of a possibly half-finalized checkout. A later cycle records the
+outcome: accepted evidence settles the task as abandoned, a confirmed refusal
+lifts the fence so the worker closes out itself, and an unknown effect keeps
+the fence and custody until the worktree's exact durable record proves
+finalization or an unfinalized checkout. An outcome that could not be
+published is kept and retried. An error is never treated as acceptance,
+missing state never as cleanup proof, and unknown liveness never as absence.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import json
 import logging
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -33,6 +39,10 @@ log = logging.getLogger("agent-dispatch.supervisor")
 
 FINALIZE_TIMEOUT_SECONDS = 180.0
 STATUS_TIMEOUT_SECONDS = 15.0
+#: Shared budget for one background selection job's Bridge liveness reads.
+SELECT_DEADLINE_SECONDS = 20.0
+IN_FLIGHT_DETAIL = "finalize in flight; effect unknown until reconciled"
+_clock = time.monotonic
 #: Candidate pages read per sweep; the cursor carries the rest to later cycles.
 MAX_PAGES = 4
 
@@ -40,11 +50,14 @@ ACCEPTED, REFUSED, UNKNOWN = "accepted", "refused", "unknown"
 ALIVE, ABSENT = "alive", "absent"
 
 FinalizeRunner = Callable[[str, str], "subprocess.CompletedProcess[str] | None"]
-StatusProbe = Callable[[str], "dict[str, Any] | None"]
+StatusProbe = Callable[[str, str], "dict[str, Any] | None"]
 Verdict = tuple[str, "dict[str, Any] | None", str]
 
-#: Worktree statuses that prove nothing is left for the worker to clean up.
-RECONCILED_STATUSES = frozenset({"finalized", "absent"})
+#: Durable record statuses proving finalization never completed, so the worker
+#: may close out its own checkout. ``finalized`` alone proves cleanup; every
+#: other status (``finalizing``, archived, orphaned, unrecognized) or a missing
+#: record keeps custody unknown.
+UNFINALIZED_STATUSES = frozenset({"active", "complete", "completed", "pushed"})
 
 
 @dataclass
@@ -55,6 +68,8 @@ class _Job:
     thread: threading.Thread | None = None
     verdict: Verdict = (UNKNOWN, None, "finalize-first job did not report")
     done: threading.Event = field(default_factory=threading.Event)
+    #: A selection job's chosen candidate (``None`` when none was absent).
+    candidate: dict[str, Any] | None = None
 
 
 def run_finalize(project: str, worktree_id: str) -> subprocess.CompletedProcess[str] | None:
@@ -106,23 +121,34 @@ def finalize_evidence(runner: FinalizeRunner, project: str, worktree_id: str) ->
 
 
 def reconcile_evidence(probe: StatusProbe, project: str, worktree_id: str) -> Verdict:
-    """Reconcile an unknown finalization from the worktree's tracking record."""
+    """Reconcile an unknown finalization from the worktree's exact durable record."""
     try:
-        record = probe(worktree_id)
+        record = probe(project, worktree_id)
     except Exception as exc:  # A failed read is not evidence either way.
-        return UNKNOWN, None, f"worktree status unavailable: {type(exc).__name__}"
+        return UNKNOWN, None, f"worktree record unavailable: {type(exc).__name__}"
     if not isinstance(record, dict):
-        return UNKNOWN, None, "worktree status unavailable"
+        # A missing record or an unavailable read never proves cleanup.
+        return UNKNOWN, None, "exact worktree record unavailable; finalization unproven"
     status = record.get("status")
-    if status in RECONCILED_STATUSES:
+    if status == "finalized":
         return ACCEPTED, _accepted(project, worktree_id, reconciled=status), ""
-    return REFUSED, None, f"finalize did not complete; worktree is {status or 'unreadable'}"[:1024]
+    if status in UNFINALIZED_STATUSES:
+        return REFUSED, None, f"finalize did not complete; worktree is {status}"[:1024]
+    return UNKNOWN, None, f"worktree is {status or 'unreadable'}; finalization unproven"[:1024]
 
 
-def _status_probe(worktree_id: str) -> dict[str, Any] | None:
-    from .doctor import resolve_worktree
+def _status_probe(project: str, worktree_id: str) -> dict[str, Any] | None:
+    """The exact durable record; the roster can lag it, so a list read is never used."""
+    from . import worktree_record
+    from .procutil import agent_worktrees_environment, agent_worktrees_launch_prefix
 
-    return resolve_worktree(worktree_id, timeout=STATUS_TIMEOUT_SECONDS)
+    prefix = agent_worktrees_launch_prefix()
+    if not prefix:
+        return None
+    return worktree_record.read_exact_row(
+        prefix, worktree_id, project=project, timeout=STATUS_TIMEOUT_SECONDS,
+        task_scoped=False, env=agent_worktrees_environment(),
+    )
 
 
 def _local(candidate: dict[str, Any]) -> bool:
@@ -177,6 +203,10 @@ def _start(owner: Supervisor, job: _Job, work: Callable[[], Verdict]) -> dict[st
     return {"task_id": job.task_id, "action": "started", "kind": job.kind}
 
 
+def _transient(exc: Exception) -> bool:
+    return not isinstance(exc, DispatchError) or exc.status_code >= 500
+
+
 def _record(owner: Supervisor, job: _Job) -> dict[str, Any]:
     client = owner.client
     verdict, evidence, detail = job.verdict
@@ -194,24 +224,35 @@ def _record(owner: Supervisor, job: _Job) -> dict[str, Any]:
         log.warning("relevance finalize-first effect unknown for %s; custody retained: %s", task_id, detail)
         return {"action": "retained", **result}
     except (DispatchError, httpx.TransportError, ValueError) as exc:
-        # The fence expires on its own; never assume settlement happened.
+        # The fence was marked in flight before launch, so custody survives this;
+        # a transient failure keeps the outcome for retry, a rejection leaves the
+        # unknown fence to exact-record reconciliation.
         log.warning("relevance finalize-first outcome unrecorded for %s: %s", task_id, exc)
-        return {"task_id": task_id, "action": "unrecorded", "error": str(exc)[:512]}
+        return {
+            "task_id": task_id, "action": "unrecorded", "error": str(exc)[:512],
+            "retry": _transient(exc),
+        }
 
 
 def sweep(owner: Supervisor) -> dict[str, Any] | None:
     """Advance at most one finalize-first job without blocking the cycle.
 
-    A running job is left alone; a finished job's verdict is recorded; otherwise
-    one unknown fence is reconciled or one fresh candidate is fenced and its
-    finalization started in the background.
+    A running job is left alone. A finished selection fences and starts its
+    candidate's finalization; a finished finalization or reconciliation is
+    recorded (and kept for retry when publication failed transiently).
+    Otherwise one unknown fence is reconciled or a background selection starts.
     """
     job = _job(owner)
     if job is not None:
         if not job.done.is_set():
             return {"task_id": job.task_id, "action": "running", "kind": job.kind}
-        _set_job(owner, None)
-        return _record(owner, job)
+        if job.kind == "select":
+            _set_job(owner, None)
+            return _admit(owner, job.candidate)
+        result = _record(owner, job)
+        if not result.pop("retry", False):
+            _set_job(owner, None)
+        return result
     client = owner.client
     if getattr(client, "relevance_finalize_candidates", None) is None:
         return None
@@ -232,7 +273,16 @@ def sweep(owner: Supervisor) -> dict[str, Any] | None:
             owner._relevance_finalize_reconciled = tried  # type: ignore[attr-defined]
             return _reconcile(owner, row)
     owner._relevance_finalize_reconciled = set()  # type: ignore[attr-defined]
-    candidate = _next_candidate(owner)
+    start_cursor = getattr(owner, "_relevance_finalize_cursor", None)
+    candidates = _local_candidates(owner)
+    if not candidates:
+        return None
+    job = _Job("", "", "select")
+    _start(owner, job, lambda: _select(owner, job, candidates, start_cursor))
+    return {"action": "selecting", "kind": "select", "candidates": len(candidates)}
+
+
+def _admit(owner: Supervisor, candidate: dict[str, Any] | None) -> dict[str, Any] | None:
     if candidate is None:
         return None
     if action_inhibited("worker-admission", logger=log):
@@ -243,30 +293,50 @@ def sweep(owner: Supervisor) -> dict[str, Any] | None:
     return _attempt(owner, candidate)
 
 
-def _next_candidate(owner: Supervisor) -> dict[str, Any] | None:
+def _select(
+    owner: Supervisor, job: _Job, candidates: list[dict[str, Any]], start_cursor: Any,
+) -> Verdict:
+    """Off the poll thread: the first candidate confirmed absent within the budget."""
+    deadline = _clock() + SELECT_DEADLINE_SECONDS
+    for index, candidate in enumerate(candidates):
+        if _clock() >= deadline:
+            # Resume after the last probed candidate so none is skipped unprobed.
+            owner._relevance_finalize_cursor = (  # type: ignore[attr-defined]
+                candidates[index - 1].get("cursor") if index else start_cursor
+            )
+            break
+        if _liveness(owner, candidate) == ABSENT:
+            job.candidate = candidate
+            return ACCEPTED, None, ""
+    return UNKNOWN, None, "no candidate confirmed absent"
+
+
+def _local_candidates(owner: Supervisor) -> list[dict[str, Any]]:
+    """Local candidates from up to ``MAX_PAGES`` coordinator pages; no Bridge reads."""
     from .queue_relevance_finalize_first import CANDIDATE_LIMIT
 
+    found: list[dict[str, Any]] = []
     for _ in range(MAX_PAGES):
         after = getattr(owner, "_relevance_finalize_cursor", None)
         try:
             page = owner.client.relevance_finalize_candidates(owner.supervisor_id, after=after)
         except DispatchUpgradeRequired:
-            return None
+            return found
         except (DispatchError, httpx.TransportError, ValueError) as exc:
             log.warning("relevance finalize-first candidates unavailable: %s", exc)
-            return None
+            return found
         cursor = page[-1].get("cursor") if page else None
         # A short page ends the cohort; the next sweep starts over from the oldest.
         owner._relevance_finalize_cursor = (  # type: ignore[attr-defined]
             cursor if len(page) >= CANDIDATE_LIMIT and isinstance(cursor, dict) else None
         )
-        for candidate in page:
-            reservation = candidate.get("reservation")
-            if isinstance(reservation, dict) and _local(candidate) and _liveness(owner, candidate) == ABSENT:
-                return candidate
+        found.extend(
+            candidate for candidate in page
+            if isinstance(candidate.get("reservation"), dict) and _local(candidate)
+        )
         if owner._relevance_finalize_cursor is None:  # type: ignore[attr-defined]
-            return None
-    return None
+            break
+    return found
 
 
 def _reconcile(owner: Supervisor, row: dict[str, Any]) -> dict[str, Any]:
@@ -290,6 +360,20 @@ def _attempt(owner: Supervisor, candidate: dict[str, Any]) -> dict[str, Any] | N
     except (DispatchError, httpx.TransportError, ValueError) as exc:
         log.info("relevance finalize-first not fenced for %s: %s", task_id, exc)
         return None
+    token = fence["token"]
+    try:
+        # Durable in-flight custody before any effect: a restart or a lost
+        # outcome leaves an unknown fence that never reopens execution by expiry.
+        client.retain_relevance_finalize(task_id, token=token, detail=IN_FLIGHT_DETAIL)
+    except (DispatchError, httpx.TransportError, ValueError) as exc:
+        log.warning("relevance finalize-first not started for %s: %s", task_id, exc)
+        try:  # Nothing ran; lift the fence so the worker can close out itself.
+            client.release_relevance_finalize(
+                task_id, token=token, detail=f"finalize not started: {exc}"[:1024],
+            )
+        except (DispatchError, httpx.TransportError, ValueError):
+            pass
+        return {"task_id": task_id, "action": "not_started", "error": str(exc)[:512]}
     runner: FinalizeRunner = getattr(owner, "finalize_runner", None) or run_finalize
 
     def work() -> Verdict:
@@ -299,4 +383,4 @@ def _attempt(owner: Supervisor, candidate: dict[str, Any]) -> dict[str, Any] | N
             return REFUSED, None, "worker became live or its liveness is unknown before finalize"
         return finalize_evidence(runner, reservation["allocation_project"], reservation["worktree"])
 
-    return _start(owner, _Job(task_id, fence["token"], "finalize"), work)
+    return _start(owner, _Job(task_id, token, "finalize"), work)

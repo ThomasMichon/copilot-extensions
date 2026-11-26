@@ -93,25 +93,33 @@ permitted `abandon` decision can retire obsolete SUBMITTED work directly.
   claim (reservation reserving/spawned, no attachment, no wake handed to
   delivery) or a suspended task with a cold reservation and no pending wake
   or resume request. Candidates are paged by `(updated_at, id)` so skipped
-  remote or hot workers never starve later ones. The supervisor requires
-  confirmed worker absence (an unknown liveness probe, such as a Bridge
-  outage, retains custody), fences the task, and runs a real
-  `agent-worktrees finalize` on the task's worktree in a bounded background
-  operation that later cycles observe, so ordinary supervision never waits
-  on it. While the fence is unexpired, start, resume, steering and every
-  closeout-wake admission exception are refused. Only a clean finalize of
-  that exact worktree, under an unexpired fence, is accepted: the task
-  becomes ABANDONED, the closeout is acknowledged with
-  `finish_action: supervisor-finalize-first/v1` plus the finalize evidence,
-  and the reservation is released through normal cleanup without waking a
-  worker. A confirmed refusal is never acceptance: the fence lifts, the
-  attempt cools down for the generation and the task falls back to case 1;
-  for a suspended task the refusal re-arms the owner's linked closeout wake
-  so the worker closes out itself. A timeout or malformed result has an
-  unknown effect: the task stays held (`unknown`, without expiry) until a
-  later cycle reconciles the worktree status — finalized or absent settles,
-  still tracked releases to the fallback. The supervisor attempts at most one
-  finalize at a time.
+  remote or hot workers never starve later ones. Bridge liveness reads run
+  in a background selection job under a shared budget, never on the
+  supervision thread. The supervisor requires confirmed worker absence (an
+  unknown liveness probe, such as a Bridge outage, retains custody), fences
+  the task, durably marks the fence in flight (`unknown`, without expiry)
+  and only then runs a real `agent-worktrees finalize` on the task's
+  worktree in a bounded background operation that later cycles observe, so
+  ordinary supervision never waits on it and a supervisor restart cannot
+  lose custody. Liveness is re-checked after fencing. While the fence is
+  held, start, resume, steering and every closeout-wake admission exception
+  are refused. Only a clean finalize of that exact worktree, under a held
+  fence, is accepted: the task becomes ABANDONED, the closeout is
+  acknowledged with `finish_action: supervisor-finalize-first/v1` plus the
+  finalize evidence, and the reservation is released through normal cleanup
+  without waking a worker. A confirmed refusal is never acceptance: the fence
+  lifts, the attempt cools down for the generation and the task falls back
+  to case 1; for a suspended task the refusal re-arms the owner's linked
+  closeout wake so the worker closes out itself. A pool resume that asks to
+  wake a suspended owner with a pending closeout is routed through the same
+  linked closeout wake, not a recovery wake. A timeout, malformed result or
+  unpublished outcome has an unknown effect: an outcome that failed to
+  publish transiently is retried, and otherwise the task stays held until a
+  later cycle reads the worktree's exact durable record (`agent-worktrees
+  --project <project> record`) — `finalized` settles, an unfinalized active
+  checkout releases to the fallback, and a missing record or any other
+  status keeps custody. The supervisor runs at most one finalize-first job
+  at a time.
 - **Retirement abandonment.** When retiring a reservation abandons its task,
   the retire endpoint publishes `task.abandoned` (with handoff-release and
   lifecycle telemetry) once, alongside `spawn.retired`.

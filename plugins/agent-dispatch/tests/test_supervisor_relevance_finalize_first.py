@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from agent_dispatch import supervisor_relevance_finalize_first as sweep_mod
-from agent_dispatch.client_errors import DispatchUpgradeRequired
+from agent_dispatch.client_errors import DispatchError, DispatchUpgradeRequired
 from agent_dispatch.queue_relevance_finalize_first import FINALIZE_RUNNER
 
 
@@ -124,15 +124,16 @@ def _owner(
 
 
 def _sweep(owner: SimpleNamespace) -> dict[str, Any] | None:
-    """Start a job, let it finish, then record it on the following cycle."""
-    started = sweep_mod.sweep(owner)  # type: ignore[arg-type]
-    job = getattr(owner, "_relevance_finalize_job", None)
-    if job is None:
-        return started
-    assert started is not None and started["action"] == "started"
-    assert job.thread is not None
-    job.thread.join(5)
-    return sweep_mod.sweep(owner)  # type: ignore[arg-type]
+    """Run cycles, letting each background job finish, until one records a result."""
+    result = sweep_mod.sweep(owner)  # type: ignore[arg-type]
+    for _ in range(4):
+        job = getattr(owner, "_relevance_finalize_job", None)
+        if job is None or result is None or result["action"] not in ("selecting", "started"):
+            return result
+        assert job.thread is not None
+        job.thread.join(5)
+        result = sweep_mod.sweep(owner)  # type: ignore[arg-type]
+    return result
 
 
 @pytest.fixture(autouse=True)
@@ -152,7 +153,8 @@ def test_sweep_settles_on_accepted_finalize_and_skips_hot_or_remote() -> None:
     result = _sweep(_owner(client, live=frozenset({"wt-hot"}), runner=_accepting))
     assert result is not None and result["action"] == "settled" and result["task_id"] == "cold"
     assert client.calls[0] == ("fence", "cold")
-    assert client.calls[1][0] == "settle" and client.calls[1][1]["worktree_id"] == "wt-cold"
+    assert client.calls[1] == ("retain", sweep_mod.IN_FLIGHT_DETAIL)
+    assert client.calls[2][0] == "settle" and client.calls[2][1]["worktree_id"] == "wt-cold"
 
 
 def test_sweep_releases_the_fence_when_finalize_is_refused() -> None:
@@ -162,8 +164,8 @@ def test_sweep_releases_the_fence_when_finalize_is_refused() -> None:
     client = _Client([_candidate()])
     result = _sweep(_owner(client, runner=refusing))
     assert result is not None and result["action"] == "released"
-    assert [name for name, _ in client.calls] == ["fence", "release"]
-    assert "unmerged work" in client.calls[1][1]
+    assert [name for name, _ in client.calls] == ["fence", "retain", "release"]
+    assert "unmerged work" in client.calls[2][1]
 
 
 def test_sweep_retains_custody_when_finalize_times_out_then_reconciles_from_status() -> None:
@@ -171,26 +173,123 @@ def test_sweep_retains_custody_when_finalize_times_out_then_reconciles_from_stat
     owner = _owner(client, runner=lambda project, worktree_id: None)
     result = _sweep(owner)
     assert result is not None and result["action"] == "retained"
-    assert [name for name, _ in client.calls] == ["fence", "retain"]
+    assert [name for name, _ in client.calls] == ["fence", "retain", "retain"]
 
     # A retained fence leaves the candidate cohort and is reconciled instead.
     client.candidates = []
     client.unknown = [{"task_id": "t1", "token": "tok", "reservation": _candidate()["reservation"]}]
-    owner.finalize_status_fn = lambda worktree_id: None
+    probed: list[tuple[str, str]] = []
+
+    def missing(project: str, worktree_id: str) -> None:
+        probed.append((project, worktree_id))
+
+    owner.finalize_status_fn = missing
     assert _sweep(owner)["action"] == "retained"  # type: ignore[index]
+    assert probed == [("proj", "wt-t1")]
     # Each unknown fence is retried once per rotation, so fresh candidates still get a turn.
     assert _sweep(owner) is None
-    owner.finalize_status_fn = lambda worktree_id: {"status": "absent"}
+    owner.finalize_status_fn = lambda project, worktree_id: {"status": "finalized"}
     result = _sweep(owner)
     assert result is not None and result["action"] == "settled"
-    assert client.calls[-1][1]["reconciled"] == "absent"
+    assert client.calls[-1][1]["reconciled"] == "finalized"
     assert [name for name, _ in client.calls].count("release") == 0
+
+
+@pytest.mark.parametrize("record", [None, {"status": "finalizing"}, {"status": "archived"}, {}])
+def test_reconcile_keeps_custody_unless_the_exact_record_proves_the_outcome(record: Any) -> None:
+    verdict, evidence, _ = sweep_mod.reconcile_evidence(lambda project, worktree_id: record, "proj", "wt-1")
+    assert verdict == sweep_mod.UNKNOWN and evidence is None
+
+
+def test_default_status_probe_reads_the_exact_project_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_dispatch import procutil, worktree_record
+
+    seen: dict[str, Any] = {}
+
+    def exact(prefix: list[str], worktree_id: str, **kwargs: Any) -> dict[str, Any]:
+        seen.update(kwargs, prefix=prefix, worktree_id=worktree_id)
+        return {"id": worktree_id, "status": "finalized"}
+
+    monkeypatch.setattr(procutil, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(worktree_record, "read_exact_row", exact)
+    assert sweep_mod._status_probe("proj", "wt-1") == {"id": "wt-1", "status": "finalized"}
+    assert seen["project"] == "proj" and seen["worktree_id"] == "wt-1" and seen["task_scoped"] is False
 
 
 def test_sweep_reconciles_a_still_tracked_worktree_as_refused() -> None:
     client = _Client([], [{"task_id": "t1", "token": "tok", "reservation": _candidate()["reservation"]}])
-    result = _sweep(_owner(client, status=lambda worktree_id: {"status": "active"}))
+    result = _sweep(_owner(client, status=lambda project, worktree_id: {"status": "active"}))
     assert result is not None and result["action"] == "released"
+
+
+def test_in_flight_custody_is_durable_before_finalize_runs() -> None:
+    client = _Client([_candidate()])
+    at_run: list[list[str]] = []
+
+    def runner(project: str, worktree_id: str) -> subprocess.CompletedProcess[str]:
+        at_run.append([name for name, _ in client.calls])
+        return _accepting(project, worktree_id)
+
+    assert _sweep(_owner(client, runner=runner))["action"] == "settled"  # type: ignore[index]
+    assert at_run == [["fence", "retain"]]
+
+
+def test_a_failed_in_flight_retain_never_finalizes() -> None:
+    class NoRetain(_Client):
+        def retain_relevance_finalize(self, task_id: str, *, token: str, detail: str) -> dict[str, Any]:
+            raise DispatchError(503, "unavailable")
+
+    ran: list[str] = []
+    client = NoRetain([_candidate()])
+    result = _sweep(_owner(client, runner=lambda p, w: ran.append(w)))
+    assert result is not None and result["action"] == "not_started" and ran == []
+    assert [name for name, _ in client.calls] == ["fence", "release"]
+
+
+def test_a_failed_outcome_publication_is_kept_and_retried() -> None:
+    failures = [DispatchError(503, "down"), None]
+
+    class Flaky(_Client):
+        def settle_relevance_finalize(self, task_id: str, *, token: str, evidence: dict[str, Any]) -> dict[str, Any]:
+            error = failures.pop(0)
+            if error is not None:
+                raise error
+            return super().settle_relevance_finalize(task_id, token=token, evidence=evidence)
+
+    ran: list[str] = []
+    client = Flaky([_candidate()])
+
+    def runner(project: str, worktree_id: str) -> subprocess.CompletedProcess[str]:
+        ran.append(worktree_id)
+        return _accepting(project, worktree_id)
+
+    owner = _owner(client, runner=runner)
+    result = _sweep(owner)
+    assert result is not None and result["action"] == "unrecorded"
+    assert owner._relevance_finalize_job is not None  # retained for retry, not rerun
+    assert sweep_mod.sweep(owner)["action"] == "settled"  # type: ignore[arg-type,index]
+    assert ran == ["wt-t1"] and owner._relevance_finalize_job is None
+
+
+def test_a_rejected_outcome_publication_falls_back_to_reconciliation() -> None:
+    class Rejecting(_Client):
+        def settle_relevance_finalize(self, task_id: str, *, token: str, evidence: dict[str, Any]) -> dict[str, Any]:
+            raise DispatchError(409, "incarnation changed")
+
+    owner = _owner(Rejecting([_candidate()]), runner=_accepting)
+    assert _sweep(owner)["action"] == "unrecorded"  # type: ignore[index]
+    assert owner._relevance_finalize_job is None
+
+
+@pytest.mark.parametrize(("status", "action"), [("finalizing", "retained"), ("finalized", "settled")])
+def test_a_restarted_supervisor_reconciles_in_flight_custody(status: str, action: str) -> None:
+    # A fresh owner has no job; the in-flight unknown fence is its only memory.
+    ran: list[str] = []
+    client = _Client([], [{"task_id": "t1", "token": "tok", "reservation": _candidate()["reservation"]}])
+    owner = _owner(client, runner=lambda p, w: ran.append(w), status=lambda project, worktree_id: {"status": status})
+    result = _sweep(owner)
+    assert result is not None and result["action"] == action and ran == []
+    assert "release" not in [name for name, _ in client.calls]
 
 
 @pytest.mark.parametrize("liveness", ["unknown", "alive"])
@@ -246,13 +345,45 @@ def test_a_slow_finalizer_does_not_block_the_sweep() -> None:
     client = _Client([_candidate()])
     owner = _owner(client, runner=slow)
     started = time.monotonic()
+    assert sweep_mod.sweep(owner)["action"] == "selecting"  # type: ignore[arg-type,index]
+    owner._relevance_finalize_job.thread.join(5)
     assert sweep_mod.sweep(owner)["action"] == "started"  # type: ignore[arg-type,index]
     assert sweep_mod.sweep(owner)["action"] == "running"  # type: ignore[arg-type,index]
     assert time.monotonic() - started < 1
-    assert [name for name, _ in client.calls] == ["fence"]
+    assert [name for name, _ in client.calls] == ["fence", "retain"]
     gate.set()
     owner._relevance_finalize_job.thread.join(5)
     assert sweep_mod.sweep(owner)["action"] == "settled"  # type: ignore[arg-type,index]
+
+
+def test_slow_liveness_reads_never_block_the_sweep() -> None:
+    gate = threading.Event()
+    client = _Client([_candidate(f"t{i}") for i in range(4)])
+    owner = _owner(client, runner=_accepting)
+
+    def slow(worktree: str, machine: str | None) -> str:
+        gate.wait(5)
+        return "absent"
+
+    owner.finalize_liveness_fn = slow
+    started = time.monotonic()
+    assert sweep_mod.sweep(owner)["action"] == "selecting"  # type: ignore[arg-type,index]
+    assert sweep_mod.sweep(owner)["action"] == "running"  # type: ignore[arg-type,index]
+    assert time.monotonic() - started < 1 and client.calls == []
+    gate.set()
+    owner._relevance_finalize_job.thread.join(5)
+    assert sweep_mod.sweep(owner)["action"] == "started"  # type: ignore[arg-type,index]
+
+
+def test_a_selection_past_its_budget_resumes_after_the_last_probed_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _Client([_candidate(f"t{i}") for i in range(3)])
+    owner = _owner(client, live=frozenset({"wt-t0", "wt-t1", "wt-t2"}))
+    clock = iter([0.0, 0.0, 0.0, 100.0])
+    monkeypatch.setattr(sweep_mod, "_clock", lambda: next(clock))
+    assert _sweep(owner) is None
+    assert owner._relevance_finalize_cursor == {"updated_at": 1.0, "task_id": "t1"}
 
 
 def test_sweep_is_a_no_op_against_a_coordinator_without_finalize_first() -> None:

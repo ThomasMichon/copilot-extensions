@@ -125,6 +125,7 @@ class QueueRelevanceMixin:
         _audit: Callable[..., None]
         _notify_owned_transition: Callable[[], None]
         _notify_wake: Callable[[], None]
+        _enqueue_wake: Callable[..., WakeOperation]
 
     @staticmethod
     def _migrate_task_relevance(conn: sqlite3.Connection) -> None:

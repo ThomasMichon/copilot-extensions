@@ -210,6 +210,30 @@ def test_refused_cold_closeout_rearms_its_owner_to_close_out(q: TaskQueue) -> No
     assert current_task(q, t.id).status != Status.ABANDONED
 
 
+def test_resume_wake_for_a_delivered_closeout_reaches_the_owner_as_its_closeout(
+    q: TaskQueue,
+) -> None:
+    t, _ = cold(q)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET state=? WHERE task_id=?", (SpawnState.SPAWNED, t.id),
+        )
+
+    q.resume(t.id, t.owner or "", wake_requested=True, now=150)
+
+    wake = q.claim_due_wake(now=200)
+    assert wake is not None and wake.task_id == t.id and wake.pool_recovery_revision is None
+    with q._connect() as conn:
+        from agent_dispatch.queue_relevance_delivery import closeout_wake
+
+        assert closeout_wake(conn, wake)
+    admission = q.admit_execution_wake(wake, provenance=None, now=201)
+    assert admission is not None
+    finished = q.finish_wake(wake.id, wake.delivery_token or "", delivered=True, now=202)
+    assert finished is not None
+    assert current_task(q, t.id).status == Status.SUSPENDED
+
+
 def test_a_fence_refuses_the_owner_closeout_wake_until_it_is_lifted(q: TaskQueue) -> None:
     t, r = cold(q)
     token = fence(q, t, r)

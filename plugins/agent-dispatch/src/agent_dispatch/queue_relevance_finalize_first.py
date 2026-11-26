@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from .queue_common import CompletionOutcome, Task, _task_transition_spec
+from .queue_common import CompletionOutcome, Task, WakeOperation, _task_transition_spec
 from .queue_lifecycle_host import single_task
 from .queue_records import SpawnState, Status, TaskError
 
@@ -130,6 +130,7 @@ class QueueRelevanceFinalizeFirstMixin:
         _audit: Callable[..., None]
         _transition: Callable[..., Task | tuple[Task, bool]]
         _notify_wake: Callable[[], None]
+        _enqueue_wake: Callable[..., WakeOperation]
 
     def relevance_finalize_candidates(
         self, supervisor_id: str, *, limit: int = CANDIDATE_LIMIT,
@@ -304,27 +305,18 @@ class QueueRelevanceFinalizeFirstMixin:
 
     def _rearm_closeout(self, task_id: str, fence: sqlite3.Row, ts: float) -> str:
         """Re-deliver the original linked closeout wake to the suspended owner."""
-        from .queue_relevance_delivery import enqueue_closeout
+        from .queue_relevance_delivery import rearm_closeout
 
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
-            closeout = conn.execute(
-                "SELECT * FROM task_relevance_closeouts WHERE task_id=? AND acknowledgement IS NULL",
-                (task_id,),
-            ).fetchone()
             if (
-                task is None or closeout is None or task.status != Status.SUSPENDED
+                task is None or task.status != Status.SUSPENDED
                 or task.generation != fence["generation"] or task.hold_reason is not None
             ):
                 conn.execute("COMMIT")
                 return "refused: closeout owner changed"
-            # The delivered wake ended with its session; a fresh linked wake is the owner's closeout.
-            conn.execute(
-                "UPDATE task_steer SET wake_operation_id=NULL, taken=0, taken_at=NULL WHERE id=?",
-                (closeout["steer_id"],),
-            )
-            wake = enqueue_closeout(self, conn, task, closeout, ts=ts)
+            wake = rearm_closeout(self, conn, task, ts=ts)
             if wake is None:
                 conn.execute("ROLLBACK")
                 return "refused: closeout owner is not resumable"
