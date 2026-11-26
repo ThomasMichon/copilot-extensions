@@ -7,6 +7,11 @@ import errno
 import os
 import select
 import sys
+from typing import Any, Protocol, cast
+
+
+class _Child(Protocol):
+    pid: int
 
 
 class _SigInfo(ctypes.Structure):
@@ -19,7 +24,7 @@ class _SigInfo(ctypes.Structure):
     ]
 
 
-def _waitid():
+def _waitid() -> Any:
     if sys.platform != "darwin" or ctypes.sizeof(ctypes.c_void_p) != 8:
         raise RuntimeError("Darwin child custody requires native 64-bit macOS")
     query = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True).waitid
@@ -30,7 +35,7 @@ def _waitid():
     return query
 
 
-def observe_unreaped(process):
+def observe_unreaped(process: _Child) -> _SigInfo | None:
     """Use native waitid on macOS, including Python versions not exposing it."""
     data = _SigInfo()
     # sys/wait.h: P_PID=1, WEXITED=4, WNOHANG=1, WNOWAIT=32.
@@ -47,6 +52,9 @@ def observe_unreaped(process):
 
 class OwnerWatch:
     """Register the still-live direct parent before any product can start."""
+
+    owner: int
+    queue: Any
 
     def __init__(self, owner: int, *, parent: bool = True) -> None:
         if sys.platform != "darwin":
@@ -76,9 +84,9 @@ class OwnerWatch:
             raise RuntimeError("native caller exit observation failed")
         event = events[0]
         if (
-            event.ident != self.owner or event.filter != select.KQ_FILTER_PROC
-            or event.flags & select.KQ_EV_ERROR
-            or not event.fflags & select.KQ_NOTE_EXIT
+            event.ident != self.owner or event.filter != cast(Any, select).KQ_FILTER_PROC
+            or event.flags & cast(Any, select).KQ_EV_ERROR
+            or not event.fflags & cast(Any, select).KQ_NOTE_EXIT
         ):
             raise RuntimeError("native caller exit observation failed")
 
@@ -103,7 +111,10 @@ class _BSDInfo(ctypes.Structure):
 
 
 class GroupCensus:
-    """Observe only the group whose original leader the caller keeps unreaped."""
+    """Provide bounded membership snapshots and strict owned-group observations."""
+
+    list_pids: Any
+    info: Any
 
     def __init__(self) -> None:
         if sys.platform != "darwin":
@@ -118,7 +129,7 @@ class GroupCensus:
         ]
         self.info.restype = ctypes.c_int
 
-    def active(self, leader: int) -> bool:
+    def _members(self, leader: int) -> list[int]:
         capacity = 64
         while capacity <= 1048576:
             pids = (ctypes.c_int * capacity)()
@@ -135,9 +146,28 @@ class GroupCensus:
             capacity *= 2
         else:
             raise RuntimeError("native process group census exceeds its bound")
-        for pid in pids[:count]:
-            if pid <= 0:
-                raise RuntimeError("native process group identity is malformed")
+        members = list(pids[:count])
+        if any(pid <= 0 for pid in members):
+            raise RuntimeError("native process group identity is malformed")
+        return members
+
+    def require_current_process(self) -> None:
+        """Probe libproc using self, not identities in a borrowed caller group."""
+        pid, group = os.getpid(), cast(Any, os).getpgrp()
+        data = _BSDInfo()
+        ctypes.set_errno(0)
+        returned = self.info(pid, 3, 0, ctypes.byref(data), ctypes.sizeof(data))
+        if (
+            returned != ctypes.sizeof(data) or data.pid != pid
+            or data.pgid != group or data.status == 5
+        ):
+            raise RuntimeError("native current process identity is unavailable")
+        if pid not in self._members(group):
+            raise RuntimeError("native current process group membership is unavailable")
+
+    def active(self, leader: int) -> bool:
+        """Observe the group whose original leader the caller keeps unreaped."""
+        for pid in self._members(leader):
             if pid == leader:
                 continue
             data = _BSDInfo()
@@ -158,6 +188,6 @@ def require_support() -> None:
     _waitid()
     with_owner = OwnerWatch(os.getpid(), parent=False)
     try:
-        GroupCensus().active(os.getpgrp())
+        GroupCensus().require_current_process()
     finally:
         with_owner.close()

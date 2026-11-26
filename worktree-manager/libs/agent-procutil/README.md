@@ -1523,7 +1523,12 @@ errors remain explicit.
 Native POSIX caller-death execution uses Linux `pidfd_open` and readable `/proc`
 pidfd identity, or macOS `kqueue` process-exit events and `libproc` group census.
 Both require unreaped-child/default-SIGCHLD custody. Unsupported native API
-prerequisites refuse before target launch. macOS uses native `waitid(WNOWAIT)`
+prerequisites refuse before target launch. macOS capability admission queries
+the current process's native identity and confirms its membership in a bounded
+group listing, without inspecting unrelated processes in the inherited group.
+Missing or malformed self identity/membership refuses before spawn; this is
+separate from the strict owned-group census used for cleanup.
+macOS uses native `waitid(WNOWAIT)`
 even on Python versions that do not expose it; Linux retains its Python/native
 pidfd path. One finite
 helper owns its session/group before starting the target in that inherited
