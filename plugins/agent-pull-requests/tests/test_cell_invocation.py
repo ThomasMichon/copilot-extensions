@@ -13,7 +13,10 @@ from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
 import pytest
+import agent_procutil
 from agent_procutil import no_window_kwargs
+from agent_procutil import managed_python
+from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
 from test_cell_installer_slice import SCRIPTS
 from test_cell_payload_upgrade import native_profile
 from test_watch_installation import _FixtureAPI, _policy
@@ -263,6 +266,53 @@ def test_dispatch_refuses_failed_admission_or_selection_changed_during_lookup(
     with pytest.raises((OSError, ValueError, RuntimeError)):
         module.execute(["--help"])
     assert admissions == [python]
+
+
+@pytest.mark.parametrize("error", [
+    subprocess.TimeoutExpired(["uv", "python", "find"], 10),
+    OutputLimitExceeded("stdout", 65536),
+])
+def test_settled_lookup_failure_reports_refusal_without_traceback_or_application(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], error: subprocess.SubprocessError,
+) -> None:
+    module, installation, runtime, status, _ = selected
+    adapter = SimpleNamespace(
+        foundation=lambda: api, management_version=lambda: runtime.payload_version,
+        process_helpers=lambda: agent_procutil,
+    )
+    monkeypatch.setattr(module, "installer", lambda: adapter)
+    monkeypatch.setattr(module, "discover", lambda _: (
+        status, installation.durable_home, installation.os_profile, {},
+    ))
+
+    def refuse(_: Path) -> str:
+        raise error
+
+    monkeypatch.setattr(managed_python, "resolve_runtime_python", refuse)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "failed application admission must not run or provision",
+    ))
+    assert module.main(["--", "inspect"]) == 126
+    captured = capsys.readouterr()
+    assert not captured.out and "Application runtime admission failed" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_application_admission_preserves_unconfirmed_cleanup_for_its_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load()
+    adapter = SimpleNamespace(process_helpers=lambda: agent_procutil)
+    error = OwnedCleanupError(None, phase="fixture", cause=RuntimeError("unconfirmed cleanup"))
+
+    def refuse(_: Path) -> str:
+        raise error
+
+    monkeypatch.setattr(managed_python, "resolve_runtime_python", refuse)
+    with pytest.raises(OwnedCleanupError) as observed:
+        module.admitted_runtime(adapter, Path("not-executed"))
+    assert observed.value is error
 
 
 @pytest.mark.parametrize("pointer", ["relative/install.json", '{"installReceipt":"not-a-path"}'])

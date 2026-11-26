@@ -127,18 +127,6 @@ Codespaces' [command-admission controls](plugins/agent-codespaces/tests/README.m
 retain prepared helper/application separation, forwarding, refusal and exact
 offline UV work in raw/materialized layouts; native jobs require all reports.
 
-Pull Requests' [command-entry controls](plugins/agent-pull-requests/README.md)
-use independent prepared helper/application interpreters, poisoned ambient
-selectors and inert governance/selection surfaces. The path-gated native workflow
-requires all twenty raw/materialized controls and reports per applicable shell
-on Ubuntu, macOS and Windows within eight-minute job limits. Positive paths run
-twice; prerequisite refusal and selection changes during admission cannot enter
-the application or installer. Inert applications are precompiled before byte
-snapshots; operational isolation/bytecode policy is unchanged. Canonical receipt
-and complete-selection behavior remains in the separate `test_cell_invocation.py`
-packet; isolated command surfaces do not qualify native OS-account adoption,
-real PR/network/broker operations or full installed-host acceptance.
-
 Index's `tests/test_managed_command_gate.py` runs the actual Bash and PowerShell
 gates with independent prepared 3.11.18 bootstrap and 3.10.20 application
 interpreters. Fourteen scenarios per shell cover current/LKG/newest, namespaced

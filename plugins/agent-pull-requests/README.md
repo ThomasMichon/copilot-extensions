@@ -1203,7 +1203,7 @@ acquisition or implicit provisioning. Legacy READY commands use the same
 prepared-only application admission; their existing native first-touch
 installation driver remains the owner of the separate missing-runtime route.
 
-The [inert command controls](tests/test_managed_command_gate.py) exercise both
+The [inert command controls](tests/README.md) exercise both
 dispatch paths with real prepared interpreters, without PR/provider, network,
 broker or service effects. Canonical governance and complete-selection
 regressions remain in `tests/test_cell_invocation.py`.

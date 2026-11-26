@@ -192,11 +192,17 @@ def admitted_runtime(adapter: Any, python: Path) -> str:
     try:
         managed = importlib.import_module("agent_procutil.managed_python")
         admit = managed.resolve_runtime_python
+        owned = importlib.import_module("agent_procutil.owned_process")
     except (ImportError, AttributeError) as error:
         raise RuntimeError(
             "Application runtime admission support is unavailable; use explicit installation management."
         ) from error
-    return cast(str, admit(python))
+    try:
+        return cast(str, admit(python))
+    except (subprocess.TimeoutExpired, owned.OutputLimitExceeded) as error:
+        raise RuntimeError(
+            "Application runtime admission failed; use explicit installation management."
+        ) from error
 
 
 def execute(arguments: list[str], *, bootstrap: bool = False) -> int:
