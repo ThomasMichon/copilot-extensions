@@ -33,7 +33,7 @@ def application_python(prepared_helper: tuple[Path, Path, Path]) -> Path:
          "--no-python-downloads", "cpython@3.10.20"],
         env={**os.environ, "UV_PYTHON_INSTALL_DIR": str(store)},
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode:
         pytest.skip("This acquisition-free control requires prepared CPython 3.10.20")
@@ -84,7 +84,7 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
         [str(uv), "venv", "--no-project", "--no-python-downloads",
          "--python", str(application_python), str(slot)],
         env=env, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert built.returncode == 0, built.stdout + built.stderr
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -151,10 +151,10 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
     tools.mkdir()
     for name in ("bash", "dirname", "basename", "wc", "cat", "git", "id", "cut",
                  "awk", "sed", "grep", "tr", "date", "head", "sort", "find",
-                 "mktemp", "mkfifo", "sleep", "rm", "rmdir", "getent", "mkdir", "flock"):
-        command = shutil.which(name)
-        if command and os.name != "nt":
-            (tools / name).symlink_to(command)
+                 "mktemp", "mkfifo", "sleep", "rm", "rmdir", "getent", "mkdir", "flock", "dscl"):
+        binary = shutil.which(name)
+        if binary and os.name != "nt":
+            (tools / name).symlink_to(binary)
     for name in ("python", "python3", "py"):
         poison = tools / (name + (".cmd" if os.name == "nt" else ""))
         poison.write_text(
@@ -190,8 +190,11 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
             missing.rename(missing.with_suffix(".unavailable"))
     empty = tmp_path / "unprepared store"
     empty.mkdir()
+    git = shutil.which("git")
+    assert git
     env.update(
-        PATH=str(tools), AGENT_INDEX_HOME=str(root), AGENT_INDEX_REPO=str(tmp_path),
+        PATH=os.pathsep.join((str(tools), str(Path(git).parent))) if os.name == "nt" else str(tools),
+        AGENT_INDEX_HOME=str(root), AGENT_INDEX_REPO=str(tmp_path),
         TEST_PYTHON=str(python), TEST_CELL_ROOT=str(root), AGENT_INDEX_ROLE="client",
         ORIGIN_MARKER=str(tmp_path / "origin-ran"), AMBIENT_MARKER=str(tmp_path / "ambient-ran"),
         VALIDATION_MARKER=str(validation), INSTALLER_MARKER=str(tmp_path / "installer-ran"),
@@ -237,7 +240,7 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
         result = subprocess.run(
             command, env=env, cwd=tmp_path, input="foreground input\n",
             capture_output=True, text=True, encoding="utf-8", timeout=45,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         samples.append(time.monotonic() - started)
         assert not Path(env["AMBIENT_MARKER"]).exists(), result.stdout + result.stderr

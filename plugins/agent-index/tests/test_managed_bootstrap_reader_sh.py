@@ -55,7 +55,8 @@ def _environment(
     commands = tmp_path / "commands"
     commands.mkdir()
     for name in ("bash", "dirname", "wc", "cat", "sed", "head", "git", "id",
-                 "cut", "awk", "grep", "tr", "date", "basename", "getent"):
+                 "cut", "awk", "grep", "tr", "date", "basename", "getent",
+                 "mktemp", "mkfifo", "sleep", "rm", "rmdir"):
         executable = shutil.which(name)
         assert executable, name
         (commands / name).symlink_to(executable)
