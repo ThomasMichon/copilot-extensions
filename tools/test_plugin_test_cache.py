@@ -17,6 +17,7 @@ else:
 import pytest
 
 from test_run_plugin_tests import runner
+from test_run_plugin_tests import preparation_logic_only as preparation_logic_only
 from plugin_test_cache import FLEET_TEST_CONSUMERS
 import plugin_test_cache as cache_policy
 import native_test_paths
@@ -246,6 +247,7 @@ def preparation_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_released_preparation_passes_overrides_through_normal_policy(
     released_graph: Graph, monkeypatch: pytest.MonkeyPatch, preparation_metadata: None,
+    preparation_logic_only: None,
 ) -> None:
     plugin, _, canonical = released_graph
     (runner.VENV_ROOT / "agent-pull-requests").mkdir(parents=True)
@@ -464,6 +466,7 @@ def test_linked_cache_root_refuses_without_touching_target(
 
 def test_automatic_body_drift_rebuild_refreshes_uv_and_preserves_other_cache(
     graph: Graph, monkeypatch: pytest.MonkeyPatch, preparation_metadata: None,
+    preparation_logic_only: None,
 ) -> None:
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
@@ -538,6 +541,7 @@ def test_private_wheel_fixture_exceeds_max_path_with_minimal_root(root: str) -> 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows long-path cleanup")
 def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
     graph: Graph, monkeypatch: pytest.MonkeyPatch,
+    preparation_logic_only: None,
 ) -> None:
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)

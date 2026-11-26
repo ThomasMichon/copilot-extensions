@@ -252,12 +252,19 @@ def test_promotion_git_calls_cannot_reintroduce_foreign_selectors(monkeypatch: p
 
     for key in ("GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"):
         monkeypatch.setenv(key, "foreign")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "foreign")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "foreign")
     monkeypatch.setenv("PROMOTION_TEST_RETAINED", "retained")
     calls = []
 
     def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         clean = kwargs["env"]
-        assert not {"GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"} & clean.keys()
+        assert not {"GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_CONFIG_GLOBAL"} & clean.keys()
+        assert {key: value for key, value in clean.items() if key.startswith("GIT_CONFIG_")} == {
+            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(tmp_path.resolve()),
+        }
         assert clean["PROMOTION_TEST_RETAINED"] == "retained"
         assert kwargs["creationflags"] == (getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0)
         assert kwargs["cwd"] == str(tmp_path)

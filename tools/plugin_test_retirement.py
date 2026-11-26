@@ -193,6 +193,10 @@ def apply(plan: Preview) -> dict[str, object]:
         raise ValueError("Retirement preview names a replaced environment")
     lease = acquire(0, environment)
     try:
+        if any(os.path.lexists(native_test_path(environment / name)) for name in (
+            ".dep-fingerprint.pending", ".dep-fingerprint.pending.update",
+        )):
+            raise ValueError("Unsettled preparation retains this environment; retirement refused")
         current = _environment(source, plan.target, plan.platform)
         if _identity(current) != identity or _observe(source, plan.target, plan.platform, current) != plan:
             raise ValueError("Retirement preview is stale")

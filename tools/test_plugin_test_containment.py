@@ -55,9 +55,12 @@ def test_poisoned_parent_state_is_detached_before_preparation(tmp_path: Path, mo
     monkeypatch.setenv("AGENT_TEST_SUPERVISOR_ROOT", "unchanged-custody")
     observed = {}
 
-    def prepare(name: str, uv: str, *, reinstall: bool, environment: dict[str, str]) -> Path:
+    def prepare(name: str, uv: str, *, reinstall: bool, environment: dict[str, str],
+                deadline: float, limits: Limits, sandbox: Path) -> Path:
         observed.update(environment)
         private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        assert sandbox == private and deadline > time.monotonic()
+        assert limits.wall_seconds == 900 and limits.max_processes == 128
         for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
                     "WORKTREE_MANAGER_ROOT", "AGENT_MCP_INSTALL_DIR", "AGENT_FUTURE_STATE_ROOT"):
             assert Path(environment[key]).is_relative_to(private)
@@ -66,6 +69,8 @@ def test_poisoned_parent_state_is_detached_before_preparation(tmp_path: Path, mo
         assert "AGENT_FUTURE_SOCKET" not in environment
         assert Path(environment["UV_CACHE_DIR"]) == cache / ".uv-cache"
         assert Path(environment["UV_PYTHON_INSTALL_DIR"]) == cache / ".python"
+        from plugin_test_source_versions import stage_ready
+        stage_ready(cache / name, "fixture-ready")
         return private / "prepared-python"
     monkeypatch.setattr(runner, "_prepare_venv", prepare)
     runner._ensure_venv("fixture", "fixture-uv", reinstall=False)
@@ -103,8 +108,11 @@ def test_user_only_uv_configuration_survives_private_preparation(tmp_path: Path,
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     observed = []
 
-    def prepare(name: str, uv: str, *, reinstall: bool, environment: dict[str, str]) -> Path:
+    def prepare(name: str, uv: str, *, reinstall: bool, environment: dict[str, str],
+                deadline: float, limits: Limits, sandbox: Path) -> Path:
         private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        assert sandbox == private and deadline > time.monotonic()
+        assert limits.wall_seconds == 900 and limits.max_processes == 128
         assert Path(environment["HOME"]).is_relative_to(private)
         assert Path(environment["APPDATA"]).is_relative_to(private)
         assert Path(environment["XDG_CONFIG_HOME"]).is_relative_to(private)
@@ -115,6 +123,8 @@ def test_user_only_uv_configuration_survives_private_preparation(tmp_path: Path,
         assert environment["UV_INDEX_FIXTURE_PASSWORD"] == "fixture-value"
         observed.append(Path(environment["UV_CONFIG_FILE"]))
         assert observed[-1].is_relative_to(private)
+        from plugin_test_source_versions import stage_ready
+        stage_ready(tmp_path / "venvs" / name, "fixture-ready")
         return private / "python"
     monkeypatch.setattr(runner, "_prepare_venv", prepare)
     runner._ensure_venv("fixture", "fixture-uv", reinstall=False)

@@ -8,7 +8,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tomllib
+from typing import Any, NoReturn, TypedDict
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 import pytest
 
@@ -27,7 +32,14 @@ repo = _repo_fixture
 no_ambient_git_identity = _identity_fixture
 
 
-def _change(repo, name):
+class PromotionInputs(TypedDict):
+    repo: Path
+    dev_ref: str
+    main_ref: str
+    promotion_time: str
+
+
+def _change(repo: Path, name: str) -> None:
     directory = repo / ".changefiles"
     directory.mkdir(exist_ok=True)
     (directory / f"{name}.json").write_text(json.dumps({
@@ -36,7 +48,7 @@ def _change(repo, name):
     }), encoding="utf-8")
 
 
-def _runtime(repo):
+def _runtime(repo: Path) -> None:
     plugin = repo / "plugins/demo-plugin"
     (plugin / "pyproject.toml").write_text(
         '[build-system]\nrequires = ["setuptools>=68", "wheel"]\n'
@@ -65,25 +77,25 @@ def test_local_composition_keeps_main_versions_and_changefiles_on_source(
     loader = promotion._load_module
     reads = []
 
-    def load(path, name):
+    def load(path: Path, name: str) -> Any:
         module = loader(path, name)
-        if name == "promote_accumulate_bumps":
+        if name == "promote_changefile":
             reader = module.read_changefiles
-            calls = []
+            calls: list[bool] = []
             reads.append(calls)
 
-            def read():
+            def read() -> Any:
                 calls.append(True)
                 return reader()
 
             module.read_changefiles = read
-            if legacy:
-                consume = module._consume_changefiles
+        if name == "promote_accumulate_bumps" and legacy:
+            consume = module._consume_changefiles
 
-                def consume_legacy():
-                    consume()
+            def consume_legacy() -> None:
+                consume()
 
-                module._consume_changefiles = consume_legacy
+            module._consume_changefiles = consume_legacy
         return module
 
     monkeypatch.setattr(promotion, "_load_module", load)
@@ -110,8 +122,8 @@ def test_local_composition_keeps_main_versions_and_changefiles_on_source(
 
 @pytest.mark.parametrize("selectors", [False, True])
 def test_local_composition_does_not_follow_or_mutate_a_foreign_caller_index(
-    repo, tmp_path, monkeypatch, selectors,
-):
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selectors: bool,
+) -> None:
     _runtime(repo)
     seed = _commit(repo, "initial runtime")
     _change(repo, "local-change")
@@ -147,12 +159,12 @@ def test_composition_changefile_workers_require_caller_context_admission(
     loader = promotion._load_module
     reads = []
 
-    def load(path, name):
+    def load(path: Path, name: str) -> Any:
         module = loader(path, name)
-        if name == "promote_accumulate_bumps":
+        if name == "promote_changefile":
             reader = module.read_changefiles
 
-            def read(*, parallel=False):
+            def read(*, parallel: bool = False) -> Any:
                 reads.append(parallel)
                 return reader(parallel=parallel)
 
@@ -249,7 +261,7 @@ def test_main_version_inputs_batch_raw_pinned_blobs_without_export_filtering(
     original = source_io._git
     calls = []
 
-    def git(root, args, **kwargs):
+    def git(root: Path, args: list[str], **kwargs: Any) -> bytes:
         calls.append(args)
         return original(root, args, **kwargs)
 
@@ -269,7 +281,7 @@ def test_main_version_inputs_batch_raw_pinned_blobs_without_export_filtering(
 
 
 def test_install_snapshot_uses_composed_main_versions_and_retains_git_association(
-    repo: Path, tmp_path: Path, monkeypatch,
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _runtime(repo)
     baseline = _commit(repo, "initial runtime")
@@ -307,12 +319,12 @@ def test_install_snapshot_uses_composed_main_versions_and_retains_git_associatio
 
 
 def test_install_snapshot_retains_no_output_when_canonical_composition_refuses(
-    repo: Path, tmp_path: Path, monkeypatch,
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = _git(["rev-parse", "HEAD"], repo)
     output = tmp_path / "refused"
 
-    def refuse(*args, **kwargs):
+    def refuse(*args: Any, **kwargs: Any) -> NoReturn:
         raise promotion.PromotionError("selected Main seed cannot be composed")
 
     monkeypatch.setattr(local_runtime_promotion, "compose", refuse)
@@ -368,7 +380,7 @@ def test_selected_application_export_keeps_full_tree_roster_and_dependency_bytes
     assert (repo / ".git/index").read_bytes() == before_index
     assert (repo / ".changefiles/local-change.json").is_file()
     refused = tmp_path / "refused"
-    with pytest.raises(ValueError, match="declared Python projects"):
+    with pytest.raises(ValueError, match="selected Python project is absent"):
         local_install_source.compose(repo, source, seed, refused, projects=("not-declared",))
     assert not refused.exists()
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
@@ -380,7 +392,9 @@ def test_local_composition_requires_exact_commits(repo: Path, field: str) -> Non
     arguments = dict(source_commit=commit, main_seed=commit)
     arguments[field] = "main"
     with pytest.raises(promotion.PromotionError, match="requires an exact"):
-        local_runtime_promotion.compose(repo, **arguments)
+        local_runtime_promotion.compose(
+            repo, source_commit=arguments["source_commit"], main_seed=arguments["main_seed"],
+        )
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
@@ -389,8 +403,8 @@ def test_local_composition_requires_exact_commits(repo: Path, field: str) -> Non
     ("0.1.19-dev1", "0.1.20-dev1"),
 ])
 def test_standalone_version_allocation_preserves_enrolled_python_source(
-    repo, main_version, expected,
-):
+    repo: Path, main_version: str, expected: str,
+) -> None:
     source = Path(__file__).resolve().parents[1]
     project = source / "services/chat"
     component = repo / "services/chat"
@@ -398,7 +412,7 @@ def test_standalone_version_allocation_preserves_enrolled_python_source(
         "project"
     ]["version"]
 
-    def copy_source(value):
+    def copy_source(value: str) -> None:
         shutil.copytree(
             project / "src", component / "src", dirs_exist_ok=True,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
@@ -449,14 +463,14 @@ def test_standalone_version_allocation_preserves_enrolled_python_source(
     assert tomllib.loads((component / "pyproject.toml").read_text())["project"]["version"] == version
 
 
-def test_unlanded_alias_does_not_change_main_derived_dependency_versions(repo):
+def test_unlanded_alias_does_not_change_main_derived_dependency_versions(repo: Path) -> None:
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
     _git(["checkout", "-q", "dev"], repo)
     _change(repo, "first")
     _commit(repo, "first pending source")
-    kwargs = dict(
+    kwargs: PromotionInputs = dict(
         repo=repo, dev_ref="dev", main_ref="main", promotion_time="2026-10-20T10:00:00Z",
     )
     first = promotion.promote(**kwargs)
@@ -513,14 +527,14 @@ def test_unlanded_alias_does_not_change_main_derived_dependency_versions(repo):
 
 
 @pytest.mark.parametrize("annotated", [False, True])
-def test_exact_source_retry_is_independent_of_unlanded_aliases(repo, annotated):
+def test_exact_source_retry_is_independent_of_unlanded_aliases(repo: Path, annotated: bool) -> None:
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
     _git(["checkout", "-q", "dev"], repo)
     _change(repo, "first")
     _commit(repo, "pending source")
-    kwargs = dict(
+    kwargs: PromotionInputs = dict(
         repo=repo, dev_ref="dev", main_ref="main", promotion_time="2026-10-20T10:00:00Z",
     )
     first = promotion.promote(**kwargs)
@@ -532,7 +546,9 @@ def test_exact_source_retry_is_independent_of_unlanded_aliases(repo, annotated):
 
 
 @pytest.mark.parametrize("change", ["code", "attributes"])
-def test_changed_source_or_checkout_policy_does_not_consume_a_version_before_main(repo, change):
+def test_changed_source_or_checkout_policy_does_not_consume_a_version_before_main(
+    repo: Path, change: str,
+) -> None:
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -559,7 +575,7 @@ def test_changed_source_or_checkout_policy_does_not_consume_a_version_before_mai
     assert _git(["rev-parse", "demo-plugin-v0.1.1-dev1"], repo) == first["commit"]
 
 
-def test_noncommit_plugin_version_alias_does_not_block_source_composition(repo):
+def test_noncommit_plugin_version_alias_does_not_block_source_composition(repo: Path) -> None:
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -577,13 +593,13 @@ def test_noncommit_plugin_version_alias_does_not_block_source_composition(repo):
         [sys.executable, promotion.__file__, "--repo", str(repo),
          "--dev-ref", "dev", "--main-ref", "main", "--dry-run"],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert command.returncode == 0, command.stderr
     assert "Traceback" not in command.stderr
 
 
-def test_unrelated_source_preserves_an_unchanged_shipped_plugin_version(repo):
+def test_unrelated_source_preserves_an_unchanged_shipped_plugin_version(repo: Path) -> None:
     _runtime(repo)
     main = _commit(repo, "shipped runtime")
     tag = "demo-plugin-v0.1.0-dev1"
@@ -600,7 +616,7 @@ def test_unrelated_source_preserves_an_unchanged_shipped_plugin_version(repo):
     ], repo))["version"] == "0.1.0-dev1"
 
 
-def test_landed_main_advances_the_next_changed_plugin_version(repo):
+def test_landed_main_advances_the_next_changed_plugin_version(repo: Path) -> None:
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -623,7 +639,7 @@ def test_landed_main_advances_the_next_changed_plugin_version(repo):
     assert _git(["rev-parse", "main"], repo) == first["commit"]
 
 
-def test_native_index_five_project_release_closure_uses_library_changefile(repo):
+def test_native_index_five_project_release_closure_uses_library_changefile(repo: Path) -> None:
     from packaging.requirements import Requirement
     from packaging.utils import canonicalize_name
     from packaging.version import Version
@@ -644,6 +660,10 @@ def test_native_index_five_project_release_closure_uses_library_changefile(repo)
             shutil.copytree(source / original / "src", target / "src", ignore=shutil.ignore_patterns(
                 "__pycache__", "*.pyc",
             ))
+    from materialize_installer_engine import derived_file_pairs
+    for canonical, _ in derived_file_pairs(repo, repo):
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / canonical.relative_to(repo), canonical)
     plugin = repo / "plugins/native-index"
     shutil.copytree(
         source / "plugins/agent-index/libs/dropin-registry",
@@ -687,7 +707,7 @@ def test_native_index_five_project_release_closure_uses_library_changefile(repo)
             for relative in projects
         ]
         versions = {canonicalize_name(p["name"]): Version(p["version"]) for p in metadata}
-        assert versions["agent-procutil"] == Version("0.1.0.dev8")
+        assert versions[canonicalize_name("agent-procutil")] == Version("0.1.0.dev8")
         checked = []
         for project in metadata:
             for dependency in project.get("dependencies", []):

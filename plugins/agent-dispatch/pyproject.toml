@@ -34,6 +34,9 @@ dependencies = [
     "agent-worktree-identity",
 ]
 
+[tool.copilot-extensions.application-sources]
+agent-pull-requests = "agent-pull-requests"
+
 [tool.uv.sources]
 agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }

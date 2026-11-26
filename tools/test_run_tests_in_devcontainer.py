@@ -29,6 +29,7 @@ import tarfile
 import uuid
 from pathlib import Path
 from unittest import mock
+from typing import Any, TypeVar
 
 import pytest
 
@@ -45,12 +46,28 @@ try:
     sys.modules[_spec.name] = wrapper
     _spec.loader.exec_module(wrapper)
     import _admission_protocol as admission
+    from single_instance_lease import AlreadyRunningError
 finally:
     sys.path[:] = _previous_path
 
 
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+def recorded(calls: list[T], value: T, result: R) -> R:
+    calls.append(value)
+    return result
+
+
+def deliver_sigterm() -> None:
+    handler = signal.getsignal(signal.SIGTERM)
+    assert callable(handler)
+    handler(signal.SIGTERM, None)
+
+
 @pytest.fixture(autouse=True)
-def _stub_host_devcontainer_cli(monkeypatch):
+def _stub_host_devcontainer_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     """Host unit tests do not install the devcontainer CLI.
 
     ``main`` resolves it before the mocked dependency-prep seam, so a
@@ -60,7 +77,7 @@ def _stub_host_devcontainer_cli(monkeypatch):
     """
     real_which = wrapper.shutil.which
 
-    def which(cmd, *args, **kwargs):
+    def which(cmd: str, *args: Any, **kwargs: Any) -> Any:
         if cmd == "devcontainer":
             return "/usr/bin/devcontainer"
         return real_which(cmd, *args, **kwargs)
@@ -69,7 +86,7 @@ def _stub_host_devcontainer_cli(monkeypatch):
 
 
 @pytest.mark.parametrize("form", ["--selection-file", "--selection-f"])
-def test_external_selection_is_validated_before_copying_and_rewritten(tmp_path, form):
+def test_external_selection_is_validated_before_copying_and_rewritten(tmp_path: Path, form: str) -> None:
     tests = tmp_path / "plugins/fixture/tests"
     tests.mkdir(parents=True)
     (tests / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
@@ -95,10 +112,10 @@ def test_external_selection_is_validated_before_copying_and_rewritten(tmp_path, 
         )
 
 
-def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
+def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> Any:
         calls.append((command, kwargs))
         return real_subprocess.CompletedProcess(command, 0, b"/tmp/ce-selection-example.json\n", b"")
 
@@ -119,12 +136,12 @@ def test_selection_staging_passes_only_validated_data_over_stdin(monkeypatch):
     ["fixture", "--selection-file", "-k", "example"],
     ["fixture", "--selection-file", "-manifest.json"],
 ])
-def test_selection_rewrite_rejects_missing_values_without_consuming_other_flags(arguments):
+def test_selection_rewrite_rejects_missing_values_without_consuming_other_flags(arguments: list[str]) -> None:
     with pytest.raises(ValueError, match="requires a path"):
         wrapper._selection.rewrite_selection(arguments, wrapper._canonicalize_flag, None)
 
 
-def test_selection_rewrite_accepts_explicit_leading_dash_path_and_preserves_other_flags():
+def test_selection_rewrite_accepts_explicit_leading_dash_path_and_preserves_other_flags() -> None:
     rewritten, path = wrapper._selection.rewrite_selection(
         ["fixture", "--selection-file=-manifest.json", "--timeout", "60"],
         wrapper._canonicalize_flag, "/tmp/ce-selection-example.json",
@@ -141,7 +158,7 @@ def test_selection_rewrite_accepts_explicit_leading_dash_path_and_preserves_othe
     ("payload-invocation", "libs/payload-invocation"),
     ("runtime-source", "libs/versioned-runtime"),
 ])
-def test_selection_uses_the_same_plugin_roots_as_the_contained_runner(tmp_path, plugin, relative_root):
+def test_selection_uses_the_same_plugin_roots_as_the_contained_runner(tmp_path: Path, plugin: str, relative_root: str) -> None:
     tests = tmp_path / relative_root / "tests"
     tests.mkdir(parents=True)
     (tests / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
@@ -156,11 +173,11 @@ def test_selection_uses_the_same_plugin_roots_as_the_contained_runner(tmp_path, 
     assert json.loads(payload)["plugin"] == plugin
 
 
-def test_network_enabled_preparation_never_runs_or_needs_the_selection(monkeypatch, tmp_path):
-    commands = []
+def test_network_enabled_preparation_never_runs_or_needs_the_selection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    commands: list[list[str]] = []
     monkeypatch.setattr(
         wrapper._net_scope.subprocess, "run",
-        lambda command: commands.append(command) or real_subprocess.CompletedProcess(command, 0),
+        lambda command: recorded(commands, command, real_subprocess.CompletedProcess(command, 0)),
     )
     wrapper._net_scope.prepare_dependencies(
         "devcontainer", tmp_path, "container", tmp_path / "config.json",
@@ -171,7 +188,7 @@ def test_network_enabled_preparation_never_runs_or_needs_the_selection(monkeypat
     assert not any("selection" in argument for argument in commands[0])
 
 
-def test_selection_admission_reads_the_manifest_once(tmp_path, monkeypatch):
+def test_selection_admission_reads_the_manifest_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     tests = tmp_path / "plugins/fixture/tests"
     tests.mkdir(parents=True)
     (tests / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
@@ -183,7 +200,7 @@ def test_selection_admission_reads_the_manifest_once(tmp_path, monkeypatch):
     original = Path.read_text
     reads = []
 
-    def read(path, *args, **kwargs):
+    def read(path: Path, *args: Any, **kwargs: Any) -> str:
         if path == manifest:
             reads.append(path)
         return original(path, *args, **kwargs)
@@ -195,7 +212,7 @@ def test_selection_admission_reads_the_manifest_once(tmp_path, monkeypatch):
     assert reads == [manifest]
 
 
-def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
+def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     monkeypatch.setenv("GIT_DIR", "/somewhere/else/.git")
     monkeypatch.setenv("GIT_WORK_TREE", "/somewhere/else")
@@ -246,7 +263,7 @@ def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> N
     assert env["GIT_CONFIG_VALUE_0"] == "false"
 
 
-def test_scrubbed_git_env_appends_discovered_clean_filter_overrides(monkeypatch) -> None:
+def test_scrubbed_git_env_appends_discovered_clean_filter_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: ["lfs", "custom"])
     env = wrapper._scrubbed_git_env()
     assert env["GIT_CONFIG_COUNT"] == "5"
@@ -265,7 +282,7 @@ def test_scrubbed_git_env_appends_discovered_clean_filter_overrides(monkeypatch)
     assert env["GIT_CONFIG_VALUE_4"] == ""
 
 
-def test_discover_configured_clean_filters_finds_assigned_filter(tmp_path, monkeypatch) -> None:
+def test_discover_configured_clean_filters_finds_assigned_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
     (repo / ".gitattributes").write_text("secret.bin filter=redact\n")
@@ -278,7 +295,7 @@ def test_discover_configured_clean_filters_finds_assigned_filter(tmp_path, monke
     assert names == ["redact"]
 
 
-def test_discover_configured_clean_filters_empty_on_no_assignments(tmp_path, monkeypatch) -> None:
+def test_discover_configured_clean_filters_empty_on_no_assignments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
     (repo / "plain.txt").write_text("hi")
@@ -288,7 +305,7 @@ def test_discover_configured_clean_filters_empty_on_no_assignments(tmp_path, mon
     assert wrapper._discover_configured_clean_filters() == []
 
 
-def test_discover_configured_clean_filters_honors_uncommitted_attributes_edit(tmp_path, monkeypatch) -> None:
+def test_discover_configured_clean_filters_honors_uncommitted_attributes_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # `--cached` would only ever see the COMMITTED `.gitattributes`
     # assignment, silently missing an uncommitted edit that assigns a NEW
     # filter -- confirmed live. Discovery must honor the actual
@@ -307,7 +324,7 @@ def test_discover_configured_clean_filters_honors_uncommitted_attributes_edit(tm
     assert names == ["uncommitted"]
 
 
-def test_discover_configured_clean_filters_fails_closed_on_subprocess_error(monkeypatch) -> None:
+def test_discover_configured_clean_filters_fails_closed_on_subprocess_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # Degrading a discovery failure to "no known filters to neutralize"
     # would be exactly the false safety this probe exists to prevent --
     # must fail loudly instead.
@@ -321,7 +338,7 @@ def test_discover_configured_clean_filters_fails_closed_on_subprocess_error(monk
             raise AssertionError("expected SystemExit on a failed discovery subprocess")
 
 
-def test_clean_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> None:
+def test_clean_filter_neutralized_during_status_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Reproduces the live finding: a configured `filter.<name>.clean`
     # command executes during an ordinary `git status` once a same-size
     # content edit forces git to actually re-hash rather than trust
@@ -352,7 +369,7 @@ def test_clean_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> 
     assert not marker.exists(), "clean filter ran despite the override -- neutralization failed"
 
 
-def test_process_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> None:
+def test_process_filter_neutralized_during_status_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A configured `filter.<name>.process` takes precedence over `.clean`
     # and uses a separate (pkt-line) protocol -- confirmed live that it
     # still executes host code during an ordinary `git status` even with
@@ -381,7 +398,7 @@ def test_process_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -
     assert not marker.exists(), "process filter ran despite the override -- neutralization failed"
 
 
-def test_tracked_paths_defaults_to_cached_only_and_filters_excluded_prefixes(monkeypatch) -> None:
+def test_tracked_paths_defaults_to_cached_only_and_filters_excluded_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(
         returncode=0,
@@ -423,7 +440,7 @@ def test_tracked_paths_decodes_non_utf8_bytes_via_surrogateescape() -> None:
     assert os.fsencode(paths[0]) == non_utf8_name
 
 
-def test_tracked_paths_raises_on_git_failure(monkeypatch) -> None:
+def test_tracked_paths_raises_on_git_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout=b"", stderr=b"not a git repository")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
@@ -471,7 +488,7 @@ def test_per_instance_config_rewrites_volume_name_uniquely() -> None:
         config_path.unlink(missing_ok=True)
 
 
-def test_per_instance_config_raises_if_base_volume_name_missing(tmp_path: Path, monkeypatch) -> None:
+def test_per_instance_config_raises_if_base_volume_name_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bogus = tmp_path / "devcontainer.json"
     bogus.write_text("{}")
     monkeypatch.setattr(wrapper, "DEVCONTAINER_CONFIG", bogus)
@@ -650,7 +667,7 @@ def test_resolve_base_ref_honors_last_of_repeated_flag() -> None:
     ) == "origin/dev"
 
 
-def test_rewrite_base_to_resolved_sha_replaces_space_and_equals_forms(monkeypatch) -> None:
+def test_rewrite_base_to_resolved_sha_replaces_space_and_equals_forms(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_git_rev_parse", lambda ref: "deadbeef" * 5)
     assert wrapper._rewrite_base_to_resolved_sha(
         ["--changed", "--base", "origin/main~1"]
@@ -660,20 +677,20 @@ def test_rewrite_base_to_resolved_sha_replaces_space_and_equals_forms(monkeypatc
     ) == ["--changed", f"--base={'deadbeef' * 5}"]
 
 
-def test_rewrite_base_to_resolved_sha_recognizes_abbreviated_flag(monkeypatch) -> None:
+def test_rewrite_base_to_resolved_sha_recognizes_abbreviated_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_git_rev_parse", lambda ref: "deadbeef" * 5)
     assert wrapper._rewrite_base_to_resolved_sha(
         ["--changed", "--bas", "origin/main~1"]
     ) == ["--changed", "--bas", "deadbeef" * 5]
 
 
-def test_rewrite_base_to_resolved_sha_leaves_passthrough_unchanged_when_unresolvable(monkeypatch) -> None:
+def test_rewrite_base_to_resolved_sha_leaves_passthrough_unchanged_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_git_rev_parse", lambda ref: None)
     original = ["--changed", "--base", "origin/nonexistent"]
     assert wrapper._rewrite_base_to_resolved_sha(original) == original
 
 
-def test_rewrite_base_to_resolved_sha_leaves_passthrough_unchanged_when_base_absent(monkeypatch) -> None:
+def test_rewrite_base_to_resolved_sha_leaves_passthrough_unchanged_when_base_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     # The default (`origin/main`) doesn't resolve in a throwaway test repo
     # with no such remote -- nothing to rewrite, passthrough is untouched.
     monkeypatch.setattr(wrapper, "_git_rev_parse", lambda ref: None)
@@ -681,7 +698,7 @@ def test_rewrite_base_to_resolved_sha_leaves_passthrough_unchanged_when_base_abs
     assert wrapper._rewrite_base_to_resolved_sha(original) == original
 
 
-def test_rewrite_base_to_resolved_sha_appends_base_when_absent_and_changed_mode_active(monkeypatch) -> None:
+def test_rewrite_base_to_resolved_sha_appends_base_when_absent_and_changed_mode_active(monkeypatch: pytest.MonkeyPatch) -> None:
     # The exact regression this closes: the single MOST COMMON invocation
     # (no --all, no plugin names, no explicit --base) has no --base TOKEN
     # at all to rewrite -- without appending one explicitly, the
@@ -695,7 +712,7 @@ def test_rewrite_base_to_resolved_sha_appends_base_when_absent_and_changed_mode_
     ]
 
 
-def test_rewrite_base_to_resolved_sha_does_not_append_base_when_not_changed_mode(monkeypatch) -> None:
+def test_rewrite_base_to_resolved_sha_does_not_append_base_when_not_changed_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     # An --all run or an explicit plugin name never consults --base at
     # all, so appending it there would be pointless noise.
     monkeypatch.setattr(wrapper, "_git_rev_parse", lambda ref: "deadbeef" * 5)
@@ -750,7 +767,7 @@ def test_changed_mode_active_with_abbreviated_base_flag_does_not_misclassify_val
     assert wrapper._changed_mode_active(["--bas=origin/dev"]) is True
 
 
-def test_git_rev_parse_returns_sha_on_success(monkeypatch) -> None:
+def test_git_rev_parse_returns_sha_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=0, stdout="deadbeef\n", stderr="")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result) as run:
@@ -764,14 +781,14 @@ def test_git_rev_parse_returns_sha_on_success(monkeypatch) -> None:
     assert kwargs["env"] == wrapper._scrubbed_git_env()
 
 
-def test_git_rev_parse_returns_none_when_unresolvable(monkeypatch) -> None:
+def test_git_rev_parse_returns_none_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout="", stderr="unknown revision")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
         assert wrapper._git_rev_parse("no-such-ref") is None
 
 
-def test_git_rev_parse_rejects_a_non_commit_object(tmp_path: Path, monkeypatch) -> None:
+def test_git_rev_parse_rejects_a_non_commit_object(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Plain `rev-parse --verify` accepts ANY object type -- a tree/blob
     # expression resolves fine there, but the downstream `git diff
     # <base>...HEAD` needs a commit-ish, so letting a non-commit object
@@ -795,7 +812,7 @@ def test_git_rev_parse_rejects_a_non_commit_object(tmp_path: Path, monkeypatch) 
     assert wrapper._git_rev_parse("HEAD") == head_sha
 
 
-def _run_git(args: list[str], **kwargs):
+def _run_git(args: list[str], **kwargs: Any) -> real_subprocess.CompletedProcess[Any]:
     """Run a real ``git`` subprocess for test setup/assertions, always
     through the scrubbed environment the production code itself uses
     (``wrapper._scrubbed_git_env()``) -- without it, an ambient
@@ -811,7 +828,7 @@ def _init_repo(path: Path) -> None:
     _run_git(["git", "-C", str(path), "config", "user.email", "t@example.com"], check=True)
 
 
-def test_materialized_git_dir_bundles_only_head_and_base_closure(tmp_path: Path, monkeypatch) -> None:
+def test_materialized_git_dir_bundles_only_head_and_base_closure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
     (repo / "tracked.txt").write_text("v1\n")
@@ -894,7 +911,7 @@ def test_materialized_git_dir_bundles_only_head_and_base_closure(tmp_path: Path,
 
 
 def test_rewrite_base_to_resolved_sha_fixes_a_ref_relative_expression_end_to_end(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The regression this closes: a REF-RELATIVE `--base` expression (e.g.
     # `origin/dev~1`) resolves fine on the host, but `git bundle create`
@@ -963,7 +980,7 @@ def test_rewrite_base_to_resolved_sha_fixes_a_ref_relative_expression_end_to_end
 
 
 def test_materialized_git_dir_handles_staged_uncommitted_change_at_snapshot_time(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A staged (but not yet committed) new file's blob is reachable from
     # neither HEAD nor the base ref -- copying the real index verbatim
@@ -1002,7 +1019,7 @@ def test_materialized_git_dir_handles_staged_uncommitted_change_at_snapshot_time
 
 
 def test_materialized_git_dir_skips_base_closure_when_base_unresolvable_and_not_changed_mode(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
@@ -1028,7 +1045,7 @@ def test_materialized_git_dir_skips_base_closure_when_base_unresolvable_and_not_
 
 
 def test_materialized_git_dir_excludes_base_closure_when_base_resolves_but_not_changed_mode(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A RESOLVABLE base must still be excluded from the bundle when
     # changed-selection isn't active (`--all`/an explicit plugin name) --
@@ -1078,7 +1095,7 @@ def test_materialized_git_dir_excludes_base_closure_when_base_resolves_but_not_c
 
 
 def test_materialized_git_dir_raises_when_changed_mode_active_and_base_unresolvable(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
@@ -1103,7 +1120,7 @@ def test_materialized_git_dir_raises_when_changed_mode_active_and_base_unresolva
 
 
 def test_materialized_git_dir_raises_when_base_resolves_but_shares_no_merge_base(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A base that RESOLVES (to some commit) can still have no common
     # ancestor with HEAD (an orphan/unrelated-history branch) -- the
@@ -1135,7 +1152,7 @@ def test_materialized_git_dir_raises_when_base_resolves_but_shares_no_merge_base
             raise AssertionError("expected SystemExit")
 
 
-def test_write_tar_of_repo_includes_materialized_git_dir_and_tracked_paths(tmp_path: Path, monkeypatch) -> None:
+def test_write_tar_of_repo_includes_materialized_git_dir_and_tracked_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_git_dir = tmp_path / "fake-git"
     fake_git_dir.mkdir()
     (fake_git_dir / "HEAD").write_text("ref: refs/heads/main\n")
@@ -1143,7 +1160,7 @@ def test_write_tar_of_repo_includes_materialized_git_dir_and_tracked_paths(tmp_p
     real_file = tmp_path / "tracked.txt"
     real_file.write_text("hello\n")
 
-    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough: fake_git_dir)
+    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough, *, paths: fake_git_dir)
     monkeypatch.setattr(wrapper, "_tracked_paths", lambda *, include_untracked: ["tracked.txt"])
     monkeypatch.setattr(wrapper, "REPO", tmp_path)
     monkeypatch.setattr(wrapper, "_warn_about_dirty_tracked_files", lambda: None)
@@ -1157,7 +1174,7 @@ def test_write_tar_of_repo_includes_materialized_git_dir_and_tracked_paths(tmp_p
     assert "tracked.txt" in names
 
 
-def test_write_tar_of_repo_skips_tracked_path_deleted_from_working_tree(tmp_path: Path, monkeypatch) -> None:
+def test_write_tar_of_repo_skips_tracked_path_deleted_from_working_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # `git ls-files --cached` still lists a path for an unstaged deletion --
     # the index entry exists even though the working-tree file is gone.
     # `_write_tar_of_repo` must skip it (`os.path.lexists`) rather than
@@ -1170,7 +1187,7 @@ def test_write_tar_of_repo_skips_tracked_path_deleted_from_working_tree(tmp_path
     present_file.write_text("still here\n")
     # "deleted.txt" is deliberately NOT created on disk.
 
-    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough: fake_git_dir)
+    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough, *, paths: fake_git_dir)
     monkeypatch.setattr(wrapper, "_tracked_paths",
                          lambda *, include_untracked: ["present.txt", "deleted.txt"])
     monkeypatch.setattr(wrapper, "REPO", tmp_path)
@@ -1185,7 +1202,7 @@ def test_write_tar_of_repo_skips_tracked_path_deleted_from_working_tree(tmp_path
     assert "deleted.txt" not in names
 
 
-def test_write_tar_of_repo_includes_a_tracked_dangling_symlink(tmp_path: Path, monkeypatch) -> None:
+def test_write_tar_of_repo_includes_a_tracked_dangling_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A tracked symlink whose target doesn't exist on disk must still be
     # archived (`os.path.lexists` reports True for a dangling symlink,
     # unlike a symlink-following `Path.exists()`) -- this is the
@@ -1202,7 +1219,7 @@ def test_write_tar_of_repo_includes_a_tracked_dangling_symlink(tmp_path: Path, m
     dangling_link = tmp_path / "dangling-link.txt"
     dangling_link.symlink_to(tmp_path / "does-not-exist.txt")
 
-    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough: fake_git_dir)
+    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough, *, paths: fake_git_dir)
     monkeypatch.setattr(wrapper, "_tracked_paths",
                          lambda *, include_untracked: ["dangling-link.txt"])
     monkeypatch.setattr(wrapper, "REPO", tmp_path)
@@ -1216,7 +1233,7 @@ def test_write_tar_of_repo_includes_a_tracked_dangling_symlink(tmp_path: Path, m
     assert member.issym()
 
 
-def test_write_tar_of_repo_rejects_a_symlinked_ancestor_directory(tmp_path: Path, monkeypatch) -> None:
+def test_write_tar_of_repo_rejects_a_symlinked_ancestor_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # `git ls-files` lists a path relative to the recorded tree structure
     # -- if a tracked path's ANCESTOR directory has since been replaced on
     # disk with a symlink pointing OUTSIDE the repo, `os.path.lexists` on
@@ -1239,7 +1256,7 @@ def test_write_tar_of_repo_rejects_a_symlinked_ancestor_directory(tmp_path: Path
     # THIS disk it has been replaced with a symlink pointing outside.
     (repo / "dir").symlink_to(outside)
 
-    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough: fake_git_dir)
+    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough, *, paths: fake_git_dir)
     monkeypatch.setattr(wrapper, "_tracked_paths",
                          lambda *, include_untracked: ["dir/secret.txt"])
     monkeypatch.setattr(wrapper, "REPO", repo)
@@ -1256,7 +1273,7 @@ def test_write_tar_of_repo_rejects_a_symlinked_ancestor_directory(tmp_path: Path
         raise AssertionError("expected SystemExit for a symlinked ancestor directory")
 
 
-def test_write_tar_of_repo_does_not_recurse_into_submodule_directory(tmp_path: Path, monkeypatch) -> None:
+def test_write_tar_of_repo_does_not_recurse_into_submodule_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # `git ls-files` lists an initialized submodule as a single path that
     # happens to be a real DIRECTORY on disk. `tarfile.add` recursively
     # archives directories by default -- that would copy the submodule's
@@ -1272,7 +1289,7 @@ def test_write_tar_of_repo_does_not_recurse_into_submodule_directory(tmp_path: P
     submodule_dir.mkdir(parents=True)
     (submodule_dir / "secret-inside-submodule.txt").write_text("should not be archived\n")
 
-    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough: fake_git_dir)
+    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough, *, paths: fake_git_dir)
     monkeypatch.setattr(wrapper, "_tracked_paths",
                          lambda *, include_untracked: ["vendor/some-submodule"])
     monkeypatch.setattr(wrapper, "REPO", tmp_path)
@@ -1288,7 +1305,7 @@ def test_write_tar_of_repo_does_not_recurse_into_submodule_directory(tmp_path: P
 
 
 def test_warn_about_dirty_tracked_files_reports_modified_tracked_paths(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
@@ -1306,7 +1323,7 @@ def test_warn_about_dirty_tracked_files_reports_modified_tracked_paths(
     assert "warning" in err.lower()
 
 
-def test_scrubbed_git_env_strips_an_otherwise_unlisted_git_variable(monkeypatch) -> None:
+def test_scrubbed_git_env_strips_an_otherwise_unlisted_git_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     # The exact regression this closes: a narrower, name-by-name
     # allowlist of variables to strip can only ever anticipate the ones
     # someone thought of -- the blanket `GIT_*` strip must catch a
@@ -1317,7 +1334,7 @@ def test_scrubbed_git_env_strips_an_otherwise_unlisted_git_variable(monkeypatch)
 
 
 def test_scrubbed_git_env_prevents_a_configured_fsmonitor_hook_from_running(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The exact regression this closes: a configured `core.fsmonitor` hook
     # runs arbitrary host code as part of an ostensibly READ-ONLY `git
@@ -1343,7 +1360,7 @@ def test_scrubbed_git_env_prevents_a_configured_fsmonitor_hook_from_running(
     assert not marker.exists(), "a configured core.fsmonitor hook executed despite the scrubbed environment"
 
 
-def test_warn_about_dirty_tracked_files_silent_when_clean(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_warn_about_dirty_tracked_files_silent_when_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
     (repo / "tracked.txt").write_text("v1\n")
@@ -1356,7 +1373,7 @@ def test_warn_about_dirty_tracked_files_silent_when_clean(tmp_path: Path, monkey
 
 
 def test_warn_about_dirty_tracked_files_does_not_warn_about_untracked_files(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     # A brand-new untracked file is a DIFFERENT (already-covered) concern
     # -- `--untracked-files=no` means this function must stay silent about
@@ -1373,7 +1390,7 @@ def test_warn_about_dirty_tracked_files_does_not_warn_about_untracked_files(
     assert capsys.readouterr().err == ""
 
 
-def test_warn_about_dirty_tracked_files_ignores_submodules(monkeypatch) -> None:
+def test_warn_about_dirty_tracked_files_ignores_submodules(monkeypatch: pytest.MonkeyPatch) -> None:
     # `git status` recursively inspects an initialized submodule by
     # default, which would consult a SUBMODULE-specific
     # `filter.<name>.clean`/`.process` assignment that
@@ -1391,7 +1408,7 @@ def test_warn_about_dirty_tracked_files_ignores_submodules(monkeypatch) -> None:
     assert "--ignore-submodules=all" in args
 
 
-def test_warn_about_dirty_tracked_files_fails_closed_when_status_itself_fails(monkeypatch) -> None:
+def test_warn_about_dirty_tracked_files_fails_closed_when_status_itself_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     # A failed `git status` must never be silently treated as "clean" --
     # this check is the runtime mitigation for accidental secret exposure,
     # so an unknown dirty state must abort the snapshot, not proceed.
@@ -1406,7 +1423,7 @@ def test_warn_about_dirty_tracked_files_fails_closed_when_status_itself_fails(mo
             raise AssertionError("expected SystemExit")
 
 
-def test_warn_about_hidden_tracked_file_flags_reports_assume_unchanged_and_skip_worktree(capsys) -> None:
+def test_warn_about_hidden_tracked_file_flags_reports_assume_unchanged_and_skip_worktree(capsys: pytest.CaptureFixture[str]) -> None:
     # `H` is an ordinary cached entry (no flag); a lowercase letter means
     # assume-unchanged, and `S` means skip-worktree -- both suppress `git
     # status`'s own on-disk-modification reporting for that path, while
@@ -1430,7 +1447,7 @@ def test_warn_about_hidden_tracked_file_flags_silent_when_none_flagged() -> None
         wrapper._warn_about_hidden_tracked_file_flags()
 
 
-def test_warn_about_hidden_tracked_file_flags_fails_closed_when_ls_files_fails(monkeypatch) -> None:
+def test_warn_about_hidden_tracked_file_flags_fails_closed_when_ls_files_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout=b"", stderr=b"not a git repository")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
@@ -1442,7 +1459,7 @@ def test_warn_about_hidden_tracked_file_flags_fails_closed_when_ls_files_fails(m
             raise AssertionError("expected SystemExit")
 
 
-def test_populate_workspace_streams_tar_file_as_stdin_then_chmod(monkeypatch) -> None:
+def test_populate_workspace_streams_tar_file_as_stdin_then_chmod(monkeypatch: pytest.MonkeyPatch) -> None:
     written_paths: list[Path] = []
     written_passthrough: list[list[str]] = []
     written_include_untracked: list[bool] = []
@@ -1500,7 +1517,7 @@ def test_populate_workspace_streams_tar_file_as_stdin_then_chmod(monkeypatch) ->
     assert set(type_values) == {"f", "d"}
 
 
-def test_populate_workspace_raises_when_opening_up_the_empty_volume_fails(monkeypatch) -> None:
+def test_populate_workspace_raises_when_opening_up_the_empty_volume_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_write_tar_of_repo",
                          lambda dest, passthrough, *, include_untracked: dest.write_bytes(b""))
     chmod_root_result = mock.Mock(returncode=1, stderr="chmod: operation not permitted")
@@ -1513,7 +1530,7 @@ def test_populate_workspace_raises_when_opening_up_the_empty_volume_fails(monkey
             raise AssertionError("expected SystemExit")
 
 
-def test_populate_workspace_raises_when_tar_extraction_fails(monkeypatch) -> None:
+def test_populate_workspace_raises_when_tar_extraction_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_write_tar_of_repo",
                          lambda dest, passthrough, *, include_untracked: dest.write_bytes(b""))
     chmod_root_result = mock.Mock(returncode=0, stderr="")
@@ -1528,7 +1545,7 @@ def test_populate_workspace_raises_when_tar_extraction_fails(monkeypatch) -> Non
             raise AssertionError("expected SystemExit")
 
 
-def test_populate_workspace_raises_when_chmod_fails(monkeypatch) -> None:
+def test_populate_workspace_raises_when_chmod_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wrapper, "_write_tar_of_repo",
                          lambda dest, passthrough, *, include_untracked: dest.write_bytes(b""))
     chmod_root_result = mock.Mock(returncode=0, stderr="")
@@ -1558,7 +1575,9 @@ def test_run_tests_invokes_devcontainer_exec_with_full_passthrough_args(tmp_path
     assert str(config_path) in args
     # The complete expected suffix, not a looser subset -- a regression
     # that drops the final passthrough argument must fail this assertion.
-    assert args[-5:] == ["python", "tools/run-plugin-tests.py", "agent-worktrees", "-k", "foo"]
+    assert args[args.index("python"):] == [
+        "python", "tools/run-plugin-tests.py", "agent-worktrees", "-k", "foo",
+    ]
 
 
 def test_is_list_only_detects_bare_list_flag() -> None:
@@ -1626,7 +1645,7 @@ def test_prepare_dependencies_strips_file_selectors_only_from_preparation(tmp_pa
     ["--test-profile=busy-host-functional"],
     ["--test-prof", "busy-host-functional"],
 ])
-def test_functional_profile_is_only_forwarded_to_offline_test_pass(tmp_path, profile_argument):
+def test_functional_profile_is_only_forwarded_to_offline_test_pass(tmp_path: Path, profile_argument: list[str]) -> None:
     arguments = [
         "agent-codespaces", *profile_argument,
         "--test-file", "tests/test_snapshot_copy_contract.py",
@@ -1653,7 +1672,7 @@ def test_functional_profile_is_only_forwarded_to_offline_test_pass(tmp_path, pro
     ["--junit-dir=/tmp/reports"],
     ["--junit", "/tmp/reports"],
 ])
-def test_junit_output_is_only_forwarded_to_offline_test_pass(tmp_path, report_argument):
+def test_junit_output_is_only_forwarded_to_offline_test_pass(tmp_path: Path, report_argument: list[str]) -> None:
     arguments = ["worktree-manager", *report_argument]
     original = arguments.copy()
     with mock.patch.object(
@@ -1709,7 +1728,7 @@ def test_disconnect_container_networks_disconnects_every_attached_network() -> N
     disconnect_result = mock.Mock(returncode=0, stdout="", stderr="")
     calls: list[list[str]] = []
 
-    def fake_run(args, **kwargs):
+    def fake_run(args: list[str], **kwargs: Any) -> Any:
         calls.append(args)
         return inspect_result if args[1] == "inspect" else disconnect_result
 
@@ -1750,7 +1769,7 @@ def test_disconnect_container_networks_raises_on_disconnect_failure() -> None:
     inspect_result = mock.Mock(returncode=0, stdout='bridge\t{"bridge": {}}', stderr="")
     disconnect_result = mock.Mock(returncode=1, stdout="", stderr="not attached")
 
-    def fake_run(args, **kwargs):
+    def fake_run(args: list[str], **kwargs: Any) -> Any:
         return inspect_result if args[1] == "inspect" else disconnect_result
 
     with mock.patch.object(wrapper._net_scope.subprocess, "run", side_effect=fake_run):
@@ -1941,11 +1960,11 @@ def test_admission_acquire_succeeds_when_uncontested(tmp_path: Path) -> None:
         lease.release()
 
 
-def test_admission_acquire_fails_fast_when_busy_and_wait_is_zero(tmp_path: Path, capsys) -> None:
+def test_admission_acquire_fails_fast_when_busy_and_wait_is_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     with mock.patch.object(admission, "admission_dir", return_value=tmp_path):
         holder = admission.acquire(0.0, tmp_path / "environment")
         try:
-            with pytest.raises(admission.AlreadyRunningError):
+            with pytest.raises(AlreadyRunningError):
                 admission.acquire(0.0, tmp_path / "environment")
         finally:
             holder.release()
@@ -1971,7 +1990,7 @@ def test_admission_acquire_waits_then_succeeds_once_released(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("mode", [[], ["--list"], ["--guards"], ["--collect-only"], ["--prepare-only"]])
-def test_main_never_acquires_host_admission(monkeypatch, tmp_path: Path, mode) -> None:
+def test_main_never_acquires_host_admission(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: list[str]) -> None:
     order: list[str] = []
     monkeypatch.setattr(admission, "acquire", lambda *_a: pytest.fail("host lease acquired"))
 
@@ -1980,20 +1999,20 @@ def test_main_never_acquires_host_admission(monkeypatch, tmp_path: Path, mode) -
     config_path.write_text("{}")
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
-    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: order.append("bring-up") or "container-admission")
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: recorded(order, "bring-up", "container-admission"))
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper._net_scope, "is_list_only", lambda passthrough, canonicalize: True)
-    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: recorded(order, "run", 0))
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
     rc = wrapper.main(["agent-worktrees", *mode, "--admission-wait", "1"])
     assert rc == 0
     assert order == ["bring-up", "run"]
 
 
-def test_main_propagates_per_instance_config_failure_without_admission(monkeypatch) -> None:
+def test_main_propagates_per_instance_config_failure_without_admission(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(admission, "acquire", lambda *_a: pytest.fail("host lease acquired"))
 
-    def failing_per_instance_config(label: str):
+    def failing_per_instance_config(label: str) -> Any:
         raise SystemExit("devcontainer config write failed: boom")
 
     monkeypatch.setattr(wrapper, "_per_instance_config", failing_per_instance_config)
@@ -2006,7 +2025,7 @@ def test_main_propagates_per_instance_config_failure_without_admission(monkeypat
         raise AssertionError("expected the original SystemExit to propagate")
 
 
-def test_main_guards_preserves_inner_environment_preparation(monkeypatch, tmp_path: Path) -> None:
+def test_main_guards_preserves_inner_environment_preparation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     order = []
     config_path = tmp_path / "cfgdir-guards" / "devcontainer.json"
     config_path.parent.mkdir()
@@ -2018,7 +2037,7 @@ def test_main_guards_preserves_inner_environment_preparation(monkeypatch, tmp_pa
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
                          lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: order.append("disconnect"))
-    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: order.append("test") or 0)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: recorded(order, "test", 0))
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     rc = wrapper.main(["agent-worktrees", "--guards"])
@@ -2094,7 +2113,7 @@ def test_cleanup_orphan_removes_containers_found_by_label_then_volume() -> None:
     assert all(call.kwargs["start_new_session"] is True for call in run.call_args_list)
 
 
-def test_cleanup_orphan_warns_but_does_not_raise_on_nonzero_results(capsys) -> None:
+def test_cleanup_orphan_warns_but_does_not_raise_on_nonzero_results(capsys: pytest.CaptureFixture[str]) -> None:
     find_result = mock.Mock(returncode=1, stdout="", stderr="docker ps failed")
     vol_result = mock.Mock(returncode=1, stderr="volume busy")
     with mock.patch.object(wrapper.subprocess, "run", side_effect=[find_result, vol_result]):
@@ -2106,7 +2125,7 @@ def test_cleanup_orphan_warns_but_does_not_raise_on_nonzero_results(capsys) -> N
     assert "volume busy" in err
 
 
-def test_cleanup_orphan_warns_but_does_not_raise_if_container_removal_fails(capsys) -> None:
+def test_cleanup_orphan_warns_but_does_not_raise_if_container_removal_fails(capsys: pytest.CaptureFixture[str]) -> None:
     find_result = mock.Mock(returncode=0, stdout="cid-a\n", stderr="")
     rm_result = mock.Mock(returncode=1, stderr="container busy")
     vol_result = mock.Mock(returncode=0, stderr="")
@@ -2116,10 +2135,10 @@ def test_cleanup_orphan_warns_but_does_not_raise_if_container_removal_fails(caps
     assert "container busy" in capsys.readouterr().err
 
 
-def test_cleanup_orphan_never_raises_when_every_subprocess_call_itself_raises(capsys) -> None:
+def test_cleanup_orphan_never_raises_when_every_subprocess_call_itself_raises(capsys: pytest.CaptureFixture[str]) -> None:
     import subprocess as real_subprocess
 
-    def always_times_out(*args, **kwargs):
+    def always_times_out(*args: Any, **kwargs: Any) -> Any:
         raise real_subprocess.TimeoutExpired(cmd=args[0] if args else "docker", timeout=30)
 
     with mock.patch.object(wrapper.subprocess, "run", side_effect=always_times_out):
@@ -2141,7 +2160,7 @@ def test_raise_on_sigterm_raises_termination_requested() -> None:
         raise AssertionError("expected _TerminationRequested")
 
 
-def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
+def test_main_installs_a_sigterm_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     # The default SIGTERM action terminates the process immediately,
     # bypassing every `finally` block (container/volume teardown
     # included) -- `main` must convert it into a normal raised exception
@@ -2149,7 +2168,7 @@ def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
     # container/volume with no later run able to find it.
     config_path = None
 
-    def fake_per_instance_config(label: str):
+    def fake_per_instance_config(label: str) -> Any:
         nonlocal config_path
         import tempfile as _tempfile
         d = _tempfile.mkdtemp()
@@ -2169,7 +2188,7 @@ def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
-    signal_calls: list[tuple] = []
+    signal_calls: list[tuple[Any, ...]] = []
     with mock.patch.object(wrapper.signal, "signal",
                             side_effect=lambda *a: signal_calls.append(a)) as signal_mock:
         wrapper.main([])
@@ -2182,7 +2201,7 @@ def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
     assert registered_handler is wrapper._raise_on_sigterm
 
 
-def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch, tmp_path: Path) -> None:
+def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # `main` is also invoked in-process by this module's own test suite
     # (and any other programmatic caller) -- permanently replacing the
     # process-wide SIGTERM handler without restoring it would leak
@@ -2200,7 +2219,7 @@ def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch,
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
-    def sentinel_handler(signum, frame):
+    def sentinel_handler(signum: int, frame: Any) -> None:
         pass
 
     previous = signal.signal(signal.SIGTERM, sentinel_handler)
@@ -2212,7 +2231,7 @@ def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch,
         signal.signal(signal.SIGTERM, previous)
 
 
-def test_main_installs_and_restores_a_sighup_handler(monkeypatch, tmp_path: Path) -> None:
+def test_main_installs_and_restores_a_sighup_handler(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # SIGHUP also terminates the process by default on Linux (e.g. a
     # closed SSH/terminal session), bypassing every `finally` block just
     # like the unhandled-SIGTERM case this wrapper already closed --
@@ -2230,7 +2249,7 @@ def test_main_installs_and_restores_a_sighup_handler(monkeypatch, tmp_path: Path
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
-    def sentinel_handler(signum, frame):
+    def sentinel_handler(signum: int, frame: Any) -> None:
         pass
 
     previous = signal.signal(signal.SIGHUP, sentinel_handler)
@@ -2250,7 +2269,7 @@ def test_raise_on_sighup_raises_termination_requested() -> None:
         raise AssertionError("expected _TerminationRequested")
 
 
-def test_cleanup_signals_deferred_records_signals_instead_of_ignoring_them(monkeypatch) -> None:
+def test_cleanup_signals_deferred_records_signals_instead_of_ignoring_them(monkeypatch: pytest.MonkeyPatch) -> None:
     # `SIG_IGN` would DISCARD a signal outright (nothing delivered or
     # queued later) -- this context manager must instead install a
     # handler that RECORDS receipt, so a signal arriving mid-cleanup can
@@ -2259,7 +2278,7 @@ def test_cleanup_signals_deferred_records_signals_instead_of_ignoring_them(monke
     sentinel_handler = object()
     installed_handlers: dict[int, object] = {}
 
-    def fake_signal(sig, handler):
+    def fake_signal(sig: int, handler: Any) -> Any:
         previous = installed_handlers.get(sig, sentinel_handler)
         installed_handlers[sig] = handler
         return previous
@@ -2289,15 +2308,15 @@ def test_cleanup_signals_deferred_blocks_signals_atomically_during_handler_swap(
     # live). On exit: a brief `SIG_UNBLOCK`/`SIG_SETMASK` flush (while
     # `_record` is still installed) precedes the restore swap, which is
     # itself bracketed the same way as the install swap.
-    calls: list[tuple] = []
+    calls: list[tuple[Any, ...]] = []
     real_sigmask = wrapper.signal.pthread_sigmask
     real_signal = wrapper.signal.signal
 
-    def tracking_sigmask(how, mask):
+    def tracking_sigmask(how: Any, mask: Any) -> Any:
         calls.append(("sigmask", how))
         return real_sigmask(how, mask)
 
-    def tracking_signal(sig, handler):
+    def tracking_signal(sig: int, handler: Any) -> Any:
         calls.append(("signal", sig))
         return real_signal(sig, handler)
 
@@ -2345,7 +2364,7 @@ def test_cleanup_signals_deferred_restores_a_pre_blocked_signal_mask() -> None:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
-def test_cleanup_signals_deferred_flushes_a_pending_signal_to_the_recorder(monkeypatch) -> None:
+def test_cleanup_signals_deferred_flushes_a_pending_signal_to_the_recorder(monkeypatch: pytest.MonkeyPatch) -> None:
     # The exact regression this closes: with SIGTERM pre-blocked by the
     # CALLER (as in the test above), a signal sent during `yield` stays
     # PENDING for the whole context-manager lifetime -- confirmed live
@@ -2388,7 +2407,7 @@ def test_cleanup_signals_deferred_replays_a_signal_received_during_cleanup() -> 
             with wrapper._cleanup_signals_deferred():
                 # Simulate a signal arriving mid-cleanup by invoking the
                 # now-installed handler directly, exactly as the OS would.
-                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                deliver_sigterm()
                 # Cleanup "completes" normally despite the signal -- it
                 # must not have been interrupted by it.
         except wrapper._TerminationRequested as exc:
@@ -2403,7 +2422,7 @@ def test_cleanup_signals_deferred_replays_a_signal_received_during_cleanup() -> 
         signal.signal(signal.SIGINT, previous_sigint)
 
 
-def test_cleanup_signals_deferred_does_not_mask_a_primary_exception_already_in_flight(capsys) -> None:
+def test_cleanup_signals_deferred_does_not_mask_a_primary_exception_already_in_flight(capsys: pytest.CaptureFixture[str]) -> None:
     # Replaying a deferred signal UNCONDITIONALLY would let it REPLACE a
     # genuine primary failure already propagating when `_cleanup_signals_deferred`
     # is entered -- exactly the masking this wrapper's teardown logic
@@ -2418,7 +2437,7 @@ def test_cleanup_signals_deferred_does_not_mask_a_primary_exception_already_in_f
             with wrapper._cleanup_signals_deferred():
                 # Simulate a signal arriving mid-cleanup while an
                 # exception is already being handled.
-                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                deliver_sigterm()
             raise  # re-raise the original ValueError, as main() itself does
     except ValueError as exc:
         assert str(exc) == "original primary failure"
@@ -2434,7 +2453,7 @@ def test_cleanup_signals_deferred_does_not_mask_a_primary_exception_already_in_f
     assert "signal" in capsys.readouterr().err.lower()
 
 
-def test_cleanup_signals_deferred_does_not_mask_a_failure_raised_by_the_cleanup_body(capsys) -> None:
+def test_cleanup_signals_deferred_does_not_mask_a_failure_raised_by_the_cleanup_body(capsys: pytest.CaptureFixture[str]) -> None:
     # The sibling case: the cleanup BODY itself (e.g. a real `_tear_down`
     # failure) raises, AFTER a signal was already recorded during that
     # same cleanup call -- the cleanup failure must still win, not be
@@ -2444,7 +2463,7 @@ def test_cleanup_signals_deferred_does_not_mask_a_failure_raised_by_the_cleanup_
     try:
         try:
             with wrapper._cleanup_signals_deferred():
-                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                deliver_sigterm()
                 raise RuntimeError("cleanup body failure")
         except RuntimeError as exc:
             assert str(exc) == "cleanup body failure"
@@ -2484,7 +2503,7 @@ def test_main_rejects_abbreviated_allow_host_state() -> None:
         raise AssertionError("expected SystemExit")
 
 
-def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) -> None:
+def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
 
     monkeypatch.setattr(wrapper, "_per_instance_config",
@@ -2493,7 +2512,7 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
-                         lambda container_id, config_path, passthrough: calls.append(passthrough) or 0)
+                         lambda container_id, config_path, passthrough: recorded(calls, passthrough, 0))
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
                          lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
@@ -2515,7 +2534,7 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
     assert calls == [["--all", "-k", "some_filter"]]
 
 
-def test_main_prepares_dependencies_and_disconnects_networks_before_running_tests(monkeypatch) -> None:
+def test_main_prepares_dependencies_and_disconnects_networks_before_running_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
 
     monkeypatch.setattr(wrapper, "_per_instance_config",
@@ -2528,7 +2547,7 @@ def test_main_prepares_dependencies_and_disconnects_networks_before_running_test
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks",
                          lambda container_id: order.append("disconnect"))
     monkeypatch.setattr(wrapper, "_run_tests",
-                         lambda container_id, config_path, passthrough: order.append("run") or 0)
+                         lambda container_id, config_path, passthrough: recorded(order, "run", 0))
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
     monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
 
@@ -2537,7 +2556,7 @@ def test_main_prepares_dependencies_and_disconnects_networks_before_running_test
     assert order == ["prepare", "disconnect", "run"]
 
 
-def test_main_raises_when_devcontainer_cli_missing_before_prepare(monkeypatch) -> None:
+def test_main_raises_when_devcontainer_cli_missing_before_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
     # The host lookup happens in ``main`` before the mocked prepare seam.
     # A missing CLI must still fail there, not inside the mock.
     prepare_calls: list[object] = []
@@ -2563,7 +2582,7 @@ def test_main_raises_when_devcontainer_cli_missing_before_prepare(monkeypatch) -
     assert prepare_calls == []
 
 
-def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch) -> None:
+def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch: pytest.MonkeyPatch) -> None:
     # The prep pass already rebuilt the venv -- the real pass must reuse
     # it, not delete and rebuild it again with no network left.
     real_pass_args: list[list[str]] = []
@@ -2578,7 +2597,7 @@ def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch)
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(
         wrapper, "_run_tests",
-        lambda container_id, config_path, passthrough: real_pass_args.append(passthrough) or 0,
+        lambda container_id, config_path, passthrough: recorded(real_pass_args, passthrough, 0),
     )
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
     monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
@@ -2588,7 +2607,7 @@ def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch)
     assert real_pass_args == [["agent-worktrees"]]
 
 
-def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypatch) -> None:
+def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
 
     monkeypatch.setattr(wrapper, "_per_instance_config",
@@ -2601,7 +2620,7 @@ def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypa
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks",
                          lambda container_id: order.append("disconnect"))
     monkeypatch.setattr(wrapper, "_run_tests",
-                         lambda container_id, config_path, passthrough: order.append("run") or 0)
+                         lambda container_id, config_path, passthrough: recorded(order, "run", 0))
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
     monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
 
@@ -2610,7 +2629,7 @@ def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypa
     assert order == ["run"]
 
 
-def test_main_rejects_malformed_admission_wait_even_for_list_only(monkeypatch) -> None:
+def test_main_rejects_malformed_admission_wait_even_for_list_only(monkeypatch: pytest.MonkeyPatch) -> None:
     # `--list` skips admission acquisition entirely (see the test above),
     # but a malformed/negative `--admission-wait` must still be rejected
     # on the HOST before any container is brought up -- not silently
@@ -2627,7 +2646,7 @@ def test_main_rejects_malformed_admission_wait_even_for_list_only(monkeypatch) -
     assert bring_up_calls == []
 
 
-def test_main_rejects_negative_admission_wait_even_for_list_only(monkeypatch) -> None:
+def test_main_rejects_negative_admission_wait_even_for_list_only(monkeypatch: pytest.MonkeyPatch) -> None:
     # A negative `--admission-wait` is well-formed (parses as a float),
     # so the malformed-value path above doesn't catch it -- only a
     # separate range check does. It must also run for --list, which
@@ -2644,7 +2663,7 @@ def test_main_rejects_negative_admission_wait_even_for_list_only(monkeypatch) ->
     assert bring_up_calls == []
 
 
-def test_main_rejects_non_finite_admission_wait_even_for_list_only(monkeypatch) -> None:
+def test_main_rejects_non_finite_admission_wait_even_for_list_only(monkeypatch: pytest.MonkeyPatch) -> None:
     # `inf`/`nan` both parse as valid floats and neither is `< 0`, so the
     # negative-range check above doesn't catch them either -- each needs
     # its own `math.isfinite` guard, enforced before `--list` can skip
@@ -2663,7 +2682,7 @@ def test_main_rejects_non_finite_admission_wait_even_for_list_only(monkeypatch) 
 
 
 
-def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch, tmp_path: Path) -> None:
+def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     torn_down: list[tuple[str, str]] = []
 
     def make_config_path() -> Path:
@@ -2700,7 +2719,7 @@ def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch,
     assert torn_down == []
 
 
-def test_main_defers_sigterm_during_the_teardown_call(monkeypatch, tmp_path: Path) -> None:
+def test_main_defers_sigterm_during_the_teardown_call(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A real second SIGTERM (or Ctrl-C) arriving mid-`_tear_down` must not
     # interrupt it between removing the container and removing its
     # volume -- the OS-level handler must genuinely have been swapped to
@@ -2741,7 +2760,7 @@ def test_main_defers_sigterm_during_the_teardown_call(monkeypatch, tmp_path: Pat
     assert callable(sigterm_handler) and callable(sigint_handler)
 
 
-def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatch, tmp_path: Path) -> None:
+def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # The exact scenario the bare-`SIG_IGN` design would have gotten
     # wrong: a cancellation signal arriving during NORMAL (non-
     # exceptional) post-success teardown must not be silently discarded
@@ -2755,7 +2774,7 @@ def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatc
         # Simulate a signal arriving mid-teardown by invoking the
         # now-installed (recording) handler directly, then let teardown
         # finish normally -- it must not be interrupted by this.
-        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        deliver_sigterm()
 
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
@@ -2783,7 +2802,7 @@ def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatc
         signal.signal(signal.SIGINT, previous_sigint)
 
 
-def test_main_raises_teardown_failure_when_primary_path_succeeded(monkeypatch, tmp_path: Path) -> None:
+def test_main_raises_teardown_failure_when_primary_path_succeeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = tmp_path / "cfgdir3" / "devcontainer.json"
     config_path.parent.mkdir()
     config_path.write_text("{}")
@@ -2813,7 +2832,7 @@ def test_main_raises_teardown_failure_when_primary_path_succeeded(monkeypatch, t
         raise AssertionError("expected SystemExit from the failed teardown")
 
 
-def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config_path = tmp_path / "cfgdir4" / "devcontainer.json"
     config_path.parent.mkdir()
     config_path.write_text("{}")
@@ -2847,7 +2866,7 @@ def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch, 
     assert "secondary teardown failure" in capsys.readouterr().err
 
 
-def test_main_preserves_nonzero_test_result_when_teardown_also_fails(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_main_preserves_nonzero_test_result_when_teardown_also_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # A nonzero `_run_tests` exit code is a RETURNED value, not a raised
     # exception -- it must be treated the same as an exception for
     # teardown-masking purposes: a secondary `_tear_down` failure must not
@@ -2878,7 +2897,7 @@ def test_main_preserves_nonzero_test_result_when_teardown_also_fails(monkeypatch
     assert "secondary teardown failure" in capsys.readouterr().err
 
 
-def test_main_cleans_up_orphan_and_reraises_when_bring_up_fails(monkeypatch, tmp_path: Path) -> None:
+def test_main_cleans_up_orphan_and_reraises_when_bring_up_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = tmp_path / "cfgdir" / "devcontainer.json"
     config_path.parent.mkdir()
     config_path.write_text("{}")
@@ -2907,7 +2926,7 @@ def test_main_cleans_up_orphan_and_reraises_when_bring_up_fails(monkeypatch, tmp
 
 
 def test_main_tears_down_not_orphan_cleans_up_when_bring_up_succeeded_but_something_then_fails(
-    monkeypatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     # The exact gap this closes: previously, a failure arriving in the
     # narrow window right after `_bring_up` returns (but before the
@@ -2953,7 +2972,7 @@ def test_main_tears_down_not_orphan_cleans_up_when_bring_up_succeeded_but_someth
     assert not config_path.parent.exists()
 
 
-def test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails(monkeypatch, tmp_path: Path) -> None:
+def test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = tmp_path / "cfgdir2" / "devcontainer.json"
     config_path.parent.mkdir()
     config_path.write_text("{}")
@@ -2979,7 +2998,7 @@ def test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails(monkeypat
     assert len(cleanup_calls) == 1
 
 
-def _load_devcontainer_config() -> dict:
+def _load_devcontainer_config() -> dict[str, Any]:
     # `.devcontainer/test-isolation/devcontainer.json` is JSONC (it carries extensive
     # `//` explanatory comments) -- strip full-line and trailing `//`
     # comments before parsing, mirroring the same crude-but-sufficient
@@ -2987,7 +3006,8 @@ def _load_devcontainer_config() -> dict:
     text = wrapper.DEVCONTAINER_CONFIG.read_text()
     cleaned = re.sub(r"(?m)^\s*//.*$", "", text)
     cleaned = re.sub(r'(?<!:)//[^"\n]*$', "", cleaned, flags=re.MULTILINE)
-    return json.loads(cleaned)
+    result: dict[str, Any] = json.loads(cleaned)
+    return result
 
 
 def test_devcontainer_config_never_mounts_a_docker_socket() -> None:

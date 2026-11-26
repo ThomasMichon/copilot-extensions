@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, TYPE_CHECKING
 
 CONTAINED_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
@@ -94,7 +95,10 @@ _ALWAYS_SCRUB_NAMES = ALWAYS_SCRUB_NAMES
 _CREDENTIAL_NAMES = {"GH_TOKEN", "GITHUB_TOKEN"}
 
 
-def capture_preparation_auth(uv, environment, cwd, *, run_metadata):
+def capture_preparation_auth(
+    uv: str, environment: Mapping[str, str], cwd: Path, *,
+    run_metadata: Callable[..., subprocess.CompletedProcess[Any]],
+) -> dict[str, str]:
     """Capture only UV's declared auth-directory location, never its contents."""
     import installer_dependency_policy as dependencies
 
@@ -152,7 +156,9 @@ def capture_preparation_auth(uv, environment, cwd, *, run_metadata):
     return {"UV_CREDENTIALS_DIR": str(directory)}
 
 
-def capture_preparation_netrc(environment, *, windows: bool | None = None):
+def capture_preparation_netrc(
+    environment: Mapping[str, str], *, windows: bool | None = None,
+) -> dict[str, str]:
     """Preserve UV's documented NETRC-or-home/.netrc location, without reading it."""
     import installer_dependency_policy as dependencies
 
@@ -180,18 +186,30 @@ def capture_preparation_netrc(environment, *, windows: bool | None = None):
 
 def preparation_environment(
     base: Mapping[str, str], sandbox: Path, project: Path, *, uv: str,
+    deadline: float | None = None,
 ) -> dict[str, str]:
     """Retain the dependency owner's resolver inputs before detaching host state."""
     import installer_dependency_policy as dependencies
-    from agent_procutil.owned_process import OwnedCleanupError, OwnedExecutionBudget, run_caller_owned
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+    from agent_procutil.owned_budget import OwnedExecutionBudget
 
-    def metadata(argv, **options):
+    def metadata(argv: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
         try:
+            budget = OwnedExecutionBudget.from_timeout(20, cleanup_reserve=5)
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, 0)
+                options["timeout"] = min(options["timeout"], remaining)
+                if deadline < budget.deadline:
+                    budget = OwnedExecutionBudget(deadline, min(5, remaining / 5))
             return run_caller_owned(
-                argv, **options, budget=OwnedExecutionBudget.from_timeout(20, cleanup_reserve=5),
+                argv, **options, budget=budget,
             )
         except OwnedCleanupError as exc:
-            if __package__:
+            if TYPE_CHECKING:
+                from plugin_test_containment import UnreapedProcessError
+            elif __package__:
                 from .plugin_test_containment import UnreapedProcessError
             else:
                 from plugin_test_containment import UnreapedProcessError
@@ -201,8 +219,8 @@ def preparation_environment(
     authentication = capture_preparation_auth(uv, base, project, run_metadata=metadata)
     authentication.update(capture_preparation_netrc(base))
 
-    inputs = dependencies._config_inputs([], base, project)
-    configuration = {}
+    inputs = dependencies._config_inputs([], dict(base), project)
+    configuration: dict[str, Any] = {}
     for path, is_project in reversed(inputs):
         data = dependencies._toml(path)
         if is_project:
@@ -324,6 +342,6 @@ def registry_environment_changes(
         != current_folded.get(name, (None, None))[1]
     ]
     return [
-        f"{label}:{current_folded.get(name, expected_folded.get(name))[0]}"
+        f"{label}:{(current_folded[name] if name in current_folded else expected_folded[name])[0]}"
         for name in drifted
     ]

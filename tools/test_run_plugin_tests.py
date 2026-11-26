@@ -76,6 +76,25 @@ def runner_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path.parent / "runner-scratch"))
 
 
+@pytest.fixture
+def preparation_logic_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    import promotion_source_archive
+
+    monkeypatch.setattr(runner, "subprocess", SimpleNamespace(**vars(subprocess)))
+    monkeypatch.setattr(
+        promotion_source_archive, "run_composition_child",
+        lambda arguments, **options: runner.subprocess.run(arguments, **options),
+    )
+    monkeypatch.setattr(
+        runner, "run_preparation_command",
+        lambda arguments, **options: runner.subprocess.run(arguments, **options),
+    )
+    monkeypatch.setattr(
+        runner, "run_preparation_install",
+        lambda *args, **options: runner.run_uv_install(*args, **options),
+    )
+
+
 @pytest.mark.parametrize("owner,code,now,expected", [
     (None, 7, 11.0, []),
     ("machine/project/worktree", 0, 9.0, [("outcome", 0)]),
@@ -114,6 +133,7 @@ def test_owned_preparation_preserves_limits_and_failure_status(
 ) -> None:
     calls: list[tuple[list[str], containment.Limits]] = []
     limits = containment.Limits(wall_seconds=10.0, max_processes=17, max_memory_mb=256, max_temp_mb=128)
+    started = time.monotonic()
 
     def execute(command: list[str], **kwargs: Any) -> int:
         calls.append((command, kwargs["limits"]))
@@ -141,8 +161,9 @@ def test_owned_preparation_preserves_limits_and_failure_status(
         else:
             prepare()
         command, selected = calls[0]
-        assert command[2:] == ["fixture", "fixture-uv", str(tmp_path / "retained"), "reuse"]
+        assert command[2:6] == ["fixture", "fixture-uv", str(tmp_path / "retained"), "reuse"]
         assert selected.wall_seconds == (10.0 if budget is None else min(10.0, budget))
+        assert started + selected.wall_seconds <= float(command[6]) <= time.monotonic() + selected.wall_seconds
         assert (selected.max_processes, selected.max_memory_mb, selected.max_temp_mb) == (17, 256, 128)
 
 
@@ -200,6 +221,8 @@ def test_unreaped_tree_retains_sandbox_without_cleanup(
 @pytest.fixture
 def cleanup_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], int]:
     plugin = tmp_path / "alpha"
+    (tmp_path / "repository").mkdir()
+    monkeypatch.setattr(runner, "REPO", tmp_path / "repository")
     monkeypatch.setenv("TEMP", str(tmp_path))
     monkeypatch.setattr(runner, "_has_suite", lambda name: True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
@@ -809,8 +832,10 @@ def test_real_group_processes_release_readonly_files_before_cleanup(
 @pytest.mark.parametrize("cached", [False, True])
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reinstall: bool, cached: bool,
+    preparation_logic_only: None,
 ) -> None:
     import plugin_test_environment as preparation
+    monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugin"
@@ -842,6 +867,9 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
             assert Path(environment[key]).is_relative_to(private)
         assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
+        assert kwargs.pop("deadline") > time.monotonic()
+        assert isinstance(kwargs.pop("limits"), containment.Limits)
+        assert kwargs.pop("sandbox") == private
         assert kwargs == {
             "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
             "retained_resource_roots": (),
@@ -979,6 +1007,7 @@ def test_source_only_cache_invalidates_the_previous_tooling_selection() -> None:
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, extra: str,
+    preparation_logic_only: None,
 ) -> None:
     import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
@@ -1018,7 +1047,9 @@ def test_preparation_selects_same_checkout_fleet_dependency(
 
     def prepare(uv: str, arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         retained.append(kwargs["retained_resource_roots"])
-        return subprocess.run([uv, "pip", "install", *arguments])
+        command = [uv, "pip", "install", *arguments]
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(runner, "run_uv_install", prepare)
     runner._ensure_venv(name, "fixture-uv", reinstall=False)
@@ -1058,6 +1089,7 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(
 @pytest.mark.parametrize("cached_editable", [False, True])
 def test_manager_bridge_is_prepared_only_by_the_test_runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bridge_fails: bool, cached_editable: bool,
+    preparation_logic_only: None,
 ) -> None:
     import plugin_test_environment as preparation
     monkeypatch.setattr(preparation, "capture_preparation_auth",
@@ -1078,6 +1110,8 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
+    for resource in runner.retained_build_resources("worktree-manager", tmp_path):
+        resource.mkdir(parents=True, exist_ok=True)
     (runner.VENV_ROOT / "worktree-manager").mkdir(parents=True)
     if cached_editable:
         python = runner._venv_python("worktree-manager")
@@ -2347,8 +2381,6 @@ def test_fresh_preparation_attributes_repository_sources(
 ) -> None:
     import agent_procutil.owned_process as owned_process
     import plugin_test_environment as preparation
-    monkeypatch.setattr(owned_process, "run_caller_owned",
-                        lambda *args, **kwargs: pytest.fail("pure preparation test attempted native execution"))
     monkeypatch.setattr(preparation, "capture_preparation_auth",
                         lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugins" / "example"
@@ -2374,7 +2406,7 @@ def test_fresh_preparation_attributes_repository_sources(
     environment = runner.VENV_ROOT / "example"
     environment.mkdir(parents=True)
     python = runner._venv_python("example")
-    admitted = runner.run_uv_install
+    admitted = runner.run_preparation_install
     installs = []
     probes = []
 
@@ -2396,7 +2428,10 @@ def test_fresh_preparation_attributes_repository_sources(
             installs.append(arguments)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(runner, "run_uv_install", prepare)
+    monkeypatch.setattr(owned_process, "run_caller_owned",
+                        lambda *args, **kwargs: pytest.fail("pure preparation attempted uncapped execution"))
+    monkeypatch.setattr(owned_scratch, "run_contained", lambda arguments, **kwargs: command(arguments, **kwargs).returncode)
+    monkeypatch.setattr(runner, "run_preparation_install", prepare)
     monkeypatch.setattr(runner.subprocess, "run", command)
     assert runner._ensure_venv("example", "uv", reinstall=False) == python
     assert len(probes) == 2 and len(installs) == 1
@@ -3292,17 +3327,30 @@ def test_source_preflight_counts_against_plugin_budget_before_preparation(
     assert "preflight exhausted" in capsys.readouterr().err
 
 
-def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_plugin_prepare_only_never_invokes_pytest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    for owned in (False, True):
+        _check_prepare_only(monkeypatch, tmp_path, owned)
+
+
+def _check_prepare_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, owned: bool,
+) -> None:
     """The whole point of `--prepare-only`: it must build/update the venv
     and return WITHOUT ever importing a single test module or
     `conftest.py` -- unlike `--collect-only`, which still runs pytest's
     own collection (and therefore executes that module-level code)."""
     monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner, "OWNED_SCRATCH_OWNER", "fixture/source/owner" if owned else None)
     ensure_venv_calls: list[tuple[str, bool]] = []
-    monkeypatch.setattr(
-        runner, "_ensure_venv",
-        lambda name, uv, *, reinstall: recorded(ensure_venv_calls, (name, reinstall), Path("fake-py")),
-    )
+    def prepare(name: str, uv: str, *, reinstall: bool, wall_seconds: float,
+                limits: containment.Limits | None = None) -> Path:
+        assert 0 < wall_seconds <= 60
+        assert limits is not None
+        return recorded(ensure_venv_calls, (name, reinstall), Path("fake-py"))
+
+    monkeypatch.setattr(runner, "_ensure_venv", prepare)
     monkeypatch.setattr(
         runner, "run_contained",
         lambda *_a, **_k: pytest.fail("--prepare-only must never invoke pytest"),
@@ -3319,6 +3367,12 @@ def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch: pytest.Monkey
     )
     assert rc == 0
     assert ensure_venv_calls == [("alpha", False)]
+    assert runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60.0, test_timeout=10.0, max_files_per_subsuite=25,
+        prepare_only=True,
+    ) == 0
+    assert ensure_venv_calls == [("alpha", False), ("alpha", False)]
 
 
 def test_host_state_requires_explicit_tier_opt_in(capsys: pytest.CaptureFixture[str]) -> None:

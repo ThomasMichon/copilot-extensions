@@ -220,6 +220,11 @@ def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path, bu
 import pathlib, sys
 payload, source, output = map(pathlib.Path, sys.argv[1:4])
 sys.path.insert(0, str(payload / sys.argv[4]))
+if sys.argv[4] == "scripts/runtime-source-tools":
+    sys.path.insert(0, str(payload / sys.argv[4] / "tools"))
+    import local_runtime_promotion, promotion_versions
+    assert local_runtime_promotion is not None
+    assert callable(promotion_versions.prepare_versions)
 import prepare_runtime_source
 prepare_runtime_source._materialize(source, "sample", output)
 assert b"sample.cli" in (output / "bin/sample.ps1").read_bytes()

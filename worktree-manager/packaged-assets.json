@@ -417,6 +417,7 @@
         "promotion_source_archive.py",
         "promotion_unit_contract.py",
         "promotion_unit_packet.py",
+        "promotion_versions.py",
         "public_toolchain_source.py",
         "publish_python_artifacts.py",
         "python_project_inventory.py",

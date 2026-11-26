@@ -78,6 +78,23 @@ def test_retirement_keeps_identity_source_and_other_targets(environment: tuple[P
         retirement.require_active(root)
 
 
+@pytest.mark.parametrize("name", [".dep-fingerprint.pending", ".dep-fingerprint.pending.update"])
+def test_retirement_refuses_unsettled_preparation_under_the_lease(
+    environment: tuple[Path, Path], name: str,
+) -> None:
+    source, root = environment
+    plan = retirement.preview(source, "example")
+    (root / ".source-inputs").mkdir()
+    (root / ".source-inputs" / "retained.py").write_text("RETAIN = True\n")
+    (root / name).write_text('{"owner":"unsettled-fixture"}')
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError, match="Unsettled preparation"):
+        retirement.apply(plan)
+    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+    assert not (root / retirement.MARKER).exists()
+    acquire(0, root).release()
+
+
 def test_runner_cannot_rebuild_a_retired_inode(
     environment: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

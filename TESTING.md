@@ -186,6 +186,92 @@ unchanged caller/payload state and offline elapsed reports are required in the
 same path-gated eight-minute native jobs. Nine actor-free units retain
 pre-effect refusal, callback/CWD and original uncertain-cleanup custody.
 
+The test wrappers select seasoned `packaging>=23` for standard requirement and
+marker evaluation. When a canonical first-party source version cannot satisfy
+an active consumer minimum, test preparation uses the release owner's pinned
+Main seed and applicable changefiles in the existing leased environment's
+private source inputs. Consumer bounds remain unchanged. Missing history,
+unstaged inputs, indirect paths, incomplete preparation or expired aggregate
+budgets refuse; no fetch or version guessing occurs inside preparation.
+The existing dependency fingerprint records candidate/Main/consumed-boundary,
+source/tool/build identities and original/generated versions. These are
+unpublished test candidates, not compatible-release or installed-upgrade proof.
+Already-satisfied source composition stays unchanged. Source bodies and the
+checkout's frozen metadata are not rewritten; the ordinary environment owner
+retains cleanup custody, and uncertain preparation/cleanup never leaves a ready
+stamp. `tools/test_plugin_test_source_versions.py` covers actual offline UV
+resolution and rejection; version allocation is shared with promotion.
+The existing ready record is staged atomically until the preparation scope has
+actually cleaned up. A retained `.dep-fingerprint.pending` names an unsettled
+attempt, not reusable success or deletion permission. Preserve its environment,
+private-state pointer and original cleanup evidence for the existing test
+preparation/retirement owner; do not clear it or retry through another cache.
+Preparation remains in its caller while the existing native process owner
+contains build commands. Unsettled native Jobs, resources and callbacks are
+never reduced to a worker exit code. The canonical retained UV transaction is
+closed normally or held by the original native settlement callback.
+Both ownership modes forward the original process, memory and temporary-storage
+limits to build execution and cap work by the same remaining preparation
+deadline. Settled diagnostic retention is distinct from an unsettled producer:
+retained diagnostics do not block retry, while unknown cleanup still does.
+Rollback of prepared-source integration must retain the independent constraint
+guard, including singleton local sources; do not restore version-bound bypass.
+The test venv uses the runner's exact interpreter binding and patch identity,
+so marker evaluation and the resolver target agree.
+
+The existing Owned budget native acceptance workflow's Linux manual-dispatch
+qualification step runs the portable
+source-version controls, Linux snapshot/clean-interpreter consumers and selected
+application-export regressions. Real Git/UV controls remain outside required
+pull-request and promotion unit-only execution. Its existing job deadline and
+the contained owners' budgets are unchanged; Windows cannot qualify the Linux
+snapshot lane by skipping it.
+The same existing workflow's manual macOS lane separately qualifies the actual
+Darwin process-group cleanup deadline. Windows additionally exercises a real
+delete-sharing refusal: retry expiration retains its sandbox rather than
+starting a fresh cleanup window. The original jobs and deadlines are unchanged.
+
+**Performance impact of prepared-source validation.** This is a blocking
+per-test-preparation path, not a hook or service callback. Cold preparation
+scans the selected library/build closure, pins candidate/index/Main/history,
+hashes the selected source/tool/changefile inputs, copies that closure, computes
+release-owned versions and builds only through existing dependency owners.
+Warm reuse still recomputes input provenance during fingerprinting and stamp
+validation, then hashes the prepared closure. It avoids allocation, copying
+and installation, not source validation. For the controlled frozen-source
+fixture, each provenance pass hashes each admitted input once and performs ten
+Git probes including ancestry and the absent-private-ref fallback; a pinned
+private Main ref removes that fallback. No network request or install occurs
+in these provenance passes. The two passes are intentionally independent:
+mutable staged source, source bodies, target environment or Main can change
+between them, and a prior fingerprint is not a held generation lease.
+Missing or changed evidence refuses reuse rather than trusting stale records.
+Preparation commands carry the original absolute deadline through controller
+startup, execution, Job/process-group settlement, controller reaping and the
+existing daemon lifecycle. Cleanup reserve is taken from that deadline, not
+added to it; process/memory/temp caps do not change. Startup that consumes the
+work phase never releases the command-ready gate. Exhausted or unconfirmed
+settlement retains the original native owner rather than reporting cleanup.
+Synchronous OS launch latency is observed at the first returned ownership
+boundary; no second detached watchdog or reconstructed cleanup owner is added.
+The Windows-only
+`test_absolute_preparation_deadline_retires_the_actual_windows_job` exercises
+delayed real controller startup and a live file-holding descendant timeout,
+under the original finite Job/resource owner. It proves the command is not
+released after startup consumes its work phase and the original Job releases
+descendant file handles before return. It is not desktop/focus observation.
+
+The deterministic work-count control is
+`test_source_provenance_rechecks_have_bounded_reproducible_work` in
+`tools/test_plugin_test_source_versions.py`. For opt-in observations, invoke it
+through `tools/run-python` (PowerShell: `tools/run-python.ps1`) with
+`--with pytest --with "packaging>=23" -m pytest`, `-s --durations=0`, and an
+owned `--basetemp`; preserve its fixture cardinality and individual first/repeated
+wall samples. The same file's real resolver and preparation/reuse controls
+provide complete functional stages. These small fixture observations do not
+qualify repository-scale cold/warm wall, child CPU, installed launch latency,
+or tail percentiles; those remain unavailable, not inferred from watchdog caps.
+
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
 Its five cross-platform controls cover current, last-known-good and legacy environments,

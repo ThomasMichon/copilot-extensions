@@ -28,7 +28,7 @@ jobs:
           python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Prepare seasoned native test tooling
-        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" psutil
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" psutil "packaging>=23" pyyaml
       - name: Qualify exact source and enclosing native custody
         env:
           EXPECTED_SHA: ${{ github.sha }}
@@ -64,6 +64,27 @@ jobs:
           --allow-explicit-tiers
           --test-file tests/test_installation_repair.py
           -k outer_required_read_timeout_reaps_nested_probe
+      - name: First-party source preparation consumers (manual Linux qualification)
+        if: runner.os == 'Linux' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+          TMPDIR: ${{ runner.temp }}
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          python tools/run_python_with.py --with "packaging>=23" -- -c "import packaging"
+          python -m pytest tools/test_plugin_test_source_versions.py tools/test_run_tests_in_devcontainer.py tools/test_promotion_version_allocation.py::test_install_snapshot_uses_composed_main_versions_and_retains_git_association tools/test_promotion_version_allocation.py::test_selected_application_export_keeps_full_tree_roster_and_dependency_bytes tools/test_promotion_version_allocation.py::test_native_index_five_project_release_closure_uses_library_changefile tools/test_plugin_test_containment.py::test_poisoned_parent_state_is_detached_before_preparation tools/test_plugin_test_containment.py::test_user_only_uv_configuration_survives_private_preparation tools/test_promote_release.py::test_required_tools_bundle_is_self_contained tools/test_promotion_python_artifacts.py::test_real_export_subprocess_uses_bumped_candidate_without_polluting_it -q --basetemp "$RUNNER_TEMP/source-version-controls"
+      - name: First-party source cleanup deadline (manual macOS qualification)
+        if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+          TMPDIR: ${{ runner.temp }}
+          UV_PYTHON_DOWNLOADS: never
+        run: >-
+          python -m pytest
+          tools/test_plugin_test_source_versions.py::test_preparation_deadline_settles_the_actual_darwin_group
+          -q --basetemp "$RUNNER_TEMP/source-deadline-control"
   owned-budget-native-macos:
     name: Borrowed budget native (macOS)
     runs-on: macos-latest

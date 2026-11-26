@@ -6,16 +6,177 @@ import argparse
 import json
 import os
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from pathlib import Path
 import secrets
 import sys
+import subprocess
+import time
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, TypeVar, cast, overload
 
 from plugin_test_containment import ContainmentError, Limits, UnreapedProcessError, run_contained
 
 _Sandbox = TypeVar("_Sandbox", bound=AbstractContextManager[str])
+
+
+class PreallocationRefusal(ContainmentError):
+    """The owned sandbox refused readiness before its allocation entrypoint."""
+
+
+class UnsettledPreparationError(UnreapedProcessError):
+    """Keep the original native custody and callbacks, not a reconstructed Job."""
+
+    def __init__(self, native: Any, retained_inputs: ExitStack | None = None, transaction: Any = None) -> None:
+        super().__init__("source preparation cleanup is unconfirmed", job=native.job)
+        self.native_cleanup = native
+        self.retained_inputs, self.transaction = retained_inputs, transaction
+
+    def retry_cleanup(self, *, deadline: float) -> None:
+        retry = getattr(self.native_cleanup, "retry_cleanup", None)
+        if not callable(retry):
+            raise ContainmentError("the original containment owner must reconcile retained cleanup")
+        retry(deadline=deadline)
+
+
+class UnsettledPreparationInputsError(UnreapedProcessError):
+    """Keep the original retention failure and transaction for its owner."""
+
+    def __init__(self, error: BaseException, transaction: Any, scope: ExitStack) -> None:
+        super().__init__("retained preparation input cleanup is unconfirmed")
+        self.retention_error, self.transaction, self.retained_scope = error, transaction, scope
+
+
+def ensure_preparation(
+    runner: Any, name: str, uv: str, *, reinstall: bool,
+    limits: Limits | None, wall_seconds: float | None,
+    scope: Callable[..., AbstractContextManager[str]],
+) -> Path:
+    from plugin_test_environment import preparation_environment
+
+    started = runner.time.monotonic()
+    parent = runner.runs_root(runner.REPO) if runner.OWNED_SCRATCH_OWNER is None else None
+    limits = limits or runner.Limits()
+    deadline = started + min(wall_seconds if wall_seconds is not None else limits.wall_seconds, limits.wall_seconds)
+    if limits.absolute_deadline is not None:
+        deadline = min(deadline, limits.absolute_deadline)
+    with scope(
+        runner.OWNED_SCRATCH_OWNER, runner.REPO, runner._TestSandbox, runner._venv_root() / name,
+        deadline=deadline, prefix="ce-prep-", dir=parent,
+    ) as private:
+        retained = runner._venv_root()
+        runner.record_owner(Path(private), runner.REPO, retention="disposable after verified preparation cleanup")
+        environment = preparation_environment(
+            runner.os.environ, Path(private), runner._plugin_dir(name), uv=uv, deadline=deadline,
+        )
+        cache = retained / ".uv-cache"
+        cache.mkdir(parents=True, exist_ok=True)
+        environment["UV_CACHE_DIR"] = str(cache.resolve())
+        interpreters = retained / ".python"
+        interpreters.mkdir(parents=True, exist_ok=True)
+        environment["UV_PYTHON_INSTALL_DIR"] = str(interpreters.resolve())
+        return cast(Path, runner._prepare_venv(
+            name, uv, reinstall=reinstall, environment=environment,
+            deadline=deadline, limits=limits, sandbox=Path(private),
+        ))
+
+
+def run_preparation_command(
+    arguments: list[str], *, deadline: float, limits: Limits, sandbox: Path,
+    env: dict[str, str], cwd: Path, check: bool = True,
+) -> subprocess.CompletedProcess[bytes]:
+    from dataclasses import replace
+
+    deadline = min(deadline, limits.absolute_deadline) if limits.absolute_deadline is not None else deadline
+    remaining = min(limits.wall_seconds, deadline - time.monotonic())
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(arguments, 0)
+    result = run_contained(
+        arguments, cwd=cwd, env=env, sandbox=sandbox,
+        limits=replace(limits, wall_seconds=remaining, absolute_deadline=deadline),
+    )
+    completed: subprocess.CompletedProcess[bytes] = subprocess.CompletedProcess(arguments, result)
+    if check:
+        completed.check_returncode()
+    return completed
+
+
+def run_preparation_install(
+    uv: str, arguments: list[str], *, deadline: float, limits: Limits, sandbox: Path,
+    check: bool = True,
+    **retention_options: Any,
+) -> Any:
+    """Keep retained inputs and native settlement callbacks in their caller."""
+    from installer_dependency_policy import retain_uv_install
+    from source_preparation_process import procutil_module
+
+    native = procutil_module("owned_process")
+    retained = ExitStack()
+    transaction = None
+    def close() -> None:
+        try:
+            retained.close()
+        except BaseException as error:
+            raise UnsettledPreparationInputsError(error, transaction, retained) from error
+    try:
+        transaction = retained.enter_context(retain_uv_install(
+            uv, arguments, deadline=deadline, **retention_options,
+        ))
+        result = run_preparation_command(
+            list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
+            deadline=deadline, limits=limits, sandbox=sandbox, check=check,
+        )
+    except native.OwnedCleanupError as error:
+        error._retain_on_settled(close)
+        raise
+    except UnreapedProcessError as error:
+        raise UnsettledPreparationError(error, retained, transaction) from error
+    except subprocess.CalledProcessError as error:
+        if error.stderr:
+            diagnostic = error.stderr[:16 << 20]
+            sys.stderr.write(diagnostic.decode("utf-8", "replace") if isinstance(diagnostic, bytes) else diagnostic)
+            sys.stderr.flush()
+        close()
+        raise
+    except BaseException:
+        close()
+        raise
+    close()
+    return result
+
+
+@contextmanager
+def preparation_scope(
+    owner: str | None, repository: Path, fallback: Callable[..., AbstractContextManager[str]],
+    venv: Path, *, deadline: float | None, **options: Any,
+) -> Iterator[str]:
+    from plugin_test_source_versions import preparation_ready, bind_preparation_owner
+    from promotion_source_archive import composition_budget
+    from source_preparation_process import procutil_module
+
+    native = procutil_module("owned_process")
+    with composition_budget(deadline), preparation_ready(venv) as cleanup:
+        scope = None
+        private: str | None = None
+        try:
+            try:
+                scope = test_sandbox(owner, repository, fallback, stage="preparation",
+                                     cleanup_deadline=deadline, **options)
+            except PreallocationRefusal:
+                cleanup["confirmed"] = True
+                raise
+            with scope as private:
+                bind_preparation_owner(venv, private)
+                try:
+                    yield private
+                except native.OwnedCleanupError as error:
+                    raise UnsettledPreparationError(error) from error
+        finally:
+            if scope is not None:
+                cleanup["confirmed"] = (
+                    bool(getattr(scope, "cleanup_settled", False)) if owner is not None else
+                    private is not None and not getattr(scope, "retained", True) and not Path(private).exists()
+                )
 
 
 class _GroupResult(TypedDict):
@@ -56,7 +217,13 @@ def test_sandbox(
     owner: str | None, repository: Path, fallback: Callable[..., AbstractContextManager[str]],
     *, stage: str, **options: Any,
 ) -> AbstractContextManager[str]:
-    return fallback(**options) if owner is None else OwnedTestSandbox(owner, repository, stage=stage)
+    if owner is None:
+        return fallback(**options)
+    try:
+        return OwnedTestSandbox(owner, repository, stage=stage)
+    except (ContainmentError, ValueError, OSError) as error:
+        # Allocation belongs exclusively to __enter__, never the readiness constructor.
+        raise PreallocationRefusal(str(error)) from error
 
 
 def add_cli_argument(parser: argparse.ArgumentParser) -> None:
@@ -89,6 +256,7 @@ def prepare_owned(
     sandbox: str | os.PathLike[str], limits: Limits | None = None, wall_seconds: float | None = None,
 ) -> None:
     import subprocess
+    import time
     from dataclasses import replace
     selected = limits or Limits()
     if wall_seconds is not None:
@@ -98,6 +266,7 @@ def prepare_owned(
     command = [
         sys.executable, str(Path(__file__).with_name("plugin_test_preparation_worker.py")),
         name, uv, str(retained), "reinstall" if reinstall else "reuse",
+        str(time.monotonic() + selected.wall_seconds),
     ]
     result = run_contained(
         command, cwd=Path(__file__).resolve().parents[1], env=environment,
@@ -164,6 +333,7 @@ class OwnedTestSandbox:
         self.group_count = 0
         self.failed = False
         self.retained = False
+        self.cleanup_settled = False
         self.allocation: dict[str, Any] | None = None
 
     def __enter__(self) -> str:
@@ -217,6 +387,7 @@ class OwnedTestSandbox:
                 self.ledger, self.owner, allocation["token"], forbidden=self.forbidden,
                 diagnostic=diagnostic,
             )
+            self.cleanup_settled = True
             if failed:
                 print(
                     f"[KEEP] Bounded runner diagnostics; retained scratch token {allocation['token']}",

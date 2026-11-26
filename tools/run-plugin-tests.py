@@ -38,6 +38,7 @@ from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from plugin_test_cli import build_argument_parser
@@ -51,6 +52,10 @@ from plugin_test_cache import (
     advance_preparation_generation, clear_cache_contents, declared_test_requirements,
     dependency_fingerprint, has_dev_extra,
     ordinary_cache_root, retained_build_resources, source_resolution_arguments,
+    prepare_version_sources,
+    read_preparation_stamp, write_preparation_stamp,
+    stage_cached_preparation, run_with_test_tooling,
+    interpreter_version as _test_python_version,
 )
 from plugin_test_resources import record_owner, retirement_venv_root, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
@@ -76,7 +81,9 @@ from plugin_test_containment import (
 )
 from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
 from plugin_test_owned_scratch import (
-    OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, prepare_owned, test_sandbox,
+    OwnedTestSandbox, add_cli_argument, admit_owned_root, finish_owned_run, test_sandbox,
+    run_preparation_install, run_preparation_command, ensure_preparation,
+    preparation_scope,
 )
 
 REPO = Path(__file__).resolve().parents[1]
@@ -99,6 +106,12 @@ OWNED_SCRATCH_OWNER: str | None = None
 
 class _InstallOptions(TypedDict, total=False):
     non_editable: bool
+
+
+class _DeadlineOptions(TypedDict, total=False):
+    deadline: float
+    limits: Limits
+    sandbox: Path
 
 
 class _PreparationOptions(TypedDict, total=False):
@@ -299,15 +312,6 @@ def _dep_fingerprint(name: str) -> str:
     return fingerprint
 
 
-def _test_python_version() -> str:
-    """Test environments use the runner's own interpreter version.
-
-    `tools/run-tests` launches the runner on the uv-managed Python pinned in
-    the repository root's `.python-version`.
-    """
-    return f"{sys.version_info.major}.{sys.version_info.minor}"
-
-
 def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
     return declared_test_requirements(
         _plugin_dir(name), (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
@@ -319,31 +323,17 @@ def _ensure_venv(
     limits: Limits | None = None, wall_seconds: float | None = None,
 ) -> Path:
     """Detach build children before preparation, not only before pytest."""
-    started = time.monotonic() if OWNED_SCRATCH_OWNER is not None else 0
-    parent = runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None
-    with test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="preparation", prefix="ce-prep-", dir=parent) as private:
-        retained = _venv_root()
-        record_owner(Path(private), REPO, retention="disposable after verified preparation cleanup")
-        from plugin_test_environment import preparation_environment
-
-        environment = preparation_environment(os.environ, Path(private), _plugin_dir(name), uv=uv)
-        cache = retained / ".uv-cache"
-        cache.mkdir(parents=True, exist_ok=True)
-        environment["UV_CACHE_DIR"] = str(cache.resolve())
-        interpreters = retained / ".python"
-        interpreters.mkdir(parents=True, exist_ok=True)
-        environment["UV_PYTHON_INSTALL_DIR"] = str(interpreters.resolve())
-        if OWNED_SCRATCH_OWNER is not None:
-            budget = wall_seconds - (time.monotonic() - started) if wall_seconds is not None else None
-            prepare_owned(
-                name, uv, reinstall, retained=retained, environment=environment,
-                sandbox=private, limits=limits, wall_seconds=budget,
-            )
-            return _venv_python(name)
-        return _prepare_venv(name, uv, reinstall=reinstall, environment=environment)
+    return ensure_preparation(
+        SimpleNamespace(**globals()), name, uv, reinstall=reinstall, limits=limits,
+        wall_seconds=wall_seconds, scope=preparation_scope,
+    )
 
 
-def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str, str]) -> Path:
+def _prepare_venv(
+    name: str, uv: str, *, reinstall: bool, environment: dict[str, str],
+    deadline: float | None = None,
+    limits: Limits | None = None, sandbox: Path | None = None,
+) -> Path:
     """Prepare the cached venv and return its Python interpreter.
 
     The caller must establish the environment directory and hold its
@@ -352,18 +342,28 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
     venv = ordinary_cache_root(_venv_root() / name)
     from plugin_test_retirement import require_active
     require_active(venv)
+    execution: _DeadlineOptions = {}
+    if deadline is not None:
+        if limits is None or sandbox is None:
+            raise ValueError("preparation execution requires its original Limits and physical owner")
+        execution = {"deadline": deadline, "limits": limits, "sandbox": sandbox}
     py = _venv_python(name)
-    stamp = venv / ".dep-fingerprint"
     fingerprint = _dep_fingerprint(name)
     fresh = not py.exists()
     # Rebuild a cached venv whose dependency fingerprint has drifted (e.g. a
     # dependency added across a rebase) -- otherwise the stale venv silently
     # masks or introduces failures instead of testing the current deps.
     drifted = False
+    source_record = None
     if not fresh and not reinstall:
         try:
-            drifted = stamp.read_text(encoding="utf-8").strip() != fingerprint
-        except OSError:
+            previous = read_preparation_stamp(
+                name, _plugin_dir(name), REPO, venv, deadline=deadline,
+            )
+            drifted = previous != fingerprint
+        except TimeoutError:
+            raise
+        except (OSError, ValueError, KeyError):
             drifted = True
         if name == "agent-worktrees" and not (venv / ".bootstrap-uv-cache").is_dir():
             drifted = True
@@ -375,36 +375,43 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
         fresh = True
     if fresh:
         before = venv.stat()
-        subprocess.run(
-            [uv, "venv", "--allow-existing", "--python", _test_python_version(), str(venv)], check=True,
-            env={key: value for key, value in environment.items() if key != "UV_VENV_CLEAR"},
-        )
+        command = [uv, "venv", "--allow-existing", "--python", sys.executable, str(venv)]
+        create_environment = {key: value for key, value in environment.items() if key != "UV_VENV_CLEAR"}
+        if deadline is None:
+            subprocess.run(command, check=True, env=create_environment, cwd=REPO)
+        else:
+            run_preparation_command(command, check=True, env=create_environment, cwd=REPO, **execution)
         after = venv.stat()
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
             raise RuntimeError("uv replaced the leased environment directory")
     if fresh or reinstall:
+        source_repo, source_plugin, source_record = prepare_version_sources(
+            name, _plugin_dir(name), REPO, venv, deadline=deadline,
+        ) if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS else (
+            REPO, _plugin_dir(name), None,
+        )
         if _has_pyproject(name) and name not in SOURCE_ONLY_TEST_TARGETS:
             # Use the project cwd so uv reads its declared local sources.
-            spec = ".[dev]" if has_dev_extra(_plugin_dir(name)) else "."
+            spec = ".[dev]" if has_dev_extra(source_plugin) else "."
             cmd = [uv, "pip", "install", "--python", str(py)]
             # Manager embeds first-party imports that must outlive retained build inputs.
             cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
             if name == "agent-index":
-                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+                cmd.extend(["-e", str(source_repo / "fleet-manager") + "[auth]"])
             if name == "agent-worktrees":
-                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+                cmd.extend(["-e", str(source_repo / "fleet-manager") + "[auth]"])
             if name == "agent-dispatch":
-                cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
-                cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
+                cmd.extend(["-e", str(source_repo / "plugins" / "agent-pull-requests") + "[fleet]"])
+                cmd.extend(["-e", str(source_repo / "fleet-manager") + "[service-gateway]"])
             if name == "agent-pull-requests":
-                cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
+                cmd.extend(["-e", str(source_repo / "fleet-manager") + "[service-gateway]"])
             if name == "agent-vault":
-                cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
+                cmd.extend(["-e", str(source_repo / "fleet-manager") + "[service-gateway]"])
             if name == "agent-ssh":
-                cmd.extend(["-e", str(REPO / "fleet-manager")])
+                cmd.extend(["-e", str(source_repo / "fleet-manager")])
             if name == "gateway-entra":
-                cmd.extend(["-e", str(REPO / "fleet-manager") + "[runtime-authentication]"])
-            cmd.extend(source_resolution_arguments(name, _plugin_dir(name), REPO, venv))
+                cmd.extend(["-e", str(source_repo / "fleet-manager") + "[runtime-authentication]"])
+            cmd.extend(source_resolution_arguments(name, source_plugin, source_repo, venv))
             if reinstall or drifted:
                 # A new venv can still consume uv's stale local-path wheels.
                 cmd.append("--reinstall")
@@ -416,29 +423,41 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 # dependencies after the container loses network access.
                 cmd.extend(["--cache-dir", str(venv / ".bootstrap-uv-cache")])
             install_options: _InstallOptions = {"non_editable": True} if name == "worktree-manager" else {}
-            run_uv_install(
-                uv, cmd[3:], env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+            install = run_preparation_install if deadline is not None else run_uv_install
+            install(
+                uv, cmd[3:], env=environment, cwd=source_plugin, trusted_source_roots=(source_repo,), check=True,
                 **install_options,
-                retained_resource_roots=retained_build_resources(name, REPO),
+                retained_resource_roots=retained_build_resources(name, source_repo),
+                **execution,
             )
             if name == "worktree-manager":
                 # Materialized consumers have separate copies of shared libraries;
                 # resolving both source graphs together gives UV conflicting URLs.
-                bridge = REPO / "plugins" / "agent-bridge"
+                bridge = source_repo / "plugins" / "agent-bridge"
                 arguments = ["--python", str(py), "-e", str(bridge)]
+                arguments.extend(source_resolution_arguments(name, source_plugin, source_repo, venv))
                 if reinstall or drifted:
                     arguments.append("--reinstall")
-                run_uv_install(
-                    uv, arguments, env=environment, cwd=bridge, trusted_source_roots=(REPO,), check=True,
+                install(
+                    uv, arguments, env=environment, cwd=bridge, trusted_source_roots=(source_repo,), check=True,
+                    **execution,
                 )
         else:
             # Source-only targets and pyproject-less plugins import their
             # owning scripts directly; they need test tooling, not an editable.
-            run_uv_install(
+            install = run_preparation_install if deadline is not None else run_uv_install
+            install(
                 uv, ["--python", str(py), *declared_test_tooling_requirements(name)],
                 env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                **execution,
             )
-        stamp.write_text(fingerprint, encoding="utf-8")
+        write_preparation_stamp(
+            venv, fingerprint, source_record, private_state=environment.get("TEMP"),
+            deadline=deadline,
+            current_fingerprint=_dep_fingerprint(name) if source_record is not None else fingerprint,
+        )
+    else:
+        stage_cached_preparation(venv)
     return py
 
 
@@ -593,10 +612,7 @@ def run_plugin(
         # "dependency preparation" pass can safely run before network
         # access is removed for the real test pass.
         print(f"[RUN ] {name}: preparing venv only (--prepare-only) ...")
-        preparation_options: _PreparationOptions = (
-            {"limits": limits, "wall_seconds": plugin_timeout}
-            if OWNED_SCRATCH_OWNER is not None else {}
-        )
+        preparation_options: _PreparationOptions = {"limits": limits, "wall_seconds": plugin_timeout}
         _ensure_venv(name, uv, reinstall=reinstall, **preparation_options)
         print(f"[PASS] {name} (prepared)")
         return 0
@@ -617,9 +633,9 @@ def run_plugin(
         report_directory = junit_dir.expanduser().resolve() / name
         # A fresh plugin directory prevents retries from overwriting prior evidence.
         report_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
-    preparation: _PreparationOptions = {}
-    if OWNED_SCRATCH_OWNER is not None:
-        preparation = {"limits": limits, "wall_seconds": plugin_timeout - (time.monotonic() - plugin_started)}
+    preparation: _PreparationOptions = {
+        "limits": limits, "wall_seconds": plugin_timeout - (time.monotonic() - plugin_started),
+    }
     py = _ensure_venv(name, uv, reinstall=reinstall, **preparation)
     sandbox_scope = test_sandbox(OWNED_SCRATCH_OWNER, REPO, _TestSandbox, stage="tests",
         prefix=run_prefix(name), dir=runs_root(REPO) if OWNED_SCRATCH_OWNER is None else None,
@@ -970,4 +986,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run_with_test_tooling(main))

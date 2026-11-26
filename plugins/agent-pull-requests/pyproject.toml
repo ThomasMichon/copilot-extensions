@@ -25,6 +25,9 @@ dependencies = [
     "agent-update-driver",
 ]
 
+[tool.copilot-extensions.application-sources]
+fleet-manager = "standalone:fleet-manager"
+
 [tool.uv.sources]
 agent-pr-filters = { path = "../../libs/pr-filters", editable = true }
 agent-update-driver = { path = "../../libs/update-driver", editable = true }

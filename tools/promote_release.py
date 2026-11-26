@@ -46,6 +46,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, cast
+from promotion_versions import prepare_versions, seed_versions
 from promotion_candidate import (
     CandidateIdentityError, candidate_clock, candidate_environment, format_promotion_message,
     push_candidate,
@@ -56,8 +57,9 @@ from promotion_source_archive import (
     git_text,
     git_timeout_options,
     is_ancestor,
-    main_version_inputs as _main_version_inputs,
+    main_version_inputs as main_version_inputs,
 )
+_main_version_inputs = main_version_inputs
 _changefile_existed_at = changefile_existed_at
 
 REPO = Path(__file__).resolve().parent.parent
@@ -155,52 +157,10 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc: Any, repo: P
     plugins on `main` back to their pre-bump versions this exact way (e.g.
     agent-bridge 0.4.1-dev1 -> 0.4.0-dev551) -- that fix was necessary but
     not sufficient on its own; this seed step is the other required half."""
-    plugins_dir = scratch / "plugins"
-    seed_result: dict[str, tuple[str, str]] = {}
-    plugin_dirs = (
-        [path for path in sorted(plugins_dir.iterdir()) if path.is_dir()]
-        if plugins_dir.is_dir() else []
-    )
-    consumers = acc.iter_standalone_consumer_names() + acc.iter_library_consumer_names()
-    metadata = _main_version_inputs(repo, main_head, [
-        *(f"plugins/{path.name}/plugin.json" for path in plugin_dirs),
-        *(f"{consumer}/pyproject.toml" for consumer in consumers),
-    ])
-    for plugin_dir in plugin_dirs:
-        plugin = plugin_dir.name
-        main_pj_raw = metadata.get(f"plugins/{plugin}/plugin.json", "").strip()
-        if not main_pj_raw:
-            continue  # never shipped on main yet -- dev's own literal stands as-is
-        try:
-            main_version = json.loads(main_pj_raw)["version"]
-        except (json.JSONDecodeError, KeyError):
-            continue
-        dev_version = acc.read_plugin_json_version(plugin)
-        if dev_version is None or dev_version == main_version:
-            continue
-        seed_result[plugin] = (dev_version, main_version)
-    # A standalone, out-of-plugin consumer (e.g. `worktree-manager`) ships
-    # its own `pyproject.toml` [project].version instead of a plugin.json --
-    # it needs the exact same main-is-truth seeding, or a promotion round
-    # with no new changefile for it would regress it back to dev's stale
-    # literal (or repeat an already-shipped bump) the same way an
-    # un-seeded plugin would (PR #4514 review).
-    parser = getattr(acc, "_project_version_from_text", None)
-    for consumer in consumers:
-        main_version = (
-            parser(metadata.get(f"{consumer}/pyproject.toml", "")) if parser is not None
-            else acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
-        )
-        if main_version is None:
-            continue  # never shipped on main yet -- dev's own literal stands as-is
-        dev_version = acc.read_consumer_version(consumer)
-        if dev_version is None or dev_version == main_version:
-            continue
-        seed_result[consumer] = (dev_version, main_version)
-    if seed_result:
-        missing = set(seed_result) - set(acc.apply(seed_result))
-        if missing:
-            raise PromotionError(f"cannot seed shipped versions for: {', '.join(sorted(missing))}")
+    try:
+        seed_versions(scratch, main_head, acc=acc, repo=repo)
+    except ValueError as error:
+        raise PromotionError(str(error)) from error
 
 
 def _sync_instruction_projections(
@@ -296,40 +256,15 @@ def consume_pending_changes(
         reader(parallel=parallel_reads())
         if "parallel" in inspect.signature(reader).parameters else reader()
     )
-    _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
     changefile_names = [p.name for p, _data in all_changefiles]
-    if not allocate_versions:
-        new_entries = []
-    elif last_dev_head is None:
-        new_entries = all_changefiles
-    else:
-        new_entries = [
-            (path, data) for path, data in all_changefiles
-            if not _changefile_existed_at(last_dev_head, path.name, repo=repo)
-        ]
-    newly_applied_names = [path.name for path, _data in new_entries]
-
-    grouped: dict[str, list[str]] = {}
-    for _path, data in new_entries:
-        for change in data.get("changes", []):
-            grouped.setdefault(change["plugin"], []).append(change["type"])
-    computed = acc.compute(grouped)
-    applied = acc.apply(computed) if computed else []
-    unapplied = sorted(set(computed) - set(applied))
-    if unapplied:
-        # A computed bump that `apply()` could not actually write (a
-        # manifest-format edge case `apply()` doesn't recognize, a
-        # missing file, etc.) must never be silently accepted --
-        # consuming the changefile below regardless would ship the OLD
-        # version on `main` while permanently discarding the bump
-        # intent (PR #4514 review, a recurring finding across several
-        # prior rounds' individual TOML-format fixes; this is the
-        # structural fix instead of another one-off format patch).
-        raise PromotionError(
-            f"promotion refused: computed a version bump for "
-            f"{', '.join(unapplied)} but apply() could not write it -- "
-            "fix the underlying manifest(s) before promoting again."
+    try:
+        computed, applied, new_entries = prepare_versions(
+            scratch, main_head, acc=acc, repo=repo, entries=all_changefiles,
+            last_dev_head=last_dev_head, allocate_versions=allocate_versions,
         )
+    except ValueError as error:
+        raise PromotionError(str(error)) from error
+    newly_applied_names = [path.name for path, _data in new_entries]
     if all_changefiles:
         # Delete every changefile physically present, not just the ones
         # that drove a bump this round -- an already-consumed changefile
