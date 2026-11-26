@@ -38,6 +38,12 @@ on:
       - libs/payload-invocation/tests/test_codespaces_ready_source.py
       - libs/payload-invocation/tests/test_containers_ready_source.py
       - libs/payload-invocation/tests/test_ssh_ready_source.py
+      - libs/payload-invocation/tests/test_logger_ready_source.py
+      - plugins/agent-logger/scripts/runtime-gate.sh
+      - plugins/agent-logger/scripts/runtime-gate.ps1
+      - plugins/agent-logger/tests/managed_command_fixture.py
+      - plugins/agent-logger/tests/test_managed_command_gate.py
+      - plugins/agent-logger/tests/test_runtime_gate.py
       - plugins/agent-ssh/scripts/runtime-gate.sh
       - plugins/agent-ssh/scripts/runtime-gate.ps1
       - plugins/agent-ssh/tests/managed_command_fixture.py
@@ -1699,6 +1705,59 @@ jobs:
       SSH_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *ssh-ready-steps
+
+  logger-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      LOGGER_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &logger-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify six prepared Logger commands without session or sync effects
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_logger_ready_source.py --allow-explicit-tiers
+          -k "${{ env.LOGGER_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/logger-ready
+      - name: Require all Logger controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.LOGGER_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/logger-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==24 and len({c.attrib['name'] for c in cases})==24;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='logger_command_admission'];
+          assert len(reports)==24 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'logger_command_admission':reports},sort_keys=True))"
+
+  logger-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      LOGGER_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *logger-ready-steps
+
+  logger-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      LOGGER_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *logger-ready-steps
 
   bridge-ready-admission-windows:
     runs-on: windows-latest

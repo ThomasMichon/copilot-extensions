@@ -82,7 +82,7 @@ NATIVE_SOURCE_ALIASES = {
 NATIVE_SUPPORT_FILES = {
     "plugins/agent-ssh": ("native_capture.sh",),
     "plugins/agent-logger": (
-        "bootstrap-uv.sh", "native_owned.sh",
+        "bootstrap-uv.sh", "native_owned.sh", "native_capture.sh",
         "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
     ),
     "plugins/agent-codespaces": (
