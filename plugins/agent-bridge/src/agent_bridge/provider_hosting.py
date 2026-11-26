@@ -229,7 +229,8 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
                        for value in scope.values())
             ):
                 raise AgentHostingError("Invalid bound runtime proxy installation environment")
-            environment = scope
+            # Direct replay skips the Containers runtime gate's environment cleanup.
+            environment = {**scope, "PYTHONPATH": None, "PYTHONHOME": None}
             bound_provider = provider
             runtime = [*provider, "runtime-proxy", "--fleet", fleet,
                        "--member", name, "--expected-runtime", binding["execution_runtime"]]

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sys
+import sysconfig
+import venv
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -101,9 +103,18 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
     root = Path(__file__).resolve().parents[2] / "agent-containers"
     # This fixture supplies Bridge's marketplace identity without installing a cell.
     monkeypatch.setattr(hosting_policy, "marketplace_id", lambda: "bridge-fixture")
-    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(map(str, [
-        root / "src", root.parents[1] / "libs" / "session-liveness-probe" / "src",
-    ])))
+    slot = tmp_path / "provider-slot"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    site = Path(sysconfig.get_path("purelib", vars={"base": str(slot), "platbase": str(slot)}))
+    dependencies = sysconfig.get_path("purelib")
+    (site / "provider-fixture.pth").write_text(
+        f"{root / 'src'}\n{root.parents[1] / 'libs' / 'session-liveness-probe' / 'src'}\n"
+        f"import site; site.addsitedir({dependencies!r})\n",
+        encoding="utf-8",
+    )
+    python = slot / "Scripts" / "python.exe" if os.name == "nt" else slot / "bin" / "python"
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.delenv("PYTHONHOME", raising=False)
     monkeypatch.setenv("PATH", "")  # no host Docker or guest tools
     provider_home = tmp_path / "provider"
     drivers = provider_home / "drivers.d"
@@ -140,7 +151,7 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
         for index in range(1, 4)
     }, "calls": []}))
 
-    provider = [sys.executable, "-m", "agent_containers"]
+    provider = [str(python), "-m", "agent_containers"]
     run = container_transport._run_provider
     rc, out, err = await run([*provider, "namespace-resolve", "example-1"], timeout=30)
     assert rc == 0, err.decode()
@@ -159,6 +170,12 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
     assert binding["provider_environment"] == {key: os.environ.get(key) for key in INSTALLATION_ENV}
     for key in INSTALLATION_ENV:
         monkeypatch.setenv(key, str(tmp_path / f"bridge-{key.lower()}"))
+    other_src = tmp_path / "other-checkout"
+    (other_src / "agent_containers").mkdir(parents=True)
+    (other_src / "agent_containers" / "__init__.py").write_text(
+        '"""Unrelated fixture package without a CLI."""\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(other_src))
     before = len(state["calls"])
     assert (await query_provider_policy(target, operation="launch"))["allowed"]
     state = json.loads(state_path.read_text())
@@ -168,6 +185,11 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
                call["request"]["id"] == "000000000001" for call in calls)
     assert not slow.exists()
     assert os.environ["AGENT_CONTAINERS_HOME"] != str(provider_home)
+
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "bridge-python-home"))
+    assert (await query_provider_policy(target, operation="launch"))["allowed"]
+    state = json.loads(state_path.read_text())
+    assert [call["verb"] for call in state["calls"][before:]] == ["inspect", "exec"] * 2
 
     target.venue["runtime_proxy"] = {
         **binding, "provider_environment": {**binding["provider_environment"], "PYTHONPATH": "foreign"},
