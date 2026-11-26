@@ -1,0 +1,13 @@
+{
+  "comment": "Admit Bridge foreground runtimes through prepared UV without implicit acquisition.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

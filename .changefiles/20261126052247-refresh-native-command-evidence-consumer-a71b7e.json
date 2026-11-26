@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh native command-evidence consumers with missing-BASHPID refusal support.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
