@@ -110,7 +110,7 @@ def test_shared_actual_stamp_first_use_admission(
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
     if state == "healthy-unicode":
         root = binding_fixture["home"] / "custom-\u00e9\u6d4b\u8bd5"
-        root.mkdir()
+        root.mkdir(mode=0o700)
         binding_fixture["legacy"] = root
         binding_fixture["arguments"]["legacy_root"] = root
     temporary = binding_fixture["home"] / "tmp"
