@@ -252,6 +252,18 @@ class _InboxCustodyMixin(DatabaseOperations):
                         })
                         continue
                     raise RuntimeCustodyError("Legacy or foreign inbox admission remains unqualified")
+                if row["delivery"] not in ("steer", "queue") and producer_queued and all(
+                    row[name] is None for name in (
+                        "handoff_json", "claimed_at", "handoff_started_at", "delivered_at", "outcome",
+                    )
+                ):
+                    from .message_contracts import dispose
+
+                    dispose(
+                        conn, consumer, row["id"], "rejected", "unsupported_reader",
+                        "This receiver cannot enforce the requested delivery effect.", now=now,
+                    )
+                    continue
                 if row["delivery"] not in ("steer", "queue") and consumer.message_base != 1:
                     raise RuntimeCustodyError("Retained inbox interrupt delivery remains unsupported")
                 association = row["runtime_custody_json"]

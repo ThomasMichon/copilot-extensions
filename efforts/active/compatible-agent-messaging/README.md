@@ -225,8 +225,11 @@ rollout is claimed by this draft.
   cleanup; supported receivers bind delivery on poll, retaining original
   handoffs and unknown effects. Unsupported legacy message semantics remain
   queued, never delivered or acknowledged through the legacy reader.
-- The focused source packet passes 232 tests; whole-file strict checks pass
-  for Linux and Windows. Dormant-agent resolution, ACP queue adoption and their
+- The initial source packet passes 232 tests; a further review-fix packet
+  passes 213 tests, including mixed unsupported/supported input, consistent
+  historical schema, exact target assertions and real two-owner ordering.
+  Whole-file strict checks pass for all 24 touched Python files on Linux and
+  Windows. Dormant-agent resolution, ACP queue adoption and their
   end-to-end controls remain outstanding. This records source validation, not
   release, installed adoption or live-queue repair.
 

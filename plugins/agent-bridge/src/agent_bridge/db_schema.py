@@ -997,8 +997,4 @@ class _SchemaMixin:
         if from_version < 50:
             from .inbox_custody import migrate_durable_messages
 
-            conn.execute("BEGIN IMMEDIATE")
-            with conn:
-                migrate_durable_messages(conn)
-                conn.execute("UPDATE schema_version SET version=?", (50,))
-            log.info("Schema migrated to version 50: durable producer input before receiver admission")
+            migrate_durable_messages(conn)

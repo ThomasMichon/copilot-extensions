@@ -148,6 +148,8 @@ when its heartbeat, frontend, enrollment or delivery epoch is unavailable.
 The immutable producer-target observation and original operation key survive
 registration cleanup. Acceptance does not resume a conversation or select a
 replacement; a retired native target is not silently rebound to a successor.
+An exact selector naming a retired routing alias is invalid, while a known
+dormant conversation remains a valid queue target.
 The receipt remains `admitted` with `queue_reason: "awaiting_consumer"` until
 a receiver owns the handoff. This is not SDK acceptance or consumption.
 

@@ -40,6 +40,13 @@ def enqueue(
     if request.idempotency_key is not None and not request.idempotency_key.strip():
         raise RuntimeCustodyError("A supplied operation key must be nonempty")
     target_id = request.session_id
+    if request.exact_session:
+        retired = conn.execute(
+            "SELECT target_session_id FROM live_session_aliases WHERE alias_session_id=?",
+            (target_id,),
+        ).fetchone()
+        if retired is not None:
+            return None, f"superseded:{retired[0]}"
     if not request.exact_session:
         target_id = conn.execute(
             f"SELECT {CANONICAL_SESSION_SQL}", (target_id, target_id),

@@ -268,9 +268,12 @@ def migrate_compatible_messages(conn: sqlite3.Connection) -> None:
 
 def migrate_durable_messages(conn: sqlite3.Connection) -> None:
     """Expand producer storage without rewriting an existing input or handoff."""
-    validate_schema(conn, durable_messages=False)
-    if "producer_target_json" not in {row[1] for row in conn.execute("PRAGMA table_info(live_messages)")}:
-        conn.execute("ALTER TABLE live_messages ADD COLUMN producer_target_json TEXT")
-    conn.execute("DROP TRIGGER live_messages_runtime_admission")
-    ensure_schema(conn)
-    validate_schema(conn)
+    conn.execute("BEGIN IMMEDIATE")
+    with conn:
+        validate_schema(conn, durable_messages=False)
+        if "producer_target_json" not in {row[1] for row in conn.execute("PRAGMA table_info(live_messages)")}:
+            conn.execute("ALTER TABLE live_messages ADD COLUMN producer_target_json TEXT")
+        conn.execute("DROP TRIGGER live_messages_runtime_admission")
+        ensure_schema(conn)
+        validate_schema(conn)
+        conn.execute("UPDATE schema_version SET version=?", (50,))

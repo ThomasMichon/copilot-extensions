@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from dataclasses import replace
 
 import pytest
 
 from agent_bridge.db import Database
-from agent_bridge.inbox_custody import schema_triggers
+from legacy_inbox_schema import restore_v49_inbox
 from test_live_inbox_runtime import (
     PREFIX, Serving, attempt, current, enroll, installation as installation,
     native_enroll, poll, serving as serving,
@@ -20,6 +21,28 @@ PAYLOAD = {
     "sender": "original-sender", "body": "original input", "reply_to": "original-reply",
     "delivery": "queue", "idempotency_key": "original-operation",
 }
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+def test_installation_receiver_rejects_unsupported_fresh_effect_without_blocking_next_input(
+    serving: Serving, versioned: bool,
+) -> None:
+    _, client, db, consumer = serving
+    if versioned:
+        consumer = replace(consumer, message_base=1)
+    body = enroll(client, consumer)
+    unsupported = client.post(MESSAGES, json={**PAYLOAD, "delivery": "interrupt"})
+    assert unsupported.status_code == 200, unsupported.text
+    accepted = client.post(MESSAGES, json={**PAYLOAD, "idempotency_key": "next-input"})
+    assert accepted.status_code == 200, accepted.text
+    row = poll(client, body)
+    assert row["id"] == accepted.json()["message_id"]
+    rejected = db.live_message_receipt(consumer.session_id, unsupported.json()["message_id"])
+    assert rejected is not None and rejected["stage"] == "rejected"
+    assert rejected["disposition"]["code"] == "unsupported_reader"
+    assert rejected["disposition"]["message"]["message_id"] == unsupported.json()["message_id"]
+    assert rejected["sdk_accepted_at"] is None and rejected["consumed_at"] is None
+    assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": True}
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -149,12 +172,7 @@ def test_schema_upgrade_retains_old_input_and_protects_new_queued_input(serving:
     path = db.db_path
     db.close()
     with sqlite3.connect(path) as old:
-        for name in schema_triggers().keys() - schema_triggers(durable_messages=False).keys():
-            old.execute(f"DROP TRIGGER {name}")
-        old.execute("DROP TRIGGER live_messages_runtime_admission")
-        old.execute(schema_triggers(durable_messages=False)["live_messages_runtime_admission"][1])
-        old.execute("ALTER TABLE live_messages DROP COLUMN producer_target_json")
-        old.execute("UPDATE schema_version SET version=49")
+        restore_v49_inbox(old)
     reopened = Database(path)
     app.state.db = reopened
     try:
