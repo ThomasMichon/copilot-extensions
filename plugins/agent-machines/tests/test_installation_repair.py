@@ -132,6 +132,62 @@ def test_payload_identity_keeps_entry_refusals(tmp_path: Path, monkeypatch: pyte
         admission_api.payload_identity(root)
 
 
+def test_payload_identity_admits_large_payload_and_binds_its_tail(tmp_path):
+    import hashlib
+
+    root = tmp_path / "payload"
+    root.mkdir()
+    expected = []
+    for index in range(9):
+        entry = root / f"part-{index}.bin"
+        with entry.open("wb") as stream:
+            stream.truncate(8 * 1024 * 1024)
+        expected.append((entry.name, hashlib.sha256(b"\0" * (8 * 1024 * 1024)).hexdigest()))
+
+    original = admission_api.payload_identity(root)
+    assert original == admission_api.digest(expected)
+    with entry.open("r+b") as stream:
+        stream.seek(-1, os.SEEK_END)
+        stream.write(b"x")
+    assert admission_api.payload_identity(root) != original
+
+
+@pytest.mark.parametrize("change", ["total-bound", "file-growth", "file-shrink"])
+def test_payload_identity_preserves_streaming_bounds_and_change_refusal(tmp_path, monkeypatch, change):
+    import io
+
+    root = tmp_path / "payload"
+    root.mkdir()
+    entry = root / "entry"
+    entry.write_bytes(b"content")
+    original_open = Path.open
+    reads = []
+    monkeypatch.setattr(admission_api, "_PAYLOAD_HASH_CHUNK_BYTES", 3)
+    monkeypatch.setattr(admission_api, "_PAYLOAD_MAX_BYTES", 6 if change == "total-bound" else 32)
+    monkeypatch.setattr(admission_api, "_PAYLOAD_MAX_FILE_BYTES", 8)
+
+    class ObservedStream(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(size)
+            assert 0 < size <= 3
+            return super().read(size)
+
+    def opened(path, *args, **kwargs):
+        if path == entry:
+            content = {
+                "total-bound": b"content",
+                "file-growth": b"content++",
+                "file-shrink": b"short",
+            }[change]
+            return ObservedStream(content)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", opened)
+    with pytest.raises(RepairAdmissionError, match="content bound or changed"):
+        admission_api.payload_identity(root)
+    assert reads
+
+
 @pytest.mark.parametrize("containerized,expected", [(True, "linux"), (False, "wsl")])
 def test_installation_repair_platform_uses_userspace_not_container_host_kernel(
     monkeypatch: pytest.MonkeyPatch, containerized: bool, expected: str,
