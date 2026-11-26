@@ -18,6 +18,7 @@ import pytest
 
 import test_azure_devops_point_worker as worker
 import test_azure_devops_points as named
+import test_change_hints_transport as hinted
 
 from agent_index.engine.client import EngineClient
 from agent_index.index_config import ModelProfile
@@ -428,6 +429,75 @@ def test_required_point_http_admission_preserves_scope_identity_and_paused_reten
         assert reopened.dequeue_next() is None
 
     asyncio.run(exercise())
+
+
+def test_explicit_point_client_uses_actual_headers_and_preserves_uncertain_admission(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from agent_index import server
+    from agent_index.indexing.point_hints import PointChangeHints
+
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+    with TestClient(app) as transport:
+        points = app.state.task_runner.point_service
+        assert transport.portal is not None
+        transport.portal.call(points.activate)
+        api, calls = hinted._wire_api(
+            transport, monkeypatch, installation_id=app.state.installation_id,
+            instance_token=app.state.instance_token,
+        )
+        receipt = api.reindex_points(f.claim.hints)
+        assert receipt["accepted"] is True
+        stored = PointChangeHints.from_dict(receipt["task"]["change_hints"])
+        assert stored.union(f.claim.hints) == stored
+        post = calls[-1]
+        assert post.headers[server.INSTALLATION_HEADER] == app.state.installation_id == ""
+        assert post.headers[server.INSTANCE_HEADER] == app.state.instance_token
+        assert receipt["instanceToken"] == app.state.instance_token
+        assert receipt["installationId"] == app.state.installation_id
+        assert app.state.task_runner.store.get_task(receipt["task"]["id"]) is None
+
+        health = api.health
+        current_instance = app.state.instance_token
+
+        def changed_peer() -> dict[str, Any]:
+            observed = health()
+            app.state.instance_token = "replacement"
+            return observed
+
+        monkeypatch.setattr(api, "health", changed_peer)
+        calls.clear()
+        with pytest.raises(RuntimeError, match="acceptance outcome unknown") as outcome:
+            api.reindex_points(f.claim.hints)
+        assert isinstance(outcome.value.__cause__, httpx.HTTPStatusError)
+        assert outcome.value.__cause__.response.status_code == 409
+        assert [(r.method, r.url.path) for r in calls] == [
+            ("GET", "/health"), ("POST", "/reindex/hints"),
+        ]
+        app.state.instance_token = current_instance
+        monkeypatch.setattr(api, "health", health)
+        request = api._request
+
+        def lost_return(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            result = request(method, path, **kwargs)
+            if method == "POST":
+                raise httpx.ReadError("lost admission receipt")
+            return result
+
+        monkeypatch.setattr(api, "_request", lost_return)
+        calls.clear()
+        with pytest.raises(RuntimeError, match="acceptance outcome unknown"):
+            api.reindex_points(f.claim.hints)
+        assert [(r.method, r.url.path) for r in calls] == [
+            ("GET", "/health"), ("POST", "/reindex/hints"),
+        ]
+        transport.portal.call(points.pause)
+    assert lifetime == ["open", "closed"]
+    reopened = TaskStore(f.config.data_dir / "tasks.db")
+    assert reopened.get_queue() and reopened.dequeue_next() is None
 
 
 @pytest.mark.parametrize("closure", ["drain", "stop"])

@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
 from .execution_effect_adapter import EffectRevocation, ExecutionScope
 from .queue_records import TaskError
+
+if TYPE_CHECKING:
+    from .queue_common import WakeOperation
 
 
 class ExecutionAdmissionClosed(TaskError):
@@ -36,17 +41,21 @@ def _scope_key(scope: ExecutionScope) -> str:
 
 def closed_execution(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
     """Read under the caller's admission transaction."""
-    return conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT c.* FROM execution_admission_closures c"
         " JOIN tasks t ON t.repo = c.repo AND t.source = c.source"
         " WHERE t.id = ?",
         (task_id,),
     ).fetchone()
+    return row
 
 
-def require_execution_admission(conn: sqlite3.Connection, task_id: str, *, owner_wake=None) -> None:
+def require_execution_admission(
+    conn: sqlite3.Connection, task_id: str, *, owner_wake: WakeOperation | None = None,
+    closeout_start: bool = False,
+) -> None:
     from .queue_relevance import require_relevant_goal
-    require_relevant_goal(conn, task_id, owner_wake=owner_wake)
+    require_relevant_goal(conn, task_id, owner_wake=owner_wake, closeout_start=closeout_start)
     row = closed_execution(conn, task_id)
     if row is not None:
         raise ExecutionAdmissionClosed(
@@ -56,6 +65,12 @@ def require_execution_admission(conn: sqlite3.Connection, task_id: str, *, owner
 
 
 class QueueExecutionHandoffMixin:
+    if TYPE_CHECKING:
+        _connect: Callable[[], sqlite3.Connection]
+        _now: Callable[[float | None], float]
+        _validate_producer_scope: Callable[[object, object], tuple[str, str]]
+        _producer_scope_row: Callable[..., sqlite3.Row | None]
+
     @staticmethod
     def _require_execution_scope(conn: sqlite3.Connection, scope: ExecutionScope) -> None:
         identity = conn.execute(

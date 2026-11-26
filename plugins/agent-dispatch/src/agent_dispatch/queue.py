@@ -128,6 +128,7 @@ from .queue_standing_sources import QueueStandingSourcesMixin
 from .queue_task_recovery import TaskRecoveryMixin
 from .queue_relevance import QueueRelevanceMixin
 from .queue_relevance_evaluations import QueueRelevanceEvaluationsMixin
+from .queue_relevance_finalize_first import QueueRelevanceFinalizeFirstMixin
 from .queue_task_relationships import QueueTaskRelationshipsMixin
 from .assignment_workspace import RelationshipWriter
 from .queue_steering import QueueSteeringMixin
@@ -181,6 +182,7 @@ class TaskQueue(
     TaskRecoveryMixin,
     QueueRelevanceMixin,
     QueueRelevanceEvaluationsMixin,
+    QueueRelevanceFinalizeFirstMixin,
     QueuePoolCatalogMixin,
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,

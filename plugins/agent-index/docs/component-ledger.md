@@ -700,7 +700,21 @@ typed task union. It confirms admission, not applied content or continued
 activation. Lost/malformed confirmation remains an unknown acceptance; never
 replay it under an old form. Absent requirements preserve existing paused
 v1/v2 retention. See the [reviewed request contract](../../../efforts/active/incremental-indexing-delta-pipeline/point-required-admission.md)
-for compatibility and rollback requirements. Caller migration remains separate.
+for compatibility and rollback requirements.
+
+`AgentIndexClient.reindex_points(PointChangeHints)` explicitly opts into this
+boundary. Its constructor must already select the installation and a nonempty
+instance token; it does not acquire or mutate identity from health. One health
+request checks that same peer, complete scope, active production pair and the
+additive admission capability before at most one required POST. A declaration-only
+provider is insufficient. The method validates the returned peer, admission
+version/fingerprint and complete typed target/correlation union, not the v1
+receipt parser. Exact `accepted: false` is refusal. Malformed, contradictory,
+missing or lost confirmation, including transport/status errors after submission,
+is unknown acceptance and never triggers retry, downgrade or generation switching.
+The receipt certifies admission only. Existing `reindex(...)`, CLI/MCP callers
+and retained recovery remain unchanged; no caller or point source activates
+automatically, and optional feature incompatibility is not a replacement veto.
 
 There is no second scheduler, timer or child process. The existing governed
 `TaskRunner` iteration executes at most one point claim before its legacy queue
