@@ -484,6 +484,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [publication-guard and explicit-keeper study](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
+proposes four tracking-only publication handoffs, preserving two legacy
+exact-candidate guard cases separately from two later publisher cases.
+All remain technically OPEN in proposed existing #7378 receiving; whole
+#8632/#8634, #8660, #9317 and #8985/#9092 acceptance stays OPEN. Review,
+whole actual receiving and separate source/routing audits precede effects;
+the 788-open hint supplies no prospective subtraction.
+
 The [coverage-bound and further-occurrence outcome](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
 records two separately verified evidence-file source completions and seven
 audited tracking-only handoffs to existing receivers. All thirty-five
@@ -5713,6 +5721,13 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [four-publication-case delivery gates](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#delivery-gates)
+remain unresolved. All ten whole originals and eight discussions were
+qualified/read; distinct actual job boundaries and remaining gaps are
+preserved. Four tracking proposals are not technical completions. All six
+whole keeper outcomes, prior local states, parent gates, actual holds and
+the fixed whole-queue target remain.
 
 The [new coverage and receiving delivery gates](journal/2026/11.25-coverage-bound-and-further-occurrences.md#delivery-gates)
 are settled: two separate one-unit source checks and acknowledged `COMPLETED`

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Four independent publication-guard cases and six whole unresolved keepers](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
+
 - [2026-11-25 - Two literal coverage-bound completions, seven tracking handoffs and 788 whole open](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
 
 - [2026-11-25 - Twenty-nine source-reuse cases, nine further tracking retirements and separate manifest timeout](journal/2026/11.25-source-reuse-timeout-intake.md)
