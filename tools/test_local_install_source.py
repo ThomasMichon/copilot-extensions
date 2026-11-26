@@ -2950,6 +2950,38 @@ def test_native_profile_selection_refuses_unassociated_wheels(native_source: tup
             source.native_selection(selected, inputs)
 
 
+def test_application_constructor_facts_share_one_fresh_source_read(
+    native_source: tuple[ModuleType, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, snapshot = native_source
+    with source.project_inputs(snapshot, "demo-app") as (selected, inputs):
+        original: Callable[..., str] = source.engine._construction_hash
+        observations: list[str] = []
+
+        def construction_hash(*args: Any, **kwargs: Any) -> str:
+            result = original(*args, **kwargs)
+            observations.append(result)
+            return result
+
+        monkeypatch.setattr(source.engine, "_construction_hash", construction_hash)
+        first = source.application_inputs(selected, inputs)
+        assert observations == [first["source_hash"]]
+        assert first["payload_hash"] == source.engine._wheel_construction_hash(
+            first["source_hash"], inputs,
+        )
+        package_file = next((selected.payload / "src").rglob("*.py"))
+        original_bytes = package_file.read_bytes()
+        package_file.write_bytes(original_bytes + b"\nCHANGED = True\n")
+        second = source.application_inputs(selected, inputs)
+        assert len(observations) == 2
+        assert second["source_hash"] != first["source_hash"]
+        assert second["payload_hash"] != first["payload_hash"]
+        package_file.write_bytes(original_bytes)
+        selected.project["artifact"]["wheels"][0]["sha256"] = "sha256:" + "0" * 64
+        with pytest.raises(ValueError, match="differs from its source association"):
+            source.application_inputs(selected, inputs)
+
+
 @pytest.mark.parametrize("failure", [
     None, "profile", "construction", "source", "late", "target", "record", "record-late", "worker-map",
 ])

@@ -6282,6 +6282,9 @@ final readback. The emitted profile and Source record must stay exact, and
 the emitted wheel files are independently recaptured against the inspected
 digests before completion. Retained private copies never stand in for that
 final emitted-byte check; all checks share the original absolute deadline.
+One constructor-fact call derives its Source hash and wheel-qualified payload
+hash from the same fresh file read. Later calls and the enclosing Source and
+retained-wheel scope checks still independently observe the actual inputs.
 Generated projects carrying a complete admitted construction profile omit the
 relative resolver-age cutoff: their retained local-wheel lock must remain usable
 when configuration discovery changes or installation happens later.
