@@ -205,3 +205,52 @@ records all nine independent audits, including two sources kept OPEN during
 initial routing delay. Only these four further-extension tracker gates are
 newly resolved. All twenty-nine technical cases and every incumbent parent
 gate remain; the preceding eight local tracker gates were not reset or replayed.
+
+## Six further independent cases
+
+The preceding twenty-nine technical cases, twenty-eight tracking retirements
+and twelve resolved local gates are settled. The
+[new whole-original study](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+proposes six further independent OPEN cases, not a repair or a shared-cause
+finding. Actual provider metadata identifies the same source-reuse job and
+original-success/source-byte verification step. Every complete excerpt again
+contains exit one and cleanup without its causal diagnostic.
+
+| Original | Exact lookup marker | Reported Dev source | Failed run / job | Technical state |
+|---|---|---|---|---|
+| #8485 | Signature: e0d1992f84d6 | `6ec6637052a751fa814e311b838aa0c5e08e91bc` | [40066194285 / 120790701774](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40066194285/job/120790701774) | OPEN |
+| #8489 | Signature: b8ec4f61d160 | `86faad3ef553a49651362431acbee9b4fee9b00d` | [40066628342 / 120792004069](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40066628342/job/120792004069) | OPEN |
+| #8491 | Signature: ee44e1ef1991 | `e75ca8ed86212e8dcc50b4256ec47c7a5164275d` | [40067004926 / 120793222183](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40067004926/job/120793222183) | OPEN |
+| #8493 | Signature: 87d90376b410 | `b24b71a93df87e8d976a6aed4ee6b099e5c17471` | [40067388793 / 120794217863](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40067388793/job/120794217863) | OPEN |
+| #8496 | Signature: 240b770cb479 | `36a272dd65a6bccabdd69fd099ab00ce42c164bd` | [40067990236 / 120796097202](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40067990236/job/120796097202) | OPEN |
+| #8629 | Signature: c3f7e9019a1e | `6936e89e8f02f5cc504160722616a184b7ef182c` | [40115471812 / 120936951403](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40115471812/job/120936951403) | OPEN |
+
+After review, append these six rows and their complete conditions to the
+immediate qualified whole #7872 body; preserve its entire twenty-nine-case
+incumbent, original report, disclosure, discussions, metadata and custodians.
+Independently read back the whole actual receiver before any source effect.
+All thirty-five technical cases remain independently OPEN. Preserve each
+literal reported source without repairing its spelling, every run/job,
+unknown cause and required evidence-backed technical disposition.
+
+Only these six new leaf tracking tokens may conditionally retire
+`NOT_PLANNED`. Use the existing exact-signature producer-equivalent lookup:
+require the OPEN receiver indexed before any selective source-selector
+withdrawal while that source remains OPEN, select #7872 first before its
+retirement, and verify that route afterward. Qualify current eligibility,
+custody and unchanged whole acceptance separately for each source; publish
+and independently audit its own disclosed acknowledgment and proper-reason,
+original-preservation and post-route readbacks. Search delay, unexpected
+selection, a changed request or any hold keeps the affected source OPEN.
+The receiver's existing selector and issue-level cooldown remain, without
+a per-signature cadence or new multi-case fix-worker claim.
+
+### Six-case delivery gates
+
+- [ ] The six-case proposal passes review and required CI and merges.
+- [ ] Whole actual receiving preserves the incumbent and independently
+  retains all thirty-five technical cases OPEN.
+- [ ] Each new source passes its separate qualification, exact routing,
+  disclosed acknowledgment and independent disposition/original audits.
+- [ ] A new complete census separates actual effects and inflow from
+  technical completion without resetting prior local or parent gates.
