@@ -223,10 +223,11 @@ After the reviewed proposal, the operator admitted execution:
   the [request-bound required-admission refinement](point-required-admission.md)
   was reviewed in #13712 and its receiver merged in #13715. It checks the actual peer,
   selected scope and admission before an owned queue effect and emits an
-  explicit typed receipt. Existing wire callers remain unchanged; the
+  explicit typed receipt. Existing ordinary wire callers remain unchanged; the
   [explicit caller proposal](point-required-admission.md#explicit-caller-migration-proposal)
-  specifies a separately reviewed opt-in API, selected-peer negotiation and
-  typed receipt checks before implementation.
+  was reviewed in #13717. Its opt-in `AgentIndexClient.reindex_points` checks
+  selected-peer support before submission and validates the typed admission
+  receipt without replay after unknown acceptance. No ordinary caller migrates.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.

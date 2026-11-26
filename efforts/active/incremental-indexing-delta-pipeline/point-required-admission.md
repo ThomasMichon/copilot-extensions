@@ -117,8 +117,9 @@ new caller, wire read, automatic recovery, source activation, repair or rollout.
 ## Explicit caller migration proposal
 
 This **agent-recommended, review-first caller step** builds on the receiver
-merged in #13715. This proposal changes no runtime behavior. Implement it only
-after its separate review merges; caller implementation still needs its own
+merged in #13715. Its contract was reviewed in #13717 before implementation;
+the [client documentation](../../../plugins/agent-index/docs/component-ledger.md#required-hinted-intake-admission)
+records the explicit API and its limits. Caller implementation retains its own
 focused validation and review. It closes the existing incremental-ingestion
 vision through the same operation and contract-evolution pattern, not a new
 discovery service or a general v2 client conversion.

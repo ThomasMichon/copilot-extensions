@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import sys
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -119,6 +120,218 @@ def test_required_admission_refuses_before_queue_callback(
     assert not service._intakes
     if selection != "stopped":
         api.finish(service.stop())
+
+
+@pytest.fixture
+def point_client(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> SimpleNamespace:
+    transport = ModuleType("httpx")
+    setattr(transport, "HTTPError", OSError)
+    monkeypatch.setitem(sys.modules, "httpx", transport)
+    api.load("indexing.change_hints_contract")
+    client = api.load("client").AgentIndexClient(
+        "http://fixture",
+        installation_id="",
+        instance_token="selected",
+    )
+    hints = _hints(api)
+    service = api.service(runtime_context=lambda: api.context(api.qualified))
+    api.finish(service.start(legacy_data_dir=Path("legacy")))
+    api.finish(service.activate())
+    health = {
+        "installationId": "",
+        "instanceToken": "selected",
+        "point_service_contract": service.contract(),
+    }
+    api.finish(service.stop())
+    receipt = {
+        "accepted": True,
+        "installationId": "",
+        "instanceToken": "selected",
+        "point_service_admission": {
+            "id": "agent-index.point-service",
+            "version": 1,
+            "scope_fingerprint": api.contract.point_scope_fingerprint(hints.scope),
+        },
+        "task": {
+            "source": hints.source,
+            "full": False,
+            "change_hints": hints.to_dict(),
+        },
+    }
+    state = SimpleNamespace(health=health, receipt=receipt, failure=None, calls=[])
+
+    def request(method: str, path: str, **kwargs: Any) -> Any:
+        state.calls.append((method, path, kwargs))
+        if method == "GET":
+            return state.health
+        if state.failure is not None:
+            raise state.failure
+        return state.receipt
+
+    monkeypatch.setattr(client, "_request", request)
+    return SimpleNamespace(
+        client=client,
+        hints=hints,
+        state=state,
+        client_type=type(client),
+        contract=api.contract,
+    )
+
+
+def test_point_client_requires_bound_capability_and_receipts_complete_union(
+    point_client: SimpleNamespace,
+) -> None:
+    p = point_client
+    extra = replace(p.hints.targets[0], revision=8)
+    stored = replace(p.hints, targets=(*p.hints.targets, extra))
+    p.state.receipt["task"]["change_hints"] = stored.to_dict()
+    assert p.client.reindex_points(p.hints) is p.state.receipt
+    assert p.state.calls == [
+        ("GET", "/health", {}),
+        (
+            "POST",
+            "/reindex/hints",
+            {
+                "json": {
+                    "source": p.hints.source,
+                    "full": False,
+                    "change_hints": p.hints.to_dict(),
+                    "required_point_service_version": 1,
+                }
+            },
+        ),
+    ]
+    assert p.client.installation_id == "" and p.client.instance_token == "selected"
+
+
+def test_point_client_refuses_unsupported_peer_scope_and_admission_before_post(
+    point_client: SimpleNamespace,
+) -> None:
+    p = point_client
+    original = deepcopy(p.state.health)
+    for key, value in (
+        ("required_admission_versions", None),
+        ("required_admission_versions", [True]),
+        ("required_admission_versions", "1"),
+        ("version", True),
+        ("paired", False),
+        ("scope_fingerprint", "different"),
+        ("state", "paused"),
+        ("execution_admitted", False),
+        ("coverage", "complete-discussion"),
+    ):
+        p.state.health = deepcopy(original)
+        p.state.health["point_service_contract"][key] = value
+        p.state.calls.clear()
+        with pytest.raises(RuntimeError):
+            p.client.reindex_points(p.hints)
+        assert [call[:2] for call in p.state.calls] == [("GET", "/health")]
+    for key, value in (("installationId", "other"), ("instanceToken", "other")):
+        p.state.health = deepcopy(original)
+        p.state.health[key] = value
+        p.state.calls.clear()
+        with pytest.raises(RuntimeError, match="selected installation"):
+            p.client.reindex_points(p.hints)
+        assert len(p.state.calls) == 1
+    p.state.health = original
+    p.client.instance_token = None
+    p.state.calls.clear()
+    with pytest.raises(RuntimeError, match="nonempty instance"):
+        p.client.reindex_points(p.hints)
+    assert len(p.state.calls) == 1 and p.client.instance_token is None
+
+
+def test_point_client_malformed_receipts_are_unknown_without_replay(
+    point_client: SimpleNamespace,
+) -> None:
+    p = point_client
+    original = deepcopy(p.state.receipt)
+    bad = [{}, {**original, "accepted": 1}]
+    for key, value in (
+        ("installationId", "other"),
+        ("instanceToken", "other"),
+        ("point_service_admission", None),
+        ("task", None),
+    ):
+        bad.append({**original, key: value})
+    for admission_key, admission_value in (
+        ("version", True),
+        ("scope_fingerprint", "other"),
+        ("id", "other"),
+    ):
+        receipt = deepcopy(original)
+        receipt["point_service_admission"][admission_key] = admission_value
+        bad.append(receipt)
+    for task_key, task_value in (
+        ("source", "other"),
+        ("full", 0),
+        ("change_hints", {}),
+        (
+            "change_hints",
+            replace(
+                p.hints,
+                targets=(replace(p.hints.targets[0], event_ids=()),),
+            ).to_dict(),
+        ),
+        (
+            "change_hints",
+            replace(
+                p.hints,
+                targets=(replace(p.hints.targets[0], revision=8),),
+            ).to_dict(),
+        ),
+        ("change_hints", replace(p.hints, account_id="other").to_dict()),
+    ):
+        receipt = deepcopy(original)
+        receipt["task"][task_key] = task_value
+        bad.append(receipt)
+    for receipt in bad:
+        p.state.receipt = receipt
+        p.state.calls.clear()
+        with pytest.raises(RuntimeError, match="acceptance outcome unknown"):
+            p.client.reindex_points(p.hints)
+        assert [call[:2] for call in p.state.calls] == [
+            ("GET", "/health"),
+            ("POST", "/reindex/hints"),
+        ]
+    p.state.receipt = {"accepted": False, "error": "unavailable"}
+    p.state.calls.clear()
+    assert p.client.reindex_points(p.hints) == p.state.receipt
+    assert len(p.state.calls) == 2
+
+
+def test_point_client_lost_returns_preserve_unknown_acceptance_and_old_api(
+    point_client: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = point_client
+    for failure in (OSError("lost return"), ValueError("invalid response JSON")):
+        p.state.calls.clear()
+        p.state.failure = failure
+        with pytest.raises(RuntimeError, match="acceptance outcome unknown") as outcome:
+            p.client.reindex_points(p.hints)
+        assert outcome.value.__cause__ is failure and len(p.state.calls) == 2
+    p.state.failure = None
+    p.state.calls.clear()
+    p.client.reindex(source="legacy")
+    assert p.state.calls == [
+        ("POST", "/reindex", {"json": {"source": "legacy", "full": False}})
+    ]
+    p.state.calls.clear()
+    with pytest.raises(ValueError, match="PointChangeHints"):
+        p.client.reindex_points(object())
+    assert not p.state.calls
+    readonly = p.client_type(
+        "http://fixture",
+        installation_id="",
+        instance_token="selected",
+        read_headers={},
+    )
+    monkeypatch.setattr(readonly, "health", lambda: p.state.health)
+    with pytest.raises(RuntimeError, match="read clients"):
+        readonly.reindex_points(p.hints)
 
 
 def test_required_admission_joins_queue_before_closing_selected_resources(

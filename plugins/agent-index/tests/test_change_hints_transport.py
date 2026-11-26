@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -60,6 +61,31 @@ def _connected_api(client: TestClient) -> tuple[AgentIndexClient, list[tuple[str
 
     setattr(api, "_request", request)
     return api, calls
+
+
+def _wire_api(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, *,
+    installation_id: str, instance_token: str,
+) -> tuple[AgentIndexClient, list[httpx.Request]]:
+    original = httpx.Client
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        response = client.request(
+            request.method, str(request.url), content=request.content, headers=request.headers,
+        )
+        return httpx.Response(
+            response.status_code, content=response.content, headers=response.headers,
+        )
+
+    def create(**kwargs: Any) -> httpx.Client:
+        return original(**kwargs, transport=httpx.MockTransport(handle))
+
+    monkeypatch.setattr(httpx, "Client", create)
+    return AgentIndexClient(
+        "http://fixture", installation_id=installation_id, instance_token=instance_token,
+    ), calls
 
 
 def test_old_source_only_caller_unchanged_and_hinted_burst_unions(service: Service) -> None:
@@ -289,7 +315,9 @@ def test_point_provider_rollback_refuses_feature_without_losing_retained_or_lega
     assert retained.change_hints == hints and retained.point_claim_id
 
 
-def test_required_point_schema_and_prior_receiver_refuse_before_effects(service: Service) -> None:
+def test_required_point_schema_and_prior_receiver_refuse_before_effects(
+    service: Service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fastapi import Body
     from pydantic import BaseModel, ConfigDict
 
@@ -353,3 +381,33 @@ def test_required_point_schema_and_prior_receiver_refuse_before_effects(service:
     retained = reopened.get_task(accepted["task"]["id"])
     assert retained is not None and retained.change_hints == hints
     assert reopened.dequeue_next() is None
+
+    @prior.get("/health")
+    def stale_positive_health() -> dict[str, Any]:
+        from agent_index.indexing.point_service_contract import point_scope_fingerprint
+
+        return {
+            "installationId": "", "instanceToken": "selected",
+            "point_service_contract": {
+                "id": "agent-index.point-service", "version": 1, "paired": True,
+                "scope_fingerprint": point_scope_fingerprint(hints.scope),
+                "representation": "point-components", "representation_version": 1,
+                "coverage": "named-target-only", "hints_versions": [2],
+                "read_boundary": "in-process-only", "failed": False, "state": "active",
+                "execution_admitted": True, "read_admitted": True,
+                "required_admission_versions": [1],
+            },
+        }
+
+    api, calls = _wire_api(
+        prior_client, monkeypatch, installation_id="", instance_token="selected",
+    )
+    before = store.get_queue(), list(notifications)
+    with pytest.raises(RuntimeError, match="acceptance outcome unknown") as outcome:
+        api.reindex_points(hints)
+    assert isinstance(outcome.value.__cause__, httpx.HTTPStatusError)
+    assert outcome.value.__cause__.response.status_code == 422
+    assert [(r.method, r.url.path) for r in calls] == [
+        ("GET", "/health"), ("POST", "/reindex/hints"),
+    ]
+    assert (store.get_queue(), notifications) == before
