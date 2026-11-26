@@ -522,6 +522,31 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source fulfillment and four retained execution cases](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
+records reviewed #14775, whole accepted receiving and twelve separately
+audited dispositions: eight `COMPLETED` reports and four `NOT_PLANNED`
+tracking retirements. Four completions are reports of one precise repaired
+candidate-admission defect, not four independent fixes. All four transferred
+technical cases stay OPEN in #7378/#11966; six broader originals and two
+acquired final-review assessment gaps remain separately OPEN. Ten original
+final units remain spent, with no body permission or renewed check inferred.
+Two equal complete censuses measure 606 whole OPEN: 293 original-cohort and
+313 inflow, with exactly twelve departures from 618 and no arrivals or
+unrelated departures. Factual publication remains; all incumbent parent
+Plan/Validation states and actual holds are unchanged.
+
+The [four source deliveries and twelve retained execution cases](journal/2026/11.26-four-source-deliveries-and-twelve-retained-cases.md)
+records reviewed #14772, whole accepted receiving and sixteen separately
+audited dispositions: four acknowledged source-request `COMPLETED` outcomes
+and twelve `NOT_PLANNED` tracking retirements. The ten preparation and two TTY
+cases remain independently OPEN in #7378/#11966; neither stage identity nor
+later green runs proves repair. Distinct #14423/#14424 and unfinished
+#14435/#14461 remain OPEN. Two equal complete censuses measure 618 whole OPEN:
+293 original-cohort and 325 inflow, with exactly sixteen departures from 634
+and no arrivals or unrelated departures. The factual outcome merged in
+#14774. Parent Plan/Validation states and all
+existing gates are unchanged.
+
 The [materialization repair and ten retained cases](journal/2026/11.26-materialization-repair-and-ten-retained-cases.md)
 records reviewed #14764, whole accepted receiving and nineteen separately
 audited dispositions: nine `COMPLETED` against the precise merged
@@ -530,7 +555,7 @@ their technical cases independently OPEN. #14310 retains its explicit
 human-owned parent completion boundary despite the delivered follow-up source.
 Two complete censuses agree on 634 whole OPEN, 293 original-cohort and
 341 inflow: the exact nineteen departures from 653, with no arrival or
-unrelated departure. The factual outcome still owes publication; all parent
+unrelated departure. The factual outcome merged in #14766; all parent
 Plan/Validation states remain unchanged.
 
 The [eighteen later TTY-case outcome](journal/2026/11.26-eighteen-later-tty-cases.md)

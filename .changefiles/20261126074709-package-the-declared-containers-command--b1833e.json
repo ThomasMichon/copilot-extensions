@@ -1,0 +1,9 @@
+{
+  "comment": "Package the declared Containers command-admission capture dependency.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

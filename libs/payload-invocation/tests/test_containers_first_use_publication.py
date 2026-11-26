@@ -133,7 +133,16 @@ def test_containers_actual_first_use_publication(
         stamp += ["-InstallDir" if stamp_shell == "powershell" else "--install-dir",
                   str(fixture["legacy"])]
         stamped = _run(fixture, environment, stamp, None)
-        assert stamped.returncode == 0, stamped.stdout + stamped.stderr
+        diagnostic = ""
+        if stamped.returncode and sys.platform == "darwin" and stamp_shell == "bash":
+            probe = _run(fixture, environment, [
+                "bash", "-x", "-c",
+                'INSTALL_DIR="$1"; . "$2"; _enter_install_lock 1',
+                "fixture-transaction-diagnostic", str(fixture["legacy"]),
+                str(fixture["payload"] / "scripts/legacy-transaction.sh"),
+            ], None)
+            diagnostic = probe.stdout + probe.stderr
+        assert stamped.returncode == 0, stamped.stdout + stamped.stderr + diagnostic
         if entry == "compat-global":
             assert b"\r" not in (fixture["home"] / ".local/bin/agent-containers").read_bytes()
         retained = Path((fixture["legacy"] / "payload-dir").read_text(encoding="utf-8-sig").strip())

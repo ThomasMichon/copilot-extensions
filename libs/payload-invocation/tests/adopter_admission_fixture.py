@@ -1,4 +1,4 @@
-"""Canonical prepared-UV prerequisites for retained Codespaces adopter tests."""
+"""Canonical prepared-UV prerequisites for retained adopter tests."""
 from __future__ import annotations
 
 import os
@@ -15,9 +15,15 @@ import pytest
 def prepare_codespaces_admission(
     fixture: dict[str, Any], environment: dict[str, str], repo: Path,
 ) -> None:
+    prepare_adopter_admission(fixture, environment, repo, "agent-codespaces")
+
+
+def prepare_adopter_admission(
+    fixture: dict[str, Any], environment: dict[str, str], repo: Path, plugin: str,
+) -> None:
     uv = shutil.which("uv")
     if not uv:
-        pytest.skip("Codespaces application admission requires prepared UV")
+        pytest.skip(f"{plugin} application admission requires prepared UV")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     request = f"cpython@{sys.version_info.major}.{sys.version_info.minor}"
     selected = subprocess.run(
@@ -26,7 +32,7 @@ def prepare_codespaces_admission(
         capture_output=True, text=True, timeout=15, creationflags=flags,
     )
     if selected.returncode:
-        pytest.skip(f"Codespaces fixture requires a prepared managed {request}")
+        pytest.skip(f"{plugin} fixture requires a prepared managed {request}")
     store = subprocess.check_output(
         [uv, "python", "dir"], text=True, timeout=15, creationflags=flags,
     ).strip()
@@ -40,7 +46,7 @@ def prepare_codespaces_admission(
         PATH=str(tools) + os.pathsep + environment["PATH"],
         UV_PYTHON_INSTALL_DIR=store, UV_PYTHON_DOWNLOADS="never",
     )
-    source = repo / "plugins/agent-codespaces"
+    source = repo / "plugins" / plugin
     payload = fixture["payload"]
     for name in ("payload-invocation.json", "pyproject.toml", "readiness-isolation.json"):
         if not (payload / name).is_file():

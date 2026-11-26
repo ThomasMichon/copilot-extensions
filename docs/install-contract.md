@@ -3038,6 +3038,11 @@ provisioning. Historical `.install.lock.pid` and `.install.lock.pid.reap`
 receipts refuse unchanged until explicitly settled; their presence does not
 authorize stale-owner deletion.
 
+The Python fallback retains its selected interpreter for the final native
+`fstat(8)`/no-follow named-file identity check. Darwin's descriptor-filesystem
+metadata is not the held file's identity; a replaced or linked lock name still
+refuses at that final boundary. Native-flock callers retain their existing check.
+
 The PID-bearing fallback entry `<install-dir>/.install.lock.pid` remains for
 other adopters without `flock`. In the matching
 agent-vault, agent-mcp and agent-ssh fallback blocks, every
