@@ -177,7 +177,7 @@ print(json.dumps(report))
         else:
             assert not (slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).exists()
             if scenario == "failed-request":
-                assert request in result.stderr, result.stderr[-4000:]
+                assert request in result.stderr, (report, result.stderr[-4000:])
         assert receipt.read_bytes() == b'{"fixture":"retained ownership"}\n'
         assert not Path(env["AMBIENT_MARKER"]).exists()
     calls = [
