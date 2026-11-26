@@ -5,6 +5,81 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 26 unique original local-context contracts
+
+The complete original binding and profile files are not admitted yet;
+none of their 36 original function names occurs in current admitted nodes
+and no existing adapter references either original file. Complete collection
+preserves 116 cases through 23 whole binding functions and 72 through all
+thirteen profile functions. Original objects, code/global origins, fixtures,
+typed parameters, function and inherited marks, IDs and order agree.
+Both module-level contract marks are the original marker objects.
+
+First unchanged guarded trials pass 116 in 1.94 pytest / 19.094 observation
+seconds and 72 in 2.30 pytest / 21.563 observation seconds.
+All 564 phases pass, zero prohibited effects occur, each trial has 25 bound
+reads and every case has actual owner call-phase coverage. Complete lossless
+phase/input/per-case witnesses are read before admission. Only explicit
+mapping/hostname/environment inputs are used; no file/OS/native behavior changes.
+
+Add exactly 188 nodes, four adapter/original bindings and one already-bound
+local-context coverage target; retain every existing node/hash/target, all
+92 helper decisions and the 300-second deadline. Current inventory is
+10,780 nodes, 1,516 sources, 552 targets and 720,834 bytes.
+The existing combined control-plane/identity admission remains exact;
+the rejected duplicate candidate contributes no nodes.
+Fatal Ruff and strict Linux/Windows whole-file typing pass.
+Current-head review, fresh full CI, normal merge and persistence remain;
+no parent completion, installed/native adoption or whole-flow saving is claimed.
+
+## November 26 original pure topology controls
+
+**Superseded candidate, not an admission:** #14700 is closed unmerged under
+the explicit `close-duplicate-continue` decision. Review identifies all
+28 cases already admitted through the combined original adapter from #14611;
+full adapter and manifest readback confirms it. The proposed two adapters,
+their extra nodes and bindings are removed without changing the existing
+admission or peers. The qualification history below is retained, not new
+coverage or completion. Subsequent admission checks must compare original
+file/function identities, not merely distinct adapter node IDs.
+
+Two adapters export all five original control-plane parser functions
+(23 cases) and the first five complete explicit topology identity functions
+(five cases). Complete metadata compares 29 and fourteen original cases.
+Objects, code/global origins, fixtures, typed parameters, marks, IDs and
+order agree. Six file/YAML loader and nine platform/OS patch/AST cases are
+excluded before execution. Originals, production and effect guards stay exact.
+
+The first parser trial refuses before test execution: the repository
+wrapper's checkout-local pytest dependency is an unadmitted repository source
+read. No result or admission is credited. The explicit
+`correct-environment-and-requalify` decision permits one fresh trial per
+module after a bounded environment correction, not replay of the refused
+environment or preload/guard exceptions. The canonical seasoned preparer's
+existing external-cache argument supplies that correction without source edits.
+Corrected trials pass 23 in 1.36 pytest / 18.875 observation seconds and five
+in 1.07 pytest / 13.265 observation seconds. All 84 phases pass, zero
+prohibited effects occur, each trial has 25 bound reads and every case has
+actual owner call-phase lines. Full observations are read before admission.
+This bounded correction decision is now consumed.
+
+Only 28 nodes and two adapter bindings are added; both originals and targets
+were already bound. Every old ordered node/hash/target, 92 helper decisions
+and 300-second limit remains: 10,604 nodes, 1,510 sources,
+549 targets and 713,469 bytes. Fatal Ruff and strict Linux/Windows whole-file
+typing pass. All 1,510 bindings, 92 helpers and 27 observed input hashes
+verify without replay. Current-head review, full CI, normal merge and
+persistent readback remain. This is not a native
+qualification, installed adoption, parent completion or whole-flow savings.
+
+Dev advances before publication. Owned rebase preserves one peer-added
+source binding and eight existing refreshes after complete semantic
+base/peer/ours inspection. Peer nodes, targets, helpers and limits do not
+change; all 27 actually observed input hashes remain exact without replay.
+The final union is 10,604 nodes, 1,511 sources, 549 targets, 92 helpers,
+300 seconds and 713,595 bytes. All current bindings/helpers verify;
+fresh exact-head review and complete hosted CI must qualify this union.
+
 ## November 26 original consumer-policy and alias controls
 
 Two adapters export all three original consumer-policy functions (five cases)
@@ -35,6 +110,16 @@ The complete 27-source observed-input union remains exact without local replay.
 The final union is 10,576 nodes, 1,508 sources, 549 targets, 92 helpers,
 300 seconds and 712,076 bytes. Fresh current-head review, full CI, merge
 and persistent verification remain.
+
+Source #14683 merges at `75970fb998e54d2082f42fc316a8bdad19949d58`
+after current-head clean approval and all required checks. Natural CI
+`45750679182` executes all 10,576 cases, 55 deselected and ten warnings,
+in 159.45 pytest / 183.036 packet seconds. Reuse refuses on
+`toolchain-binding-budget-exhausted`; the packet honestly executes, not reuses.
+Independent merged state, full-tree equality, supported pull-forward,
+all seven reviewed/merged/working blobs, exact candidate, all current
+bindings/helpers and 27 observed input hashes verify without replay.
+Only the 128-case leaf is complete; parent and all retained gates remain.
 
 ## November 26 original pure registry projections
 

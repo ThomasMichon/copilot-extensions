@@ -487,7 +487,44 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify adjacent pure registry policy and alias controls as one coherent
+- [ ] Qualify the still-unrepresented original local-execution binding and
+  profile controls as one coherent source PR, only after checking original
+  file/function admission uniqueness rather than new adapter node IDs.
+  Preserve every complete function and parameter row, original code/global
+  origins, fixtures, typed values, module-level contract marks, function
+  marks, IDs and order. Metadata comparison precedes unchanged guarding;
+  actual owner call lines per case precede admission. Use only explicit
+  mapping/hostname/environment inputs, with no host observation, OS patch,
+  file loading, native process or guard exception. Retain all current
+  inventory, hashes, helpers, limits and refusals. Current-head review,
+  full CI, normal merge and persistence remain required.
+  Complete metadata collection confirms 116 binding cases through all
+  23 original functions and 72 profile cases through all thirteen.
+  Neither original file/function set is already admitted; module contract
+  marks are the exact original objects and all inherited/function marks agree.
+  First unchanged guarded trials pass 116 in 1.94 pytest / 19.094 observation
+  seconds and 72 in 2.30 pytest / 21.563 observation seconds.
+  All 564 phases pass, zero prohibited effects occur, each trial has
+  25 bound reads, and actual local-context/registry call lines cover every
+  case. Complete lossless phase/input/per-case witnesses are read before
+  admission. Add only 188 nodes, four adapter/original bindings and one
+  already-bound local-context target: 10,780 nodes, 1,516 sources,
+  552 targets, 92 helpers, 300 seconds and 720,834 bytes.
+  Existing combined control-plane/identity admission remains unchanged;
+  no redundant candidate cases are present. Fatal Ruff and strict
+  Linux/Windows whole-file typing pass; review/full CI/merge/persistence remain.
+- [x] Disposition the proposed control-plane/identity expansion as duplicate,
+  not new assurance. Review #14700 identifies that all 28 proposed cases
+  already run through the admitted combined adapter from merged #14611.
+  Complete existing adapter and node inventory readback confirms the finding.
+  Explicit `close-duplicate-continue` directs closure; #14700 is closed,
+  unmerged, at 05:48:48 UTC. Its green full CI and corrected local trials
+  remain historical evidence only, not added coverage or parent completion.
+  Remove only the two redundant candidate adapters, their 28 extra nodes
+  and two new bindings; preserve every existing selection and peer change.
+  Retain the candidate, review, refused environment and consumed correction
+  decision. No worktree finalization or evidence deletion is authorized.
+- [x] Qualify adjacent pure registry policy and alias controls as one coherent
   source PR: all three original consumer-default functions (five cases), and
   twelve complete original alias-matrix functions with every parameter row.
   Exclude both whole observed-local/standalone-host identity functions before
@@ -518,6 +555,12 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   without trial replay. Final inventory is 10,576 nodes, 1,508 sources,
   549 targets and 712,076 bytes, with the same helpers/deadline. Fresh
   current-head review and complete hosted CI must qualify this union.
+  Source #14683 merges after fresh exact-head approval and required checks.
+  Natural CI executes all 10,576 cases in 183.036 packet seconds; this is
+  fresh execution, not reuse. Independent merged state, full-tree equality,
+  supported pull-forward, all seven reviewed/merged/working blobs, exact
+  reconciled candidate, 1,508 bindings, 92 helpers and all 27 observed
+  input hashes verify without replay. Only this 128-case leaf is Done.
 - [x] Qualify original pure registry projections through eleven complete
   functions and the entire `TestMachineName` and `TestFindMachineEntry`
   classes. Preserve original classes/methods, code/global origins, fixtures,
