@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 from agent_procutil import contained_test_mode, no_window_kwargs
 
 from .backend import HeadedBackend
-from .staging import CONNECTOR_ENV, connector_selection, stage_extension
+from .staging import CONNECTOR_ENV, connector_selection, selected_connector_roots, stage_extension
 from .receipt import PROCESS_RECEIPT
 from ..native_arguments import VALUE_OPTIONS
 from ..session_host.host import ChildProcess, SessionHost
@@ -337,7 +337,9 @@ async def _run_headed_once(
     )
     nonce = nonce or (env or {}).get(_NONCE_ENV) or os.environ.get(_NONCE_ENV) or secrets.token_hex(32)
     child_env = {**os.environ, **(env or {})}
-    connector = connector_selection(child_env, session_id=session_id, cwd=cwd, argv=child_argv)
+    connector = connector_selection(child_env, session_id=session_id, cwd=cwd)
+    if connector is not None:
+        selected_connector_roots(connector, child_argv, value_options=VALUE_OPTIONS)
     plugin = stage_extension(
         Path(attempt_directory), **({"native_connector": True} if connector is not None else {}),
     )

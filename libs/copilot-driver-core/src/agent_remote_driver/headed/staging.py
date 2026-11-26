@@ -9,14 +9,12 @@ import os
 from pathlib import Path
 import tempfile
 
-from ..native_arguments import VALUE_OPTIONS
-
 CONNECTOR_ENV = "COPILOT_DRIVER_NATIVE_CONNECTOR"
 CONNECTOR_CONTRACT = "driver-native-v1"
 
 
 def connector_selection(
-    env: dict[str, str], *, session_id: str, cwd: str, argv: list[str],
+    env: dict[str, str], *, session_id: str, cwd: str,
 ) -> dict[str, object] | None:
     """Validate an explicit receiving selection before staging or native birth."""
     raw = env.get(CONNECTOR_ENV)
@@ -46,13 +44,14 @@ def connector_selection(
             )
         ):
             raise ValueError("invalid native connector selection")
-        _connector_roots(selected, argv)
-    except (ValueError, KeyError, TypeError, OSError) as error:
+    except (ValueError, KeyError, TypeError) as error:
         raise ValueError("Native connector differs from its explicit receiving launch") from error
     return selected
 
 
-def _connector_roots(selected: dict[str, object], argv: list[str]) -> None:
+def selected_connector_roots(
+    selected: dict[str, object], argv: list[str], *, value_options: set[str],
+) -> None:
     expected = {
         "agent-bridge": Path(str(selected["bridgePluginRoot"])).resolve(strict=True),
         "agent-remote-driver": Path(str(selected["driverPluginRoot"])).resolve(strict=True),
@@ -65,7 +64,7 @@ def _connector_roots(selected: dict[str, object], argv: list[str]) -> None:
         if argument == "--":
             break
         name, separator, value = argument.partition("=")
-        if not separator and name in VALUE_OPTIONS | {"-C", "--resume"}:
+        if not separator and name in value_options | {"-C", "--resume"}:
             index += 1
             if index >= len(argv):
                 raise ValueError("Missing selected native argument")

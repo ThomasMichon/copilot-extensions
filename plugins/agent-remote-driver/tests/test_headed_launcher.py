@@ -63,10 +63,11 @@ def test_selected_connector_binds_facade_roots_to_the_original_native_command(
     elif change == "extra":
         argv += ["--plugin-dir", roots["other"]]
     if change == "matching":
-        assert connector_selection(env, session_id="chosen", cwd=str(tmp_path), argv=argv) == selected
+        assert connector_selection(env, session_id="chosen", cwd=str(tmp_path)) == selected
+        launcher.selected_connector_roots(selected, argv, value_options=launcher.VALUE_OPTIONS)
     else:
-        with pytest.raises(ValueError, match="explicit receiving launch"):
-            connector_selection(env, session_id="chosen", cwd=str(tmp_path), argv=argv)
+        with pytest.raises(ValueError):
+            launcher.selected_connector_roots(selected, argv, value_options=launcher.VALUE_OPTIONS)
 
 
 @pytest.mark.asyncio
@@ -88,7 +89,7 @@ async def test_selected_root_mismatch_refuses_before_staging_or_native_birth(
     monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
     monkeypatch.setattr(launcher, "stage_extension", stage)
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    with pytest.raises(ValueError, match="explicit receiving launch"):
+    with pytest.raises(ValueError, match="missing from the original command"):
         await launcher.run_headed(
             ["copilot", "--session-id", "chosen"], session_id="chosen", env=env,
             cwd=str(tmp_path), attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
