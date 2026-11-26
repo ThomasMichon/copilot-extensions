@@ -37,6 +37,7 @@ async function load(selected, version = 50, {
   tokenInitiallyMissing = false,
   retainedReceipts, legacyAck, legacyPoll, legacyControls = [], modeSet, composeDriver = false,
   joinFailure, activationEffects = [], composeHeaded = false, retainedMessages,
+  liveConnector = false, liveExtensions = [],
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const headedUpdates = [];
@@ -49,6 +50,7 @@ async function load(selected, version = 50, {
   let consumer;
   let joined;
   let joins = 0;
+  let liveReads = 0;
   let driverOptions;
   let headedAdapter;
   const driverDescriptors = [], driverEvents = [];
@@ -69,7 +71,16 @@ async function load(selected, version = 50, {
     getEvents: async () => [],
     abort: async () => {},
     close() { assert.fail("Closing the Bridge client must not close native"); },
-    rpc: { mode: { set: modeSet || (async () => ({ modeApplied: true })) },
+    rpc: {
+      ...(liveConnector ? {
+        plugins: { list: () => assert.fail("Executing-origin validation must not inspect installer records") },
+        extensions: { list: async () => { liveReads++; return { extensions: [
+          { id: "plugin:copilot-driver-headed:copilot-driver-headed", name: "copilot-driver-headed",
+            source: "plugin", status: "running", pid: 102 },
+          ...liveExtensions,
+        ] }; } },
+      } : {}),
+      mode: { set: modeSet || (async () => ({ modeApplied: true })) },
       metadata: { snapshot: snapshot || (async () => ({
       sessionId: nativeId, workingDirectory: process.cwd(),
     })) } },
@@ -88,7 +99,8 @@ async function load(selected, version = 50, {
     let result = {};
     if (route === "/health") result = {
       protocol_version: version, capabilities: compatibleReady
-        ? { compatible_native_inbox: 1, native_consumption_inbox: 1 } : {},
+        ? { compatible_native_inbox: 1, native_consumption_inbox: 1,
+          ...(liveConnector ? { portable_inbox: 1, readonly_plugin_controls: 1 } : {}) } : {},
     };
     else if (route.endsWith("/events?replay=true")) result = { session_id: nativeId, ...historyResponse };
     else if (route.includes("/recovery?")) result = {
@@ -151,6 +163,10 @@ async function load(selected, version = 50, {
     return { ok: true, status: 200, json: async () => result };
   };
   const context = vm.createContext({
+    __nativeConnector: liveConnector ? {
+      sessionId: nativeId, cwd: process.cwd(), bridgePluginRoot: process.cwd(),
+      driverPluginRoot: process.cwd(), connectorPluginRoot: process.cwd(),
+    } : undefined,
     __createDeliverySession: (native) => {
       if (!composeHeaded) return native;
       headedAdapter = createHeadedAdapter(native, {
@@ -164,6 +180,11 @@ async function load(selected, version = 50, {
       env: { SESSION_ID: initialSessionId, AGENT_BRIDGE_RETAINED_INBOX: selected,
         ...(muted ? { AGENT_BRIDGE_DELIVERY: "0" } : {}),
         ...(headed ? { COPILOT_DRIVER_HEADED_CLIENT: "synthetic-selected-core" } : {}),
+        ...(liveConnector ? {
+          AGENT_BRIDGE_REMOTE_DRIVER_ROOT: process.cwd(), AGENT_BRIDGE_NATIVE_SESSION_ID: nativeId,
+          AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: process.cwd(),
+          AGENT_BRIDGE_PORTABLE_ATTEMPT: "11111111-1111-4111-8111-111111111111",
+        } : {}),
         ...(driver ? {
           AGENT_BRIDGE_REMOTE_DRIVER_ROOT: process.cwd(), AGENT_BRIDGE_NATIVE_SESSION_ID: "native-a",
           AGENT_BRIDGE_DRIVER_OWNER: "synthetic-launch",
@@ -323,6 +344,7 @@ async function load(selected, version = 50, {
     globalThis.joinedConnector = await activateBridgeExtension({
     joinSession: __dependencies["@microsoft/copilot-sdk/extension"].joinSession,
     pluginRoot: process.cwd(),
+    nativeConnector: __nativeConnector,
     createDeliverySession: __createDeliverySession,
   }));
   ${composeDriver ? "await activateDriverExtension({ joinSession: joinConnector });" : "await joinConnector();"}
@@ -346,12 +368,34 @@ async function load(selected, version = 50, {
     calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
     nativeSession: session, joinedConnector: context.joinedConnector,
     joins, driverOptions, driverDescriptors, driverEvents, headedAdapter, headedUpdates,
+    liveReads: () => liveReads,
     closed: () => closed, runDeferred, registeredSessions,
     publishBridge: () => { bridgeReady = true; },
     publishRetained: () => { compatibleReady = true; now += 60_000; },
     rename: (sid) => { session.sessionId = sid; nativeId = sid; },
   };
 }
+
+test("the selected retained inbox uses the executing connector, not installation provenance", async () => {
+  const f = await load("1", 51, { liveConnector: true });
+  assert.equal(f.sends.length, 1, JSON.stringify(f.logs));
+  assert.ok(f.liveReads() > 0);
+  assert.match(f.sends[0].prompt, /\nsynthetic message\n<\/agent-message>$/);
+});
+
+test("the selected retained inbox refuses a second live global Driver before input", async () => {
+  const f = await load("1", 51, {
+    liveConnector: true, liveExtensions: [{
+      id: "plugin:agent-remote-driver:agent-remote-driver", name: "agent-remote-driver",
+      source: "plugin", status: "running", pid: 103,
+    }],
+  });
+  assert.equal(f.sends.length, 0);
+  assert.ok(f.liveReads() > 0);
+  f.poll.fn();
+  await settle();
+  assert.equal(f.sends.length, 0);
+});
 
 test("the composed headed inbox interrupts a running native turn before delivering its message", async () => {
   const messages = [];

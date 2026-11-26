@@ -15,6 +15,8 @@ function selectedContextDiagnostic(error) {
     "native-session-mismatch", "native-cwd-unavailable", "native-cwd-mismatch",
     "plugin-observation-invalid", "plugin-missing", "plugin-duplicated", "plugin-not-installed",
     "plugin-origin-missing", "plugin-origin-relative", "plugin-origin-unavailable", "plugin-origin-mismatch",
+    "extensions-list-unsupported", "extensions-list-failed", "extension-observation-invalid",
+    "extension-identity-mismatch", "extension-not-running", "extension-process-mismatch", "extension-competing",
   ]);
   const reason = reasons.has(error?.selectedContextReason)
     ? error.selectedContextReason : "context-validation-failed";

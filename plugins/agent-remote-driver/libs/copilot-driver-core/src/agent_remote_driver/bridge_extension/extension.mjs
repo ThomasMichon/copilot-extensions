@@ -585,6 +585,7 @@ export async function activateBridgeExtension({
           bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
           extensionPluginRoot: pluginRoot,
           nativeConnector,
+          ...(nativeConnector === undefined ? {} : { extensionPid: process.pid }),
         }),
       } : {}),
   });

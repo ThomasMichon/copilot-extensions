@@ -56,12 +56,15 @@ try {
       sessionId, log: async () => {}, getEvents: async () => [],
       rpc: {
         metadata: { snapshot: async () => ({ sessionId, workingDirectory: process.cwd() }) },
-        plugins: mode === "missing-observer" ? {} : { list: async () => ({ plugins: [
-          { name: "agent-bridge", enabled: true, installedFrom: bridgeRoot },
-          { name: "agent-remote-driver", enabled: true, installedFrom: driverRoot },
-          { name: "copilot-driver-headed", enabled: true,
-            installedFrom: mode === "missing-origin" ? undefined
-              : mode === "wrong-loadout" ? driverRoot : connectorRoot },
+        plugins: { list: () => assert.fail("Installer records cannot establish executing origins") },
+        extensions: mode === "missing-observer" ? {} : { list: async () => ({ extensions: [
+          { id: "plugin:copilot-driver-headed:copilot-driver-headed", name: "copilot-driver-headed",
+            source: "plugin", status: "running",
+            pid: mode === "missing-origin" ? undefined : mode === "wrong-loadout" ? process.pid + 1 : process.pid },
+          ...(mode === "competing-driver" ? [{
+            id: "plugin:agent-remote-driver:agent-remote-driver", name: "agent-remote-driver",
+            source: "plugin", status: "running", pid: process.pid + 2,
+          }] : []),
         ] }) },
       },
       on(handler) { handlers.add(handler); return () => handlers.delete(handler); },
@@ -94,9 +97,10 @@ try {
   }) + "\n");
   await response;
   const refusal = {
-    "wrong-loadout": "plugin-origin-mismatch:connector",
-    "missing-origin": "plugin-origin-missing:connector",
-    "missing-observer": "plugins-list-unsupported",
+    "wrong-loadout": "extension-process-mismatch:connector",
+    "missing-origin": "extension-process-mismatch:connector",
+    "missing-observer": "extensions-list-unsupported",
+    "competing-driver": "extension-competing:driver",
   }[mode];
   if (refusal) {
     assert.equal(reply.error.code, -32001);

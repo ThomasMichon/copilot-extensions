@@ -9267,7 +9267,8 @@ the existing higher-covered HTTP/service path beside the same three native
 content/vector/checkpoint/ordering-ledger cardinalities. Select this Linux T3
 filesystem/service packet with `--test-file
 tests/test_native_azure_devops_point_service_matrix.py --allow-explicit-tiers`;
-run it separately from the native consumer matrix to retain the existing caps.
+select `-k http_supersession` separately from the native consumer matrix to
+retain the existing caps.
 Initial application and corpus setup are outside operation measurement.
 Actual HTTP intake stays parked until explicit service activation, completes
 through the governed runner, and closes the joined client. Reopened completed
@@ -9284,6 +9285,27 @@ time and separate setup time are observations, not flat-byte, physical-disk
 or whole-resource acceptance. Ordinary v2 execution remains unadvertised.
 No new required-unit node, production repair, provider activation or rollout
 is introduced; the small service/recovery controls remain separate.
+
+The same file's `test_explicit_client_acquires_and_replays_beside_unrelated_native_history`
+adds fresh named-target acquisition and equal-version replay through the actual
+`AgentIndexClient.reindex_points`, HTTP receiver, governed runner and configured
+two-model native owners. Run its content and comment-tombstone cases separately
+with `-k 'explicit_client and content'` and `-k 'explicit_client and tombstone'`
+under the same budgets. Each application submits one health read and one required
+POST, acquires only the named item revision and comment version, and compares
+qualified component content and complete selected vectors with a clean small
+reference. Replay reacquires those two bodies but performs no embedding,
+identical projection writes or derived maintenance. Reconstructed service
+lifetimes preserve polling bytes, sampled unrelated content/vector/checkpoint/
+ordering records and complete native row counts.
+
+The twelve `POINT_CLIENT_NATIVE_WORK` records separate application from replay
+at all three cardinalities and both deletion states. Logical provider and
+native query/row/read-I/O counts must match across cardinalities; full checkpoint
+enumeration is trapped. Setup, clean-reference construction and post-round
+comparisons are outside measurement. As above, diagnostic query-plan replay
+contributes to process I/O; no flat-byte, physical-disk, whole-resource,
+live-provider, broader polling/repair or rollout claim follows from this packet.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
@@ -9862,6 +9884,14 @@ The Driver connector-selection packet substitutes storage and native execution.
 It exercises explicit launch binding, old/new capability selection, unchanged
 defaults, provider rollback, immutable retained choice and actual child
 environment construction without a process, socket or service.
+The existing selection case additionally executes seven fixture-only controls
+of Core's actual staging command-root validator with its canonical native argument
+options. They retain split/equal
+plugin-directory syntax, selected manifest identity and refusal of missing,
+duplicate, substituted or option/positional-hidden roots. The adapter exports
+the existing hash-bound staging module; it does not import the
+launcher runtime or create a Host. The ordinary launcher suite separately
+checks refusal before staging or native process creation.
 The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
 controls exercise the actual entrypoints with a synthetic SDK, shared adapter
 input ownership, startup/auth-wait, takeover and unknown-send refusal.
