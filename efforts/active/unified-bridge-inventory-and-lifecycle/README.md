@@ -205,8 +205,12 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   65 contained parser/client/HTTP/native-owner controls and whole-file strict
   checks on Linux and Windows. The final manifest retains all 11,134 target
   nodes in order and adds 37 caller controls under the unchanged budget.
-  Normal source release remains open. Stop/end selectors, default lifecycle
-  migration, full-flow qualification and installed adoption are not complete.
+  All ten released content files now match Main
+  `ddf9a6ee068155972976ee3f99da1a2a66c9c9a8`, Bridge `0.9.575-dev1`.
+  The logical release packet retains all 11,171 published nodes in order,
+  valid owned source bindings and the 300-second budget. The opt-in caller
+  is source-released. Stop/end selectors, default lifecycle migration,
+  full-flow qualification and installed adoption are not complete.
   The ordinary resume default follow-up now passes 259 actor-free controls,
   65 contained Bridge cases and 32 contained Dispatch cases. The root parser
   reaches the real exact provider in both hosting modes and refuses a changed
@@ -216,6 +220,16 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   Windows. The focused real source-effect guard, changed documentation links,
   module-size limits and install contract pass. Publication and release of
   this follow-up remain open.
+  Its initial published head passes required CI and both native OS jobs,
+  but review finds a missing restricted-provider resume compatibility setting.
+  The requested local review also finds a generated singleton-profile hint
+  without legacy selection. Both corrections pass the real-selector controls:
+  the focused source-effect packet now has 261 passing cases. Targeted
+  restricted recovery and singleton consumer checks pass; the full restricted
+  file exceeds its 180-second local limit and is not passing evidence.
+  Whole-file strict admission of the newly touched legacy files now passes
+  for Linux and Windows, completing qualification of all eleven changed
+  Python files. Review-correction publication and final hosted gates remain open.
 - **Return:** finish the remaining selector, guarded lifecycle, qualification
   and release gates below, then return the driving worktree to its retained
   earlier objectives. Do not equate this source slice with receiving recovery.
@@ -545,10 +559,12 @@ Installed fleet adoption is not claimed.
   `e0a62de772b7`, Bridge `0.9.573-dev1`, after #14713 and promotion
   `45769032231`. All 142 Bridge controls and the complete original census,
   order, source bindings, helper coverage and budget are preserved.
-- [ ] Verify normal source release of the opt-in common-selector workspace
+- [x] Verify normal source release of the opt-in common-selector workspace
   resume caller. #14719 merges as `9fa4d16c9727` after current-head approval,
   resolved threads, required source CI and both native OS jobs. All 14
-  published blobs match the merge; no local rollout is authorized.
+  published blobs match the merge. All ten released content paths match Main
+  `ddf9a6ee0681`, Bridge `0.9.575-dev1`, with the complete original admission
+  census and order preserved. No local rollout is authorized.
 - [ ] Qualify and release ordinary resume defaults over the exact provider,
   preserving explicit legacy selection, specialized writer/recovery contracts,
   the hosting choice and existing programmatic retained-resume producers.

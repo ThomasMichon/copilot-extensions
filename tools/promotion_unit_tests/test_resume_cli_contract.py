@@ -9,8 +9,10 @@ import importlib.util
 import io
 import json
 import socket
+import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from types import CodeType, ModuleType, SimpleNamespace
@@ -1060,4 +1062,102 @@ def test_explicit_bridge_resume_overrides_the_retained_caller_environment(
     assert json.loads(capsys.readouterr().out)["acp_session_id"] == "native-123"
     assert [path for method, path, _ in boundary.calls if method == "POST"] == [
         "/api/v1/worktrees/worktree-123/resume/acp/exact",
+    ]
+
+
+def test_restricted_stopped_provider_resume_crosses_the_real_selector_without_workspace(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch,
+    source_code: Callable[[Path], CodeType],
+) -> None:
+    root = ROOT / "plugins/agent-dispatch/src/agent_dispatch"
+    helper = ModuleType(f"{PACKAGE}.bridge_continuation_cli")
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    exec(source_code(root / "bridge_continuation_cli.py"), helper.__dict__)
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_RESUME", "parent-value")
+    boundary.response.update(worktree_id=None, target_dir=None, status="stopped")
+    monkeypatch.setattr(
+        sys.modules[f"{PACKAGE}.__main__"], "_caller_id_for", lambda args: None, raising=False,
+    )
+    request = boundary.client._request
+
+    def receive(method: str, path: str, *args: Any, **kwargs: Any) -> Any:
+        if method == "POST":
+            boundary.response["status"] = "idle"
+        return request(method, path, *args, **kwargs)
+
+    monkeypatch.setattr(boundary.client, "_request", receive)
+    invocations: list[tuple[list[str], str | None]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        choice = (kwargs.get("env") or {}).get("AGENT_BRIDGE_LEGACY_RESUME")
+        invocations.append((argv, choice))
+        assert kwargs["timeout"] == 180
+        output = io.StringIO()
+        code = 0
+        with monkeypatch.context() as child, redirect_stdout(output):
+            if choice is not None:
+                child.setenv("AGENT_BRIDGE_LEGACY_RESUME", choice)
+            try:
+                boundary.invoke(*argv[1:])
+            except SystemExit as error:
+                code = error.code if isinstance(error.code, int) else 1
+        return subprocess.CompletedProcess(argv, code, output.getvalue(), "")
+
+    path = root / "restricted_spawn.py"
+    tree = ast.parse(path.read_bytes(), str(path))
+    functions: list[ast.stmt] = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in {"_run", "_resume_unprompted"}
+    ]
+    assert len(functions) == 2
+    namespace: dict[str, Any] = {
+        "__name__": f"{PACKAGE}.restricted_spawn", "__package__": PACKAGE,
+        "subprocess": SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError),
+        "no_window_kwargs": lambda: {}, "BridgeUnavailable": RuntimeError,
+        "_json_result": lambda result: json.loads(result.stdout),
+    }
+    future = [
+        node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+    ]
+    exec(compile(ast.Module(body=[*future, *functions], type_ignores=[]), str(path), "exec"), namespace)
+    namespace["_resume_unprompted"](["synthetic-bridge"], {"session_id": "owned-123"})
+    assert invocations == [
+        (["synthetic-bridge", "--json", "status", "owned-123"], None),
+        (["synthetic-bridge", "--json", "resume", "owned-123", "--strict"], "1"),
+    ]
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/sessions/owned-123/resume",
+    ]
+    assert all(path != "/api/v1/bridges" for _, path, _ in boundary.calls)
+    assert helper.__dict__["os"].environ["AGENT_BRIDGE_LEGACY_RESUME"] == "parent-value"
+
+
+def test_singleton_create_recovery_hint_uses_the_real_legacy_profile_selector(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    monkeypatch.setattr(
+        boundary.resume, "find_singleton_repo",
+        lambda value: SimpleNamespace(name="example") if value == "example" else None,
+    )
+    monkeypatch.setattr(
+        boundary.client, "list_agents",
+        lambda: [{"name": "worker-profile", "project": "example"}],
+    )
+    match = lambda target, agents: ["worker-profile"]
+    monkeypatch.setattr(sys.modules[f"{PACKAGE}.__main__"], "_match_agents", match)
+    with pytest.raises(SystemExit):
+        boundary.resume.reject_singleton_create(
+            client=boundary.client, target="worker-profile", match_agents=match,
+        )
+    line = next(
+        line for line in capsys.readouterr().err.splitlines() if "Resume the current head:" in line
+    )
+    argv = line.split("Resume the current head:", 1)[1].strip().split()
+    boundary.response["worktree_id"] = "example@anchor"
+    boundary.failures.append(boundary.errors.BridgeClientError(404, "not owned"))
+    boundary.invoke("--json", *argv[1:])
+    assert json.loads(capsys.readouterr().out)["worktree_id"] == "example@anchor"
+    assert [path for method, path, _ in boundary.calls if method == "POST"] == [
+        "/api/v1/sessions/worker-profile/resume",
+        "/api/v1/worktrees/example@anchor/resume/acp",
     ]

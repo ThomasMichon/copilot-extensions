@@ -6,8 +6,11 @@ import json
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -24,7 +27,7 @@ from tests._helpers import TEST_REPO, RepoDefaultingQueue
 
 
 @pytest.fixture
-def rig(tmp_path, monkeypatch):
+def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     queue = RepoDefaultingQueue(tmp_path / "tasks.db")
     task = queue.create(
         "restricted task", repo=TEST_REPO, labels=["restricted"], payload_inline="own work",
@@ -32,7 +35,9 @@ def rig(tmp_path, monkeypatch):
     # The supervisor must use the returned claim generation, not assume 1.
     queue.claim_one("previous-owner", task_id=task.id, repo=TEST_REPO)
     queue.yield_task(task.id, "previous-owner")
-    task = queue.get(task.id)
+    refreshed = queue.get(task.id)
+    assert refreshed is not None
+    task = refreshed
     spec = {
         "command": ["provider-fixture"], "name": "worker",
         "instance_id": "a" * 64, "coordinator_url": "http://coordinator.test",
@@ -41,14 +46,14 @@ def rig(tmp_path, monkeypatch):
     control = {"Authorization": scheme + "control-fixture"}
     app = create_app(queue, token="fleet-fixture", control_token="control-fixture", enable_mcp=False)
     with TestClient(app) as api:
-        def send(request):
+        def send(request: httpx.Request) -> httpx.Response:
             response = api.request(
                 request.method, request.url.raw_path.decode(),
                 headers=dict(request.headers), content=request.content,
             )
             return httpx.Response(response.status_code, content=response.content, headers=dict(response.headers))
 
-        def client_factory():
+        def client_factory() -> DispatchClient:
             return DispatchClient(
                 "http://coordinator.test", token="fleet-fixture", control_token="control-fixture",
                 transport=httpx.MockTransport(send),
@@ -56,12 +61,13 @@ def rig(tmp_path, monkeypatch):
 
         with client_factory() as client:
             calls, grants, admissions = [], [], []
-            prepared = {}
+            prepared: dict[str, Any] = {}
             agent = f"container:dispatch/{spec['instance_id']}/{'b' * 32}/worker"
             monkeypatch.setattr(delivery, "agent_bridge_launch_prefix", lambda: ["bridge-fixture"])
 
-            def command(argv, payload=None):
+            def command(argv: list[str], payload: str | None=None) -> Any:
                 if argv[:2] == ["provider-fixture", "dispatch-check-hosting"]:
+                    assert payload is not None
                     assert json.loads(payload) == {}
                     assert argv[argv.index("--expected-container-id") + 1] == spec["instance_id"]
                     admissions.append(list(argv))
@@ -71,6 +77,7 @@ def rig(tmp_path, monkeypatch):
                     }
                 calls.append((list(argv), payload))
                 if argv[0] == "provider-fixture":
+                    assert payload is not None
                     body = json.loads(payload)
                     if argv[1] == "dispatch-prepare":
                         prepared.update(
@@ -116,11 +123,11 @@ def rig(tmp_path, monkeypatch):
             )
 
 
-def reservation(rig):
+def reservation(rig: SimpleNamespace) -> Any:
     return rig.client.list_reservations(task_id=rig.task.id)[0]
 
 
-def test_existing_supervisor_claims_binds_projects_and_sends_in_order(rig):
+def test_existing_supervisor_claims_binds_projects_and_sends_in_order(rig: SimpleNamespace) -> None:
     assert rig.supervisor.poll_once() == [rig.task.id]
     task = rig.queue.get(rig.task.id)
     receipt = reservation(rig)
@@ -148,7 +155,7 @@ def test_existing_supervisor_claims_binds_projects_and_sends_in_order(rig):
     {"target_machine": "another-machine"},
     {"target_worktree": "another-worktree"},
 ])
-def test_unclaimable_task_does_not_block_a_later_eligible_task(rig, selectors):
+def test_unclaimable_task_does_not_block_a_later_eligible_task(rig: SimpleNamespace, selectors: Any) -> None:
     blocked = rig.queue.create(
         "not claimable by this lane", repo=TEST_REPO, labels=["restricted"],
         now=rig.task.created_at - 1, **selectors,
@@ -165,14 +172,14 @@ def test_unclaimable_task_does_not_block_a_later_eligible_task(rig, selectors):
     assert sum("send" in argv for argv, _ in rig.calls) == 1
 
 
-def test_claim_rejection_cannot_defer_a_concurrently_claimed_incarnation(rig, monkeypatch):
+def test_claim_rejection_cannot_defer_a_concurrently_claimed_incarnation(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     blocked = rig.queue.create(
         "racing claim", repo=TEST_REPO, labels=["restricted"],
         requires=["other-capability"], now=rig.task.created_at - 1,
     )
     claim = rig.client.claim
 
-    def race(worker_id, **kwargs):
+    def race(worker_id: Any, **kwargs: Any) -> Any:
         result = claim(worker_id, **kwargs)
         if kwargs.get("task_id") == blocked.id and result is None:
             rig.queue.claim_one(
@@ -189,7 +196,7 @@ def test_claim_rejection_cannot_defer_a_concurrently_claimed_incarnation(rig, mo
     assert rig.calls == []
 
 
-def test_prepared_or_claimed_restricted_startup_cannot_be_deferred(rig):
+def test_prepared_or_claimed_restricted_startup_cannot_be_deferred(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     receipt = reservation(rig)
     with pytest.raises(DispatchError) as rejected:
@@ -200,7 +207,7 @@ def test_prepared_or_claimed_restricted_startup_cannot_be_deferred(rig):
     assert reservation(rig) == receipt
 
 
-def test_restart_defers_a_previously_reserved_unclaimable_task(rig):
+def test_restart_defers_a_previously_reserved_unclaimable_task(rig: SimpleNamespace) -> None:
     blocked = rig.queue.create(
         "reserved before restart", repo=TEST_REPO, labels=["restricted"],
         requires=["unavailable"], now=rig.task.created_at - 1,
@@ -216,12 +223,12 @@ def test_restart_defers_a_previously_reserved_unclaimable_task(rig):
 
 
 @pytest.mark.parametrize("managed", [False, True])
-def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig, monkeypatch, managed):
+def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, managed: bool) -> None:
     if managed:
         rig.supervisor.pool_instance = ("restricted-supervisor", "fixture-host", "default")
     claim = rig.client.claim
 
-    def interrupted(*args, **kwargs):
+    def interrupted(*args: Any, **kwargs: Any) -> Any:
         result = claim(*args, **kwargs)
         assert result["id"] == rig.task.id
         raise DispatchError(503, "lost claim acknowledgement")
@@ -241,7 +248,7 @@ def test_lost_claim_ack_is_retained_and_recovered_without_deferral(rig, monkeypa
 
 
 @pytest.mark.parametrize("owner", ["ordinary-worker", "acquired-without-receipt"])
-def test_empty_deferral_does_not_replace_ordinary_acquisition_checks(rig, owner):
+def test_empty_deferral_does_not_replace_ordinary_acquisition_checks(rig: SimpleNamespace, owner: Any) -> None:
     blocked = rig.queue.create(
         "ordinary worker can claim later", repo=TEST_REPO, labels=["restricted"],
         requires=["ordinary-capability"], now=rig.task.created_at - 1,
@@ -263,7 +270,7 @@ def test_empty_deferral_does_not_replace_ordinary_acquisition_checks(rig, owner)
         assert rig.queue.get(blocked.id).owner_session_id == "ordinary-native"
 
 
-def test_admitted_restricted_delivery_still_fences_an_ordinary_reclaimer(rig):
+def test_admitted_restricted_delivery_still_fences_an_ordinary_reclaimer(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     before = rig.queue.get(rig.task.id)
     rig.queue.yield_task(before.id, before.owner)
@@ -278,7 +285,7 @@ def test_admitted_restricted_delivery_still_fences_an_ordinary_reclaimer(rig):
     assert "restricted start" in response.text
 
 
-def test_projected_worker_starts_and_completes_without_fleet_authority(rig):
+def test_projected_worker_starts_and_completes_without_fleet_authority(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     headers = {TASK_SCOPE_HEADER: rig.grants[-1]}
     task_id = rig.task.id
@@ -304,10 +311,10 @@ def test_projected_worker_starts_and_completes_without_fleet_authority(rig):
     assert len(rig.grants) == count
 
 
-def test_restart_before_prepare_reuses_actual_claim_and_receipt(rig, monkeypatch):
+def test_restart_before_prepare_reuses_actual_claim_and_receipt(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     original = delivery._provider
 
-    def interrupted_prepare(spec, action, body):
+    def interrupted_prepare(spec: Any, action: Any, body: Any) -> Any:
         if action == "dispatch-prepare":
             raise delivery.BridgeUnavailable("interrupted")
         return original(spec, action, body)
@@ -331,10 +338,10 @@ def test_restart_before_prepare_reuses_actual_claim_and_receipt(rig, monkeypatch
     assert sum("create" in argv for argv, _ in rig.calls) == 1
 
 
-def test_lost_native_create_ack_reuses_original_creation_key(rig, monkeypatch):
+def test_lost_native_create_ack_reuses_original_creation_key(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     created = []
 
-    def interrupted(argv, payload=None):
+    def interrupted(argv: list[str], payload: str | None=None) -> Any:
         result = rig.command(argv, payload)
         if "create" in argv:
             created.append(argv[argv.index("--creation-key") + 1])
@@ -349,16 +356,18 @@ def test_lost_native_create_ack_reuses_original_creation_key(rig, monkeypatch):
     assert reservation(rig)["state"] == "spawned"
 
 
-def test_lost_create_ack_recovers_the_original_stopped_keyed_native(rig, monkeypatch):
+def test_lost_create_ack_recovers_the_original_stopped_keyed_native(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     keys, resumed = [], []
     stopped = False
 
-    def command(argv, payload=None):
+    def command(argv: list[str], payload: str | None=None, *, env: dict[str, str] | None=None) -> Any:
         nonlocal stopped
         if "status" in argv:
             return {"session_id": "bridge-worker", "status": "stopped", "turn_count": 0}
         if "resume" in argv:
             assert "--strict" in argv
+            assert env is not None
+            assert env["AGENT_BRIDGE_LEGACY_RESUME"] == "1"
             assert reservation(rig)["agent_info"]["native_session_id"] == "native-worker"
             resumed.append(argv)
             stopped = False
@@ -382,7 +391,7 @@ def test_lost_create_ack_recovers_the_original_stopped_keyed_native(rig, monkeyp
     assert sum("send" in argv for argv, _ in rig.calls) == 1
 
 
-def test_overlapping_starters_acquire_only_one_first_send(rig, monkeypatch):
+def test_overlapping_starters_acquire_only_one_first_send(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     project = delivery._project
     monkeypatch.setattr(
         delivery, "_project",
@@ -392,7 +401,7 @@ def test_overlapping_starters_acquire_only_one_first_send(rig, monkeypatch):
     receipt = reservation(rig)
     monkeypatch.setattr(delivery, "_project", project)
 
-    def command(argv, payload=None):
+    def command(argv: list[str], payload: str | None=None) -> Any:
         if "status" in argv:
             return {"session_id": "bridge-worker", "status": "idle", "turn_count": 0}
         return rig.command(argv, payload)
@@ -401,7 +410,7 @@ def test_overlapping_starters_acquire_only_one_first_send(rig, monkeypatch):
     save = delivery._save
     gate = threading.Barrier(2)
 
-    def synchronized_intent(client, key, info):
+    def synchronized_intent(client: Any, key: Any, info: Any) -> Any:
         if info.get("send_attempted") and not info.get("delivered"):
             gate.wait(timeout=5)
         return save(client, key, info)
@@ -418,7 +427,7 @@ def test_overlapping_starters_acquire_only_one_first_send(rig, monkeypatch):
     assert reservation(rig)["agent_info"]["delivered"] is True
 
 
-def test_delivery_ack_cannot_skip_the_retained_first_send_intent(rig, monkeypatch):
+def test_delivery_ack_cannot_skip_the_retained_first_send_intent(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         delivery, "_project",
         lambda *_args: (_ for _ in ()).throw(delivery.BridgeUnavailable("interrupted")),
@@ -437,9 +446,9 @@ def test_delivery_ack_cannot_skip_the_retained_first_send_intent(rig, monkeypatc
 @pytest.mark.parametrize("outcome", ["complete", "abandon"])
 @pytest.mark.parametrize("lost_publication", [False, True])
 def test_terminal_transition_during_send_does_not_strand_lane_capacity(
-    rig, monkeypatch, outcome, lost_publication,
-):
-    def command(argv, payload=None):
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, outcome: Any, lost_publication: bool,
+) -> None:
+    def command(argv: list[str], payload: str | None=None) -> Any:
         result = rig.command(argv, payload)
         if "send" in argv:
             headers = {TASK_SCOPE_HEADER: rig.grants[-1]}
@@ -483,8 +492,8 @@ def test_terminal_transition_during_send_does_not_strand_lane_capacity(
     assert sum("send" in argv for argv, _ in rig.calls) == 1
 
 
-def test_terminal_ack_cannot_adopt_a_reclaimed_generation(rig, monkeypatch):
-    def interrupted(argv, payload=None):
+def test_terminal_ack_cannot_adopt_a_reclaimed_generation(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    def interrupted(argv: list[str], payload: str | None=None) -> Any:
         result = rig.command(argv, payload)
         if "send" in argv:
             raise delivery.BridgeUnavailable("lost acknowledgement")
@@ -511,8 +520,8 @@ def test_terminal_ack_cannot_adopt_a_reclaimed_generation(rig, monkeypatch):
 
 
 def test_later_completion_after_lost_spawn_publication_requires_startup_reconciliation(
-    rig, monkeypatch,
-):
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         rig.client, "record_spawn",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(DispatchError(503, "lost publication")),
@@ -546,7 +555,7 @@ def test_later_completion_after_lost_spawn_publication_requires_startup_reconcil
 
 
 @pytest.mark.parametrize("replaced", [False, True])
-def test_restart_before_projection_strictly_resumes_original_native(rig, monkeypatch, replaced):
+def test_restart_before_projection_strictly_resumes_original_native(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, replaced: bool) -> None:
     project = delivery._project
     monkeypatch.setattr(delivery, "_project", lambda *_args: (_ for _ in ()).throw(delivery.BridgeUnavailable("interrupted")))
     assert rig.supervisor.poll_once() == []
@@ -554,11 +563,13 @@ def test_restart_before_projection_strictly_resumes_original_native(rig, monkeyp
     monkeypatch.setattr(delivery, "_project", project)
     resumed = []
 
-    def command(argv, payload=None):
+    def command(argv: list[str], payload: str | None=None, *, env: dict[str, str] | None=None) -> Any:
         if "status" in argv:
             return {"session_id": "bridge-worker", "status": "stopped", "turn_count": 0}
         if "resume" in argv:
             assert "--strict" in argv
+            assert env is not None
+            assert env["AGENT_BRIDGE_LEGACY_RESUME"] == "1"
             resumed.append(argv)
             return {"session_id": "bridge-worker", "status": "idle"}
         result = rig.command(argv, payload)
@@ -574,8 +585,8 @@ def test_restart_before_projection_strictly_resumes_original_native(rig, monkeyp
     assert len(rig.grants) == (0 if replaced else 1)
 
 
-def test_uncertain_first_send_is_not_automatically_repeated(rig, monkeypatch):
-    def interrupted(argv, payload=None):
+def test_uncertain_first_send_is_not_automatically_repeated(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    def interrupted(argv: list[str], payload: str | None=None) -> Any:
         result = rig.command(argv, payload)
         if "send" in argv:
             raise delivery.BridgeUnavailable("lost send acknowledgement")
@@ -590,7 +601,7 @@ def test_uncertain_first_send_is_not_automatically_repeated(rig, monkeypatch):
 
 
 @pytest.mark.parametrize("change", ["epoch", "generation", "native", "configuration", "unknown"])
-def test_trusted_renewal_refuses_changed_authority_or_unknown_liveness(rig, change):
+def test_trusted_renewal_refuses_changed_authority_or_unknown_liveness(rig: SimpleNamespace, change: Any) -> None:
     rig.supervisor.poll_once()
     count = len(rig.grants)
     if change == "epoch":
@@ -609,7 +620,7 @@ def test_trusted_renewal_refuses_changed_authority_or_unknown_liveness(rig, chan
     assert len(rig.grants) == count
 
 
-def test_renewal_rotates_token_without_mutating_task_lease(rig, monkeypatch):
+def test_renewal_rotates_token_without_mutating_task_lease(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.supervisor.poll_once()
     before = rig.queue.get(rig.task.id)
     old = rig.grants[-1]
@@ -620,12 +631,12 @@ def test_renewal_rotates_token_without_mutating_task_lease(rig, monkeypatch):
     assert rig.queue.get(rig.task.id) == before
 
 
-def test_scoped_start_race_cannot_start_a_reclaimed_incarnation(rig, monkeypatch):
+def test_scoped_start_race_cannot_start_a_reclaimed_incarnation(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.supervisor.poll_once()
     before = rig.queue.get(rig.task.id)
     original = rig.queue.start
 
-    def race(task_id, worker_id, **kwargs):
+    def race(task_id: Any, worker_id: Any, **kwargs: Any) -> Any:
         rig.queue.yield_task(task_id, worker_id)
         rig.queue.claim_one(worker_id, task_id=task_id, repo=TEST_REPO)
         return original(task_id, worker_id, **kwargs)
@@ -641,7 +652,7 @@ def test_scoped_start_race_cannot_start_a_reclaimed_incarnation(rig, monkeypatch
     assert current.owner_session_id is None
 
 
-def test_restricted_lease_heartbeat_is_scoped_and_native_fenced(rig, monkeypatch):
+def test_restricted_lease_heartbeat_is_scoped_and_native_fenced(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.supervisor.poll_once()
     before = rig.queue.get(rig.task.id)
     rig.supervisor.heartbeat = True
@@ -655,7 +666,7 @@ def test_restricted_lease_heartbeat_is_scoped_and_native_fenced(rig, monkeypatch
 
 
 @pytest.mark.parametrize("started", [False, True])
-def test_restricted_activity_refreshes_without_generic_heartbeat(rig, monkeypatch, started):
+def test_restricted_activity_refreshes_without_generic_heartbeat(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, started: bool) -> None:
     rig.supervisor.poll_once()
     if started:
         response = rig.api.post(
@@ -681,14 +692,14 @@ def test_restricted_activity_refreshes_without_generic_heartbeat(rig, monkeypatc
 
 
 @pytest.mark.parametrize("change", ["native-before", "native-during", "generation"])
-def test_restricted_activity_refuses_replaced_incarnation(rig, change):
+def test_restricted_activity_refuses_replaced_incarnation(rig: SimpleNamespace, change: Any) -> None:
     rig.supervisor.poll_once()
     before = rig.queue.get(rig.task.id)
     rig.supervisor.publish_activity = True
     if change == "native-before":
         rig.supervisor.local_acp_session_fn = lambda _sid: "replacement-native"
 
-    def activity(_sid):
+    def activity(_sid: Any) -> Any:
         if change == "native-during":
             rig.supervisor.local_acp_session_fn = lambda _sid: "replacement-native"
         elif change == "generation":
@@ -706,7 +717,7 @@ def test_restricted_activity_refuses_replaced_incarnation(rig, change):
         assert current == before
 
 
-def test_production_resolving_client_renews_with_scoped_heartbeat(rig, monkeypatch):
+def test_production_resolving_client_renews_with_scoped_heartbeat(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.supervisor.client = ResolvingDispatchClient(rig.client_factory)
     rig.supervisor.heartbeat = True
     assert rig.supervisor.poll_once() == [rig.task.id]
@@ -726,13 +737,13 @@ def test_production_resolving_client_renews_with_scoped_heartbeat(rig, monkeypat
     assert len(rig.grants) == 2
 
 
-def test_restricted_heartbeat_race_does_not_extend_reclaimed_task(rig, monkeypatch):
+def test_restricted_heartbeat_race_does_not_extend_reclaimed_task(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     rig.supervisor.poll_once()
     rig.supervisor.heartbeat = True
     project = delivery._project
     replacement = []
 
-    def race(*args):
+    def race(*args: Any) -> Any:
         grant = project(*args)
         task_id = rig.task.id
         worker_id = rig.queue.get(task_id).owner
@@ -746,7 +757,7 @@ def test_restricted_heartbeat_race_does_not_extend_reclaimed_task(rig, monkeypat
     assert rig.queue.get(rig.task.id) == replacement[0]
 
 
-def test_receipt_route_requires_control_and_never_accepts_credentials_or_identity_replacement(rig):
+def test_receipt_route_requires_control_and_never_accepts_credentials_or_identity_replacement(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     receipt = reservation(rig)
     route = f"/spawn-reservations/{receipt['key']}/restricted-delivery"
@@ -760,7 +771,7 @@ def test_receipt_route_requires_control_and_never_accepts_credentials_or_identit
     assert reservation(rig)["agent_info"] == info
 
 
-def test_ordinary_created_agent_route_cannot_adopt_restricted_receipt(rig):
+def test_ordinary_created_agent_route_cannot_adopt_restricted_receipt(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     receipt = reservation(rig)
     with pytest.raises(DispatchError):
@@ -775,14 +786,14 @@ def test_ordinary_created_agent_route_cannot_adopt_restricted_receipt(rig):
     {"cli_labels": ["ordinary"]}, {"fleet": {"pool": ["host"]}},
     {"restricted_worker": {"command": ["provider"]}},
 ])
-def test_registration_rejects_ambiguous_or_incomplete_restricted_lane(rig, change):
+def test_registration_rejects_ambiguous_or_incomplete_restricted_lane(rig: SimpleNamespace, change: Any) -> None:
     with pytest.raises(RegistrationError):
         validate_registration("supervised-lane", {
             "repo": TEST_REPO, "labels": ["restricted"], "restricted_worker": rig.spec, **change,
         })
 
 
-def test_receipt_is_not_a_second_task_or_authority_store(rig):
+def test_receipt_is_not_a_second_task_or_authority_store(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     stored = rig.queue.get(rig.task.id)
     info = reservation(rig)["agent_info"]
@@ -790,7 +801,7 @@ def test_receipt_is_not_a_second_task_or_authority_store(rig):
     assert asdict(stored)["owner_session_id"] == info["native_session_id"]
 
 
-def test_legacy_unauthenticated_ingress_refuses_delivery_receipts(rig):
+def test_legacy_unauthenticated_ingress_refuses_delivery_receipts(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     receipt = reservation(rig)
     with TestClient(create_app(
@@ -804,7 +815,7 @@ def test_legacy_unauthenticated_ingress_refuses_delivery_receipts(rig):
     assert "authenticated coordinator ingress" in response.text
 
 
-def test_registration_and_daemon_keep_exact_provider_invocation(rig, monkeypatch):
+def test_registration_and_daemon_keep_exact_provider_invocation(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import __main__ as cli
     from agent_dispatch.supervise_cli import _build_registration_spec
     from agent_dispatch.supervisor_registration import _lane_flags
@@ -823,7 +834,7 @@ def test_registration_and_daemon_keep_exact_provider_invocation(rig, monkeypatch
     assert parsed.max_concurrent == 1 and parsed.label == ["restricted"]
 
 
-def test_supervisor_does_not_adopt_a_replacement_native_via_generic_binding(rig):
+def test_supervisor_does_not_adopt_a_replacement_native_via_generic_binding(rig: SimpleNamespace) -> None:
     rig.supervisor.poll_once()
     owner = rig.queue.get(rig.task.id).owner
     rig.queue.yield_task(rig.task.id, owner)
@@ -834,7 +845,7 @@ def test_supervisor_does_not_adopt_a_replacement_native_via_generic_binding(rig)
 
 
 @pytest.mark.parametrize("started", [False, True])
-def test_default_recovery_retains_a_stopped_restricted_incarnation(rig, started):
+def test_default_recovery_retains_a_stopped_restricted_incarnation(rig: SimpleNamespace, started: bool) -> None:
     rig.supervisor.recover = True
     assert rig.supervisor.poll_once() == [rig.task.id]
     if started:
@@ -855,7 +866,7 @@ def test_default_recovery_retains_a_stopped_restricted_incarnation(rig, started)
 
 
 @pytest.mark.parametrize("started", [False, True])
-def test_coordinator_liveness_preserves_restricted_incarnation_at_attempt_cap(rig, started):
+def test_coordinator_liveness_preserves_restricted_incarnation_at_attempt_cap(rig: SimpleNamespace, started: bool) -> None:
     rig.supervisor.poll_once()
     if started:
         response = rig.api.post(
@@ -873,7 +884,7 @@ def test_coordinator_liveness_preserves_restricted_incarnation_at_attempt_cap(ri
     assert reservation(rig) == receipt
 
 
-def test_queue_recovery_preserves_a_claim_with_lost_ack_before_first_receipt(rig, monkeypatch):
+def test_queue_recovery_preserves_a_claim_with_lost_ack_before_first_receipt(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     save = delivery._save
     monkeypatch.setattr(
         delivery, "_save",
