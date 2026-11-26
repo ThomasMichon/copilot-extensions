@@ -124,6 +124,36 @@ the inventory read; legacy commands remain available on rollback.
 `read` and `wait` use the exact default described below. No existing endpoint
 is deprecated or removed.
 
+### Identity-pinned workspace resume provider
+
+The optional `worktree_exact_resume: 1` health capability adds
+`POST /api/v1/worktrees/{worktree_id}/resume/{acp|cli}/exact` with a strict JSON
+body, `{"native_session_id": "<selected native ID>"}`. The explicit
+`BridgeClient.resume_worktree_exact(worktree_id, native_session_id, mode=...)`
+method negotiates that capability from the executing daemon before one POST.
+This is a provider-first expansion within HTTP generation 52. It does not
+migrate the CLI's `resume`, `stop` or `end` selectors.
+
+The workspace's existing native-resume owner still controls admission, history,
+hosting and launch. The selected ID must match its authoritative head before
+metadata import or launch. Pending handoff, changed head, a live foreign holder,
+unconfirmed launch and missing owner capability retain their existing refusals.
+ACP and CLI modes retain the selected native identity; they do not create a
+replacement conversation. The existing singleton owner can load its known
+conversation, but this exact operation never initializes an empty anchor.
+Keyed metadata loss still uses the original retained recovery owner and journal;
+it cannot substitute a different selected native identity.
+
+The client pins the health-check endpoint and validates the returned workspace,
+mode and native identity. It makes no automatic retry or fallback. A lost or
+invalid reply reports `native_resume_unconfirmed` with the original identity;
+inspect the original operation before deciding whether another resume is safe.
+An HTTP failure is not proof that no effects occurred. Older receivers refuse
+before POST when they lack the capability. A downgrade after negotiation reaches
+an unsupported exact route, not a legacy route that could ignore the identity.
+Existing qualified and unqualified resume routes, their callers and their
+supported behavior remain unchanged. No old form is deprecated by this change.
+
 ### Ordinary selector defaults and legacy support
 
 The CLI contract `bridge-cli/ordinary-selectors/v2` makes plain `send ID PROMPT`,

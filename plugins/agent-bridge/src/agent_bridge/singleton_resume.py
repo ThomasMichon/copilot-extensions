@@ -9,12 +9,13 @@ from dataclasses import replace
 from typing import Any
 
 from .acquisition_store import AcquisitionStore
-from .models import SessionInfo, SessionStatus
+from .models import SessionInfo
+from .session_status import SessionStatus
 from .singleton_anchor import find_singleton_repo, repo_name_from_anchor_key
 
 
 async def resume_singleton_anchor(
-    anchor: str, request: Any, mode: str, *, strict: bool,
+    anchor: str, request: Any, mode: str, *, strict: bool, expected_native: str | None = None,
 ) -> SessionInfo:
     from .routes import worktrees as wt
     from .routes.sessions import _session_info
@@ -44,21 +45,25 @@ async def resume_singleton_anchor(
     ]
     store = AcquisitionStore(db)
     delivery = f"singleton-anchor:{anchor}"
-    expected_native = None
+    loaded_native = None
     if heads:
         if len(heads) != 1:
             raise _refuse("singleton_head_ambiguous", "Singleton conversation identity is ambiguous")
         session = heads[0]
         if session.target.cwd != repo.path or not session.acp_session_id:
             raise _refuse("singleton_binding_unconfirmed", "Singleton conversation binding is incomplete")
+        if expected_native is not None and session.acp_session_id != expected_native:
+            raise _refuse("native_identity_changed", "The singleton no longer holds the selected conversation")
+        loaded_native = session.acp_session_id
         ready = (
-            await wt._resolve_already_live(manager, anchor, session)
+            await getattr(wt, "_resolve_already_live")(manager, anchor, session)
             and session.client is not None and session.client.is_running
         )
+        if expected_native is not None and session.acp_session_id != expected_native:
+            raise _refuse("native_identity_changed", "The singleton changed during liveness observation")
         if ready:
             return _session_info(session, manager)
         require_path_hosting(repo.path, operation="singleton resume")
-        expected_native = session.acp_session_id
         held = db.execute_read(
             "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (anchor,),
         )
@@ -67,12 +72,12 @@ async def resume_singleton_anchor(
             if (
                 gate["delivery_id"] != delivery or gate["mode"] != "acp"
                 or gate["session_id"] != session.session_id
-                or gate["native_session_id"] not in {None, expected_native}
+                or gate["native_session_id"] not in {None, loaded_native}
             ):
                 raise _refuse("launch_gate_held", "Another operation owns this singleton")
         else:
             store.gate_workspace(
-                anchor, delivery, "acp", session.session_id, expected_native, delivery,
+                anchor, delivery, "acp", session.session_id, loaded_native, delivery,
             )
         if not db.reserve_worktree_ownership(anchor, session.session_id, now=time.time()):
             raise _refuse("live_holder", "Singleton ownership changed before native load")
@@ -84,10 +89,10 @@ async def resume_singleton_anchor(
             "SELECT id FROM sessions WHERE json_extract(target_json, '$.worktree_id')=?",
             (anchor,),
         )
-        if strict or sessions or known:
+        if strict or expected_native is not None or sessions or known:
             raise _refuse("singleton_head_unavailable", "No exact singleton conversation can be resumed")
         require_path_hosting(repo.path, operation="singleton launch")
-        owner, entry = await wt._find_cached_worktree_entry(
+        owner, entry = await getattr(wt, "_find_cached_worktree_entry")(
             anchor, request.app.state.resolver, cache=wt.cache_for_app(request.app),
         )
         if owner is None or entry is None or entry.path != repo.path:
@@ -105,7 +110,7 @@ async def resume_singleton_anchor(
         )
     if (
         session.status not in {SessionStatus.IDLE, SessionStatus.RUNNING} or not session.acp_session_id
-        or (expected_native is not None and session.acp_session_id != expected_native)
+        or (loaded_native is not None and session.acp_session_id != loaded_native)
     ):
         raise _refuse("singleton_native_unconfirmed", "Singleton native initialization or load is unconfirmed", status=502)
     if not db.reserve_worktree_ownership(anchor, session.session_id, now=time.time()):

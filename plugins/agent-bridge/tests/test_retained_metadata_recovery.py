@@ -148,6 +148,8 @@ async def test_worktree_resume_recovers_original_keyed_native_without_a_repair_c
     assert manager.db.get_session(old.session_id) is None
     assert len(manager.list_sessions()) == 1
     assert not manager.db.execute_read("SELECT * FROM turns")
+
+
     resumed = manager.get_session(first["session_id"])
     assert resumed.target.venue[creation.JOURNAL_KEY] == recovery.journal_key
     boundary = metadata.adoption(dict(manager.db.execute_read(
@@ -166,6 +168,32 @@ async def test_worktree_resume_recovers_original_keyed_native_without_a_repair_c
     assert len(fixture.starts) == launches
     assert dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == before
     assert manager._active_acquisitions == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("matches", [False, True])
+async def test_exact_worktree_resume_preserves_retained_native_owner(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, matches: bool,  # noqa: F811
+) -> None:
+    from fastapi import HTTPException
+    from agent_bridge.worktree_exact_resume import ExactResumeBody, resume_exact_worktree
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    before = len(bound.fixture.starts)
+    body = ExactResumeBody(native_session_id=bound.old.acp_session_id if matches else "other-native")
+    if not matches:
+        with pytest.raises(HTTPException) as refused:
+            await resume_exact_worktree(bound.row["id"], bound.request, "acp", body)
+        assert refused.value.status_code == 409
+        assert not bound.manager.list_sessions()
+        assert len(bound.fixture.starts) == before
+        assert not bound.manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+        return
+    result = await resume_exact_worktree(bound.row["id"], bound.request, "acp", body)
+    assert isinstance(result, JSONResponse)
+    value = json.loads(bytes(result.body))
+    assert value["acp_session_id"] == value["durable_session_id"] == bound.old.acp_session_id
+    assert value["session_id"] != bound.old.session_id
 
 
 @pytest.mark.asyncio
@@ -679,6 +707,12 @@ async def test_completed_metadata_recovery_admits_its_journaled_handoff_successo
     assert successor.acp_session_id == "native-successor"
     assert successor.target.venue[creation.JOURNAL_KEY] == request.journal_key
     seed.assert_awaited_once()
+    from agent_bridge import retained_worktree_resume
+
+    passthrough = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_manager=manager)))
+    assert await retained_worktree_resume.resume(
+        passthrough, successor.target.worktree_id, "acp", expected_native=successor.acp_session_id,
+    ) is None
     assert manager.get_session(successor.acp_session_id) is successor
     assert manager.get_session(request.native_session_id) is None
     resync = AsyncMock(return_value=0)
@@ -851,10 +885,12 @@ async def test_prior_passive_receiver_refuses_adopted_schema_before_writable_cut
         manager, old.session_id, request, fixture.requirement, lambda: True,
     )
     before = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    schema_before = manager.db.execute_read("SELECT version FROM schema_version")[0][0]
+    assert schema_before == db_core.SCHEMA_VERSION
     # The supported cutover owner opens passively and checks this before any migration.
     monkeypatch.setattr(db_core, "SCHEMA_VERSION", 48)
     with pytest.raises(ValueError, match="current schema"):
         Database(manager.db.db_path, read_only=True)
     assert dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == before
     assert json.loads(before[metadata.COLUMN]) == boundary
-    assert manager.db.execute_read("SELECT version FROM schema_version")[0][0] == 49
+    assert manager.db.execute_read("SELECT version FROM schema_version")[0][0] == schema_before
