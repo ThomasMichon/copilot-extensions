@@ -231,6 +231,7 @@ def test_native_code_claim_setup_exports_one_worker_selection(
 @pytest.mark.guard
 @pytest.mark.parametrize("original", [
     "test_registered_file_local_write_reuses_original_guard_facts",
+    "test_registered_prepared_cell_membership_read_requires_complete_native_proof",
     "test_native_timeout_kills_before_joining_a_blocked_collector",
 ])
 def test_code_mode_only_wraps_the_declared_original_case_family(
@@ -252,11 +253,79 @@ def test_code_mode_only_wraps_the_declared_original_case_family(
 
     monkeypatch.setattr(full, "observed_subprocess", proxy)
     observer.subprocess_proxy(lambda row: None)
-    if original == "test_registered_file_local_write_reuses_original_guard_facts":
+    if original in {
+        "test_registered_file_local_write_reuses_original_guard_facts",
+        "test_registered_prepared_cell_membership_read_requires_complete_native_proof",
+    }:
         assert set(calls[0]) == {"deadline_factory"}
     else:
         assert calls == [{"factory": PostExitChildObserver}]
     assert not (tmp_path / "selected").exists()
+
+
+@pytest.mark.guard
+def test_code_mode_leaves_setup_children_passive_without_consuming_the_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hook_native_portfolio as full
+    from hook_child_code_observer import CodeChildObserver
+
+    claim = tmp_path / "selected"
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "code-stack")
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM", str(claim))
+    observer = FullNativeChildObserver()
+    item = original_item(monkeypatch)
+    original_run = Mock(return_value="passive")
+    original_namespace = SimpleNamespace(run=original_run)
+    monkeypatch.setattr(item.module, "subprocess", original_namespace)
+    item.path = Path("test_managed_session.py")
+    item.originalname = "test_registered_prepared_cell_membership_read_requires_complete_native_proof"
+    monkeypatch.setattr(full, "is_native_subprocess", lambda value: value is original_namespace)
+    calls: list[dict[str, Any]] = []
+    sampled: list[bool] = []
+    selections = []
+
+    def sample_once() -> bool:
+        sampled.append(True)
+        return True
+
+    def observe(argv: Any, **kwargs: Any) -> str:
+        select = calls[0]["deadline_factory"]
+        candidate = select(SimpleNamespace(args=argv, poll=lambda: None),
+                           time.monotonic() + 1)
+        assert isinstance(candidate, CodeChildObserver)
+        monkeypatch.setattr(candidate, "INITIAL_DELAY", 0)
+        monkeypatch.setattr(candidate, "sample_once", sample_once)
+        candidate.collect()
+        selections.append(candidate.selection)
+        return "observed"
+
+    def proxy(emit: object, **kwargs: Any) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(run=observe)
+
+    monkeypatch.setattr(full, "observed_subprocess", proxy)
+    wrapper = observer.pytest_runtest_call(item)
+    assert next(wrapper) is None
+    assert set(calls[0]) == {"deadline_factory"}
+    run = item.module.subprocess.run
+    for argv in (
+        None, [], ["python.exe", "-NoProfile", "-NonInteractive", "stamp.py"],
+        ["git.exe", "-NoProfile", "-NonInteractive", "status"],
+        ["pwsh.exe.cmd", "-NoProfile", "-NonInteractive", "exit"],
+        [b"pwsh.exe", "-NoProfile", "-NonInteractive", "exit"], "pwsh.exe -Command exit",
+        [str(tmp_path / "cmd.exe"), "-NoProfile", "-NonInteractive", "powershell.exe"],
+    ):
+        assert run(argv, timeout=10) == "passive"
+        assert not claim.exists()
+    assert original_run.call_count == 8 and not sampled
+    for executable in ("pwsh.EXE", "powershell.exe"):
+        argv = [str(tmp_path / executable), "-NoProfile", "-NonInteractive", "-Command", "exit"]
+        assert run(argv, timeout=10) == "observed"
+    assert selections == ["selected", "already-selected"]
+    assert sampled == [True] and claim.is_dir()
+    with pytest.raises(StopIteration):
+        next(wrapper)
 
 
 @pytest.mark.guard

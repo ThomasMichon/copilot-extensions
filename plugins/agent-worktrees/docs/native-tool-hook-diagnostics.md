@@ -148,8 +148,14 @@ is a native-contract input, not an exemption from unit-source admission.
 
 The manual full profile's `native_observation_mode=code-stack` preserves the
 post-exit metadata and existing retained phase/bootstrap variant. It selects
-only original registered-write, natural-policy and selected-owner post-tool
-PowerShell calls, not intentional timeout or observer controls. The original
+only original registered-read, registered-write, natural-policy and selected-owner
+post-tool PowerShell calls, not intentional timeout or observer controls.
+The existing original-call boundary requires a PowerShell list argv with
+`-NoProfile`, `-NonInteractive` and the original ten-second timeout. Python
+stamping and other setup calls remain unwrapped and cannot consume the
+code-sample claim. This target-class selection does not replace the backend's
+native process/thread identity checks.
+The original
 fifteen-job topology, selectors, calls, order and deadlines stay unchanged.
 An atomic runner-owned directory claim is shared across each Windows job's
 pytest steps. Only an eligible child can take it, after the eight-second delay;
