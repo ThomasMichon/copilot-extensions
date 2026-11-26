@@ -1,0 +1,9 @@
+{
+  "comment": "Include original passive cleanup-diagnostic snapshots in guarded promotion units",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
