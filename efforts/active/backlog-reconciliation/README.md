@@ -523,8 +523,11 @@ the non-public approval conversation.
 ## Plan
 
 The [materialized Codespaces fixture correspondence](journal/2026/11.26-materialized-codespaces-fixture-correspondence.md)
-maps five conditional semantic-fixture candidates and preserves five whole
-keepers. Functional-profile evidence does not establish original-budget,
+records reviewed #14819, five separately spent passing final assessments
+and five independently audited `COMPLETED` reports. Five whole keepers
+remain OPEN. Two equal complete censuses measure 584 whole OPEN, with
+exactly five departures and no arrivals or unrelated departures.
+Functional-profile evidence does not establish original-budget,
 whole-portfolio, installed or parent completion; every parent gate remains.
 
 The [raced-authority fixtures and hosted SSH baselines](journal/2026/11.26-raced-authority-fixtures-and-hosted-ssh-baselines.md)
