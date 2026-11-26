@@ -111,7 +111,10 @@ def send(args: argparse.Namespace) -> None:
             _refuse(args, "bridge_selection_unavailable", "selected Bridge host changed")
         send_remote(client, args, row, prompt)
         return
-    managed = row.get("managed_session_id") or row.get("retained_managed_session_id")
+    managed = row.get("managed_session_id")
+    registered = row.get("registered_session_id")
+    if not managed and registered != native:
+        managed = row.get("retained_managed_session_id")
     bound = argparse.Namespace(**vars(args))
     owned = isinstance(managed, str) and bool(managed)
     if owned:
@@ -122,7 +125,6 @@ def send(args: argparse.Namespace) -> None:
                 "--sender and --reply-to require a registered-session inbox",
             )
     else:
-        registered = row.get("registered_session_id")
         if not isinstance(registered, str) or registered != native:
             _refuse(
                 args, "bridge_send_unavailable", "selected bridge has no exact admission owner"

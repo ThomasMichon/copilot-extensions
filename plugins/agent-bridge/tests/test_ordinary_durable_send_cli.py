@@ -139,3 +139,25 @@ def test_managed_failure_never_falls_back_and_retains_generated_operation(
         assert result["bridge"]["managed_session_id"] == "managed-original"
     else:
         assert result["reason"] == reason
+
+
+def test_local_text_unknown_prints_original_generated_key_and_selected_identity(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = DurableClient("stopped")
+
+    def fail(session_id: str, prompt: str, **options: Any) -> None:
+        client.accepted.append({"session_id": session_id, "prompt": prompt, **options})
+        raise BridgeClientError(502, {"code": "managed_message_acceptance_unknown"})
+
+    monkeypatch.setattr(client, "submit_managed_message", fail)
+    monkeypatch.setattr(core, "_get_client", lambda **_kwargs: client)
+    monkeypatch.setattr(core, "_caller_id_for", lambda _args: "original-sender")
+    monkeypatch.setattr(core, "_sender_repo", lambda: "fixture-project")
+    args = core.build_parser().parse_args(["send", "managed-original", "original"])
+    with pytest.raises(SystemExit) as error:
+        targeting._cmd_send(args)
+    assert error.value.code == 70 and len(client.accepted) == 1
+    key = client.accepted[0]["idempotency_key"]
+    output = capsys.readouterr()
+    assert all(value in output.err for value in ("managed-original", "native-original", key))

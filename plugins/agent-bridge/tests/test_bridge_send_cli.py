@@ -202,6 +202,24 @@ def test_explicit_legacy_selector_keeps_existing_registered_payload(
     assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
 
 
+def test_registered_owner_wins_over_retained_managed_history(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    api: Any,
+    tmp_db: Any,
+) -> None:
+    calls = wire(monkeypatch, api, row_changes={"retained_managed_session_id": "old-managed"})
+    cli.main(["--json", "send", "workspace-a", "work", "--idempotency-key", "original"])
+    result = json.loads(capsys.readouterr().out)
+    assert result["message_id"] and result["session_id"] == "live-1"
+    assert result["accepted"] is True
+    (post,) = [item for item in calls if item[0] == "POST"]
+    assert post[1].endswith("/live-1/messages")
+    assert post[2]["expected_session_id"] == "live-1"
+    assert len(tmp_db.execute_read("SELECT * FROM live_messages")) == 1
+    assert tmp_db.list_pending_prompts("old-managed") == []
+
+
 @pytest.mark.parametrize("wait", [False, True])
 @pytest.mark.parametrize("caller", [None, "agent-dispatch:controller-a"])
 def test_dispatch_continuation_reaches_real_selector_and_supported_prior_parser(

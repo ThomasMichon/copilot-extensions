@@ -167,9 +167,9 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
     except StartupObservationError as exc:
         print(f"[UNKNOWN] {exc}", file=sys.stderr, flush=True)
         bridge = getattr(args, "_bridge_send_identity", None)
-        if not as_json and isinstance(bridge, dict) and bridge.get("host"):
+        if not as_json and isinstance(bridge, dict):
             print(
-                f"    host: {bridge['host']}; managed owner: {bridge.get('managed_session_id')}; "
+                f"    host: {bridge.get('host') or 'local'}; managed owner: {bridge.get('managed_session_id')}; "
                 f"registered inbox: {bridge.get('registered_session_id')}; "
                 f"sender: {bridge.get('sender')}; "
                 f"native: {bridge.get('session_id')}; invocation key: "
