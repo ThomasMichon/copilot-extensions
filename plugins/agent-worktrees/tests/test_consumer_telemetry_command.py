@@ -1,0 +1,176 @@
+"""Optional `worktrees.lifecycle.v1` records for finite CLI runs."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from agent_worktrees import config, consumer_telemetry, pr_publication_labels
+from process_telemetry.finite_owner import capability
+
+_RECEIVER = """\
+import json, os, sys
+from pathlib import Path
+with Path("readback.jsonl").open("a", encoding="utf-8") as output:
+    for line in sys.stdin:
+        output.write(json.dumps({"record": json.loads(line), "cwd": os.getcwd()}) + "\\n")
+"""
+
+
+def _admit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "harness root"
+    root.mkdir()
+    (root / "receiver.py").write_text(_RECEIVER, encoding="utf-8")
+    (root / ".agent-telemetry").mkdir()
+    (root / ".agent-telemetry" / "config.json").write_text(json.dumps({
+        "schema_version": 1, "mode": "command",
+        "command": {"argv": [sys.executable, "-I", "receiver.py"]},
+    }), encoding="utf-8")
+    install = tmp_path / "install"
+    install.mkdir()
+    (install / "consumer-telemetry.json").write_text(json.dumps({
+        "schema_version": 1, "root": str(root),
+    }), encoding="utf-8")
+    monkeypatch.setattr(config, "install_dir", lambda: install)
+    return root
+
+
+def _readback(root: Path) -> list[dict[str, Any]]:
+    path = root / "readback.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line)["record"] for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _run(monkeypatch: pytest.MonkeyPatch, argv: list[str], main: Any) -> Any:
+    monkeypatch.setattr(sys, "argv", ["agent-worktrees", *argv])
+    return consumer_telemetry.instrument(main)()
+
+
+@pytest.mark.parametrize("argv, expected", [
+    (["create", "--json"], ("stage", "worktree_create")),
+    (["-p", "example", "create"], ("stage", "worktree_create")),
+    (["--project=example", "bind-session"], ("stage", "session_bind")),
+    (["lease", "acquire", "x"], ("stage", "lease")),
+    (["pr-create"], ("pr", "create")),
+    (["push-changes"], ("pr", "push")),
+    (["pr-publication-labels", "--repo", "o/r"], ("pr", "label")),
+    (["pr-merge", "1", "--now"], ("pr", "merge")),
+    (["finalize"], ("pr", "merge")),
+    (["finalize", "--abandon", "--handoff-to", "x"], ("pr", "abandon")),
+    (["lease"], None), (["lease", "list"], None), (["create", "--help"], None),
+    (["status"], None), (["--version"], None), ([], None),
+])
+def test_classify_observes_only_mutating_lifecycle_verbs(
+    argv: list[str], expected: tuple[str, str] | None,
+) -> None:
+    assert consumer_telemetry.classify(argv) == expected
+
+
+def test_legacy_install_runs_unchanged_and_starts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+    assert _run(monkeypatch, ["create"], lambda: 0) == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_unobserved_verbs_never_read_the_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail() -> Path:
+        raise AssertionError("policy lookup on an unobserved verb")
+
+    monkeypatch.setattr(config, "install_dir", fail)
+    assert _run(monkeypatch, ["status"], lambda: 7) == 7
+
+
+def test_records_reach_a_real_receiver_without_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _admit(tmp_path, monkeypatch)
+    assert _run(monkeypatch, ["-p", "secret-project", "create"], lambda: 0) == 0
+
+    def conflict() -> int:
+        raise SystemExit(3)
+
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, ["lease", "acquire", "secret-resource"], conflict)
+
+    def interrupted() -> int:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        _run(monkeypatch, ["finalize", "--abandon"], interrupted)
+
+    records = _readback(root)
+    assert [r["event"] for r in records] == [
+        {"kind": "stage", "stage": "worktree_create", "outcome": "success",
+         "reason": "none", "duration_ms": records[0]["event"]["duration_ms"], "attempt": 1},
+        {"kind": "stage", "stage": "lease", "outcome": "failure",
+         "reason": "lease_conflict", "duration_ms": records[1]["event"]["duration_ms"],
+         "attempt": 1},
+        {"kind": "pr", "action": "abandon", "outcome": "failure", "reason": "interrupted",
+         "duration_ms": records[2]["event"]["duration_ms"]},
+    ]
+    for record in records:
+        assert (record["source"], record["source_schema"]) == (
+            "agent-worktrees", "worktrees.lifecycle.v1",
+        )
+    text = json.dumps(records)
+    assert "secret" not in text and str(tmp_path) not in text
+
+
+@pytest.mark.parametrize("result, code, expected", [
+    ({"ok": True, "added": ["label"]}, 0, ("success", "none", "repaired")),
+    ({"ok": True, "added": []}, 0, ("success", "none", "already_present")),
+    ({"skipped": True}, 0, ("success", "none", "not_requested")),
+    ({"ok": False, "error": "provider does not support publication labels"}, 1,
+     ("failure", "unavailable", "unsupported")),
+    ({"ok": False, "error": "HTTP 403 for https://example.invalid/secret"}, 1,
+     ("failure", "provider_rejected", "failed")),
+])
+def test_label_activity_reports_only_the_closed_label_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    result: dict[str, Any], code: int, expected: tuple[str, str, str],
+) -> None:
+    root = _admit(tmp_path, monkeypatch)
+
+    def main() -> int:
+        pr_publication_labels.last_result.set(result)
+        return code
+
+    assert _run(monkeypatch, ["pr-publication-labels"], main) == code
+    (record,) = _readback(root)
+    event = record["event"]
+    assert (event["outcome"], event["reason"], event["label_result"]) == expected
+    assert "example.invalid" not in json.dumps(record)
+
+
+def test_receiver_failure_never_changes_the_product_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _admit(tmp_path, monkeypatch)
+    (root / ".agent-telemetry" / "config.json").write_text(json.dumps({
+        "schema_version": 1, "mode": "command",
+        "command": {"argv": [str(tmp_path / "missing-receiver")]},
+    }), encoding="utf-8")
+    assert _run(monkeypatch, ["push-changes"], lambda: 0) == 0
+
+
+def test_console_entry_is_instrumented(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import __main__ as cli, current_roster_entry
+
+    seen: list[Any] = []
+    monkeypatch.setattr(current_roster_entry, "run_legacy_console", seen.append)
+    cli.console_entry()
+    assert seen and seen[0].__qualname__ == "instrument.<locals>.run"
+
+
+def test_packaged_descriptor_names_only_the_worktrees_schema() -> None:
+    path = Path(consumer_telemetry.__file__).parent / "metadata" / "consumer-telemetry-contract.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == capability([
+        consumer_telemetry.SOURCE_SCHEMA,
+    ])

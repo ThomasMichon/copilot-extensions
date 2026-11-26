@@ -46,6 +46,10 @@ _BLOCKS = {
     ),
     "update-telemetry": (
         "# Vendored update-telemetry lib (agent-update-telemetry / module",
+        "# Vendored process-telemetry lib",
+    ),
+    "process-telemetry": (
+        "# Vendored process-telemetry lib (agent-process-telemetry / module",
         "# Shared PR filter semantics must resolve locally, never from an index.",
     ),
     "pr-filters": (
@@ -60,6 +64,7 @@ _LIBS = (
     "remote-login-shell",
     "machine-transport",
     "update-telemetry",
+    "process-telemetry",
     "pr-filters",
 )
 
