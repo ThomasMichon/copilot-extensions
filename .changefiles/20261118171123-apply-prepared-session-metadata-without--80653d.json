@@ -1,0 +1,9 @@
+{
+  "comment": "Apply prepared session metadata without disconnecting event readers.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

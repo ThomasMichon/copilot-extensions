@@ -307,6 +307,9 @@ async def _sse_event_stream(  # noqa: ANN001
                         await wait_task
                     return
             wait_result = wait_task.result()
+            if getattr(session.event_log, "source_unavailable", False) is True:
+                yield _control_sse("source_unavailable", "the inherited event source is no longer available")
+                return
             if (
                 isinstance(wait_result, tuple)
                 and len(wait_result) == 2
@@ -380,7 +383,9 @@ async def _sse_event_stream(  # noqa: ANN001
             else:
                 yield ": heartbeat\n\n"
     finally:
-        if mgr is not None:
+        if mgr is not None and getattr(session.event_log, "source_unavailable", False) is True:
+            session.subscriber_count = max(0, session.subscriber_count - 1)
+        elif mgr is not None:
             mgr.remove_subscriber(session.session_id)
 
 
@@ -1028,6 +1033,11 @@ async def wait_for_attention(
 
     deadline = time.monotonic() + timeout_seconds
     while True:
+        if session.event_log.source_unavailable:
+            raise HTTPException(
+                status_code=410,
+                detail={"code": "source_unavailable", "message": "The inherited event source is gone"},
+            )
         after = session.event_log.latest_id
         try:
             result = evaluate_owned_attention(
