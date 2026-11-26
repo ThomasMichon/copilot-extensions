@@ -28,6 +28,7 @@ from agent_index import config
 from agent_index import __main__ as agent_main
 from agent_index import __version__
 from agent_index.index_config import IndexConfig
+from test_runtime_gate import _fixture_bootstrap_selector
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -1484,11 +1485,11 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
     )
-    for name in (
-        "resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py",
-        "config_schema.py", "config_yaml.py",
-    ):
-        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
+    shutil.copytree(
+        PLUGIN / "scripts", scripts, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    _fixture_bootstrap_selector(scripts)
     if os.name == "nt":
         shutil.copy2(
             PLUGIN / "scripts" / "runtime-gate.ps1",
@@ -3582,8 +3583,8 @@ def test_selected_completed_runtime_requires_successful_import(
     )
     monkeypatch.setattr(CELL, "_run_context", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(
-        CELL.subprocess,
-        "run",
+        CELL._cell_process_helpers(),
+        "runtime_probe",
         lambda *_args, **_kwargs: SimpleNamespace(
             returncode=1,
             stdout="",
@@ -4108,8 +4109,8 @@ def test_completed_slot_corruption_is_not_silently_overwritten(
         ),
     )
     monkeypatch.setattr(
-        CELL.subprocess,
-        "run",
+        CELL._cell_process_helpers(),
+        "runtime_probe",
         lambda *_args, **_kwargs: SimpleNamespace(
             returncode=1,
             stdout="",
