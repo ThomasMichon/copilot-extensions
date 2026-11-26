@@ -16,10 +16,14 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 SOURCE = "agent-worktrees"
 SOURCE_SCHEMA = "worktrees.lifecycle.v1"
+HOOK_SOURCE_SCHEMA = "hook.lifecycle.v1"
+# Shared with scripts/hook_telemetry.py, which writes the journal.
+HOOK_JOURNAL_DIRECTORY = "consumer-telemetry-hooks"
 
 # First verb token -> (kind, stage-or-action).  Only mutating lifecycle verbs
 # are observed; read-only verbs never pay for a policy lookup.
@@ -272,22 +276,69 @@ def record(
     return event
 
 
-def _offer(event: dict[str, Any]) -> None:
-    """Admit, offer and close within the contract's bounded shutdown; fail open."""
-    try:
-        from process_telemetry.finite_owner import FiniteOwner
+def _admitted(root: Path, source_schema: str) -> Any:
+    from process_telemetry.finite_owner import FiniteOwner
 
+    owner = FiniteOwner.from_directory(root, source=SOURCE, source_schema=source_schema)
+    return None if owner.legacy or owner.refusal is not None else owner
+
+
+def _hook_records_pending(directory: Path) -> bool:
+    try:
+        return (directory / "pending.jsonl").stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _close_together(owners: list[Any]) -> None:
+    """Close every route concurrently so the command keeps one shutdown budget."""
+    if not owners:
+        return
+    import threading
+
+    others = [threading.Thread(target=owner.close, daemon=True) for owner in owners[1:]]
+    for thread in others:
+        thread.start()
+    owners[0].close()
+    for thread in others:
+        thread.join()
+
+
+def _offer(event: dict[str, Any]) -> None:
+    """Admit, offer and close within the contract's bounded shutdown; fail open.
+
+    Pending sessionStart hook records ride along on their own admitted
+    `hook.lifecycle.v1` route: hooks never launch a receiver, so the command
+    drains the journal they wrote.  Admission is checked before draining, so a
+    refused route leaves the records pending; drained records that cannot be
+    offered are lost, never duplicated.  Both routes close concurrently, so
+    hook delivery never extends the command's two-second shutdown budget.
+    """
+    owners: list[Any] = []
+    try:
         from .config import install_dir
 
-        owner = FiniteOwner.from_directory(
-            install_dir(), source=SOURCE, source_schema=SOURCE_SCHEMA,
-        )
-        if owner.legacy or owner.refusal is not None:
-            return
-        with owner:
-            owner.emit(event)
+        root = install_dir()
+        lifecycle = _admitted(root, SOURCE_SCHEMA)
+        journal = root / HOOK_JOURNAL_DIRECTORY
+        hooks = _admitted(root, HOOK_SOURCE_SCHEMA) if _hook_records_pending(journal) else None
+        if lifecycle is not None:
+            owners.append(lifecycle.start())
+            lifecycle.emit(event)
+        if hooks is not None:
+            from process_telemetry import hook_journal
+
+            owners.append(hooks.start())
+            if hooks.active:
+                for record in hook_journal.drain(journal):
+                    hooks.emit(record)
     except Exception:
-        return
+        pass
+    finally:
+        try:
+            _close_together(owners)
+        except Exception:
+            pass
 
 
 def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
