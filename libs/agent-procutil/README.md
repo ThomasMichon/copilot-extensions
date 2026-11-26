@@ -1351,6 +1351,8 @@ never a saved numeric identity. Two absent-group kernel null-signal probes
 precede reaping and return; permission or unknown errors never count as absence.
 This needs neither a process-table scan nor a potentially privileged `ps` child.
 Unconfirmed settlement refuses with status 125 and never invokes the application.
+Its diagnostic distinguishes an unavailable group observation, a still-present
+group at the cleanup deadline and retained private files; none is success.
 Ordinary timeout returns 124; cancellation retains the conventional signal exit
 status. The guardian unlinks its private files before retiring, even when the
 caller dies after release. A pre-opened caller descriptor retains unread stdout
@@ -1521,7 +1523,12 @@ errors remain explicit.
 Native POSIX caller-death execution uses Linux `pidfd_open` and readable `/proc`
 pidfd identity, or macOS `kqueue` process-exit events and `libproc` group census.
 Both require unreaped-child/default-SIGCHLD custody. Unsupported native API
-prerequisites refuse before target launch. macOS uses native `waitid(WNOWAIT)`
+prerequisites refuse before target launch. macOS capability admission queries
+the current process's native identity and confirms its membership in a bounded
+group listing, without inspecting unrelated processes in the inherited group.
+Missing or malformed self identity/membership refuses before spawn; this is
+separate from the strict owned-group census used for cleanup.
+macOS uses native `waitid(WNOWAIT)`
 even on Python versions that do not expose it; Linux retains its Python/native
 pidfd path. One finite
 helper owns its session/group before starting the target in that inherited

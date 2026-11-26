@@ -13,6 +13,8 @@ on:
       - libs/agent-procutil/tests/test_native_helper_python_binding.py
       - libs/agent-procutil/tests/test_managed_venv_construction.py
       - libs/agent-procutil/tests/test_daemon_instances_linux.py
+      - libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py
+      - libs/agent-procutil/tests/test_darwin_caller_owned.py
       - libs/installer-engine/installer-engine.ps1
       - libs/installer-engine/installer-engine.sh
       - libs/installer-engine/bootstrap-uv.ps1
@@ -31,6 +33,8 @@ on:
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
       - libs/payload-invocation/tests/test_mcp_ready_source.py
+      - libs/payload-invocation/tests/test_vault_ready_source.py
+      - libs/payload-invocation/tests/test_bridge_ready_source.py
       - plugins/agent-mcp/scripts/runtime-gate.sh
       - plugins/agent-mcp/scripts/runtime-gate.ps1
       - plugins/agent-mcp/tests/test_managed_command_gate.py
@@ -43,6 +47,10 @@ on:
       - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
       - plugins/agent-bridge/tests/test_payload_invocation.py
+      - plugins/agent-bridge/tests/managed_command_fixture.py
+      - plugins/agent-bridge/tests/test_managed_command_gate.py
+      - plugins/agent-bridge/scripts/runtime-gate.sh
+      - plugins/agent-bridge/scripts/runtime-gate.ps1
       - plugins/agent-bridge/scripts/install.sh
       - plugins/agent-bridge/scripts/install.ps1
       - plugins/agent-bridge/scripts/bootstrap-uv.ps1
@@ -107,6 +115,10 @@ on:
       - plugins/agent-vault/scripts/install.sh
       - plugins/agent-vault/scripts/install.ps1
       - plugins/agent-vault/tests/test_identity_payload_gate.py
+      - plugins/agent-vault/tests/managed_command_fixture.py
+      - plugins/agent-vault/tests/test_managed_command_gate.py
+      - plugins/agent-vault/scripts/runtime-gate.sh
+      - plugins/agent-vault/scripts/runtime-gate.ps1
       - plugins/agent-vault/scripts/runtime-activation.sh
       - libs/installer-engine/bootstrap-python.ps1
       - plugins/agent-codespaces/tests/test_bootstrap_python.py
@@ -1279,38 +1291,23 @@ jobs:
       - *command-native-python
       - *command-native-uv
       - *command-native-interpreters
-      - name: Observe native macOS process-group admission prerequisites
+      - name: Qualify native macOS support admission and owned-group cleanup
         if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          python - <<'PY'
-          import ctypes
-          import json
-          import os
-          import sys
-          sys.path.insert(0, "libs/agent-procutil/src")
-          from agent_procutil._darwin_caller_owned import GroupCensus, _BSDInfo
-          census = GroupCensus()
-          group = os.getpgrp()
-          pids = (ctypes.c_int * 1024)()
-          ctypes.set_errno(0)
-          count = census.list_pids(group, pids, ctypes.sizeof(pids))
-          print(json.dumps({"group_count": count, "errno": ctypes.get_errno()}), flush=True)
-          assert 0 <= count < len(pids)
-          for pid in pids[:count]:
-              data = _BSDInfo()
-              ctypes.set_errno(0)
-              returned = census.info(pid, 3, 0, ctypes.byref(data), ctypes.sizeof(data))
-              print(json.dumps({
-                  "self": pid == os.getpid(),
-                  "leader": pid == group,
-                  "returned": returned,
-                  "expected": ctypes.sizeof(data),
-                  "errno": ctypes.get_errno(),
-                  "same_pid": data.pid == pid,
-                  "same_group": data.pgid == group,
-              }), flush=True)
-          PY
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_darwin_caller_owned.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/darwin-caller-owned
+      - name: Require actual macOS support, bounded execution and caller-death controls
+        if: runner.os == 'macOS'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/darwin-caller-owned').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase') if c.attrib['name'].startswith('test_native_darwin_')];
+          assert {c.attrib['name'] for c in cases}=={
+          'test_native_darwin_kqueue_and_libproc_construction',
+          'test_native_darwin_guard_identity_and_bounded_execution',
+          'test_native_darwin_caller_death_retires_guard_target_and_descendant'};
+          assert len(cases)==3 and all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify raw and materialized prepared MCP foreground entry
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -1350,6 +1347,118 @@ jobs:
       MCP_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *mcp-ready-steps
+
+  bridge-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      BRIDGE_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &bridge-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Bridge foreground and passive command admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bridge_ready_source.py --allow-explicit-tiers
+          -k "${{ env.BRIDGE_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/bridge-ready
+      - name: Require all Bridge command controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.BRIDGE_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          expected=22 if os.environ['QUALIFIED_SHELL']=='bash' else 24;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='bridge_command_admission'];
+          assert len(reports)==expected and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['application_uv_lookups']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'bridge_command_admission':reports},sort_keys=True))"
+
+  bridge-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      BRIDGE_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *bridge-ready-steps
+
+  bridge-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      BRIDGE_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *bridge-ready-steps
+
+  vault-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      VAULT_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &vault-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Vault foreground and pinned-cache admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_vault_ready_source.py --allow-explicit-tiers
+          -k "${{ env.VAULT_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/vault-ready
+      - name: Require all Vault command controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.VAULT_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/vault-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==26 and len({c.attrib['name'] for c in cases})==26;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='vault_command_admission'];
+          assert len(reports)==26 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-')
+          or r['scenario']=='pinned-rejected' else 2)
+          and r['application_uv_lookups']==(0 if r['scenario'].startswith('missing-')
+          else 1 if r['scenario']=='pinned-rejected' else 2)
+          and r['pin_validated']==r['scenario'].startswith('pinned')
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'vault_command_admission':reports},sort_keys=True))"
+
+  vault-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      VAULT_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *vault-ready-steps
+
+  vault-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      VAULT_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *vault-ready-steps
 
   mixed-python:
     runs-on: windows-latest

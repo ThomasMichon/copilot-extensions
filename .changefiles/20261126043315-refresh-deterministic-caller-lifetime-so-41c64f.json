@@ -1,0 +1,17 @@
+{
+  "comment": "Refresh deterministic caller-lifetime source archives so pre-install lifecycle entrypoints retain Darwin self-identity support admission and strict owned cleanup.",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

@@ -197,6 +197,18 @@ def _prepared_runtime(tmp_path: Path) -> tuple[list[str], dict[str, str], Path]:
         (scripts / "install.sh").write_text("exit 97\n", encoding="utf-8")
     provider = runpy.run_path(str(ROOT / "libs/payload-invocation/command_evidence.py"))
     (scripts / "command-errors.pyz").write_bytes(provider["archive"](ROOT))
+    bootstrap = runpy.run_path(str(ROOT / "libs/payload-invocation/bootstrap_python.py"))
+    manifest = BRIDGE / "payload-invocation.json"
+    for source, content in bootstrap["expected_files"](
+        manifest, json.loads(manifest.read_text(encoding="utf-8")), canonical_root=ROOT,
+    ).items():
+        target = payload / source.relative_to(BRIDGE)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+    shutil.copyfile(
+        ROOT / "libs/agent-procutil/src/agent_procutil/native_capture.sh",
+        scripts / "native_capture.sh",
+    )
     return command, environment, home
 
 

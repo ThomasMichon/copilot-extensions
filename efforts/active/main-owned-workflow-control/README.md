@@ -487,7 +487,105 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify all four original hosting-result parser functions as one
+- [ ] Qualify only the whole original invalid-budget refusal function,
+  retaining all four rows, including the exact NaN value, original
+  objects/globals/fixtures, own row objects, typed values, all marks, IDs
+  and order. All fourteen other whole functions remain excluded before
+  execution. Complete original/adapted metadata and unchanged guarding
+  precede admission; require actual budget validation calls per case.
+  Complete collection confirms 25 original cases and exactly four adapter
+  cases through the same whole function. First unchanged guarded execution
+  passes four in 0.87 pytest / 14.641 observation seconds: all twelve phases
+  pass, zero prohibited effects, nineteen bound reads and budget-validation
+  call lines for every case, without execution or cleanup budget consumers.
+  The full observation is read before admission. Only four nodes, two
+  adapter/original bindings and one already-bound production coverage target
+  are added: 11,183 nodes, 1,545 sources, 564 targets, unchanged 92 helpers,
+  300 seconds and 739,577 bytes. Fresh review/full CI, normal merge and
+  persistence remain before Done.
+- [ ] The passive cleanup-diagnostic candidate is disqualified by first-touch
+  Linux CI collection: its original module imports a native fixture helper,
+  whose `ctypes` import triggers forbidden `ctypes.dlopen`.
+  The local eight-case pass does not qualify that import path.
+  All eight candidate nodes, three new bindings, the added target and adapter
+  are withdrawn before any further execution; every prior admission/limit
+  is restored exactly first. Keep the failed CI and evidence.
+  No preload, fixture/original rewrite, environment change or guard exception
+  may make this module eligible. This remains blocked, not Done.
+- [x] Qualify only the whole original invalid-workspace refusal function
+  with its original tmp-path fixture and both missing-path/file-path checks.
+  Complete metadata and unchanged guarding must establish eligibility before
+  admission; require actual workspace-validation calls without policy reads
+  or parent discovery. Preserve original objects/globals/fixtures/assertions,
+  typed values, all marks, IDs, order and every existing admission/limit.
+  Exclude every other whole function in that module. In particular, the
+  nested-checkout freshness function writes a synthetic `.git` file and is
+  excluded before execution because the unchanged guard refuses every such
+  open. Do not rewrite that fixture, redirect the marker or alter a guard.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete collection confirms 41 original cases and exactly one adapted
+  whole function, preserving its original object/globals, tmp-path fixture,
+  typed values, all marks, IDs and order. The other fifteen whole functions
+  remain excluded. First unchanged guarded qualification passes one in
+  1.36 pytest / 21.390 observation seconds: all three phases pass, zero
+  prohibited effects, sixteen bound reads, both workspace-validation refusal
+  branches and no parent traversal, policy presence checks or policy reads.
+  The full observation is read before admission. Only one node and one
+  adapter binding are added: 11,179 nodes, 1,543 sources, unchanged 563
+  targets, 92 helpers, 300 seconds and 739,114 bytes.
+  Fresh review/full CI, normal merge and persistence remain before Done.
+  Source #14737 merges at `3c6e7699cfb18eb0adcf898851b2c184afb19eb0`
+  after exact-head approval and complete required CI. Both natural runs
+  execute all 11,179 units; neither is a reuse hit.
+  Independent merged/open-parent readback and managed sync complete.
+  All five owned raw blobs, the exact candidate, all 1,543 bindings,
+  92 helpers and sixteen observed inputs verify without replay.
+  Reviewed and merged trees match. Actual parent Goal, own Plan and the
+  whole Validation Plan are reread before only this one-case leaf is Done.
+- [x] Qualify the whole original invalid-marketplace-identity refusal
+  function without discovering a repository or reading policy.
+  Preserve all seven original rows, the original tmp-path fixture, marks,
+  objects/globals, IDs and order. Compare complete original/adapted metadata
+  and admission uniqueness before unchanged guarding.
+  Exclude every other whole function in that module before execution;
+  policy discovery/reader and subprocess consumers remain outside this slice.
+  Require actual early-validation call lines and no discovery/reader calls
+  for every case before admission. Do not patch environment, policy,
+  fixtures, original assertions or guards to obtain eligibility.
+  Retain every prior node/hash/target/helper/limit and refusal.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete collection confirms 41 original cases and exactly seven adapted
+  rows through the same whole function, preserving original objects/globals,
+  tmp-path fixture, typed values, all marks, IDs and order.
+  All other fifteen whole functions/thirty-four cases remain excluded.
+  First unchanged guarded qualification passes seven in 1.54 pytest /
+  22.594 observation seconds: all 21 phases pass, zero prohibited effects,
+  sixteen bound reads and actual early-validation call lines per case.
+  Every trace avoids repository discovery, policy reads and the loader's
+  post-validation body. The complete observation is read before admission.
+  Only seven nodes and two adapter/original bindings are added:
+  11,141 nodes, 1,536 sources, unchanged 558 targets, 92 helpers,
+  300 seconds and 736,500 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass. Fresh review/full CI, merge and persistence
+  remain before this finite leaf is complete.
+  Final merge fencing finds a new base conflict after the first clean review
+  and successful 11,141-case CI. Preserve the reviewed head, all concurrent
+  37 case additions, six bindings, five targets and three hash refreshes,
+  then rebase without dropping any prior admission.
+  All sixteen original observed inputs remain unchanged.
+  The peer-preserving union is 11,178 nodes, 1,542 sources, 563 targets,
+  unchanged 92 helpers, 300 seconds and 738,845 bytes.
+  Fresh exact-head review and complete required CI must pass again.
+  Source #14732 merges at `4f07fcdd1c0a0561bfbfb3973cf1a16146a72cfa`
+  after fresh approval and complete required CI. Both natural current-head
+  runs execute all 11,178 units; neither is a reuse hit.
+  Independent merged/open-parent readback and managed sync complete.
+  All five owned reviewed/merged/working blobs, the exact peer-preserving
+  candidate, 1,542 bindings, 92 helpers and sixteen observed inputs verify
+  without replay. Thirteen unrelated concurrent peer files remain intact;
+  whole-tree identity is not claimed. Actual parent Goal, own Plan and
+  whole Validation are reread before only this seven-case leaf is Done.
+- [x] Qualify all four original hosting-result parser functions as one
   coherent source slice, preserving complete parameter rows, objects,
   globals, fixtures, typed values, marks, IDs and order.
   Compare original file/function admission uniqueness and full metadata
@@ -510,6 +608,14 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   unchanged 92 helpers, 300 seconds and 736,046 bytes.
   Fatal Ruff and strict Linux/Windows whole-file typing pass.
   Fresh review/full hosted CI, normal merge and persistence remain.
+  Source #14726 merges at `752163ee0902080ae4dca4d7b143355bee637085`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,134 units in 156.474 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, managed sync, all five owned
+  reviewed/merged/working blobs, exact peer-preserving candidate, all current
+  bindings/helpers and sixteen observed inputs verify without replay.
+  Actual parent Goal, own Plan and whole Validation are reread.
+  Only this 34-case leaf is Done; the parent stays active.
 - [x] Qualify the original explicit-clock startup controls and whole
   diagnostic outer-frame refusal function as one coherent source slice.
   Preserve all four startup functions and all fifteen invalid-budget rows,

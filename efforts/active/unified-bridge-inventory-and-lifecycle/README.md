@@ -196,12 +196,32 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   boundary: the real notification reached the owned model, but its original
   receipt lacked consumption. Relevant fixes #13862 and #13883 are released;
   that does not prove adoption or resolve every queued-input stall.
-  The next opt-in workspace resume caller now passes 238 actor-free controls
-  and 65 contained parser/client/HTTP/native-owner controls. It preserves the
-  existing hosting choice and legacy recovery contracts. All six changed
-  Python files pass whole-file strict checks for Linux and Windows.
-  The remaining source-publication gates remain open; no caller release,
-  default lifecycle migration or installed adoption is claimed.
+  The opt-in workspace resume caller merges in #14719 on November 26 at
+  09:43:01 UTC as `9fa4d16c97276e28d4a726adaa2467cc7e37a2ca`.
+  Current-head Copilot approval, resolved threads, both exact-source CI runs
+  and both native OS jobs pass before normal role-scoped self-merge.
+  All 14 published blobs match the confirmed squash merge. Local qualification
+  passes 246 actor-free controls, the actual focused source-effect guard,
+  65 contained parser/client/HTTP/native-owner controls and whole-file strict
+  checks on Linux and Windows. The final manifest retains all 11,134 target
+  nodes in order and adds 37 caller controls under the unchanged budget.
+  All ten released content files now match Main
+  `ddf9a6ee068155972976ee3f99da1a2a66c9c9a8`, Bridge `0.9.575-dev1`.
+  The logical release packet retains all 11,171 published nodes in order,
+  valid owned source bindings and the 300-second budget. The opt-in caller
+  is source-released. Stop/end selectors, default lifecycle migration,
+  full-flow qualification and installed adoption are not complete.
+  The ordinary resume default follow-up uses the common selector in both
+  hosting modes and refuses a changed head. Its publication, qualification
+  and release gates remain open.
+  Existing strict and hosting-fenced forms keep their original selectors
+  without a Dispatch update or new child environment. This preserves running,
+  older and rolled-back producers while unqualified ordinary resume uses the
+  common selector. Explicit exact selection retains compatible fences, and
+  generated singleton-profile recovery hints select legacy matching.
+  All 267 focused source-effect controls pass without forbidden effects.
+  The five Python files in the reduced final diff pass whole-file strict
+  checks for Linux and Windows. Publication and final hosted gates remain open.
 - **Return:** finish the remaining selector, guarded lifecycle, qualification
   and release gates below, then return the driving worktree to its retained
   earlier objectives. Do not equate this source slice with receiving recovery.
@@ -531,6 +551,17 @@ Installed fleet adoption is not claimed.
   `e0a62de772b7`, Bridge `0.9.573-dev1`, after #14713 and promotion
   `45769032231`. All 142 Bridge controls and the complete original census,
   order, source bindings, helper coverage and budget are preserved.
+- [x] Verify normal source release of the opt-in common-selector workspace
+  resume caller. #14719 merges as `9fa4d16c9727` after current-head approval,
+  resolved threads, required source CI and both native OS jobs. All 14
+  published blobs match the merge. All ten released content paths match Main
+  `ddf9a6ee0681`, Bridge `0.9.575-dev1`, with the complete original admission
+  census and order preserved. No local rollout is authorized.
+- [ ] Qualify and release ordinary resume defaults over the exact provider,
+  preserving explicit legacy selection, specialized writer/recovery contracts,
+  the hosting choice and existing programmatic retained-resume producers.
+  Local consumer, strict, source-effect and static checks pass; publication,
+  exact-head required CI, native OS qualification and release remain open.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Local and explicit-host observations and sends, including ordinary defaults,

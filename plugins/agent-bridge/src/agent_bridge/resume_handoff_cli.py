@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from http.client import HTTPException
 from typing import Any
 
@@ -19,7 +20,7 @@ def _singleton_repo_for_target(
     client: Any,
     target: str,
     *,
-    match_agents,
+    match_agents: Callable[[str, list[dict[str, Any]]], list[str]],
 ) -> SingletonRepo | None:
     repo_name = repo_name_from_anchor_key(target)
     if repo_name:
@@ -51,7 +52,7 @@ def reject_singleton_create(
     *,
     client: Any,
     target: str,
-    match_agents,
+    match_agents: Callable[[str, list[dict[str, Any]]], list[str]],
 ) -> None:
     """Raise a declared create refusal for singleton-class repo targets."""
     repo = _singleton_repo_for_target(client, target, match_agents=match_agents)
@@ -61,7 +62,7 @@ def reject_singleton_create(
         f"[BLOCKED] '{target}' resolves to singleton repo '{repo.name}'.\n"
         "  `create` is the fresh-worktree gesture; singleton repos have one "
         "anchor checkout, not a second worktree to create.\n"
-        f"  Resume the current head:   agent-bridge resume {target}\n"
+        f"  Resume the current head:   agent-bridge resume {target} --legacy-selector\n"
         f"  Roll it forward in place: agent-bridge handoff {target}",
         file=sys.stderr,
     )
@@ -74,9 +75,9 @@ def run_resume(
     target: str,
     reclaim: bool,
     as_json: bool,
-    json_out,
-    match_agents,
-    startup_request_timeout,
+    json_out: Callable[[dict[str, Any]], None],
+    match_agents: Callable[[str, list[dict[str, Any]]], list[str]],
+    startup_request_timeout: Callable[..., float | None],
     strict: bool = False,
     cli: bool = False,
     worktree_only: bool = False,
@@ -262,7 +263,7 @@ def run_handoff(
     target: str,
     reason: str | None,
     seed: bool,
-    match_agents,
+    match_agents: Callable[[str, list[dict[str, Any]]], list[str]],
 ) -> None:
     """Implementation of ``agent-bridge handoff`` with singleton fallback."""
 

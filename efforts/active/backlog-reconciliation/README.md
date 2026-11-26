@@ -522,6 +522,39 @@ the non-public approval conversation.
 
 ## Plan
 
+The [eighteen later TTY-case proposal](journal/2026/11.26-eighteen-later-tty-cases.md)
+adds separate unresolved execution identities to existing #11966 only after
+review and whole actual receiving. Literal reported sources remain distinct
+from workflow metadata heads. #13660's verifier failure and #14053's two
+human repair claims, original mux-safety refusal and later missing-component
+report stay separately OPEN. No technical completion or new implementation
+authority is claimed; every incumbent parent Plan/Validation state remains.
+
+The [further publication and installed-TTY outcome](journal/2026/11.26-further-publication-and-tty-evidence.md)
+retains two distinct publication-boundary cases in existing #7378 and
+fourteen TTY case keys in existing #11966 after reviewed #14754 and whole
+actual receiving. Sixteen redundant leaf tokens have separately audited
+`NOT_PLANNED` dispositions; fifty-one publication and ninety-two TTY rows
+remain OPEN. #13550's unchanged automated recurrence retains its second
+failed execution. Human diagnostic requests #13414/#13427 and distinct
+verifier #13405 / unsigned-build #13551 remain separately OPEN.
+Two equal complete censuses measure 671 whole OPEN: 293 original-cohort and
+378 inflow; one arrival offsets the sixteen departures from 686.
+The factual outcome merged in #14757; every incumbent parent
+Plan/Validation state remains unchanged.
+
+The [checkout-policy completion and nine-case TTY outcome](journal/2026/11.26-checkout-policy-completion-and-nine-tty-cases.md)
+records independently acknowledged #13264 source completion through #13265,
+without claiming whole installed-TTY qualification. After reviewed #14750,
+whole actual #11966 receiving and separate provenance/routing/acknowledgment/
+proper-reason audits, nine redundant leaf tokens retired `NOT_PLANNED`.
+All seventy-eight registered technical rows and ten human comments remain;
+the six source-input gaps, #13263's specifically discussed generation,
+assigned #13268/#13269 and #13260's distinct module-health request stay OPEN.
+Two equal complete censuses measure 686 whole OPEN: 293 original-cohort and
+393 inflow, 43 below fixed 729. The factual outcome merged in #14751;
+no incumbent parent Plan/Validation item is resolved by this slice.
+
 The [six further occurrence outcome](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
 retains four additional independent reuse cases under existing #7872 and two
 publication cases under existing #7378 after reviewed #14672 and whole actual
@@ -1809,6 +1842,22 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [later publisher and installed-TTY delivery](journal/2026/11.26-later-publisher-and-tty-occurrences.md)
+records nineteen audited tracking-only retirements after both whole accepted
+receivers. All forty-nine publisher and sixty-nine TTY registered technical
+cases remain OPEN in #7378/#11966, with the 120-second retained-asset read,
+six literal HTTP 403 observations and #13062's separate human follow-up
+preserved. The complete 03:53 PST census is 696 whole open; no technical
+completion, execution, custody transfer or parent-gate change is inferred.
+
+The [strict-import completion and thirteen-case continuation](journal/2026/11.26-strict-import-completion-and-thirteen-tty-cases.md)
+records #11506's independently audited finite `COMPLETED` disposition and
+thirteen audited tracking-only retirements after reviewed, whole accepted
+receiving in existing #11966. All fifty-seven registered technical cases
+remain OPEN there. The complete 02:38 PST census is 714 whole open; all
+incumbent diagnostics, custodians, actual holds and parent Plan/Validation
+states remain, without a new target or renewal question.
 
 The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
 credits #4619's newly accepted observation/task-closeout lanes before selecting

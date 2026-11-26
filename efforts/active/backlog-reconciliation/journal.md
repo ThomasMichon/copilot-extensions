@@ -3,6 +3,16 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-26 - Eighteen later TTY cases: receiving proposal and separate verifier/native keepers](journal/2026/11.26-eighteen-later-tty-cases.md)
+
+- [2026-11-26 - Sixteen audited publication/TTY handoffs and 671 whole open](journal/2026/11.26-further-publication-and-tty-evidence.md)
+
+- [2026-11-26 - Checkout-policy completion, nine audited TTY handoffs and 686 whole open](journal/2026/11.26-checkout-policy-completion-and-nine-tty-cases.md)
+
+- [2026-11-26 - Nineteen audited publisher/TTY tracking retirements, retained human diagnostics and 696 whole open](journal/2026/11.26-later-publisher-and-tty-occurrences.md)
+
+- [2026-11-26 - One strict-import completion, thirteen tracking retirements and 714 whole open](journal/2026/11.26-strict-import-completion-and-thirteen-tty-cases.md)
+
 - [2026-11-25 - Four audited publication tracking handoffs, six whole keepers and 784 whole open](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
 
 - [2026-11-25 - Two literal coverage-bound completions, seven tracking handoffs and 788 whole open](journal/2026/11.25-coverage-bound-and-further-occurrences.md)

@@ -1,0 +1,9 @@
+{
+  "comment": "Include original invalid-budget refusals without native helper imports in guarded promotion units",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

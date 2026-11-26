@@ -115,6 +115,11 @@ adds explicit `github_snapshot_batches: true` owner metadata and a per-repositor
 `snapshot_batch` protocol selection. Omission retains scalar acquisition.
 Its additive adoption, durable primary/shared-secondary backoff, interrupted-read
 refusal and compatible scalar rollback keep the same writer and cache owners.
+The optional [owner recovery API](../../plugins/agent-pull-requests/docs/snapshot-batches.md#explicit-owner-recovery-api)
+lets an embedding supervisor retain an unresolved query as unknown while
+admitting future observations after actual graceful drain. It is not a CLI,
+HTTP operation or automatic service-start action; the supervisor retains
+current-owner proof and effect authority.
 
 ## Provision and foreground lifetime
 
