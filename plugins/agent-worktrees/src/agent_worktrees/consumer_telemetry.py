@@ -20,6 +20,9 @@ from typing import Any
 
 SOURCE = "agent-worktrees"
 SOURCE_SCHEMA = "worktrees.lifecycle.v1"
+HOOK_SOURCE_SCHEMA = "hook.lifecycle.v1"
+# Shared with scripts/hook_telemetry.py, which writes the journal.
+HOOK_JOURNAL_DIRECTORY = "consumer-telemetry-hooks"
 
 # First verb token -> (kind, stage-or-action).  Only mutating lifecycle verbs
 # are observed; read-only verbs never pay for a policy lookup.
@@ -290,6 +293,39 @@ def _offer(event: dict[str, Any]) -> None:
         return
 
 
+def _offer_hook_journal() -> None:
+    """Deliver pending sessionStart hook records through their own admitted route.
+
+    Hooks never launch a receiver, so this finite owner drains the journal they
+    wrote.  Admission is checked before draining, so a refused route leaves the
+    records pending; drained records that cannot be offered are lost, never
+    duplicated (consumer-telemetry-command, `hook.lifecycle.v1`).
+    """
+    try:
+        from process_telemetry import hook_journal
+        from process_telemetry.finite_owner import FiniteOwner
+
+        from .config import install_dir
+
+        root = install_dir()
+        directory = root / HOOK_JOURNAL_DIRECTORY
+        if not directory.is_dir():
+            return
+        owner = FiniteOwner.from_directory(
+            root, source=SOURCE, source_schema=HOOK_SOURCE_SCHEMA,
+        )
+        if owner.legacy or owner.refusal is not None:
+            return
+        events = hook_journal.drain(directory)
+        if not events:
+            return
+        with owner:
+            for event in events:
+                owner.emit(event)
+    except Exception:
+        return
+
+
 def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
     """Wrap the console `main`; unobserved verbs run it directly."""
 
@@ -320,6 +356,7 @@ def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
                     kind, name, code=code, interrupted=interrupted,
                     duration_ms=int((time.monotonic() - started) * 1000),
                 ))
+                _offer_hook_journal()
             except BaseException:
                 # Delivery never replaces the command's own result or exception,
                 # including an interrupt or cancellation raised while offering.
