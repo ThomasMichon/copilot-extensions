@@ -347,32 +347,48 @@ def _reclaim(scratch: list[Path], now_ms: int, stale_after_ms: int) -> None:
             continue
 
 
-def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> None:
-    """Remove committed markers whose records this drain handed off; the lock is held."""
+def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> set[tuple[Any, ...]]:
+    """Remove committed markers for `keys`; return the keys not confirmed settled.
+
+    The lock is held.  A key stays unconfirmed when its marker could not be
+    removed, or when the bounded scan ended before every entry was examined.
+    """
     if not keys:
-        return
+        return set()
+    unsettled: set[tuple[Any, ...]] = set()
     with os.scandir(directory) as entries:
         for examined, item in enumerate(entries, 1):
             if examined > SCAN_LIMIT:
-                return
+                return set(keys)
             if not item.name.endswith(".start"):
                 continue
             path = directory / item.name
             try:
                 state = _read_marker(path)
-            except OSError:
+            except FileNotFoundError:
                 continue
+            except OSError:
+                state = None
             record = state.get("record") if state is not None else None
-            if type(record) is dict and _key(record) in keys:
-                with contextlib.suppress(OSError):
-                    path.unlink()
+            key = _key(record) if type(record) is dict else None
+            if key is None or key not in keys:
+                continue
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unsettled.add(key)
+    return unsettled
 
 
 def drain(directory: Path, *, limit: int = DRAIN_LIMIT) -> list[dict[str, Any]]:
     """Remove and return up to `limit` observations; the rest stay pending.
 
-    Returned records leave the journal before they are handed to the caller,
-    so a drained record is never replayed.
+    A record leaves the journal only after any committed marker that carries
+    it is confirmed removed, so neither a drained record nor its marker can be
+    reported again.  A record whose marker removal is unconfirmed stays
+    pending, behind the other records, without being returned.
     """
     directory = Path(directory)
     source = directory / "pending.jsonl"
@@ -389,19 +405,25 @@ def drain(directory: Path, *, limit: int = DRAIN_LIMIT) -> list[dict[str, Any]]:
             lines = data[:PENDING_LIMIT].splitlines(keepends=True)
             if lines and not lines[-1].endswith(b"\n"):
                 lines.pop()
-            taken, rest = lines[:limit], b"".join(lines[limit:])
-            if rest:
+            taken, rest = lines[:limit], lines[limit:]
+            candidates: list[tuple[bytes, dict[str, Any]]] = []
+            for line in taken:
+                try:
+                    candidates.append((line, _project(json.loads(line))))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+            unsettled = _settle(
+                directory, {key for _, event in candidates if (key := _key(event)) is not None},
+            )
+            retained = [line for line, event in candidates if _key(event) in unsettled]
+            remaining = b"".join(rest + retained)
+            if remaining:
                 scratch = directory / f".{uuid.uuid4().hex}.pending"
-                scratch.write_bytes(rest)
+                scratch.write_bytes(remaining)
                 os.replace(scratch, source)
             else:
                 source.unlink()
-            for line in taken:
-                try:
-                    events.append(_project(json.loads(line)))
-                except (ValueError, TypeError, AttributeError):
-                    continue
-            _settle(directory, {key for event in events if (key := _key(event)) is not None})
+            events = [event for _, event in candidates if _key(event) not in unsettled]
     except OSError:
-        return events
+        return []
     return events

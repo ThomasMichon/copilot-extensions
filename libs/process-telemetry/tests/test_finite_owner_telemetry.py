@@ -318,6 +318,23 @@ def test_drain_settles_a_committed_marker_left_after_its_append(
     assert hook_journal.drain(tmp_path) == []
 
 
+def test_drain_retains_a_record_while_its_marker_cannot_be_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    real_unlink = _failing_marker_unlink(monkeypatch)
+    run.finish(outcome="success")
+    assert hook_journal.drain(tmp_path) == []
+    assert len(list(tmp_path.glob("*.start"))) == 1
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert hook_journal.drain(tmp_path) == []
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    drained = hook_journal.drain(tmp_path)
+    assert [(event["outcome"], event["run_sequence"]) for event in drained] == [("success", 1)]
+    assert len(list(tmp_path.glob("*.start"))) == 1
+    assert hook_journal.drain(tmp_path) == []
+
+
 class _Stopped(BaseException):
     """Stands in for the runtime stopping a hook process mid-commit."""
 
