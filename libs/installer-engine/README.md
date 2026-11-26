@@ -61,6 +61,14 @@ reuse behavior. This does not qualify managed Python on policy-enforcing hosts
 or migrate the installers' earlier activation and bootstrap readers.
 The legacy `Get-SignedBasePython` discovery API remains unchanged for
 unmigrated consumers; these constructors use the separate managed owner instead.
+On Windows, when UV refuses a bare `X.Y` request because Windows
+RedirectionGuard rejects its minor-version link (`os error 448`, for example
+on Microsoft Dev Box), the PowerShell constructor retries once with the
+highest exact `X.Y.Z` managed interpreter that UV itself reports: it lists
+candidate patches with `uv python list X.Y --managed-python --all-versions`
+and confirms each with `uv python find X.Y.Z --managed-python`, neither of
+which reads UV's on-disk layout or the refused link. It
+still requires UV-managed selection and never falls back to another minor.
 
 The shell-native `resolve_uv_runtime_python` adapter selects an already-resolved
 completed application interpreter through PATH uv, without configuration/project

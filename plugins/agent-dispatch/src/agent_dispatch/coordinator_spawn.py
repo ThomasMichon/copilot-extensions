@@ -9,11 +9,12 @@ import sqlite3
 import subprocess
 from typing import Any, Literal, cast
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
 from .queue import TaskQueue
+from .queue_placement_audit import record_placement_decision as _record_placement
 from .queue_records import SpawnReservation, TaskError, WorkerAdmissionInhibited
 from .routing_provenance import RoutingAssignment
 from .queue_pool_placement import (
@@ -589,6 +590,18 @@ def register_spawn_routes(
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/placement-decision")
+    def record_placement_decision(key: str, body: dict[str, Any] = Body(...)) -> Json:
+        try:
+            result = _record_placement(queue, key, body)
+        except TaskError as exc:
+            msg = str(exc)
+            raise HTTPException(status_code=404 if msg.startswith("no such reservation") else 422,
+                                detail=msg) from exc
+        if result["recorded"]:
+            bus.publish({"type": "spawn.placement_decision", **result})
         return result
 
     @app.post("/spawn-reservations/{key}/startup-fence")

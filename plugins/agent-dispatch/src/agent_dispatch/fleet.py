@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import os
 import shutil
 import subprocess
 import time
@@ -66,7 +68,7 @@ def _ssh_alias(host: str) -> str:
     return host.strip().lower()
 
 
-def host_can_embody(host: str, *, timeout: float = 8.0) -> bool:
+def host_can_embody(host: str, *, timeout: float | None = None) -> bool:
     """True when ``host`` is reachable over SSH **and** has ``agent-worktrees``.
 
     A single cheap probe that doubles as reachability + capability: SSH to the
@@ -78,7 +80,7 @@ def host_can_embody(host: str, *, timeout: float = 8.0) -> bool:
     return _host_has_command(host, "agent-worktrees", timeout=timeout)
 
 
-def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
+def host_can_bridge(host: str, *, timeout: float | None = None) -> bool:
     """True when ``host`` is reachable over SSH **and** has ``agent-bridge``.
 
     The **headless-fleet** liveness probe -- a headless fleet body embodies via
@@ -100,7 +102,7 @@ POSIX_SHELL = "posix"
 WINDOWS_SHELL = "windows"
 
 
-def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
+def host_bridge_shell(host: str, *, timeout: float | None = None) -> str | None:
     """Classify the SSH login shell under which ``host`` resolves ``agent-bridge``.
 
     Returns :data:`POSIX_SHELL`, :data:`WINDOWS_SHELL`, or ``None`` when the
@@ -112,7 +114,7 @@ def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
     return _host_command_shell(host, "agent-bridge", timeout=timeout, windows=True)
 
 
-def require_posix_bridge_host(host: str, *, timeout: float = 8.0) -> None:
+def require_posix_bridge_host(host: str, *, timeout: float | None = None) -> None:
     """Raise :class:`~agent_dispatch.embody.EmbodyUnavailable` unless ``host``
     resolves ``agent-bridge`` under a POSIX login shell.
 
@@ -144,15 +146,36 @@ def _posix_command_probe(command: str) -> str:
     return f"case posix in posix) command -v {command};; esac"
 
 
+#: Default bound (seconds) on ONE fleet liveness SSH round trip. A relayed SSH
+#: hop (for example a dev-tunnel ``ProxyCommand``) to a Windows host can take
+#: well over 5 s while the host is healthy.
+_FLEET_PROBE_TIMEOUT_DEFAULT = 15.0
+
+
+def fleet_probe_timeout() -> float:
+    """The bound (seconds) on one fleet host liveness SSH round trip
+    (``AGENT_DISPATCH_FLEET_PROBE_TIMEOUT``). Degrades to the default on
+    unset, non-positive, non-finite or unparseable values."""
+    raw = os.environ.get("AGENT_DISPATCH_FLEET_PROBE_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return _FLEET_PROBE_TIMEOUT_DEFAULT
+        if value > 0 and math.isfinite(value):
+            return value
+    return _FLEET_PROBE_TIMEOUT_DEFAULT
+
+
 def _host_has_command(
-    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+    host: str, command: str, *, timeout: float | None = None, windows: bool = False
 ) -> bool:
     """SSH to ``host`` (SSH alias) and check that ``command`` resolves there."""
     return _host_command_shell(host, command, timeout=timeout, windows=windows) is not None
 
 
 def _host_command_shell(
-    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+    host: str, command: str, *, timeout: float | None = None, windows: bool = False
 ) -> str | None:
     """Classify the login shell under which ``command`` resolves on ``host``.
 
@@ -164,34 +187,51 @@ def _host_command_shell(
     The POSIX probe (:func:`_posix_command_probe`) counts only when it exits 0
     **and** prints the resolved command. With ``windows``, a host that fails
     the POSIX probe (other than an SSH-level failure, exit 255) gets one
-    ``where.exe <command>`` probe within the same ``timeout`` budget;
-    ``where.exe`` behaves the same under ``cmd.exe`` and PowerShell.
+    ``where.exe <command>`` probe; ``where.exe`` behaves the same under
+    ``cmd.exe`` and PowerShell.
+
+    ``timeout`` bounds **each** SSH round trip (default
+    :func:`fleet_probe_timeout`), so a slow relayed hop
+    cannot starve the second probe. An SSH-level failure (exit 255) is retried
+    once, since a cold relayed hop can drop its first connect; a second 255
+    or any timeout ends the probe, so an unreachable host still fails in
+    bounded time. The shell that
+    last answered for a host is remembered and tried first next time, so a
+    known Windows host needs one round trip, not two.
     """
     exe = shutil.which("ssh")
     if exe is None:
         return None
+    per_probe = fleet_probe_timeout() if timeout is None else timeout
+    alias = _ssh_alias(host)
     probes = [(POSIX_SHELL, _posix_command_probe(command))]
     if windows:
         probes.append((WINDOWS_SHELL, f"where.exe {command}"))
-    deadline = time.monotonic() + timeout
-    budget = timeout
+        if _SHELL_HINTS.get(alias) == WINDOWS_SHELL:
+            probes.reverse()
     for shell, probe in probes:
         cmd = [
             exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            _ssh_alias(host), probe,
+            alias, probe,
         ]
         try:
-            result = run_ssh_command(cmd, timeout=budget)
+            result = run_ssh_command(cmd, timeout=per_probe)
+            if result.returncode == 255:
+                # One retry: a cold relayed hop can drop the first connect.
+                result = run_ssh_command(cmd, timeout=per_probe)
         except (OSError, subprocess.SubprocessError):
             return None
         if result.returncode == 0 and (result.stdout or "").strip():
+            _SHELL_HINTS[alias] = shell
             return shell
         if result.returncode == 255:
             return None
-        budget = deadline - time.monotonic()
-        if budget <= 0:
-            return None
     return None
+
+
+#: SSH alias -> login shell that last resolved a probed command there. Only
+#: an ordering hint: a wrong hint costs one extra round trip, never a result.
+_SHELL_HINTS: dict[str, str] = {}
 
 
 def _selector_tokens(value: object) -> set[str]:
@@ -288,6 +328,8 @@ class FleetSpawner:
         self.placement = placement
         #: task_id -> chosen host, so can_spawn() and __call__() agree per cycle.
         self._selection: dict[str, str] = {}
+        #: task_id -> the last ``select`` explanation (recorded as a task event).
+        self._decisions: dict[str, dict[str, Any]] = {}
         #: host -> (checked_at, is_live); short-TTL so a cycle probes each host once.
         self._live_cache: dict[str, tuple[float, bool]] = {}
 
@@ -295,6 +337,7 @@ class FleetSpawner:
 
     def begin_placement_cycle(self) -> None:
         """Start a supervisor cycle: drop the previous cycle's provider result."""
+        self._decisions.clear()
         if self.placement is not None:
             self.placement.begin_cycle()
 
@@ -345,17 +388,62 @@ class FleetSpawner:
         provider kept it and it is live; it never moves to another host.
         """
         tid = str(task.get("id"))
-        candidates = self._candidates(task)
-        if self.placement is not None:
-            candidates = self.placement.order(candidates)
+        eligible = self._candidates(task)
+        candidates = self.placement.order(eligible) if self.placement is not None else eligible
+        probes: dict[str, bool] = {}
+        selected: str | None = None
         for host in candidates:
-            if self._is_live(host):
-                self._selection[tid] = host
-                return host
+            probes[host] = self._is_live(host)
+            if probes[host]:
+                selected = host
+                break
+        self._decisions[tid] = self._decision(tid, eligible, candidates, probes, selected)
+        log.debug("fleet placement for task %s: %s", tid, json.dumps(self._decisions[tid], sort_keys=True))
+        if selected is not None:
+            self._selection[tid] = selected
+            return selected
         self._selection.pop(tid, None)
         if self.placement is not None:
             log.info("fleet: no eligible host for task %s this cycle; deferring", tid)
         return None
+
+    def _decision(
+        self, tid: str, eligible: list[str], merged: list[str],
+        probes: dict[str, bool], selected: str | None,
+    ) -> dict[str, Any]:
+        """Explain one ``select``: what the provider ranked and why ``selected`` won."""
+        decision: dict[str, Any] = {
+            "decision_id": uuid.uuid4().hex[:12],
+            "task_id": tid,
+            "pool": list(self.pool),
+            "task_candidates": eligible,
+            "merged_order": merged,
+            "probes": probes,
+            "selected": selected,
+        }
+        if self.placement is None:
+            return decision
+        decision.update(self.placement.audit())
+        ordered = decision.get("provider_ordered") or []
+        decision["omitted_by_provider"] = [h for h in self.placement.declaration.hosts if h not in ordered]
+        decision["selected_provider_rank"] = (
+            ordered.index(selected) + 1 if selected in ordered else None
+        )
+        skipped: list[dict[str, Any]] = []
+        for rank, host in enumerate(ordered, 1):
+            if host == selected:
+                break
+            reason = ("excluded_by_task" if host not in eligible
+                      else "not_live" if probes.get(host) is False else "not_reached")
+            skipped.append({"host": host, "rank": rank, "reason": reason})
+        if selected is not None and selected not in self.placement.managed and ordered:
+            skipped.append({"host": selected, "reason": "unmanaged_host_ahead_in_pool"})
+        decision["skipped"] = skipped
+        return decision
+
+    def take_placement_decision(self, task_id: str) -> dict[str, Any] | None:
+        """Remove and return this cycle's last ``select`` decision for ``task_id``."""
+        return self._decisions.pop(str(task_id), None)
 
     def can_spawn(self, task: dict[str, Any]) -> bool:
         """Capacity gate: True iff a live pool host is available for ``task``.

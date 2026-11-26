@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -217,7 +218,35 @@ def _capture_posix(command: ProviderCommand, payload: str) -> tuple[int, str]:
     return proc.returncode, stdout
 
 
-def run_provider(command: ProviderCommand, candidates: Sequence[str]) -> tuple[str, ...]:
+class ProviderOrder(tuple[str, ...]):
+    """A validated provider ordering, plus any optional per-host ``scores``."""
+
+    scores: dict[str, float]
+
+    def __new__(cls, ordered: Sequence[str], scores: Mapping[str, float] | None = None) -> ProviderOrder:
+        self = super().__new__(cls, ordered)
+        self.scores = dict(scores or {})
+        return self
+
+
+def _scores(data: Mapping[str, object], known: set[str]) -> dict[str, float]:
+    """Optional ``scores`` map (host -> number); recorded for audit, never ordering."""
+    raw = data.get("scores")
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise PlacementProviderError("'scores' must be an object")
+    scores: dict[str, float] = {}
+    for host, value in raw.items():
+        if host not in known:
+            raise PlacementProviderError(f"unknown scored host {host!r}")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise PlacementProviderError(f"score for {host!r} must be a finite number")
+        scores[host] = float(value)
+    return scores
+
+
+def run_provider(command: ProviderCommand, candidates: Sequence[str]) -> ProviderOrder:
     """Call the provider once; return its validated ordering or raise."""
     payload = json.dumps({"version": PROTOCOL_VERSION, "candidates": list(candidates)})
     returncode, stdout = _capture(command, payload)
@@ -240,7 +269,7 @@ def run_provider(command: ProviderCommand, candidates: Sequence[str]) -> tuple[s
         if host in result:
             raise PlacementProviderError(f"duplicate host {host!r}")
         result.append(host)
-    return tuple(result)
+    return ProviderOrder(result, _scores(data, known))
 
 
 ProviderRunner = Callable[[ProviderCommand, Sequence[str]], tuple[str, ...]]
@@ -264,6 +293,8 @@ class PlacementOrdering:
         self._clock = clock
         self._called = False
         self._ordered: tuple[str, ...] | None = None
+        #: The last call's failure text (``None`` after a successful call).
+        self.last_error: str | None = None
         #: Provider calls made (all cycles) and the last call's wall time, in seconds.
         self.calls = 0
         self.last_duration: float | None = None
@@ -272,6 +303,23 @@ class PlacementOrdering:
         """Forget the previous cycle's result; the next need calls again."""
         self._called = False
         self._ordered = None
+        self.last_error = None
+
+    def audit(self) -> dict[str, object]:
+        """This cycle's provider exchange, for the placement decision record."""
+        ordered = self._ordered
+        record: dict[str, object] = {
+            "provider": self.declaration.name,
+            "candidates_sent": list(self.declaration.hosts),
+            "provider_called": self._called,
+            "provider_ordered": None if ordered is None else list(ordered),
+        }
+        scores = getattr(ordered, "scores", None)
+        if scores:
+            record["provider_scores"] = dict(scores)
+        if self.last_error is not None:
+            record["provider_error"] = self.last_error
+        return record
 
     def _provider_order(self) -> tuple[str, ...] | None:
         if not self._called:
@@ -280,8 +328,10 @@ class PlacementOrdering:
             started = self._clock()
             try:
                 self._ordered = self._runner(self.command, self.declaration.hosts)
+                self.last_error = None
             except PlacementProviderError as exc:
                 self._ordered = None
+                self.last_error = str(exc)
                 log.warning(
                     "placement provider %r %s; managed hosts %s skip this cycle",
                     self.declaration.name, exc, ", ".join(self.declaration.hosts),

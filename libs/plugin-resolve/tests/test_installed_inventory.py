@@ -94,3 +94,26 @@ def test_github_registration_identity_matches_case_insensitively(
     native = _catalog(cache, "Example-Owner-Fixture-Market", origin)
     item = installed_item(SOURCE, home, cache)
     assert item["inventory"]["catalog_root"] == str(native.resolve())
+
+
+def test_inventory_reuses_installed_plugin_when_github_repo_differs_only_in_case(
+    inventory: tuple[Path, Path],
+) -> None:
+    from plugin_resolve.inventory import inventory_item
+
+    home, cache = inventory
+    _catalog(cache, "example-owner-fixture-market",
+             "https://github.com/example-owner/fixture-market.git")
+    definition = {"source": {"source": "github", "repo": "Example-Owner/Fixture-Market"}}
+    item = inventory_item(SOURCE, home, cache, definition=definition)
+    assert item is not None
+    assert item["marketplace"] == definition
+    assert item["inventory"]["payload"].endswith("helper")
+
+
+def test_inventory_does_not_reuse_a_different_github_repo(inventory: tuple[Path, Path]) -> None:
+    from plugin_resolve.inventory import inventory_item
+
+    home, cache = inventory
+    definition = {"source": {"source": "github", "repo": "other-owner/fixture-market"}}
+    assert inventory_item(SOURCE, home, cache, definition=definition) is None

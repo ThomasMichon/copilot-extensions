@@ -21,17 +21,13 @@ from ssh_manager import (
 )
 
 from .agent_registry import AgentResolver
-from .client import (
-    BridgeClient,
-    BridgeClientError,
-    BridgeConnectionError,
-    SseStream,
-)
+from .client import BridgeClient, BridgeClientError, BridgeConnectionError, SseStream
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 from .remote_errors import RemoteBridgeError
 from .remote_observation import RemoteObservationMixin
 from .remote_native_prompt import RemoteNativePromptMixin, submit_native
 from .remote_live_prompt import RemoteExactLivePromptMixin, submit_exact_live
+from .remote_create_timeout import create_start_kwargs
 from .remote_operation_versions import (
     REMOTE_OPERATION_VERSION as REMOTE_OPERATION_VERSION,
     REMOTE_COPILOT_ARGS_MIN_VERSION as REMOTE_COPILOT_ARGS_MIN_VERSION,
@@ -316,6 +312,7 @@ class CarrierRequestRouter:
                 caller_id=caller_id,
                 force_new=True,
                 copilot_args=copilot_args,
+                **create_start_kwargs(payload.get("timeout")),
             )
         )
         try:
@@ -967,6 +964,7 @@ class RemoteOperationService(RemoteObservationMixin, RemoteNativePromptMixin, Re
         }
         if copilot_args is not None:
             payload["copilot_args"] = validate_copilot_args(copilot_args)
+        payload["timeout"] = float(timeout)
         response = await self._request(host, payload, timeout=timeout)
         result = response.get("result")
         return dict(result) if isinstance(result, dict) else {}
