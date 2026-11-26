@@ -14,7 +14,7 @@ import time
 import pytest
 
 from .managed_command_fixture import (
-    HEADLESS, PLUGIN, REPO, packaged_command, prepare_application, prepared_python, snapshot,
+    HEADLESS, PLUGIN, REPO, bash_host, packaged_command, prepare_application, prepared_python, snapshot,
 )
 
 __all__ = ["packaged_command", "prepared_python"]
@@ -32,9 +32,9 @@ def test_ready_command_admits_exact_prepared_application(
     prepared_python: tuple[Path, Path, Path], packaged_command: Path,
     record_property: Callable[[str, object], None],
 ) -> None:
-    if (host == "bash" and os.name == "nt") or (host == "powershell" and os.name != "nt"):
+    if host == "powershell" and os.name != "nt":
         pytest.skip("This control requires the addressed native shell")
-    shell = shutil.which(host)
+    shell = bash_host() if host == "bash" else shutil.which(host)
     if not shell:
         pytest.skip(f"{host} unavailable")
     uv, application, store = prepared_python
@@ -89,9 +89,10 @@ def test_ready_command_admits_exact_prepared_application(
             assert executable, name
             (tools / name).symlink_to(executable)
     for name in ("python", "python3", "py", "agent-machines"):
-        poison = tools / (name + ".cmd" if os.name == "nt" else name)
+        native_cmd = os.name == "nt" and host != "bash"
+        poison = tools / (name + ".cmd" if native_cmd else name)
         poison.write_text(
-            '@echo off\n> "%AMBIENT_MARKER%" echo called\nexit /b 91\n' if os.name == "nt" else
+            '@echo off\n> "%AMBIENT_MARKER%" echo called\nexit /b 91\n' if native_cmd else
             '#!/bin/sh\nprintf called > "$AMBIENT_MARKER"\nexit 91\n', encoding="utf-8",
         )
         poison.chmod(0o700)
@@ -102,6 +103,13 @@ def test_ready_command_admits_exact_prepared_application(
         "UV_PYTHON_INSTALL_DIR": str(store), "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
         "UV_OFFLINE": "1", "UV_NO_CONFIG": "1", "UV_PYTHON_DOWNLOADS": "never",
     }
+    if host == "bash" and os.name == "nt":
+        git = shutil.which("git")
+        assert git is not None
+        git_root = Path(git).resolve().parents[1]
+        env["PATH"] = os.pathsep.join((
+            str(tools), str(git_root / "usr/bin"), str(git_root / "bin"),
+        ))
     for name in list(env):
         if name.startswith(("AGENT_MACHINES_", "AGENT_RT_", "MACHINES_", "COPILOT_EXTENSIONS_",
                             "UPDATE_DRIVER_")) or name in ("BASH_ENV", "ENV", "COPILOT_PLUGIN_ROOT"):
@@ -154,11 +162,13 @@ def test_ready_command_admits_exact_prepared_application(
             "status": "ready", "reason": "namespaced-active" if context else "policy-default-false",
             "actualMode": "namespaced" if context else "legacy",
             "desiredMode": "namespaced" if context else "legacy",
-            "runtimeRoot": str(root), "context": str(context) if context else "",
+            "runtimeRoot": root.as_posix() if host == "bash" else str(root),
+            "context": str(context) if context else "",
             "marketplaceId": "test-market",
         }),
         AGENT_MACHINES_NO_SELFPROVISION="1", APPLICATION_PROOF=str(proof),
-        MACHINES_UV_LOG=str(uv_log), AMBIENT_MARKER=str(tmp_path / "ambient-ran"),
+        MACHINES_UV_LOG=uv_log.as_posix() if host == "bash" else str(uv_log),
+        AMBIENT_MARKER=(tmp_path / "ambient-ran").as_posix(),
         UV_PYTHON="unrelated-python", UV_NO_MANAGED_PYTHON="1",
         UV_CONFIG_FILE="missing-relative.toml", UV_NO_CONFIG="false",
         VIRTUAL_ENV="unrelated", CONDA_PREFIX="unrelated", PYTHONPATH="unrelated", PYTHONHOME="unrelated",
@@ -182,13 +192,14 @@ def test_ready_command_admits_exact_prepared_application(
         "installer-readiness": ["installer-readiness"], "invocation-contract": ["invocation-contract"],
     }.get(scenario, ["inspect"])
     arguments = [*prefix, "space value", 'quote"value', "", "end\\", "\u03bb"]
-    command = [shell, str(payload / "bin/agent-machines"), *arguments]
+    command = [shell, (payload / "bin/agent-machines").as_posix(), *arguments]
     descriptors = tmp_path / "inherited-fds"
     if host == "bash":
-        env["FIXTURE_HOME"] = str(home)
+        env["FIXTURE_HOME"] = home.as_posix()
         command = [
             shell, "-c",
-            'getent() { printf "fixture:x:%s:0::%s:/bin/bash\\n" "$(id -u)" "$FIXTURE_HOME"; }\n'
+            'export HOME="$(cd "$FIXTURE_HOME" && pwd)"\n'
+            'getent() { printf "fixture:x:%s:0::%s:/bin/bash\\n" "$(id -u)" "$HOME"; }\n'
             'export -f getent\nexec bash "$@"', "machines-fixture", *command[1:],
         ]
     else:
@@ -200,7 +211,7 @@ def test_ready_command_admits_exact_prepared_application(
             "exit $LASTEXITCODE\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]
-    if host == "bash" and scenario == "module":
+    if host == "bash" and os.name != "nt" and scenario == "module":
         env["INHERITED_FD_TARGET"] = str(descriptors)
         command = [
             shell, "-c",
@@ -211,6 +222,12 @@ def test_ready_command_admits_exact_prepared_application(
             'exit "$code"\n', "machines-inherited-descriptors", *command,
         ]
     before_slot, before_payload = snapshot(slot), snapshot(payload)
+    lookup_python = str(python)
+    if host == "bash" and os.name == "nt":
+        lookup_python = subprocess.check_output(
+            [shell, "-c", 'cygpath -au -- "$1"', "machines-address", python.as_posix()],
+            env=env, text=True, timeout=15, creationflags=HEADLESS,
+        ).strip()
     samples: list[float] = []
     missing = scenario.startswith("missing-")
     for cycle in range(1 if missing else 2):
@@ -226,7 +243,7 @@ def test_ready_command_admits_exact_prepared_application(
         assert result.returncode == (126 if missing else 37), result.stdout + result.stderr
         lookups = uv_log.read_text(encoding="utf-8").splitlines() if uv_log.exists() else []
         assert lookups == ([] if missing else [
-            f"python find --no-project --managed-python --no-python-downloads {python}",
+            f"python find --no-project --managed-python --no-python-downloads {lookup_python}",
         ] * (cycle + 1)), result.stdout + result.stderr
         if missing:
             assert "application runtime admission" in result.stderr or "uv is unavailable" in result.stderr
@@ -242,7 +259,7 @@ def test_ready_command_admits_exact_prepared_application(
             "isolated": int(isolated), "no_bytecode": not isolated or probe,
             "utf8": int(not isolated or probe),
         }
-        if host == "bash" and scenario == "module":
+        if host == "bash" and os.name != "nt" and scenario == "module":
             assert descriptors.read_text(encoding="utf-8").splitlines() == (
                 [f"application-fd-{fd}" for fd in range(5, 10)]
                 + [f"caller-fd-{fd}" for fd in range(5, 10)]

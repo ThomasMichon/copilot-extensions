@@ -16,6 +16,19 @@ REPO = PLUGIN.parents[1]
 HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def bash_host() -> str | None:
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    if git is None:
+        return None
+    root = Path(git).resolve().parents[1]
+    return next((
+        str(path) for path in (root / "bin/bash.exe", root / "usr/bin/bash.exe")
+        if path.is_file()
+    ), None)
+
+
 def snapshot(root: Path) -> dict[str, str]:
     return {
         str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -25,16 +38,20 @@ def snapshot(root: Path) -> dict[str, str]:
 
 @pytest.fixture(scope="module")
 def prepared_python() -> tuple[Path, Path, Path]:
+    return prepared_python_inputs()
+
+
+def prepared_python_inputs(request: str = "cpython@3.10.20") -> tuple[Path, Path, Path]:
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("This acquisition-free control requires prepared uv")
     result = subprocess.run(
         [uv, "python", "find", "--no-project", "--system", "--managed-python",
-         "--no-python-downloads", "cpython@3.10.20"],
+         "--no-python-downloads", request],
         capture_output=True, text=True, timeout=15, creationflags=HEADLESS,
     )
     if result.returncode:
-        pytest.skip("This acquisition-free control requires prepared CPython 3.10.20")
+        pytest.skip(f"This acquisition-free control requires prepared {request}")
     store = subprocess.check_output(
         [uv, "python", "dir"], text=True, timeout=15, creationflags=HEADLESS,
     ).strip()
@@ -44,6 +61,10 @@ def prepared_python() -> tuple[Path, Path, Path]:
 @pytest.fixture(scope="module")
 def packaged_command(tmp_path_factory: pytest.TempPathFactory) -> Path:
     payload = tmp_path_factory.mktemp("machines-command-package") / "agent-machines"
+    return materialize_command(payload)
+
+
+def materialize_command(payload: Path) -> Path:
     shutil.copytree(PLUGIN / "scripts", payload / "scripts")
     for name in ("plugin.json", "payload-invocation.json", "pyproject.toml", "readiness-isolation.json"):
         shutil.copy2(PLUGIN / name, payload / name)

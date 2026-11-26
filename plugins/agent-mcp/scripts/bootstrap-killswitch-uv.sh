@@ -8,8 +8,21 @@ invoke_uv_bootstrap_environment() (
     exec "$@"
 )
 
+_uv_runtime_posix_address() {
+    case "$1" in
+        /*|[a-zA-Z]:[\\/]*|\\\\*) cygpath -au -- "$1" ;;
+        *) return 1 ;;
+    esac
+}
+
 resolve_uv_runtime_python() (
-    local expected="${1:-}" uv_path python
+    local expected="${1:-}" uv_path python addressed="${1:-}" windows_bash=0
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            windows_bash=1
+            expected="$(_uv_runtime_posix_address "$expected")" || return 1
+            ;;
+    esac
     [[ "$expected" == /* && "$expected" != *$'\n'* && "$expected" != *$'\r'* &&
         -x "$expected" ]] || {
         printf 'The selected application runtime is unavailable; use explicit installation management.\n' >&2
@@ -17,6 +30,9 @@ resolve_uv_runtime_python() (
     }
     if [[ "$#" -gt 1 ]]; then
         uv_path="$2"
+        if [[ "$windows_bash" == 1 ]]; then
+            uv_path="$(_uv_runtime_posix_address "$uv_path")" || return 127
+        fi
         [[ "$uv_path" == /* && "$uv_path" != *$'\n'* && "$uv_path" != *$'\r'* &&
             -f "$uv_path" && -x "$uv_path" ]] || {
             printf 'Bound uv is unavailable; prepare the command prerequisites before launch.\n' >&2
@@ -33,11 +49,14 @@ resolve_uv_runtime_python() (
     export UV_NO_CONFIG=1
     python="$(invoke_uv_bootstrap_environment "$uv_path" python find --no-project --managed-python \
         --no-python-downloads "$expected")" || return
+    if [[ "$windows_bash" == 1 ]]; then
+        python="$(_uv_runtime_posix_address "$python")" || return 1
+    fi
     [[ "$python" == "$expected" ]] || {
         printf 'uv did not select the addressed application runtime; use explicit installation management.\n' >&2
         return 1
     }
-    printf '%s\n' "$python"
+    printf '%s\n' "$addressed"
 )
 
 resolve_uv_bootstrap_python() (
