@@ -484,6 +484,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [six further occurrence proposal](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
+retains four additional independent reuse cases under existing #7872 and two
+publication cases under existing #7378. Its four local delivery gates are
+open; no technical completion, current tracker effect or prospective count
+credit is claimed. Explicit diagnostic keepers, source-correspondence gaps
+and every incumbent Plan/Validation state remain unchanged.
+
 The [publication-guard and explicit-keeper outcome](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
 records four independently audited tracking-only publication handoffs after
 reviewed #14664 and whole actual #7378 receiving. Two legacy exact-candidate
