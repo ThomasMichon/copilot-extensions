@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import copy_context
 import base64
 import binascii
 import hashlib
@@ -84,12 +85,18 @@ def key_binding(context: Any, description: dict[str, Any]) -> None:
 
 def _verify_vault_boundary(
     source: protocol.Setup | None, invocation: VaultInvocation | None,
+    *, workers: ThreadPoolExecutor | None = None,
 ) -> None:
     if source is not None and invocation is not None:
-        with ThreadPoolExecutor(max_workers=2) as workers:
-            checks = [workers.submit(source.verify), workers.submit(invocation.verify)]
-            for check in checks:
-                check.result()
+        if workers is None:
+            with ThreadPoolExecutor(max_workers=2) as owned:
+                _verify_vault_boundary(source, invocation, workers=owned)
+            return
+        checks = [workers.submit(copy_context().run, source.verify),
+                  workers.submit(copy_context().run, invocation.verify)]
+        wait(checks)
+        for check in checks:
+            check.result()
     elif source is not None:
         source.verify()
     elif invocation is not None:
@@ -99,8 +106,9 @@ def _verify_vault_boundary(
 def _vault_call(
     selection: Any, arguments: list[str], *, timeout: int, invocation: VaultInvocation | None = None,
     source: protocol.Setup | None = None, verify_source_after: bool = False,
+    workers: ThreadPoolExecutor | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    _verify_vault_boundary(source, invocation)
+    _verify_vault_boundary(source, invocation, workers=workers)
     environment = (
         dict(invocation.environment) if invocation is not None else protocol._environment(attended=False)
     )
@@ -115,7 +123,7 @@ def _vault_call(
              "--configuration-root", str(Path(selection.configuration_root).expanduser()), *arguments],
             env=environment, timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
         )
-        _verify_vault_boundary(source if verify_source_after else None, invocation)
+        _verify_vault_boundary(source if verify_source_after else None, invocation, workers=workers)
         value = json.loads(completed.stdout, object_pairs_hook=protocol._object)
         if not isinstance(value, dict):
             raise ValueError
@@ -149,6 +157,15 @@ def prepare_key(
     setup: Any, context: Any, description: dict[str, Any], *, invocation: VaultInvocation | None = None,
 ) -> protocol.Outcome | None:
     """Reuse the selected owning Vault before any new enrollment or installation."""
+    # Boundary checks can await Git workers, so settle them before closing the Source scope.
+    with protocol._source_verification_scope(), ThreadPoolExecutor(max_workers=2) as workers:
+        return _prepare_key(setup, context, description, invocation=invocation, workers=workers)
+
+
+def _prepare_key(
+    setup: Any, context: Any, description: dict[str, Any], *, invocation: VaultInvocation | None,
+    workers: ThreadPoolExecutor,
+) -> protocol.Outcome | None:
     selection = context.ssh_key
     key_binding(context, description)
     root = Path(selection.configuration_root).expanduser()
@@ -170,7 +187,9 @@ def prepare_key(
         invocation_options["invocation"] = invocation
     else:
         setup.verify()
-    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30, **invocation_options)
+    code, contract = _vault_call(
+        selection, ["invocation-contract", "--json"], timeout=30, workers=workers, **invocation_options,
+    )
     if (
         code != 0 or contract.get("schema") != "agent-vault.invocation"
         or type(contract.get("version")) is not int or contract["version"] != 1
@@ -192,7 +211,7 @@ def prepare_key(
             invocation_options["verify_source_after"] = operation == "install"
         else:
             setup.verify()
-        code, result = _vault_call(selection, arguments, timeout=120, **invocation_options)
+        code, result = _vault_call(selection, arguments, timeout=120, workers=workers, **invocation_options)
         if operation == "install" and not invocation_options:
             setup.verify()
         if code != 0:

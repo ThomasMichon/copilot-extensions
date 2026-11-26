@@ -1,5 +1,6 @@
 """Installed-owner selection does not guess another Vault or provision one."""
 
+from contextvars import ContextVar
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -46,10 +47,16 @@ def test_key_application_joins_all_fresh_source_and_owner_barriers(
     owner_checks: list[int] = []
     settled: list[tuple[str, int]] = []
     calls: list[list[str]] = []
+    caller_context = ContextVar("key-preparation-caller", default=-1)
+    caller_context.set(0)
+    observations: list[tuple[int, int]] = []
+    workers: set[threading.Thread] = set()
 
     def source_verify() -> None:
         index = len(source_checks)
         source_checks.append(index)
+        observations.append((caller_context.get(), index))
+        workers.add(threading.current_thread())
         try:
             barriers[index].wait(timeout=3)
             if failure == ("source-after" if index == 3 else "source-before") and index in (0, 3):
@@ -60,6 +67,9 @@ def test_key_application_joins_all_fresh_source_and_owner_barriers(
     def owner_verify() -> None:
         index = len(owner_checks)
         owner_checks.append(index)
+        observations.append((caller_context.get(), (0, 1, 1, 2, 2, 3)[index]))
+        if threading.current_thread() is not threading.main_thread():
+            workers.add(threading.current_thread())
         try:
             if index in (0, 2, 4, 5):
                 barriers[(0, 2, 4, 5).index(index)].wait(timeout=3)
@@ -84,6 +94,7 @@ def test_key_application_joins_all_fresh_source_and_owner_barriers(
             if arguments[1] == "install":
                 value.update(private_key_path=description["key_files"]["identity_file"],
                              public_key_path=description["key_files"]["public_key_file"])
+        caller_context.set(len(calls))
         return SimpleNamespace(returncode=0, stdout=json.dumps(value))
 
     monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
@@ -101,6 +112,9 @@ def test_key_application_joins_all_fresh_source_and_owner_barriers(
     assert len(source_checks) == (1 if before_failure else 4)
     assert len(owner_checks) == (1 if before_failure else 6)
     assert len(settled) == len(source_checks) + len(owner_checks)
+    assert all(actual == expected for actual, expected in observations)
+    assert len(workers) <= 2
+    assert all(not worker.is_alive() for worker in workers)
 
 
 @pytest.mark.parametrize("failure", [None, "missing", "foreign", "migration", "no-runtime", "no-retention"])

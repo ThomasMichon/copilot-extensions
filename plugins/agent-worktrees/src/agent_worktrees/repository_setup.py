@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -30,6 +33,7 @@ ENGINE_CONTEXT = "AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE"
 ENGINE_PYTHON = "AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON"
 LIMIT = 16 * 1024
 STATUSES = frozenset({"ready", "needed", "waiting", "refused", "failed"})
+_source_workers: ContextVar[ThreadPoolExecutor | None] = ContextVar("repository_source_workers", default=None)
 
 
 class SetupError(ValueError):
@@ -152,6 +156,20 @@ class Source:
     commit: str
 
 
+@contextmanager
+def _source_verification_scope() -> Iterator[ThreadPoolExecutor]:
+    existing = _source_workers.get()
+    if existing is not None:
+        yield existing
+        return
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        token = _source_workers.set(workers)
+        try:
+            yield workers
+        finally:
+            _source_workers.reset(token)
+
+
 def qualify(path: Path, url: str) -> Source:
     """Read-only qualification; never convert, repair, fetch or reset a checkout."""
     canonical = https_url(url)
@@ -168,8 +186,9 @@ def qualify(path: Path, url: str) -> Source:
         ("status", "--porcelain=v1", "--untracked-files=all"),
         ("ls-files", "-v"),
     )
-    with ThreadPoolExecutor(max_workers=len(queries)) as workers:
-        pending = [workers.submit(_git, path, *arguments) for arguments in queries]
+    with _source_verification_scope() as workers:
+        pending = [workers.submit(copy_context().run, _git, path, *arguments) for arguments in queries]
+        wait(pending)
         top, origin, status, flags = [query.result() for query in pending]
     if Path(top).resolve() != path:
         raise SetupError("Repository target is not the checkout root.")

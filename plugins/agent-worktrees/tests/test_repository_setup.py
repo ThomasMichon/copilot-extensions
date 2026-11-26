@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
@@ -122,6 +123,57 @@ def test_source_queries_overlap_and_settle_before_head(
     selected = setup.qualify(source, URL)
     assert selected.commit == git(source, "rev-parse", "HEAD")
     assert completed == queries
+
+
+@pytest.mark.parametrize("failure", ["modified", "query"])
+def test_source_scope_reuses_workers_with_fresh_context_and_source(
+    source: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    caller_context = ContextVar("source-verification-caller", default=-1)
+    original = setup._git
+    queries = {
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        ("ls-files", "-v"),
+    }
+    rendezvous = threading.Barrier(len(queries), timeout=10)
+    observations: list[tuple[int, tuple[str, ...]]] = []
+    workers: set[threading.Thread] = set()
+    settled: list[tuple[int, tuple[str, ...]]] = []
+
+    def observed(path: Path, *arguments: str) -> str:
+        value = caller_context.get()
+        observations.append((value, arguments))
+        if arguments not in queries:
+            return original(path, *arguments)
+        workers.add(threading.current_thread())
+        try:
+            rendezvous.wait()
+            if value == 2 and failure == "query" and arguments == ("ls-files", "-v"):
+                raise setup.SetupError("query failed")
+            return original(path, *arguments)
+        finally:
+            settled.append((value, arguments))
+
+    monkeypatch.setattr(setup, "_git", observed)
+    try:
+        with setup._source_verification_scope():
+            caller_context.set(0)
+            selected = setup.inspect(source, URL)
+            caller_context.set(1)
+            selected.verify()
+            assert [value for value, _ in observations] == [0] * 9 + [1] * 9
+            assert len(workers) == 4
+            caller_context.set(2)
+            if failure == "modified":
+                (source / "setup.ps1").write_text("preserve", encoding="utf-8")
+            with pytest.raises(setup.SetupError, match="source changes|query failed"):
+                selected.verify()
+            assert {arguments for value, arguments in settled if value == 2} == queries
+            assert all(worker.is_alive() for worker in workers)
+    finally:
+        assert all(not worker.is_alive() for worker in workers)
 
 
 @pytest.mark.parametrize("kind", ["foreign", "transport-path", "untracked", "modified", "linked", "nested"])

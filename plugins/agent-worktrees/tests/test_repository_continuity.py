@@ -233,7 +233,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
 
     def vault_runtime(
         selection: Any, arguments: list[str], *, timeout: int, invocation: Any = None,
-        source: Any = None, verify_source_after: bool = False,
+        source: Any = None, verify_source_after: bool = False, workers: Any = None,
     ) -> tuple[int, dict[str, Any]]:
         if source is not None:
             source.verify()
