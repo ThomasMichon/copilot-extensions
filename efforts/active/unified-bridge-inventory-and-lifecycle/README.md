@@ -107,7 +107,7 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   The released manifest uses the existing release projection; effort files
   remain Dev-only under the independently owned release-scope policy.
   This verifies source release, not diagnosis of the earlier TTY fault.
-  Lifecycle migration remains open. The next provider-first slice adds
+  Lifecycle migration remains open. The identity-pinned provider slice adds
   identity-pinned workspace resume through the existing native, retained and
   singleton owners. Its separate capability and exact route prevent a selected
   conversation from becoming a newer head during lookup-to-resume.
@@ -115,8 +115,16 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   controls pass locally. A retained-successor correction passes 30 focused
   controls. All 11 changed Python files pass whole-file strict checks for Linux
   and Windows targets; install, documentation and module-size guards pass.
-  Source publication and hosted qualification remain; no CLI migration,
-  delivered provider or installed adoption is claimed.
+  #14705 merges on November 26 at 06:24:09 UTC as
+  `f9243b29211aa8418fe3bec1ad78ba63a3909ba7` after current-head approval,
+  no open threads, required source checks and both native OS jobs.
+  All 17 published blobs match the confirmed merge. Natural Dev CI
+  `45767942749` and normal promotion `45769032231` pass. All 13 released
+  content files match Main `e0a62de772b705be095b9547c32dfc99b01f0ee9`,
+  Bridge `0.9.573-dev1`, after #14713. The logical release admission keeps
+  all 10,615 original nodes in order, 142 Bridge controls, the new helper's
+  coverage and the 300-second budget. The provider is source-released.
+  No CLI lifecycle migration or installed adoption is claimed.
   No competing release repair, qualification bypass or installed adoption is claimed.
   The original
   application materializer correction is verified in Main from #14339;
@@ -124,9 +132,9 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   Main snapshot. Full-effort release closure remains open; no competing
   materializer implementation was added.
   The carrier and HTTP expansions did not themselves migrate ordinary CLI
-  callers. The managed consumer above is separate opt-in adoption; legacy
-  defaults remain unchanged.
-  The current source slice qualifies plain send/read/wait defaults over the
+  callers. Their later ordinary default migration is now released; specialized
+  delivery, history and receipt operations retain their existing owners.
+  The released default slice qualifies plain send/read/wait defaults over the
   released exact selector, with an explicit legacy escape and unchanged
   specialized delivery/history/receipt operations. The root project guard and
   Dispatch continuation/startup/observation producers preserve their intended
@@ -180,14 +188,20 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   All 38 other authored files are byte-identical to the clean-reviewed code.
   The actual required checks and both native jobs pass before normal
   role-scoped self-merge. All 39 published blobs match the confirmed squash
-  merge. Source release is the remaining gate for this slice; effectful
-  lifecycle selectors, potential targets and the full root remain separate.
+  merge. That default slice is released as recorded above; effectful lifecycle
+  selectors, potential targets and the full root remain separate.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
   Queued-delivery attribution remains separately open at the installed-adoption
   boundary: the real notification reached the owned model, but its original
   receipt lacked consumption. Relevant fixes #13862 and #13883 are released;
   that does not prove adoption or resolve every queued-input stall.
+  The next opt-in workspace resume caller now passes 238 actor-free controls
+  and 65 contained parser/client/HTTP/native-owner controls. It preserves the
+  existing hosting choice and legacy recovery contracts. All six changed
+  Python files pass whole-file strict checks for Linux and Windows.
+  The remaining source-publication gates remain open; no caller release,
+  default lifecycle migration or installed adoption is claimed.
 - **Return:** finish the remaining selector, guarded lifecycle, qualification
   and release gates below, then return the driving worktree to its retained
   earlier objectives. Do not equate this source slice with receiving recovery.
@@ -507,14 +521,20 @@ Installed fleet adoption is not claimed.
   controls and the original source-unit census and budget are preserved.
   The earlier TTY occurrence remains under #14688/#12203/#12680; no fault
   repair, self-triggered retry or installed adoption is claimed.
-- [ ] Qualify and release identity-pinned workspace resume through existing
+- [x] Qualify and release identity-pinned workspace resume through existing
   native, keyed-retained and singleton lifecycle owners before migrating the
   common CLI selector. Preserve prior-peer refusal, one attempt, original
   history, pending handoff and unknown outcomes.
+  Source #14705 merges as `f9243b29211a` after current-head approval,
+  required source CI and both native OS jobs. All 17 published blobs match
+  the confirmed merge. All 13 released content files match normal Main
+  `e0a62de772b7`, Bridge `0.9.573-dev1`, after #14713 and promotion
+  `45769032231`. All 142 Bridge controls and the complete original census,
+  order, source bindings, helper coverage and budget are preserved.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
-  Opt-in local and explicit-host read/wait and managed sends have landed;
-  default migration and lifecycle selectors remain open. The opt-in registered
+  Local and explicit-host observations and sends, including ordinary defaults,
+  are released; lifecycle selectors remain open. The opt-in registered
   consumer merged in #14549; its normal source release is verified in Main
   `138d0ac9dbc4`, Bridge `0.9.561-dev1`.
   The remote HTTP adapter merged in #14365 and matches normal Main promotion
@@ -628,6 +648,7 @@ not another permanent public discovery path.
 
 Dated pages retain every original journal entry.
 
+- [2026-11-26](journal/2026/11.26-identity-pinned-resume.md) - Exact-resume merge, qualification and source-release return.
 - [2026-11-25](journal/2026/11.25-default-selection-review.md) - Default-selector review corrections and consumer qualification.
 - [2026-11-24](journal/2026/11.24-remote-results-and-validation.md) - Result bounds, delivery and validation.
 - [2026-11-23](journal/2026/11.23-exact-observations-and-sends.md) - Exact inspection, observations and sends.
