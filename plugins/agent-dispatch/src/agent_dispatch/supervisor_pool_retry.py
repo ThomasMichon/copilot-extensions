@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -20,13 +20,15 @@ log = logging.getLogger("agent-dispatch.supervisor")
 
 
 def reconcile_retry_completion(
-    owner: Supervisor, reservation: dict, task: dict, *, observe_only: bool = False,
+    owner: Supervisor, reservation: dict[str, Any], task: dict[str, Any], *, observe_only: bool = False,
 ) -> bool | None:
     """Observe only; None means unrelated, False retains an unresolved caller."""
     if (
         reservation.get("driver") not in {"cli", "ordinary-bridge"} or reservation.get("startup_complete") is not False
-        or task.get("status") not in {Status.STARTED, Status.SUBMITTED, Status.COMPLETED, Status.QUEUED}
-        or task.get("status") == Status.QUEUED and not reservation.get("release_requested")
+        or task.get("status") not in {
+            Status.STARTED, Status.SUBMITTED, Status.COMPLETED, Status.QUEUED, Status.ABANDONED,
+        }
+        or task.get("status") in {Status.QUEUED, Status.ABANDONED} and not reservation.get("release_requested")
     ):
         return None
     try:

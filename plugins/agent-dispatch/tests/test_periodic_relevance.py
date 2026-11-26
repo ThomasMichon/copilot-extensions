@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import asyncio
+import sqlite3
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from subprocess import CompletedProcess
+from typing import Any, cast
 from unittest.mock import Mock
 import sys
 import uuid
@@ -16,17 +20,33 @@ from agent_dispatch.periodic_relevance import reconsider_unbound_tasks
 from agent_dispatch.producers.evaluator import (
     Abandon, EvaluatorError, apply_decisions, decision_from_dict,
 )
-from agent_dispatch.queue import Status, TaskError
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import Status, TaskError
 from agent_dispatch.queue_relevance_registration import RelevanceRegistration
 from agent_dispatch.relevance_evaluation import PeriodicRelevancePolicy
 from agent_dispatch.relevance_source import RelevanceSource
 from tests._helpers import TEST_REPO
-from tests.test_task_relevance_effective_scope import declaration, venue as venue
-from tests.test_task_relevance_registration import SPEC, emitted, q as q
+from tests import test_task_relevance_effective_scope as effective_scope
+from tests import test_task_relevance_registration as registration
+from tests.test_task_relevance_effective_scope import venue as venue
+from tests.test_task_relevance_registration import SPEC, q as q
+
+Periodic = tuple[RelevanceSource, dict[str, Any], str, list[float]]
+Venue = tuple[Any, Path, Path]
+# The shared helpers are untyped; bind them through typed callables.
+declaration = cast("Callable[..., str]", effective_scope.declaration)
+emitted = cast("Callable[..., Task]", registration.emitted)
+
+
+def current(q: TaskQueue, task_id: str) -> Task:
+    found = q.get(task_id)
+    assert found is not None
+    return found
 
 
 @pytest.fixture
-def periodic(q, venue, monkeypatch):
+def periodic(q: TaskQueue, venue: Venue, monkeypatch: pytest.MonkeyPatch) -> Periodic:
     _, trusted, _ = venue
     declaration(trusted, "review-source", "emitter", {**SPEC, "evaluator_ref": "review-loop"})
     spec = {
@@ -45,12 +65,12 @@ def periodic(q, venue, monkeypatch):
 
     source = RelevanceSource(RegistrarSources(
         base=trusted.parent / "registrar", dropins=trusted.parent / "absent-dropins",
-        activation_source=lambda: None,
+        activation_source=lambda: None,  # type: ignore[arg-type,return-value]
     ))
     return source, spec, rid, clock
 
 
-def task(q, **changes):
+def task(q: TaskQueue, **changes: Any) -> Task:
     if changes.get("source", "emitter") != "emitter" or changes.get("repo", TEST_REPO) != TEST_REPO:
         return emitted(q, evaluator_ref="review-loop", now=80, **changes)
     producer = changes.get("origin_ref", SPEC["id"])
@@ -61,7 +81,7 @@ def task(q, **changes):
             TEST_REPO, "emitter", producer_id=producer,
             expected_generation=current.current_generation,
         )
-        q._test_periodic_grant = grant
+        q._test_periodic_grant = grant  # type: ignore[attr-defined]
     return emitted(
         q, evaluator_ref="review-loop", now=80, **changes,
         producer_scope={"repo": TEST_REPO, "source": "emitter"}, producer_id=producer,
@@ -70,8 +90,10 @@ def task(q, **changes):
     )
 
 
-def runner(verdict="obsolete", *, callback=None):
-    def run(argv, **kwargs):
+def runner(
+    verdict: str = "obsolete", *, callback: Callable[[dict[str, Any]], object] | None = None,
+) -> Mock:
+    def run(argv: list[str], **kwargs: Any) -> CompletedProcess[str]:
         event = json.loads(kwargs["input"])
         assert event["type"] == "task.reconsider"
         if callback is not None:
@@ -83,11 +105,11 @@ def runner(verdict="obsolete", *, callback=None):
     return Mock(side_effect=run)
 
 
-def tick(q, periodic, **kwargs):
+def tick(q: TaskQueue, periodic: Periodic, **kwargs: Any) -> dict[str, Any]:
     return reconsider_unbound_tasks(q, periodic[0], **kwargs)
 
 
-def test_periodic_closure_uses_receiver_and_only_eligible_source_tasks(q, periodic):
+def test_periodic_closure_uses_receiver_and_only_eligible_source_tasks(q: TaskQueue, periodic: Periodic) -> None:
     unverified = emitted(q, evaluator_ref="review-loop", now=80)
     young = emitted(q, evaluator_ref="review-loop", now=99)
     eligible = task(q)
@@ -98,14 +120,14 @@ def test_periodic_closure_uses_receiver_and_only_eligible_source_tasks(q, period
     check = runner()
     for _ in range(8):
         tick(q, periodic, runner=check)
-    assert q.get(eligible.id).status == Status.ABANDONED
-    assert all(q.get(t.id).status == Status.QUEUED for t in (unverified, young, manual, other_repo))
-    assert q.get(bound.id).status == Status.CLAIMED
+    assert current(q, eligible.id).status == Status.ABANDONED
+    assert all(current(q, t.id).status == Status.QUEUED for t in (unverified, young, manual, other_repo))
+    assert current(q, bound.id).status == Status.CLAIMED
     assert check.call_count == 1
     assert q.relevance_evaluations(eligible.id)[0]["status"] == "finished"
 
 
-def test_managed_receipt_from_another_producer_cannot_enroll_checker_payload(q, periodic):
+def test_managed_receipt_from_another_producer_cannot_enroll_checker_payload(q: TaskQueue, periodic: Periodic) -> None:
     grant = q.handoff_producer_scope(TEST_REPO, "emitter", producer_id="other-producer", expected_generation=0)
     forged = emitted(
         q, evaluator_ref="review-loop", now=80, payload_inline="caller-selected-object",
@@ -116,19 +138,19 @@ def test_managed_receipt_from_another_producer_cannot_enroll_checker_payload(q, 
     check = Mock(side_effect=AssertionError("unverified provenance must not reach checker"))
     for _ in range(2):
         assert tick(q, periodic, runner=check)["accepted"] == []
-    assert q.get(forged.id).status == Status.QUEUED
+    assert current(q, forged.id).status == Status.QUEUED
     assert q.relevance_evaluations(forged.id) == []
     check.assert_not_called()
 
 
 @pytest.mark.parametrize("verdict", ["needed", "unknown"])
-def test_due_and_retry_state_survives_restart_without_age_abandonment(q, periodic, verdict):
+def test_due_and_retry_state_survives_restart_without_age_abandonment(q: TaskQueue, periodic: Periodic, verdict: str) -> None:
     t = task(q)
     check = runner(verdict)
     assert tick(q, periodic, runner=check)["accepted"]
     row = q.relevance_evaluations(t.id)[0]
     assert row["next_due"] == (200 if verdict == "needed" else 105)
-    assert q.get(t.id).status == Status.QUEUED
+    assert current(q, t.id).status == Status.QUEUED
     assert not tick(q, periodic, runner=check)["accepted"]
     from tests._helpers import RepoDefaultingQueue
 
@@ -138,17 +160,17 @@ def test_due_and_retry_state_survives_restart_without_age_abandonment(q, periodi
     for _ in range(2):
         tick(restarted, periodic, runner=check)
     assert check.call_count == 2
-    assert restarted.get(t.id).status == Status.QUEUED
+    assert current(restarted, t.id).status == Status.QUEUED
     if verdict == "unknown":
         assert restarted.relevance_evaluations(t.id)[0]["status"] == "failed"
 
 
 @pytest.mark.parametrize("change", ["claim", "hold", "definition", "not_active"])
-def test_changes_during_source_check_cannot_abandon(q, periodic, venue, change):
+def test_changes_during_source_check_cannot_abandon(q: TaskQueue, periodic: Periodic, venue: Venue, change: str) -> None:
     t = task(q)
     active = [True]
 
-    def changed(_event):
+    def changed(_event: dict[str, Any]) -> None:
         if change == "claim":
             q.claim_one("host/worker", task_id=t.id)
         elif change == "hold":
@@ -163,28 +185,30 @@ def test_changes_during_source_check_cannot_abandon(q, periodic, venue, change):
 
     report = tick(q, periodic, runner=runner(callback=changed), can_continue=lambda: active[0])
     assert not report["accepted"]
-    assert q.get(t.id).status != Status.ABANDONED
+    assert current(q, t.id).status != Status.ABANDONED
     assert not q.steer_log(t.id)
 
 
 @pytest.mark.parametrize("value", [
     {"decision": "abandon"}, {"decision": "noop"}, {"decision": "confirm"},
 ])
-def test_legacy_or_failed_judgment_never_uses_ordinary_abandon(q, periodic, value):
+def test_legacy_or_failed_judgment_never_uses_ordinary_abandon(q: TaskQueue, periodic: Periodic, value: dict[str, Any]) -> None:
     t = task(q)
     check = Mock(return_value=CompletedProcess(["source-reader"], 0, stdout=json.dumps(value)))
     assert tick(q, periodic, runner=check)["errors"]
-    assert q.get(t.id).status == Status.QUEUED
+    assert current(q, t.id).status == Status.QUEUED
     assert q.relevance_evaluations(t.id)[0]["next_due"] == 105
 
 
-def test_saved_report_recovers_after_crash_without_another_source_check(q, periodic):
+def test_saved_report_recovers_after_crash_without_another_source_check(q: TaskQueue, periodic: Periodic) -> None:
     t = task(q)
     policy = PeriodicRelevancePolicy.from_spec(periodic[1])
+    assert policy is not None
     selector = RelevanceRegistration(periodic[2], "host-a", "default")
     entry = q.claim_relevance_evaluation(
         selector, policy, admission=periodic[0].prepare(), lease_seconds=20,
     )
+    assert entry is not None
     snapshot = json.loads(entry["snapshot_json"])
     report = {
         "request_id": "retained-report", "expected_generation": snapshot["generation"],
@@ -208,10 +232,10 @@ def test_saved_report_recovers_after_crash_without_another_source_check(q, perio
     check = Mock(side_effect=AssertionError("must recover saved report"))
     assert tick(q, periodic, runner=check)["accepted"][0]["decision"] == "abandoned"
     check.assert_not_called()
-    assert q.get(t.id).status == Status.ABANDONED
+    assert current(q, t.id).status == Status.ABANDONED
 
 
-def test_relevance_decision_cannot_escape_through_generic_lifecycle_apply():
+def test_relevance_decision_cannot_escape_through_generic_lifecycle_apply() -> None:
     decision = decision_from_dict({
         "decision": "relevance", "verdict": "obsolete",
         "reason": "closed source", "observation_ref": "object:2",
@@ -222,24 +246,25 @@ def test_relevance_decision_cannot_escape_through_generic_lifecycle_apply():
     abandon.assert_not_called()
 
 
-def test_prior_claim_is_owner_closeout_even_when_now_unbound(q, periodic):
+def test_released_prior_claim_is_not_custody_and_abandons(q: TaskQueue, periodic: Periodic) -> None:
     t = task(q)
     q.claim_one("host/worker", task_id=t.id)
     q.yield_task(t.id, "host/worker")
     accepted = tick(q, periodic, runner=runner())["accepted"][0]
-    assert accepted["decision"] == "closeout_pending"
-    assert q.get(t.id).status == Status.QUEUED
-    assert len(q.steer_log(t.id)) == 1
+    assert accepted["decision"] == "abandoned"
+    assert current(q, t.id).status == Status.ABANDONED
+    assert q.steer_log(t.id) == []
     assert q.claim_one("host/replacement", task_id=t.id) is None
 
 
-def test_concurrent_due_selection_has_one_delivery_lease(q, periodic):
+def test_concurrent_due_selection_has_one_delivery_lease(q: TaskQueue, periodic: Periodic) -> None:
     t = task(q)
     policy = PeriodicRelevancePolicy.from_spec(periodic[1])
+    assert policy is not None
     selector = RelevanceRegistration(periodic[2], "host-a", "default")
     admission = periodic[0].prepare()
 
-    def claim(_index):
+    def claim(_index: int) -> dict[str, Any] | None:
         return q.claim_relevance_evaluation(
             selector, policy, admission=admission, lease_seconds=20,
         )
@@ -251,7 +276,7 @@ def test_concurrent_due_selection_has_one_delivery_lease(q, periodic):
 
 
 @pytest.mark.parametrize("failure", ["timeout", "malformed", "nonzero"])
-def test_check_failure_exhaustion_and_supported_owner_retry(q, periodic, failure):
+def test_check_failure_exhaustion_and_supported_owner_retry(q: TaskQueue, periodic: Periodic, failure: str) -> None:
     t = task(q)
     if failure == "timeout":
         from subprocess import TimeoutExpired
@@ -267,7 +292,7 @@ def test_check_failure_exhaustion_and_supported_owner_retry(q, periodic, failure
     row = q.relevance_evaluations(t.id)[0]
     assert row["status"] == "failed"
     assert row["attempts"] == check.call_count == 2
-    assert q.get(t.id).status == Status.QUEUED
+    assert current(q, t.id).status == Status.QUEUED
     q.retry_relevance_evaluation(
         t.id, registration_id=periodic[2], generation=t.generation,
     )
@@ -279,20 +304,20 @@ def test_check_failure_exhaustion_and_supported_owner_retry(q, periodic, failure
     assert accepted[0]["decision"] == "abandoned"
 
 
-def test_acceptance_callback_failure_is_recovered_without_duplicate_effect(q, periodic, monkeypatch):
+def test_acceptance_callback_failure_is_recovered_without_duplicate_effect(q: TaskQueue, periodic: Periodic, monkeypatch: pytest.MonkeyPatch) -> None:
     t = task(q)
     publish = Mock(side_effect=RuntimeError("post-commit callback failure"))
     monkeypatch.setattr("agent_dispatch.periodic_relevance._publish", publish)
     result = tick(q, periodic, runner=runner(), bus=Mock())
     assert result["accepted"][0]["decision"] == "abandoned"
-    assert q.get(t.id).status == Status.ABANDONED
+    assert current(q, t.id).status == Status.ABANDONED
     assert publish.call_count == 1
     tick(q, periodic, runner=Mock(side_effect=AssertionError("not rechecked")))
-    assert len([e for e in q.events(t.id) if e["to_status"] == Status.ABANDONED]) == 1
+    assert len([e for e in [*q.events(t.id)] if e["to_status"] == Status.ABANDONED]) == 1
 
 
 @pytest.mark.parametrize("gate", ["inactive", "draining", "governance"])
-def test_coordinator_loop_honors_owner_gates_and_stops_cooperatively(q, periodic, monkeypatch, gate):
+def test_coordinator_loop_honors_owner_gates_and_stops_cooperatively(q: TaskQueue, periodic: Periodic, monkeypatch: pytest.MonkeyPatch, gate: str) -> None:
     from agent_dispatch.coordinator_loops import DrainGate
     from agent_dispatch.loop_governance import LoopGovernance
     from agent_dispatch.periodic_relevance import drain_periodic_relevance
@@ -300,7 +325,7 @@ def test_coordinator_loop_honors_owner_gates_and_stops_cooperatively(q, periodic
     calls = Mock()
     monkeypatch.setattr("agent_dispatch.periodic_relevance.reconsider_unbound_tasks", calls)
 
-    async def exercise():
+    async def exercise() -> None:
         stop = asyncio.Event()
         drain_gate = DrainGate()
         drain_gate.set_draining(gate == "draining")
@@ -319,13 +344,13 @@ def test_coordinator_loop_honors_owner_gates_and_stops_cooperatively(q, periodic
     calls.assert_not_called()
 
 
-def test_coordinator_lifespan_owns_periodic_loop(q, periodic, venue, monkeypatch):
+def test_coordinator_lifespan_owns_periodic_loop(q: TaskQueue, periodic: Periodic, venue: Venue, monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator import create_app
 
     seen = []
 
-    async def drain(*args, stop_event, **kwargs):
+    async def drain(*args: Any, stop_event: asyncio.Event, **kwargs: Any) -> None:
         seen.append("started")
         await stop_event.wait()
         seen.append("stopped")
@@ -345,7 +370,7 @@ def test_coordinator_lifespan_owns_periodic_loop(q, periodic, venue, monkeypatch
     {"batch_size": True}, {"batch_size": 101}, {"retry_base": 0},
     {"min_age_seconds": float("nan")}, {"max_attempts": 0}, {"unknown": 1},
 ])
-def test_registration_rejects_invalid_periodic_policy_before_persistence(q, periodic, config):
+def test_registration_rejects_invalid_periodic_policy_before_persistence(q: TaskQueue, periodic: Periodic, config: dict[str, Any]) -> None:
     with pytest.raises(TaskError):
         q.register_registration(
             "evaluator", {**periodic[1], "periodic_relevance": config},
@@ -354,7 +379,7 @@ def test_registration_rejects_invalid_periodic_policy_before_persistence(q, peri
     assert q.get_registration("invalid") is None
 
 
-def test_actual_trusted_script_receives_reconsider_event(q, periodic, venue, tmp_path):
+def test_actual_trusted_script_receives_reconsider_event(q: TaskQueue, periodic: Periodic, venue: Venue, tmp_path: Path) -> None:
     script = tmp_path / "source-check.py"
     script.write_text(
         "import json, sys\n"
@@ -373,22 +398,22 @@ def test_actual_trusted_script_receives_reconsider_event(q, periodic, venue, tmp
     })
     t = task(q)
     assert tick(q, periodic)["accepted"][0]["decision"] == "abandoned"
-    assert q.get(t.id).status == Status.ABANDONED
+    assert current(q, t.id).status == Status.ABANDONED
 
 
-def test_bounded_scan_rotates_past_unattributed_tasks(q, periodic):
+def test_bounded_scan_rotates_past_unattributed_tasks(q: TaskQueue, periodic: Periodic) -> None:
     for _ in range(6):
         task(q, source="manual")
     eligible = [task(q) for _ in range(3)]
     check = runner()
     for _ in range(20):
         tick(q, periodic, runner=check)
-    assert all(q.get(t.id).status == Status.ABANDONED for t in eligible)
+    assert all(current(q, t.id).status == Status.ABANDONED for t in eligible)
     assert check.call_count == len(eligible)
 
 
 @pytest.mark.parametrize("kind", ["emitter", "evaluator"])
-def test_held_registration_does_not_spend_source_check_attempts(q, periodic, venue, kind):
+def test_held_registration_does_not_spend_source_check_attempts(q: TaskQueue, periodic: Periodic, venue: Venue, kind: str) -> None:
     from agent_dispatch.overrides import set_override
 
     t = task(q)
@@ -398,11 +423,11 @@ def test_held_registration_does_not_spend_source_check_attempts(q, periodic, ven
     for _ in range(3):
         assert not tick(q, periodic, runner=check)["accepted"]
     assert q.relevance_evaluations(t.id) == []
-    assert q.get(t.id).status == Status.QUEUED
+    assert current(q, t.id).status == Status.QUEUED
     check.assert_not_called()
 
 
-def test_claim_race_rechecks_source_and_routes_closeout_to_original_owner(q, periodic):
+def test_claim_race_rechecks_source_and_routes_closeout_to_original_owner(q: TaskQueue, periodic: Periodic) -> None:
     t = task(q)
     first = tick(q, periodic, runner=runner(
         callback=lambda _event: q.claim_one("host/worker", task_id=t.id),
@@ -413,12 +438,12 @@ def test_claim_race_rechecks_source_and_routes_closeout_to_original_owner(q, per
     result = tick(q, periodic, runner=refreshed)
     assert result["accepted"][0]["decision"] == "closeout_pending"
     assert refreshed.call_count == 1
-    assert q.get(t.id).status == Status.CLAIMED
-    assert q.get(t.id).owner == "host/worker"
+    assert current(q, t.id).status == Status.CLAIMED
+    assert current(q, t.id).owner == "host/worker"
     assert len(q.steer_log(t.id)) == 1
 
 
-def test_registration_rejects_nonfinite_script_timeout(q, periodic):
+def test_registration_rejects_nonfinite_script_timeout(q: TaskQueue, periodic: Periodic) -> None:
     with pytest.raises(TaskError, match="timeout_seconds"):
         q.register_registration("evaluator", {
             **periodic[1], "evaluator_spec": {
@@ -428,13 +453,13 @@ def test_registration_rejects_nonfinite_script_timeout(q, periodic):
     assert q.get_registration("invalid") is None
 
 
-def test_authority_lost_during_report_discovery_retains_original_request(q, periodic, monkeypatch):
+def test_authority_lost_during_report_discovery_retains_original_request(q: TaskQueue, periodic: Periodic, monkeypatch: pytest.MonkeyPatch) -> None:
     t = task(q)
     active = [True]
     original = periodic[0].prepare
     discoveries = [0]
 
-    def prepare():
+    def prepare() -> Any:
         discoveries[0] += 1
         admission = original()
         if discoveries[0] == 2:
@@ -446,7 +471,7 @@ def test_authority_lost_during_report_discovery_retains_original_request(q, peri
     assert not tick(q, periodic, runner=check, can_continue=lambda: active[0])["accepted"]
     row = q.relevance_evaluations(t.id)[0]
     saved = json.loads(row["report_json"])
-    assert q.get(t.id).status == Status.QUEUED
+    assert current(q, t.id).status == Status.QUEUED
     assert q.relevance_receipt(t.id, saved["request_id"]) is None
     active[0] = True
     periodic[3][0] = row["next_due"]
@@ -455,7 +480,7 @@ def test_authority_lost_during_report_discovery_retains_original_request(q, peri
     assert check.call_count == 1
 
 
-def test_needed_task_with_short_interval_cannot_starve_next_candidate(q, periodic, venue):
+def test_needed_task_with_short_interval_cannot_starve_next_candidate(q: TaskQueue, periodic: Periodic, venue: Venue) -> None:
     declaration(venue[1], "review-evaluator", "evaluator", {
         **periodic[1], "periodic_relevance": {
             **periodic[1]["periodic_relevance"], "interval_seconds": 1,
@@ -468,10 +493,10 @@ def test_needed_task_with_short_interval_cannot_starve_next_candidate(q, periodi
         tick(q, periodic, runner=check)
         periodic[3][0] += 60
     assert seen == {t.id for t in tasks}
-    assert all(q.get(t.id).status == Status.QUEUED for t in tasks)
+    assert all(current(q, t.id).status == Status.QUEUED for t in tasks)
 
 
-def test_held_retry_page_rotates_to_bound_owner_closeout(q, periodic, venue, monkeypatch):
+def test_held_retry_page_rotates_to_bound_owner_closeout(q: TaskQueue, periodic: Periodic, venue: Venue, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from uuid import UUID
     from agent_dispatch.overrides import set_override
@@ -497,17 +522,17 @@ def test_held_retry_page_rotates_to_bound_owner_closeout(q, periodic, venue, mon
         acceptance["task_id"] == bound.id and acceptance["decision"] == "closeout_pending"
         for result in results for acceptance in result["accepted"]
     )
-    assert q.get(bound.id).status == Status.CLAIMED
+    assert current(q, bound.id).status == Status.CLAIMED
     assert all(q.relevance_evaluations(t.id)[0]["attempts"] == 1 for t in held)
 
 
-def test_spilled_payload_is_hydrated_outside_queue_writer_lock(q, periodic, monkeypatch):
+def test_spilled_payload_is_hydrated_outside_queue_writer_lock(q: TaskQueue, periodic: Periodic, monkeypatch: pytest.MonkeyPatch) -> None:
     q.blob_threshold = 1
     t = task(q, payload_inline="source-object:42")
     assert t.payload_inline is None and t.payload_ref
     original = q.read_payload
 
-    def read_payload(selected):
+    def read_payload(selected: Task | str) -> str | None:
         with q._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
         return original(selected)
@@ -519,7 +544,7 @@ def test_spilled_payload_is_hydrated_outside_queue_writer_lock(q, periodic, monk
     assert seen == ["source-object:42"]
 
 
-def test_explicit_retry_of_exhausted_claimed_task_reaches_original_owner(q, periodic):
+def test_explicit_retry_of_exhausted_claimed_task_reaches_original_owner(q: TaskQueue, periodic: Periodic) -> None:
     t = task(q)
     tick(q, periodic, runner=runner(
         callback=lambda _event: q.claim_one("host/worker", task_id=t.id),
@@ -527,7 +552,7 @@ def test_explicit_retry_of_exhausted_claimed_task_reaches_original_owner(q, peri
     periodic[3][0] = 105
     tick(q, periodic, runner=runner("unknown"))
     assert q.relevance_evaluations(t.id)[0]["status"] == "failed"
-    assert q.get(t.id).status == Status.CLAIMED
+    assert current(q, t.id).status == Status.CLAIMED
     q.retry_relevance_evaluation(
         t.id, registration_id=periodic[2], generation=t.generation,
     )
@@ -538,14 +563,14 @@ def test_explicit_retry_of_exhausted_claimed_task_reaches_original_owner(q, peri
             break
     assert result["accepted"][0]["decision"] == "closeout_pending"
     assert check.call_count == 1
-    assert q.get(t.id).owner == "host/worker"
+    assert current(q, t.id).owner == "host/worker"
 
 
-def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, periodic, monkeypatch):
+def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q: TaskQueue, periodic: Periodic, monkeypatch: pytest.MonkeyPatch) -> None:
     original = q._connect
     selections = []
 
-    def connect():
+    def connect() -> sqlite3.Connection:
         conn = original()
         conn.set_trace_callback(lambda sql: selections.append(sql) if sql.startswith(
             "SELECT t.id FROM tasks t"
@@ -554,7 +579,7 @@ def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, perio
 
     monkeypatch.setattr(q, "_connect", connect)
 
-    def candidate_steps():
+    def candidate_steps() -> int:
         tick(q, periodic, runner=Mock(side_effect=AssertionError("no eligible tasks")))
         sql = selections[-1]
         with original() as conn:
@@ -562,7 +587,7 @@ def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, perio
             assert any("idx_relevance_candidates" in detail for detail in plan)
             steps = [0]
 
-            def progress():
+            def progress() -> int:
                 steps[0] += 1
                 return 0
 
@@ -579,7 +604,7 @@ def test_unrelated_tasks_do_not_expand_candidate_scan_under_writer_lock(q, perio
 
 
 @pytest.mark.parametrize("selection", ["candidate", "retry", "retry_wait"])
-def test_ineligible_same_evaluator_cohort_has_bounded_raw_pages(q, periodic, monkeypatch, selection):
+def test_ineligible_same_evaluator_cohort_has_bounded_raw_pages(q: TaskQueue, periodic: Periodic, monkeypatch: pytest.MonkeyPatch, selection: str) -> None:
     original = q._connect
     queries = []
     prefix = (
@@ -587,19 +612,19 @@ def test_ineligible_same_evaluator_cohort_has_bounded_raw_pages(q, periodic, mon
         else "SELECT * FROM task_relevance_evaluations WHERE registration_id="
     )
 
-    def connect():
+    def connect() -> sqlite3.Connection:
         conn = original()
         conn.set_trace_callback(lambda sql: queries.append(sql) if sql.startswith(prefix) else None)
         return conn
 
     monkeypatch.setattr(q, "_connect", connect)
 
-    def steps():
+    def steps() -> int:
         tick(q, periodic, runner=Mock(side_effect=AssertionError("not due")))
         with original() as conn:
             count = [0]
 
-            def progress():
+            def progress() -> int:
                 count[0] += 1
                 return 0
 
@@ -624,7 +649,7 @@ def test_ineligible_same_evaluator_cohort_has_bounded_raw_pages(q, periodic, mon
 
 
 @pytest.mark.parametrize("verdict", ["needed", "obsolete"])
-def test_final_attempt_recovers_committed_report_after_crash(q, periodic, venue, monkeypatch, verdict):
+def test_final_attempt_recovers_committed_report_after_crash(q: TaskQueue, periodic: Periodic, venue: Venue, monkeypatch: pytest.MonkeyPatch, verdict: str) -> None:
     declaration(venue[1], "review-evaluator", "evaluator", {
         **periodic[1], "periodic_relevance": {
             **periodic[1]["periodic_relevance"], "max_attempts": 1,
@@ -662,7 +687,7 @@ def test_final_attempt_recovers_committed_report_after_crash(q, periodic, venue,
 
 
 @pytest.mark.parametrize("interruption", ["authority", "receipt_unavailable"])
-def test_final_attempt_retains_report_recovery_after_interruption(q, periodic, venue, monkeypatch, interruption):
+def test_final_attempt_retains_report_recovery_after_interruption(q: TaskQueue, periodic: Periodic, venue: Venue, monkeypatch: pytest.MonkeyPatch, interruption: str) -> None:
     declaration(venue[1], "review-evaluator", "evaluator", {
         **periodic[1], "periodic_relevance": {
             **periodic[1]["periodic_relevance"], "max_attempts": 1,
@@ -686,4 +711,4 @@ def test_final_attempt_retains_report_recovery_after_interruption(q, periodic, v
     recovered = tick(q, periodic, runner=check)
     assert recovered["accepted"][0]["request_id"] == saved["request_id"]
     assert check.call_count == 1
-    assert q.get(t.id).status == Status.ABANDONED
+    assert current(q, t.id).status == Status.ABANDONED

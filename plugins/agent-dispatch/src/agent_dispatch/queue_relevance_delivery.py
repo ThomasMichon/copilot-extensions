@@ -5,11 +5,19 @@ from __future__ import annotations
 import sqlite3
 import json
 from dataclasses import replace
+from typing import Protocol
 
 from .queue_common import Task, WakeOperation
 from .queue_records import Status
 
 CLOSEOUT_STATUSES = frozenset({*Status.OWNED, Status.SUBMITTED})
+
+
+class WakeEnqueuer(Protocol):
+    def _enqueue_wake(
+        self, conn: sqlite3.Connection, task: Task, *, message: str | None, ts: float,
+        pool_recovery_revision: int | None = None,
+    ) -> WakeOperation: ...
 
 
 def closeout_owner(task: Task) -> str | None:
@@ -59,7 +67,7 @@ def closeout_wake(conn: sqlite3.Connection, wake: WakeOperation) -> bool:
     ) == (row["generation"], row["owner"], row["owner_session_id"]))
 
 
-def enqueue_closeout(owner, conn: sqlite3.Connection, task: Task, closeout: sqlite3.Row,
+def enqueue_closeout(owner: WakeEnqueuer, conn: sqlite3.Connection, task: Task, closeout: sqlite3.Row,
                      *, ts: float) -> WakeOperation | None:
     if not closeout_owner_matches(task, closeout) or not closeout["owner_session_id"]:
         return None
@@ -99,3 +107,31 @@ def enqueue_closeout(owner, conn: sqlite3.Connection, task: Task, closeout: sqli
         "UPDATE task_steer SET wake_operation_id=? WHERE id=?", (wake.id, closeout["steer_id"]),
     )
     return wake
+
+
+def rearm_closeout(
+    owner: WakeEnqueuer, conn: sqlite3.Connection, task: Task, *, ts: float,
+) -> WakeOperation | None:
+    """Wake the owner through its linked closeout wake, never a recovery wake.
+
+    A still-pending linked wake is reused; a delivered or failed one ended with
+    its session, so a fresh linked wake replaces it. ``None`` means no pending
+    closeout for this exact owner, and the caller keeps its own path.
+    """
+    closeout = conn.execute(
+        "SELECT * FROM task_relevance_closeouts WHERE task_id=? AND acknowledgement IS NULL",
+        (task.id,),
+    ).fetchone()
+    if closeout is None or not closeout_owner_matches(task, closeout):
+        return None
+    linked: sqlite3.Row | None = conn.execute(
+        "SELECT w.* FROM task_steer s JOIN wake_outbox w ON w.id=s.wake_operation_id"
+        " WHERE s.id=?", (closeout["steer_id"],),
+    ).fetchone()
+    if linked is not None and linked["status"] == "pending":
+        return WakeOperation._from_row(linked)
+    conn.execute(
+        "UPDATE task_steer SET wake_operation_id=NULL, taken=0, taken_at=NULL WHERE id=?",
+        (closeout["steer_id"],),
+    )
+    return enqueue_closeout(owner, conn, task, closeout, ts=ts)

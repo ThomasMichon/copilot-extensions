@@ -17,6 +17,12 @@ resolver and disable SSH failover. A projected task caller keeps its pinned
 coordinator, exclusive task credential and projected worker; it does not
 discover fleet endpoints, load shared credentials or require global health.
 
+A worker started or resumed for an obsolete task with an unacknowledged
+closeout is captured as that closeout's owner at start, so it can run this
+command even when no earlier body was captured. When the supervisor's
+[finalize-first](task-relevance.md#automatic-next-moves) attempt already
+finalized the worktree, the task is abandoned and no worker is woken.
+
 ## Ordering and custody
 
 1. Read the worker's own closeout route and validate `task_relevance_closeout/v1`,

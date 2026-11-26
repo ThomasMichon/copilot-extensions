@@ -91,7 +91,7 @@ def advance_pool_startup(conn: sqlite3.Connection, key: str, ts: float) -> None:
     ):
         raise TaskError("pool startup attempt requires its current unheld claim")
     from .queue_execution_handoff import require_execution_admission
-    require_execution_admission(conn, task.id)
+    require_execution_admission(conn, task.id, closeout_start=True)
     if assignment["startup_deadline"] is None:
         raise TaskError("pool startup budget requires reconciliation of the legacy claim")
     if (
@@ -232,7 +232,7 @@ def _current(
     ):
         raise TaskError("pool startup assignment changed, held or requires reconciliation")
     from .queue_execution_handoff import require_execution_admission
-    require_execution_admission(conn, task.id)
+    require_execution_admission(conn, task.id, closeout_start=True)
     from .queue_pool_decline import require_no_pool_decline
     require_no_pool_decline(conn, task.id)
     return task, assignment, reservation

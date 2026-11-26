@@ -564,6 +564,16 @@ retained; the native attachment history is preserved. Late affirmation and
 stale queued sends refuse. Exhaustion is not physical stop, retirement,
 absence evidence or permission to free the slot.
 
+An unacknowledged [source-relevance closeout](task-relevance.md#automatic-next-moves)
+never blocks pool startup, retry, exhaustion or recovery: the body that starts
+becomes the closeout owner and receives the closeout wake instead of the goal.
+Before that, the reservation's supervisor may finalize an unstarted claim's
+worktree itself (finalize-first) and abandon the task without a worker. When
+the reservation is instead exhausted and retired with no live custody left,
+the ownerless obsolete task is abandoned at retirement. A pending startup retry
+accepts the exact relevance-abandoned incarnation as resolved, so the slot is
+freed.
+
 Non-pool interactive and supervised continuation retain their legacy behavior.
 Full installed, mixed-lane and cohort qualification remains an
 [integration gate](#integration-boundary), not a claim made by these source
