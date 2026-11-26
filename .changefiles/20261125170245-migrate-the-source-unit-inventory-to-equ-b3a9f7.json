@@ -1,0 +1,9 @@
+{
+  "comment": "Migrate the source unit inventory to equivalent prefix-group storage after compatible reader delivery",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

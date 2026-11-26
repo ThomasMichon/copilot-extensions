@@ -12631,9 +12631,10 @@ remove admitted cases to accommodate formatting.
 
 ### Unit-manifest storage compatibility
 
-The checked-in source inventory uses the compact source-storage profile
-`copilot-extensions.promotion-units/v2` until the separately reviewed successor
-migration. The admission reader accepts flat, ordered v1 `nodes`, v2 file
+The checked-in source inventory uses the prefix-group source-storage profile
+`copilot-extensions.promotion-units/v3`. The compatible reader landed in
+#14658 before the separately reviewed data migration.
+The admission reader accepts flat, ordered v1 `nodes`, v2 file
 groups, and `copilot-extensions.promotion-units/v3` prefix groups.
 V2 replaces only `nodes` with
 `node_groups`: an ordered list of `[test_file, [case_suffix, ...]]` pairs.
@@ -12653,7 +12654,7 @@ Expanded identifier bytes are bounded by the existing 128 MiB
 `MAX_PACKET_FILE_BYTES` limit before each full identifier is constructed.
 The repository's separate 1 MiB source-file cap is unchanged.
 
-The committed v2 JSON uses whitespace-minified UTF-8 with one final newline.
+The committed source JSON uses whitespace-minified UTF-8 with one final newline.
 Formatting preserves object/array order, every stored value and the normalized
 logical manifest; it does not change the representation, admission policy,
 source-file cap, parser bound, packet deadline or proof contract.
@@ -12698,7 +12699,20 @@ composition. Both existing real compatibility-CLI cases exercise v1/v2/v3
 without running Git or release actors. New assertions run under existing
 admitted identities; old parameter tables, assertions and selection remain.
 The reader-only stage honestly rebinds changed existing code/test hashes while
-keeping the active source profile v2. These source results do not prove
+keeping the active source profile v2. The subsequent data-only conversion
+freezes that post-reader baseline at
+`7ef2eefee79e64d48e265daefab4ded622de8fbd`: all 10,375 ordered nodes,
+1,499 source bindings, 546 targets, 92 helper decisions and the 300-second
+deadline remain identical. Stored bytes fall from 1,048,547 to 697,907.
+Independent expansion and recursive type/order comparison, plus fresh-process
+receipt-file reads, verify equivalence before replacing the source file.
+The matching v2 inventory at that immutable revision is a supported rollback
+pair with the reader; later admissions must not be discarded to reuse it.
+PR CI selects the head's reader; qualification/publication select helpers and
+data from the same immutable Dev SHA. Main
+`73554ecb6359f06ef8248fdf090c92686be719fe` retains the previously traced
+consumer selectors. No operational writer or installed reader is switched.
+These source results do not prove
 deployed reader adoption, installed/native qualification or full-census coverage.
 
 The version-bump guard packet exports eleven original cases through eight exact

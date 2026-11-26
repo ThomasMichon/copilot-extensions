@@ -5,7 +5,29 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
-## November 26 reader-only prefix compatibility
+## November 26 separate format-only migration
+
+Reader #14658 merges as `7ef2eefee79e64d48e265daefab4ded622de8fbd`
+after actual clean Copilot approval, seven fresh configured checks and natural
+CI `45730698536`: all 10,375 cases pass in 187.264 packet seconds, with
+fresh execution rather than a reuse hit. Independent merge/blob readback,
+supported source sync, all 1,499 bindings and 92 helper decisions verify.
+The [implementation Journal](journal/2026/11.26-manifest-successor.md)
+records the full exact-head result.
+
+The separate migration freezes the actual post-reader inventory and uses its
+merged encoder. Independent expansion plus recursive type/order comparison and
+two fresh real receipt-file consumers preserve every ordered value:
+10,375 nodes, 1,499 bindings, 546 targets, 92 helper decisions and 300 seconds.
+V3 is 697,907 bytes rather than 1,048,547, saving 350,640 under the same cap.
+No new census node or source/code hash is mixed into the conversion.
+Current Main's traced consumer selectors are unchanged; actual reader/data
+pairing and matching v2 rollback are explicit in TESTING.md.
+Migration review, a fresh complete hosted packet, merge and persistent readback
+remain pending. No runtime, operational writer, native, controller, eligibility,
+guard, ownership or cleanup change follows. The parent stays active.
+
+## November 26 reader-only prefix compatibility (prior stage)
 
 Reviewed intent #14648 precedes implementation. The existing bound admission
 owner now accepts explicit v3 prefix groups while retaining v1/v2 behavior
@@ -36,7 +58,8 @@ size, 29-byte headroom, all old identities/targets and 92 helper decisions remai
 Worktree Manager's declared packaged reader asset requires its own patch intent;
 that intent is recorded without installing or updating a runtime.
 
-Reader review, current hosted CI, merge and readback remain open.
+At this prior stage, reader review, hosted CI, merge and readback remained open;
+the subsequent delivery is recorded above.
 No workflow/controller, operational writer, native lane, rollout, eligibility
 or guard changes occur, and no retained refusal is replayed.
 
