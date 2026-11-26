@@ -4,32 +4,38 @@ import asyncio
 import base64
 import copy
 import json
+from collections.abc import Awaitable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from acp.schema import ConfigOptionUpdate
-from fastapi import HTTPException
-
-from agent_bridge.acp_client import AcpClient
-from agent_bridge.client import BridgeClient, BridgeClientError
-from agent_bridge.models import ServiceConfig, SessionStatus, StartSessionRequest
-from agent_bridge.protocol import TARGET_PREFERENCES_PROTOCOL_VERSION
-from agent_bridge.routes.sessions import start_session
-from agent_bridge.session_host import protocol
-from agent_bridge.session_host.client import SessionHostClient
-from agent_bridge.session_host.host import SessionHost
-from agent_bridge.session_preferences import (
+from fastapi import HTTPException, Request
+from agent_remote_driver.session_host import protocol
+from agent_remote_driver.session_host.client import SessionHostClient
+from agent_remote_driver.session_host.host import SessionHost
+from agent_remote_driver.session_preferences import (
     CONTEXT_ENV, PreferenceApplicationError, SOURCE_ENV, client_preferences, execution_receipt,
     execution_settings, validate_receipt,
 )
+
+from agent_bridge.acp_client import AcpClient
+from agent_bridge.client import BridgeClient, BridgeClientError
+from agent_bridge.models import ServiceConfig
+from agent_bridge.session_status import SessionStatus
+from agent_bridge.session_start_models import StartSessionRequest
+from agent_bridge.protocol import TARGET_PREFERENCES_PROTOCOL_VERSION
+from agent_bridge.routes.sessions import start_session
+from agent_bridge.session_manager import SessionManager
+from agent_bridge.transport import SpawnTarget
 
 pytestmark = pytest.mark.contract("agent_bridge.target_preferences")
 
 
 @pytest.fixture(autouse=True)
-def clean_environment(monkeypatch):
+def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "AGENT_BRIDGE_ACP_MODEL", "AGENT_CODESPACES_ACP_MODEL",
         "AGENT_BRIDGE_ACP_EFFORT", "AGENT_CODESPACES_ACP_EFFORT",
@@ -40,7 +46,7 @@ def clean_environment(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def options(context=False):
+def options(context: bool = False) -> list[dict[str, Any]]:
     values = [
         {"id": "model", "currentValue": "native", "options": [
             {"value": value} for value in ("native", "target", "requested", "local", "saved")
@@ -54,8 +60,8 @@ def options(context=False):
     return values
 
 
-def client(**kwargs):
-    events = []
+def client(**kwargs: Any) -> tuple[AcpClient, list[tuple[str, dict[str, Any]]]]:
+    events: list[tuple[str, dict[str, Any]]] = []
     value = AcpClient(
         preference_source="target-settings",
         on_event=lambda kind, data: events.append((kind, data)),
@@ -63,7 +69,7 @@ def client(**kwargs):
     )
     value._connection = MagicMock()
 
-    async def set_option(*, config_id, session_id, value: str):
+    async def set_option(*, config_id: str, session_id: str, value: str) -> SimpleNamespace:
         response = copy.deepcopy(owner._verified_options)
         for option in response:
             if option["id"] == config_id:
@@ -76,9 +82,21 @@ def client(**kwargs):
     return value, events
 
 
-def calls(value):
+def connection(value: AcpClient) -> MagicMock:
+    assert isinstance(value._connection, MagicMock)
+    return value._connection
+
+
+def calls(value: AcpClient) -> dict[str, str]:
     return {c.kwargs["config_id"]: c.kwargs["value"]
-            for c in value._connection.set_config_option.call_args_list}
+            for c in connection(value).set_config_option.call_args_list}
+
+
+def run(awaitable: Awaitable[None]) -> None:
+    async def scenario() -> None:
+        await awaitable
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("raw,status", [
@@ -86,7 +104,9 @@ def calls(value):
     ('{//comment\n"model":"target","effortLevel":"medium","contextTier":"long_context"}',
      "resolved"),
 ])
-def test_execution_side_settings(monkeypatch, tmp_path, raw, status):
+def test_execution_side_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str | None, status: str,
+) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     if raw is not None:
         settings = tmp_path / ".copilot" / "settings.json"
@@ -101,7 +121,7 @@ def test_execution_side_settings(monkeypatch, tmp_path, raw, status):
         }
 
 
-def test_backend_profile_and_opaque_launch(monkeypatch, tmp_path):
+def test_backend_profile_and_opaque_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     receipt = execution_settings(
         ["copilot", "--model", "local", "--reasoning-effort=medium"],
@@ -114,7 +134,9 @@ def test_backend_profile_and_opaque_launch(monkeypatch, tmp_path):
     assert validate_receipt({**receipt, "version": 2}, 123) is None
 
 
-def test_executable_basename_cannot_attest_execution_identity(monkeypatch, tmp_path):
+def test_executable_basename_cannot_attest_execution_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     fake = tmp_path / "copilot"
     fake.write_text("#!/bin/sh\nHOME=/other exec real-copilot\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -125,8 +147,8 @@ def test_executable_basename_cannot_attest_execution_identity(monkeypatch, tmp_p
         assert receipt["reason"] == "unverified-executable-provenance"
 
 
-def test_unattested_v1_values_and_provider_claims_are_rejected():
-    receipt = {"version": 1, "child_pid": 123, "status": "unsupported",
+def test_unattested_v1_values_and_provider_claims_are_rejected() -> None:
+    receipt: dict[str, Any] = {"version": 1, "child_pid": 123, "status": "unsupported",
                "values": {"model": "target"}, "sources": {"model": "target-settings"}}
     assert validate_receipt(receipt, 123) is None
     receipt.update(values={}, sources={}, provider_selected=True)
@@ -139,8 +161,8 @@ def test_unattested_v1_values_and_provider_claims_are_rejected():
     {"version": 1, "child_pid": 999, "status": "missing", "values": {}, "sources": {}},
     b"not-json",
 ])
-def test_hello_extension_and_legacy_peer(receipt):
-    async def scenario():
+def test_hello_extension_and_legacy_peer(receipt: dict[str, Any] | bytes | None) -> None:
+    async def scenario() -> None:
         payload = protocol.pack_u64(7) + protocol.pack_u64(123)
         if receipt is not None:
             payload += receipt if isinstance(receipt, bytes) else json.dumps(receipt).encode()
@@ -161,8 +183,8 @@ def test_hello_extension_and_legacy_peer(receipt):
 
 
 @pytest.mark.parametrize("size", [0, 7, 8, 15])
-def test_short_hello_is_a_connection_error(size):
-    async def scenario():
+def test_short_hello_is_a_connection_error(size: int) -> None:
+    async def scenario() -> None:
         reader = asyncio.StreamReader()
         reader.feed_data(protocol.encode(protocol.MsgType.HELLO, b"\0" * size))
         reader.feed_eof()
@@ -173,15 +195,15 @@ def test_short_hello_is_a_connection_error(size):
     asyncio.run(scenario())
 
 
-def test_host_sends_execution_bound_receipt():
-    async def scenario():
+def test_host_sends_execution_bound_receipt() -> None:
+    async def scenario() -> None:
         stdout = asyncio.StreamReader()
         stdout.feed_eof()
         child = SimpleNamespace(pid=123, returncode=0, stdout=stdout, stdin=None,
                                 wait=AsyncMock(return_value=0))
         receipt = {"version": 1, "child_pid": 123, "status": "unsupported",
                    "values": {}, "sources": {}}
-        host = SessionHost(child, preference_receipt=receipt)
+        host = SessionHost(cast(asyncio.subprocess.Process, child), preference_receipt=receipt)
         sock = None
         try:
             port = await host.serve(port=0)
@@ -195,8 +217,8 @@ def test_host_sends_execution_bound_receipt():
     asyncio.run(scenario())
 
 
-def test_golden_unsealed_settings_are_not_accepted_as_authority():
-    async def scenario():
+def test_golden_unsealed_settings_are_not_accepted_as_authority() -> None:
+    async def scenario() -> None:
         fixture = json.loads((
             Path(__file__).parents[1] / "contract" / "fixtures" / "session-host"
             / "current" / "messages.json"
@@ -211,12 +233,16 @@ def test_golden_unsealed_settings_are_not_accepted_as_authority():
     asyncio.run(scenario())
 
 
-def test_connection_propagates_host_authority(tmp_path):
+def test_connection_propagates_host_authority(tmp_path: Path) -> None:
     from agent_bridge.session_host_connection import _SessionHostConnectionMixin
-    from agent_bridge.transport import SpawnTarget
 
-    async def scenario():
-        manager = _SessionHostConnectionMixin()
+    class HostConnectionHarness(_SessionHostConnectionMixin):
+        _db: MagicMock
+        _timeouts: SimpleNamespace
+        _host_index: None
+
+    async def scenario() -> None:
+        manager = HostConnectionHarness()
         manager._db = MagicMock()
         manager._db.execute_read.return_value = []
         manager._timeouts = SimpleNamespace(session_start=1, session_new=1)
@@ -252,29 +278,29 @@ def test_connection_propagates_host_authority(tmp_path):
     asyncio.run(scenario())
 
 
-def test_unequal_caller_target_and_context_capability(monkeypatch):
+def test_unequal_caller_target_and_context_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_bridge.acp_client.resolve_acp_model_config",
                         lambda: pytest.fail("target mode must not read caller settings"))
     receipt = {"status": "resolved", "values": {
         "model": "target", "reasoning_effort": "medium", "context": "long_context",
     }, "sources": {}}
     value, events = client(target_preferences=receipt)
-    asyncio.run(value._apply_model_config(options(context=True)))
+    run(value._apply_model_config(options(context=True)))
     assert calls(value) == receipt["values"]
     assert value.confirmed_preferences == receipt["values"]
     value, events = client(target_preferences=receipt)
-    asyncio.run(value._apply_model_config(options()))
+    run(value._apply_model_config(options()))
     fallback = next(data for kind, data in events if kind == "model_fallback")
     assert fallback["fallbacks"][0]["reason"] == "not-advertised"
     assert "context" not in value.confirmed_preferences
 
 
-def test_missing_authority_never_uses_caller_defaults(monkeypatch):
+def test_missing_authority_never_uses_caller_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent_bridge.acp_client.resolve_acp_model_config",
                         lambda: pytest.fail("caller fallback is forbidden"))
     value, events = client()
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(value._apply_model_config(options()))
+        run(value._apply_model_config(options()))
     assert calls(value) == {}
     assert ("preference_resolution", {
         "source": "target-settings", "status": "unsupported", "reason": "authority-unavailable",
@@ -286,32 +312,32 @@ def test_missing_authority_never_uses_caller_defaults(monkeypatch):
     assert not any(kind == "preference_selected" for kind, _ in events)
 
 
-def test_explicit_request_and_backend_precedence(monkeypatch):
+def test_explicit_request_and_backend_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "target")
     receipt = {"status": "resolved", "values": {"model": "local"},
                "sources": {"model": "launch-profile"}}
     value, _ = client(target_preferences=receipt)
-    asyncio.run(value._apply_model_config(options()))
+    run(value._apply_model_config(options()))
     assert calls(value)["model"] == "local"
     value, _ = client(target_preferences=receipt, model_override="requested")
-    asyncio.run(value._apply_model_config(options()))
+    run(value._apply_model_config(options()))
     assert calls(value)["model"] == "requested"
 
 
-def test_unoffered_and_failed_rpc_are_visible():
+def test_unoffered_and_failed_rpc_are_visible() -> None:
     value, events = client(model_override="requested")
     advertised = options()
     advertised[0]["options"] = []
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(value._apply_model_config(advertised))
+        run(value._apply_model_config(advertised))
     assert not calls(value)
     assert next(d for k, d in events if k == "model_fallback")["fallbacks"][0][
         "reason"
     ] == "not-offered"
     value, events = client(model_override="native", context_override="long_context")
-    value._connection.set_config_option.side_effect = RuntimeError("test failure")
+    connection(value).set_config_option.side_effect = RuntimeError("test failure")
     with pytest.raises(PreferenceApplicationError, match="required model/effort was not verified"):
-        asyncio.run(value._apply_model_config(options(context=True)))
+        run(value._apply_model_config(options(context=True)))
     assert not any(kind in {"usage_update", "model_applied"} for kind, _ in events)
     assert next(d for k, d in events if k == "model_fallback")["fallbacks"][0][
         "reason"
@@ -319,23 +345,23 @@ def test_unoffered_and_failed_rpc_are_visible():
     assert "context" not in value.confirmed_preferences
 
 
-def test_load_and_recreate_preserve_confirmed_choices():
+def test_load_and_recreate_preserve_confirmed_choices() -> None:
     receipt = {"status": "resolved", "values": {"model": "target"}, "sources": {}}
     for resuming in (True, False):
         value, _ = client(
             target_preferences=receipt, model_override="requested",
             confirmed_preferences={"model": "saved", "reasoning_effort": "high"},
         )
-        asyncio.run(value._apply_model_config(options(), resuming=resuming))
+        run(value._apply_model_config(options(), resuming=resuming))
         assert calls(value) == {"model": "saved", "reasoning_effort": "high"}
     value, _ = client(target_preferences=receipt, model_override="requested")
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(value._apply_model_config(options(), resuming=True))
+        run(value._apply_model_config(options(), resuming=True))
     assert calls(value) == {}
     assert value.confirmed_preferences == {}
 
 
-def test_selected_notification_and_persistence():
+def test_selected_notification_and_persistence() -> None:
     value, events = client()
     changed = options()
     changed[0]["currentValue"] = "saved"
@@ -351,7 +377,7 @@ def test_selected_notification_and_persistence():
     assert "context" not in value.confirmed_preferences
     db = MagicMock()
     db.execute_read.return_value = [{"data_json": json.dumps(snapshot)}]
-    target = SimpleNamespace(env={SOURCE_ENV: "target-settings"}, copilot_args=[])
+    target = SpawnTarget(type="local", env={SOURCE_ENV: "target-settings"}, copilot_args=[])
     assert client_preferences(target, db, "session")["confirmed_preferences"] == snapshot
     db.flush.assert_called_once()
     assert "LIMIT 1" in db.execute_read.call_args.args[0]
@@ -360,7 +386,7 @@ def test_selected_notification_and_persistence():
 @pytest.mark.parametrize("failure", [
     "not-offered", "not-advertised", "rpc-failed", "not-confirmed", "readback-unavailable",
 ])
-def test_required_model_failure_never_claims_a_ready_selection(failure):
+def test_required_model_failure_never_claims_a_ready_selection(failure: str) -> None:
     value, events = client(model_override="requested")
     offered = options()
     if failure == "not-offered":
@@ -368,15 +394,15 @@ def test_required_model_failure_never_claims_a_ready_selection(failure):
     elif failure == "not-advertised":
         offered = offered[1:]
     elif failure == "rpc-failed":
-        value._connection.set_config_option.side_effect = RuntimeError("test failure")
+        connection(value).set_config_option.side_effect = RuntimeError("test failure")
     elif failure == "not-confirmed":
-        value._connection.set_config_option.side_effect = None
-        value._connection.set_config_option.return_value = SimpleNamespace(config_options=options())
+        connection(value).set_config_option.side_effect = None
+        connection(value).set_config_option.return_value = SimpleNamespace(config_options=options())
     else:
-        value._connection.set_config_option.side_effect = None
-        value._connection.set_config_option.return_value = SimpleNamespace()
+        connection(value).set_config_option.side_effect = None
+        connection(value).set_config_option.return_value = SimpleNamespace()
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(value._apply_model_config(offered))
+        run(value._apply_model_config(offered))
     assert not value._preferences_ready
     assert not any(kind in {"model_applied", "preference_selected"} for kind, _ in events)
     assert value.confirmed_preferences == {}
@@ -385,48 +411,51 @@ def test_required_model_failure_never_claims_a_ready_selection(failure):
     assert application["effective"].get("model") != "requested"
 
 
-def test_failed_restore_keeps_the_prior_confirmed_intent():
+def test_failed_restore_keeps_the_prior_confirmed_intent() -> None:
     value, events = client(confirmed_preferences={"model": "saved"})
-    value._connection.set_config_option.side_effect = None
-    value._connection.set_config_option.return_value = SimpleNamespace(config_options=options())
+    connection(value).set_config_option.side_effect = None
+    connection(value).set_config_option.return_value = SimpleNamespace(config_options=options())
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(value._apply_model_config(options(), resuming=True))
+        run(value._apply_model_config(options(), resuming=True))
     assert value.confirmed_preferences == {"model": "saved"}
     assert not any(kind == "preference_selected" for kind, _ in events)
 
 
-def test_grouped_advertised_model_choice_is_verified():
+def test_grouped_advertised_model_choice_is_verified() -> None:
     value, _ = client(model_override="requested")
     offered = options()
     offered[0]["options"] = [{"group": "choices", "options": [{"value": "requested"}]}]
-    asyncio.run(value._apply_model_config(offered))
+    run(value._apply_model_config(offered))
     assert value.confirmed_preferences["model"] == "requested"
 
 
-def test_final_readback_cannot_change_model_behind_effort():
+def test_final_readback_cannot_change_model_behind_effort() -> None:
     value, events = client(model_override="requested", effort_override="medium")
-    original = value._connection.set_config_option.side_effect
+    original = connection(value).set_config_option.side_effect
 
-    async def reset_model(**kwargs):
+    async def reset_model(**kwargs: Any) -> SimpleNamespace:
         result = await original(**kwargs)
+        assert isinstance(result, SimpleNamespace)
         if kwargs["config_id"] == "reasoning_effort":
             result.config_options[0]["currentValue"] = "native"
         return result
 
-    value._connection.set_config_option.side_effect = reset_model
+    connection(value).set_config_option.side_effect = reset_model
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(value._apply_model_config(options()))
+        run(value._apply_model_config(options()))
     assert not any(kind == "preference_selected" for kind, _ in events)
     application = next(data for kind, data in events if kind == "preference_application")
     assert application["effective"]["model"] == "native"
 
 
-def test_intentional_native_provider_precedes_cloud_environment(monkeypatch):
+def test_intentional_native_provider_precedes_cloud_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "target")
     receipt = {"status": "resolved", "provider_selected": True,
                "values": {"reasoning_effort": "medium"}, "sources": {}}
     value, _ = client(target_preferences=receipt)
-    asyncio.run(value._apply_model_config(options()))
+    run(value._apply_model_config(options()))
     assert calls(value) == {"reasoning_effort": "medium"}
     assert value.confirmed_preferences["model"] == "native"
 
@@ -436,20 +465,19 @@ def test_intentional_native_provider_precedes_cloud_environment(monkeypatch):
     ("native", SessionStatus.FAILED), ("requested", SessionStatus.IDLE),
 ])
 async def test_manager_never_readies_an_unverified_model(
-    session_manager, monkeypatch, current, expected, permitted_provider_hosting,
-):
-    from agent_bridge.transport import SpawnTarget
-
+    session_manager: SessionManager, monkeypatch: pytest.MonkeyPatch, current: str,
+    expected: SessionStatus, permitted_provider_hosting: None,
+) -> None:
     process = SimpleNamespace(
         proc=MagicMock(), pid=123, alive=True, kill=AsyncMock(),
     )
     process.kill.side_effect = lambda: setattr(process, "alive", False)
-    created = []
+    created: list[AcpClient] = []
 
-    def factory(**kwargs):
+    def factory(**kwargs: Any) -> AcpClient:
         value = AcpClient(**kwargs)
-        value.start = AsyncMock()
-        value.shutdown = AsyncMock()
+        monkeypatch.setattr(value, "start", AsyncMock())
+        monkeypatch.setattr(value, "shutdown", AsyncMock())
         value._connection = MagicMock()
         offered = options()
         offered[0]["currentValue"] = current
@@ -480,7 +508,7 @@ async def test_manager_never_readies_an_unverified_model(
         assert selected[-1]["data"]["model"] == "requested"
 
 
-def test_client_capability_gate_and_legacy_default():
+def test_client_capability_gate_and_legacy_default() -> None:
     bridge = BridgeClient("http://localhost:1", "test")
     bridge._daemon_proto = (TARGET_PREFERENCES_PROTOCOL_VERSION - 1, 1)
     with patch.object(bridge, "_request", return_value={}) as request:
@@ -496,7 +524,7 @@ def test_client_capability_gate_and_legacy_default():
 
 
 @pytest.mark.parametrize("policy", ["", False, 0, {}, []])
-def test_client_rejects_every_explicit_invalid_policy_before_request(policy):
+def test_client_rejects_every_explicit_invalid_policy_before_request(policy: Any) -> None:
     bridge = BridgeClient("http://localhost:1", "test")
     bridge._daemon_proto = (TARGET_PREFERENCES_PROTOCOL_VERSION - 1, 1)
     with patch.object(bridge, "_request", return_value={}) as request:
@@ -506,7 +534,9 @@ def test_client_rejects_every_explicit_invalid_policy_before_request(policy):
 
 
 @pytest.mark.parametrize("policy", ["target-settings", "target-setting", "null", "false", "''"])
-def test_invalid_target_configuration_does_not_fall_back(monkeypatch, tmp_path, policy):
+def test_invalid_target_configuration_does_not_fall_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, policy: str,
+) -> None:
     from agent_bridge import config
 
     monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
@@ -522,7 +552,9 @@ def test_invalid_target_configuration_does_not_fall_back(monkeypatch, tmp_path, 
     "preference_source: target-settings\nbad: 'unterminated",
     "- preference_source: target-settings\n",
 ])
-def test_unparseable_authority_configuration_refuses_startup(monkeypatch, tmp_path, text):
+def test_unparseable_authority_configuration_refuses_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str,
+) -> None:
     from agent_bridge import config
 
     monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
@@ -531,7 +563,9 @@ def test_unparseable_authority_configuration_refuses_startup(monkeypatch, tmp_pa
         config.load_config()
 
 
-def test_unreadable_authority_configuration_refuses_startup(monkeypatch, tmp_path):
+def test_unreadable_authority_configuration_refuses_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from agent_bridge import config
 
     monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
@@ -539,7 +573,7 @@ def test_unreadable_authority_configuration_refuses_startup(monkeypatch, tmp_pat
     path.write_text("preference_source: target-settings", encoding="utf-8")
     original = Path.read_text
 
-    def read(self, *args, **kwargs):
+    def read(self: Path, *args: Any, **kwargs: Any) -> str:
         if self == path:
             raise PermissionError("test read failure")
         return original(self, *args, **kwargs)
@@ -555,7 +589,7 @@ def test_unreadable_authority_configuration_refuses_startup(monkeypatch, tmp_pat
     "default_env:\n  AGENT_BRIDGE_PREFERENCE_SOURCE: target-setting\n",
     "preference_source: target-settings\n",
 ])
-def test_invalid_repo_authority_configuration_refuses_fallback(tmp_path, text):
+def test_invalid_repo_authority_configuration_refuses_fallback(tmp_path: Path, text: str) -> None:
     from agent_bridge import config
 
     path = tmp_path / ".copilot-extensions" / "agent-bridge" / "config.yaml"
@@ -565,7 +599,9 @@ def test_invalid_repo_authority_configuration_refuses_fallback(tmp_path, text):
         config.load_repo_bridge_config(tmp_path)
 
 
-def test_unreadable_repo_authority_configuration_refuses_fallback(monkeypatch, tmp_path):
+def test_unreadable_repo_authority_configuration_refuses_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from agent_bridge import config
 
     path = tmp_path / ".copilot-extensions" / "agent-bridge" / "config.yaml"
@@ -573,7 +609,7 @@ def test_unreadable_repo_authority_configuration_refuses_fallback(monkeypatch, t
     path.write_text("default_env: {}", encoding="utf-8")
     original = Path.read_text
 
-    def read(self, *args, **kwargs):
+    def read(self: Path, *args: Any, **kwargs: Any) -> str:
         if self == path:
             raise PermissionError("test repository read failure")
         return original(self, *args, **kwargs)
@@ -587,19 +623,21 @@ def test_unreadable_repo_authority_configuration_refuses_fallback(monkeypatch, t
     {"COPILOT_PROVIDER_BASE_URL": "http://localhost:1"},
     {"COPILOT_OFFLINE": "1"},
 ])
-def test_real_request_owned_provider_intent_preserves_native_model(monkeypatch, env):
+def test_real_request_owned_provider_intent_preserves_native_model(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str],
+) -> None:
     monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "target")
-    target = SimpleNamespace(env={SOURCE_ENV: "target-settings", **env}, copilot_args=[])
+    target = SpawnTarget(type="local", env={SOURCE_ENV: "target-settings", **env}, copilot_args=[])
     kwargs = client_preferences(target)
     assert kwargs.pop("preference_source") == "target-settings"
     assert kwargs["provider_intent"]
     instance, _ = client(**kwargs)
-    asyncio.run(instance._apply_model_config(options()))
+    run(instance._apply_model_config(options()))
     assert calls(instance) == {}
     assert instance.confirmed_preferences["model"] == "native"
 
 
-def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider():
+def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider() -> None:
     from agent_bridge.preference_requests import reused_preference_source
 
     existing = SimpleNamespace(
@@ -633,18 +671,20 @@ def test_affinity_reuse_cannot_ignore_explicit_preferences_or_provider():
         assert error.value.status_code == 422
 
 
-def test_target_propagation_off_keeps_explicit_environment_choices(monkeypatch):
+def test_target_propagation_off_keeps_explicit_environment_choices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AGENT_BRIDGE_MODEL_PROPAGATE", "0")
     monkeypatch.setenv("AGENT_BRIDGE_ACP_MODEL", "target")
     monkeypatch.setenv("AGENT_BRIDGE_ACP_EFFORT", "medium")
     instance, _ = client()
-    asyncio.run(instance._apply_model_config(options()))
+    run(instance._apply_model_config(options()))
     assert calls(instance) == {"model": "target", "reasoning_effort": "medium"}
     assert instance.confirmed_preferences["model"] == "target"
 
 
 @pytest.mark.parametrize("policy", ["", "target-setting"])
-def test_invalid_policy_environment_never_selects_another_authority(policy):
+def test_invalid_policy_environment_never_selects_another_authority(policy: str) -> None:
     from agent_bridge.preference_requests import apply_request_preferences, reused_preference_source
 
     request = StartSessionRequest(env={SOURCE_ENV: policy})
@@ -659,7 +699,7 @@ def test_invalid_policy_environment_never_selects_another_authority(policy):
 
 
 @pytest.mark.parametrize("key,value", [("model", "requested"), ("reasoning_effort", "medium")])
-def test_unoffered_already_current_value_cannot_ready_target_mode(key, value):
+def test_unoffered_already_current_value_cannot_ready_target_mode(key: str, value: str) -> None:
     instance, events = client(model_override="native" if key != "model" else value,
                               effort_override=value if key == "reasoning_effort" else None)
     offered = options()
@@ -667,36 +707,36 @@ def test_unoffered_already_current_value_cannot_ready_target_mode(key, value):
     selected["currentValue"] = value
     selected["options"] = []
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(instance._apply_model_config(offered))
+        run(instance._apply_model_config(offered))
     assert not instance._preferences_ready
     assert not any(kind == "preference_selected" for kind, _ in events)
     applied = [data for kind, data in events if kind == "model_applied"]
     assert not any(key in data for data in applied)
 
 
-def test_rpc_current_value_must_remain_offered():
+def test_rpc_current_value_must_remain_offered() -> None:
     instance, events = client(model_override="requested")
     readback = options()
     readback[0]["currentValue"] = "requested"
     readback[0]["options"] = []
-    instance._connection.set_config_option.side_effect = None
-    instance._connection.set_config_option.return_value = SimpleNamespace(config_options=readback)
+    connection(instance).set_config_option.side_effect = None
+    connection(instance).set_config_option.return_value = SimpleNamespace(config_options=readback)
     with pytest.raises(PreferenceApplicationError):
-        asyncio.run(instance._apply_model_config(options()))
+        run(instance._apply_model_config(options()))
     assert not instance._preferences_ready
     assert not any(kind == "preference_selected" for kind, _ in events)
 
 
-def test_route_persists_policy_as_request_owned_env():
-    async def scenario():
+def test_route_persists_policy_as_request_owned_env() -> None:
+    async def scenario() -> None:
         mgr = MagicMock()
         mgr.is_draining = False
         mgr.start_session = AsyncMock(return_value=SimpleNamespace(
             session_id="new", name="new", status=SessionStatus.IDLE, caller_session_id=None,
         ))
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
             session_manager=mgr, config=ServiceConfig(preference_source="target-settings"),
-        )))
+        ))))
         response = await start_session(StartSessionRequest(context="long_context"), request)
         assert response.preference_source == "target-settings"
         call = mgr.start_session.call_args
