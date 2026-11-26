@@ -29,7 +29,8 @@ def _hooks() -> list[dict[str, object]]:
 def _assert_powershell_dispatch_after_detach(
     source: str, *, native_entry: str | None = None,
 ) -> None:
-    detach = source.find("Set-Location")
+    relocation = re.search(r"\bSet-Location\b|\.Path\.SetLocation\(", source)
+    detach = relocation.start() if relocation is not None else -1
     process_cwd = source.find("SetCurrentDirectory")
     dispatches = list(re.finditer(
         r"""(?:&|\.)\s+(?:\$[A-Za-z_]\w*|'[^']*'|"[^"]*"|\()"""
@@ -74,9 +75,14 @@ def test_every_hook_leaves_payload_cwd_before_running_script() -> None:
         powershell = str(hook["powershell"])
         bash = str(hook["bash"])
         _assert_powershell_dispatch_after_detach(powershell, native_entry=native_entry)
-        detach_owner = powershell if "Set-Location" in powershell else native_entry
+        detach_owner = powershell if re.search(
+            r"\bSet-Location\b|\.Path\.SetLocation\(", powershell,
+        ) else native_entry
         assert "$env:USERPROFILE" in detach_owner
-        assert "-ErrorAction Stop" in detach_owner
+        if "Set-Location" in detach_owner:
+            assert "-ErrorAction Stop" in detach_owner
+        else:
+            assert "[System.Management.Automation.WildcardPattern]::Escape(" in detach_owner
         assert "GetPathRoot" in detach_owner
         assert 'cd "$HOME"' in bash
         bash_detach = bash.find("cd ")
@@ -125,7 +131,7 @@ def test_native_delegation_exempts_only_the_native_pre_tool_entry(change: str) -
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("hook_name", ["postToolUse", "preToolUse"])
 def test_hook_releases_valid_payload_before_waiting_for_input(
-    tmp_path: Path, host: str, hook_name: str,
+    tmp_path: Path, host: str, hook_name: str, *, home_available: bool = True,
 ) -> None:
     executable = shutil.which(host)
     if not executable:
@@ -133,7 +139,7 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
     payload = tmp_path / "payload [literal]"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    home = tmp_path / "home"
+    home = tmp_path / "home [literal]`tail"
     home.mkdir()
     project = tmp_path / "project"
     project.mkdir()
@@ -143,7 +149,9 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
     # Observe the real ingress immediately before its blocking stdin read.
     witness_reader = (
         "[IO.File]::WriteAllText($env:HOOK_CWD_WITNESS, "
-        "(@{logical=(Get-Location).Path; native=[IO.Directory]::GetCurrentDirectory()} "
+        "(@{logical=$ExecutionContext.SessionState.Path.CurrentLocation.Path; "
+        "native=[IO.Directory]::GetCurrentDirectory(); "
+        "management=[bool](Get-Module -Name Microsoft.PowerShell.Management)} "
         "| ConvertTo-Json -Compress)); $reader = "
     )
     if hook_name == "postToolUse":
@@ -155,9 +163,11 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
         command = command.replace("$reader = ", witness_reader, 1)
     else:
         native_entry = (_PLUGIN / "scripts" / "pre-tool-hook.ps1").read_text("utf-8")
-        assert native_entry.count("$reader = ") == 1
+        reader = "$reader = [IO.StreamReader]::new([Console]::OpenStandardInput()"
+        assert native_entry.count(reader) == 1
         (scripts / "pre-tool-hook.ps1").write_text(
-            native_entry.replace("$reader = ", witness_reader, 1), encoding="utf-8",
+            native_entry.replace(reader, witness_reader + reader.removeprefix("$reader = "), 1),
+            encoding="utf-8",
         )
         (scripts / "managed-session.ps1").write_text(
             "function Test-PreparedManagedWorktreesSession {\n"
@@ -174,6 +184,13 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
         "HOOK_CWD_WITNESS": str(witness),
         "AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION": "native",
     }
+    if not home_available:
+        assert not (home / "missing-home").exists()
+        command = (
+            "$env:USERPROFILE = [IO.Path]::Combine($env:USERPROFILE, 'missing-home'); "
+            "if ([IO.Directory]::Exists($env:USERPROFILE)) { throw 'Fixture home must be unavailable' }; "
+            + command
+        )
     process = subprocess.Popen(
         [executable, "-NoLogo", "-NoProfile", "-Command", command],
         cwd=payload, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -189,8 +206,12 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
         payload.rename(moved)
         moved.rename(payload)
         selected = json.loads(witness.read_text(encoding="utf-8"))
-        assert Path(selected["logical"]) == home
-        assert Path(selected["native"]) == home
+        expected = home if home_available else Path(payload.anchor)
+        assert Path(selected["logical"]) == expected
+        assert Path(selected["native"]) == expected
+        assert selected["management"] is False
+        if not home_available:
+            assert not (home / "missing-home").exists()
         event = {"cwd": str(project), "toolName": "view"}
         stdout, stderr = process.communicate(json.dumps(event), timeout=10)
         assert process.returncode == 0, stderr
@@ -199,6 +220,17 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=10)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory replacement semantics")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("hook_name", ["preToolUse", "postToolUse"])
+def test_native_hooks_detach_to_root_when_home_unavailable(
+    tmp_path: Path, host: str, hook_name: str,
+) -> None:
+    test_hook_releases_valid_payload_before_waiting_for_input(
+        tmp_path, host, hook_name, home_available=False,
+    )
 
 
 def test_provision_compatibility_path_never_starts_runtime_work() -> None:

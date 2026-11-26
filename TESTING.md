@@ -976,6 +976,15 @@ descendant's exit after the existing finite owner settles. The same file
 contains controlled owner-selection and unconfirmed-cleanup propagation cases.
 These are contained child-process controls, not native Copilot or fleet adoption.
 
+The Dispatch native packet also selects `tests/test_idle_outbox_contention.py`.
+Its four controls hold a real SQLite writer while polling empty wake and
+verification outboxes; they require read-only idle results without waiting for
+the writer. The test-local busy timeout is shortened only to make a regression
+fail quickly; production timeouts and the original consumer workloads remain
+unchanged. Four companion failure controls require the advisory read's original
+database exception to propagate, rather than reporting an empty outbox.
+This database integration stays outside required unit-only CI.
+
 The same native packet selects
 `agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
 `wall_cpu_tail` / incompatible-reader controls. JUnit properties named
@@ -1204,6 +1213,10 @@ start Python or perform executable discovery. Missing-resident behavior remains
 in the separate cold transport controls.
 The existing native lane explicitly selects the complete command-entry transport
 matrix too, rather than only the process-free original-guard control.
+Detailed [native tool-hook diagnostics](plugins/agent-worktrees/docs/native-tool-hook-diagnostics.md)
+cover launch evidence, phase-free controls, buffered/retained clocks and their
+limits. These optional observations do not qualify historical causes, observer
+overhead, lifetime or composed latency.
 Registered post-tool work-count controls require one original membership
 validation per event on both engines in legacy and selected-cell contexts.
 Direct prepared-read helper calls retain their own admission check.
@@ -1221,6 +1234,12 @@ Large valid warnings and oversized non-BMP or HTML-sensitive reasons require
 explicit truncation without losing a confirmed decision. Both native engines
 consume the bounded large response through their original 500 ms transport,
 including Windows PowerShell 5's HTML-sensitive client reserialization.
+
+The source-only Job-owner and full-portfolio profiles retain the original
+fifteen-job topology, selectors and deadlines. Their sampling, privacy,
+retention and cleanup contracts are in
+[Owned runner and full-portfolio observation](plugins/agent-worktrees/docs/native-tool-hook-diagnostics.md#owned-runner-and-full-portfolio-observation).
+Instrumented results remain nonacceptance, including nonreproductions.
 
 The focused Worktrees credential-isolation regression is
 `tests/test_git_credential_isolation.py`, selected through the canonical
@@ -1251,7 +1270,10 @@ original scripts without these probes. Probe overhead is included in diagnostic
 timings; passing observations are nonreproduction, not an explanation or fix
 for an earlier timeout. Production scripts, retries and deadlines are unchanged.
 
-The same file's `-k registered_policy_timeout_observation` selection invokes
+Focused sender, receiver and original-child observations are documented in
+[Focused original sender observation](plugins/agent-worktrees/docs/native-tool-hook-diagnostics.md#focused-original-sender-observation).
+
+The membership-tail file's `-k registered_policy_timeout_observation` selection invokes
 the unchanged `cross-modes` cell composition on both engines. Only that test
 module's subprocess namespace is adapted. If its original ten-second entry
 times out, the adapter reports fixed shell-build/policy-start/policy-complete
@@ -2061,6 +2083,15 @@ without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
 production decoder and verifies structured-value and malformed-input parity.
 Child/item/group limits remain 10/30/300 seconds. These finite synthetic
 measurements are not installed, composed-hook or productive-throughput proof.
+
+`tests/test_pre_tool_bounded_reads.py` adds actual opened-file size, growth,
+short-read, atomic-replacement and decoding controls on both Windows engines.
+Its `registered_pretool_reader_compatibility` adapter reuses every original
+entry case with the contained runner's dependency-ready interpreter; it does
+not select an ambient Python or change the original fixture's assertions.
+The existing prepared-membership job selects only its focused `pretool_bounded`
+reader controls alongside the original registered portfolio. Local validation
+can select the complete adapter explicitly under the same 10/30/300 limits.
 
 For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 `registered_file_local_write_reuses_original_guard_facts` from
@@ -14808,6 +14839,12 @@ the 15-minute per-plugin ceiling remain safety limits for unusually slow or
 explicit runs. A suite that cannot fit the required pull-request CI target must
 provide a contract-focused smoke lane and move its exhaustive cross-products to
 a scheduled or manually dispatched workflow.
+
+The source CI unit job's ten-minute outer envelope includes checkout, tooling,
+the unchanged 300-second admitted unit packet, evidence publication and cleanup.
+It is a safety bound, not an accepted ten-minute execution time or a relaxation
+of the below-five-minute CI target. A canceled or failed evidence upload still
+fails the required aggregate even when the tests have passed.
 
 - Gate specialized suites by changed paths so unrelated pull requests do not
   pay their cost.

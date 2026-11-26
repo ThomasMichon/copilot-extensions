@@ -5,23 +5,175 @@ import hashlib
 import importlib.util
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 import time
 from typing import Any
 
 import pytest
 from agent_procutil import no_window_kwargs
+from native_rpc_fixture import (
+    BOOTSTRAP_PHASES, _BUFFERED_PHASES, diagnostic_policy_bootstrap, diagnostic_policy_transport,
+    retained_rpc_command, retained_rpc_phases, rpc_clock_phase,
+)
 
 from test_managed_session import (
     SCRIPTS, environment, fixture_checkout, fixture_linked_worktree, fixture_project, load,
 )
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Native Windows policy composition")
+
+NATURAL_POLICY_WRAPPER = """function Invoke-SelectedResidentToolHook {
+    param([string]$Kind, [string]$Raw, [bool]$PreparedMembership = $false, [object]$DecodedPayload)
+    [Console]::Error.WriteLine('NATURAL_POLICY_START')
+    try { return Invoke-FixtureOriginalResidentPolicy @PSBoundParameters }
+    finally { [Console]::Error.WriteLine('NATURAL_POLICY_COMPLETE') }
+}
+function Invoke-FixtureOriginalResidentPolicy {"""
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("decoded", [False, True])
+def test_full_policy_wrapper_preserves_decoded_payload(shell: str, decoded: bool) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    raw = '{"sessionId":"fixture-session","toolCalls":[{"name":"edit","args":{"path":"source.py","text":"complete"}}]}'
+    program = (
+        "$ErrorActionPreference = 'Stop'\n"
+        + "$script:fixtureRaw = '" + raw + "'\n"
+        + "$script:fixturePayload = @{ sessionId='fixture-session'; toolCalls=@("
+        "@{ name='edit'; args=@{ path='source.py'; text='complete' } }) }\n"
+        + NATURAL_POLICY_WRAPPER
+        + """
+    param([string]$Kind, [string]$Raw, [bool]$PreparedMembership = $false, [object]$DecodedPayload)
+    @{
+        kind = $Kind
+        raw = $Raw
+        prepared = $PreparedMembership
+        has_decoded = $PSBoundParameters.ContainsKey('DecodedPayload')
+        same_payload = [Object]::ReferenceEquals($DecodedPayload, $script:fixturePayload)
+    } | ConvertTo-Json -Compress
+}
+Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $script:fixtureRaw -PreparedMembership $true"""
+        + (" -DecodedPayload $script:fixturePayload" if decoded else "")
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", program],
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.splitlines() == ["NATURAL_POLICY_START", "NATURAL_POLICY_COMPLETE"]
+    assert json.loads(result.stdout) == {
+        "kind": "preToolUse", "raw": raw, "prepared": True,
+        "has_decoded": decoded, "same_payload": decoded,
+    }
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_full_policy_diagnostic_transport(
+    tmp_path: Path, shell: str, *, retain: bool = False,
+    reporter: Callable[[dict[str, object]], None] | None = None,
+) -> None:
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    seen: list[dict[str, Any]] = []
+    expected = {"permissionDecision": "ask", "permissionDecisionReason": "synthetic"}
+
+    def decide(kind: str, event: dict[str, Any], deadline: float) -> dict[str, str]:
+        assert kind == "preToolUse"
+        seen.append(event)
+        return expected
+
+    source = (SCRIPTS / "post-tool-hook.ps1").read_text(encoding="utf-8")
+    copied = tmp_path / "diagnostic.ps1"
+    copied.write_text(
+        diagnostic_policy_transport(source, enabled=True, retain=retain), encoding="utf-8",
+    )
+    shutil.copyfile(SCRIPTS / "managed-session.ps1", tmp_path / "managed-session.ps1")
+    event = {"sessionId": "diagnostic-control", "cwd": str(tmp_path), "toolName": "edit"}
+    server = HookIpcServer(decide)
+    server.start()
+    try:
+        endpoint = json.dumps(server.rendezvous()).replace("'", "''")
+        raw = json.dumps(event).replace("'", "''")
+        copied_path = str(copied).replace("'", "''")
+        program = (
+            f"$ErrorActionPreference = 'Stop'; . '{copied_path}'; "
+            f"$endpoint = ConvertFrom-PostToolJson '{endpoint}'; "
+            f"$payload = ConvertFrom-PostToolJson '{raw}'; "
+            f"Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson '{raw}' "
+            "-Kind preToolUse -DecodedPayload $payload"
+        )
+        with retained_rpc_phases(enabled=retain, reporter=reporter) as prefix:
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 retained_rpc_command(prefix, program)],
+                capture_output=True, text=True, encoding="utf-8", timeout=10,
+                **no_window_kwargs(),
+            )
+    finally:
+        server.close()
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == expected, result.stderr
+    assert len(seen) == 1 and all(seen[0][key] == value for key, value in event.items())
+    phases = [
+        phase for line in result.stderr.splitlines(keepends=True)
+        if (phase := rpc_clock_phase(line.encode("utf-8"))) is not None
+    ]
+    assert 0 < len(phases) <= 64
+    assert {
+        "rpc-entry", "rpc-encoded", "rpc-connected", "rpc-sent", "rpc-received", "rpc-result",
+    } <= {phase.split()[1] for phase in phases}
+    assert "NATIVE_WRITE_FIXTURE_RPC_" not in result.stderr
+    assert (SCRIPTS / "post-tool-hook.ps1").read_text(encoding="utf-8") == source
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_full_policy_diagnostic_transport_retained(
+    tmp_path: Path, shell: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    test_full_policy_diagnostic_transport(tmp_path, shell, retain=True)
+    report = json.loads(capsys.readouterr().err.removeprefix("retained_rpc_phases="))
+    assert report["status"] == "complete" and report["region_closed"] is True
+    assert report["error"] is False and report["truncated"] is False
+    assert 0 < len(report["records"]) <= 64
+    assert {2, 6, 11, 12, 13, 14} <= {row["phase_id"] for row in report["records"]}
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_full_policy_diagnostic_transport_retained_reporter(
+    tmp_path: Path, shell: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    reports: list[dict[str, object]] = []
+
+    def report(value: dict[str, object]) -> None:
+        reports.append(value)
+        with capsys.disabled():
+            print("retained_rpc_phases=" + json.dumps(
+                value, sort_keys=True,
+            ), file=sys.stderr, flush=True)
+
+    test_full_policy_diagnostic_transport(tmp_path, shell, retain=True, reporter=report)
+    assert capsys.readouterr().err == ""
+    assert len(reports) == 1
+    assert reports[0]["region_closed"] is True and reports[0]["status"] == "complete"
+    assert reports[0]["error"] is False and reports[0]["truncated"] is False
+    records = reports[0]["records"]
+    assert isinstance(records, list) and 0 < len(records) <= 64
 
 
 @contextmanager
@@ -94,6 +246,12 @@ def test_registered_full_policy_composition(
             }}), flush=True)
 
     progress("fixture-start")
+    diagnostic_rpc = os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {
+        "report-only", "post-exit", "code-stack",
+    }
+    bootstrap_diagnostics = os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {
+        "post-exit", "code-stack",
+    }
 
     executable = shutil.which(shell)
     if not executable:
@@ -217,18 +375,21 @@ def test_registered_full_policy_composition(
         "hook_policy_process.py", "hook_client.py", "hook_pre_policy.py",
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     )}
+    bootstrap = scripts / "pre-tool-hook.ps1"
+    if bootstrap_diagnostics:
+        bootstrap.write_text(
+            diagnostic_policy_bootstrap(bootstrap.read_text(encoding="utf-8"), enabled=True),
+            encoding="utf-8",
+        )
     native = scripts / "post-tool-hook.ps1"
     source = native.read_text(encoding="utf-8")
     declaration = "function Invoke-SelectedResidentToolHook {"
     assert source.count(declaration) == 1
-    source = source.replace(declaration, """function Invoke-SelectedResidentToolHook {
-    param([string]$Kind, [string]$Raw, [bool]$PreparedMembership = $false)
-    [Console]::Error.WriteLine('NATURAL_POLICY_START')
-    try { return Invoke-FixtureOriginalResidentPolicy @PSBoundParameters }
-    finally { [Console]::Error.WriteLine('NATURAL_POLICY_COMPLETE') }
-}
-function Invoke-FixtureOriginalResidentPolicy {""", 1)
-    native.write_text(source, encoding="utf-8")
+    source = source.replace(declaration, NATURAL_POLICY_WRAPPER, 1)
+    native.write_text(
+        diagnostic_policy_transport(source, enabled=diagnostic_rpc, retain=diagnostic_rpc),
+        encoding="utf-8",
+    )
     if case == "anchor-unavailable":
         (scripts / "anchor_write_guard.py").unlink()
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]["powershell"]
@@ -238,6 +399,12 @@ function Invoke-FixtureOriginalResidentPolicy {""", 1)
 
     def oracle_module(filename: str) -> Any:
         return load(filename.removesuffix(".py"))
+
+    def report_retained(report: dict[str, object]) -> None:
+        with capsys.disabled():
+            print("retained_rpc_phases=" + json.dumps(
+                report, sort_keys=True,
+            ), file=sys.stderr, flush=True)
 
     def invoke(variant: str) -> dict[str, Any]:
         progress("oracle-start:" + variant)
@@ -249,15 +416,35 @@ function Invoke-FixtureOriginalResidentPolicy {""", 1)
         capsys.readouterr()
         progress("registered-entry-start:" + variant)
         prior = len(seen)
-        started = time.monotonic()
-        result = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command",
-             "[Console]::Error.WriteLine('NATURAL_SHELL_BUILD ' + $PSVersionTable.PSVersion); " + entry],
-            input=json.dumps(event), capture_output=True, text=True, encoding="utf-8",
-            cwd=workspace, env=env, timeout=10, **no_window_kwargs(),
-        )
-        elapsed = time.monotonic() - started
+        with retained_rpc_phases(
+            enabled=diagnostic_rpc, reporter=report_retained if diagnostic_rpc else None,
+        ) as prefix:
+            started = time.monotonic()
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 retained_rpc_command(
+                     prefix,
+                     "[Console]::Error.WriteLine('NATURAL_SHELL_BUILD ' + $PSVersionTable.PSVersion); " + entry,
+                     bootstrap=bootstrap_diagnostics,
+                 )],
+                input=json.dumps(event), capture_output=True, text=True, encoding="utf-8",
+                cwd=workspace, env=env, timeout=10, **no_window_kwargs(),
+            )
+            elapsed = time.monotonic() - started
         progress("registered-entry-complete:" + variant)
+        if diagnostic_rpc:
+            rpc_phases = [
+                phase for line in result.stderr.splitlines(keepends=True)
+                if (phase := rpc_clock_phase(line.encode("utf-8"))) is not None
+            ]
+            with capsys.disabled():
+                print(json.dumps({"natural_policy_rpc": {
+                    "shell": shell, "cell": cell, "case": case, "variant": variant,
+                    "phases": rpc_phases,
+                    "truncated": "NATIVE_WRITE_FIXTURE_RPC_TRUNCATED" in result.stderr.splitlines(),
+                    "report_error": "NATIVE_WRITE_FIXTURE_RPC_REPORT_ERROR" in result.stderr.splitlines(),
+                    "diagnostic_only": True,
+                }}), flush=True)
         assert result.returncode == 0, result.stderr
         assert len(seen) == prior + 1
         phases = [line for line in result.stderr.splitlines() if line.startswith("NATURAL_POLICY_")]
@@ -308,9 +495,76 @@ function Invoke-FixtureOriginalResidentPolicy {""", 1)
             "cell": cell, "case": case, "source_sha256": originals,
             "fixture_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "native_entry_fixture_sha256": hashlib.sha256(native.read_bytes()).hexdigest(),
+            **({"bootstrap_fixture_sha256": hashlib.sha256(bootstrap.read_bytes()).hexdigest()}
+               if bootstrap_diagnostics else {}),
             "fault": "copied anchor guard unavailable" if case == "anchor-unavailable" else None,
             "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
             "observations": observations,
             "fixture_call_seconds": time.monotonic() - case_started,
             "limits": "Synthetic native consumer; selected resident and original policy, passive entry markers. Not a distribution, installed/CLI/ACP/model, composed-latency or throughput pass.",
         }}), flush=True)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_bootstrap_phase_buffer_covers_registered_policy_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str,
+) -> None:
+    retained = retained_rpc_phases
+    reports: list[dict[str, object]] = []
+
+    @contextmanager
+    def capture(
+        *, enabled: bool, reporter: Callable[[dict[str, object]], None] | None = None,
+    ) -> Iterator[str]:
+        def record(report: dict[str, object]) -> None:
+            reports.append(report)
+            if reporter is not None:
+                reporter(report)
+
+        with retained(enabled=enabled, reporter=record) as prefix:
+            yield prefix
+
+    monkeypatch.setattr(sys.modules[__name__], "retained_rpc_phases", capture)
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "post-exit")
+    test_registered_full_policy_composition(tmp_path, monkeypatch, capsys, shell, True, "anchor")
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["status"] == "complete" and report["region_closed"] is True
+    assert report["error"] is False and report["truncated"] is False
+    rows = report["records"]
+    assert isinstance(rows, list) and 10 < len(rows) <= 64
+    names = [_BUFFERED_PHASES[row["phase_id"]] for row in rows]
+    assert tuple(name for name in names if name in BOOTSTRAP_PHASES) == BOOTSTRAP_PHASES
+    assert names.index("pretool-posttool-loaded") < names.index("rpc-entry")
+    assert names.index("rpc-entry") < names.index("rpc-result")
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_bootstrap_phase_buffer_closes_after_script_error(tmp_path: Path, shell: str) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    reports: list[dict[str, object]] = []
+    with retained_rpc_phases(enabled=True, reporter=reports.append) as prefix:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", retained_rpc_command(
+                prefix, "throw 'synthetic bootstrap fixture failure'", bootstrap=True,
+            )],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+            cwd=tmp_path, **no_window_kwargs(),
+        )
+    assert result.returncode != 0 and "synthetic bootstrap fixture failure" in result.stderr
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["status"] == "complete" and report["region_closed"] is True
+    assert report["error"] is False and report["truncated"] is False
+    rows = report["records"]
+    assert isinstance(rows, list) and len(rows) == 1
+    assert _BUFFERED_PHASES[rows[0]["phase_id"]] == "bootstrap-capture-ready"

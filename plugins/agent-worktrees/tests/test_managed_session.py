@@ -20,6 +20,11 @@ from typing import Any, Callable, NoReturn
 
 import pytest
 from agent_procutil import no_window_kwargs
+from native_rpc_fixture import (
+    PHASE_BUFFER_WRITER, RPC_DETAIL_PHASES, RPC_PHASES, SHARED_PHASE_BUFFER_WRITER,
+    instrument_native_transport,
+    retained_rpc_command, retained_rpc_phases, rpc_clock_phase,
+)
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 ResidentFactory = Callable[..., list[dict[str, Any]]]
@@ -37,10 +42,7 @@ PATCH_PROTECTED_CASES = (
     "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
     "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
 )
-NATIVE_RPC_PHASES = (
-    "rpc-context", "rpc-dispatch", "rpc-entry", "rpc-payload", "rpc-elevation",
-    "rpc-encoded", "rpc-connected", "rpc-sent", "rpc-received", "rpc-result",
-)
+NATIVE_RPC_PHASES = RPC_PHASES
 NATIVE_WRITE_PHASES = {
     "command-entry", "helper-loaded", "input-complete", "output-complete",
     "script-entry", "membership-start", "membership-complete",
@@ -53,14 +55,17 @@ NATIVE_WRITE_PHASES = {
     "runtime-start", "runtime-complete",
 } | set(NATIVE_RPC_PHASES)
 NATIVE_WRITE_PHASE_WRITER = (
+    PHASE_BUFFER_WRITER +
     "function Write-NativeWriteFixturePhase([string]$Name) { "
+    "if (Add-NativeWriteFixturePhase $Name) { return }; "
     "[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' + "
     "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
     "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
     "Write-NativeWriteFixturePhase 'command-entry'; "
 )
-NATIVE_WRITE_LOAD_WRITER = """
+NATIVE_WRITE_LOAD_WRITER = PHASE_BUFFER_WRITER + """
 function Write-NativeWriteFixtureCpuPhase([string]$Name) {
+    if (Add-NativeWriteFixturePhase $Name) { return }
     $process = [Diagnostics.Process]::GetCurrentProcess()
     try { $cpu = $process.TotalProcessorTime.Ticks }
     finally { $process.Dispose() }
@@ -198,9 +203,25 @@ def native_write_fixture_launch(stderr: bytes) -> tuple[dict[str, int] | None, b
     return launch, b"".join(errors)
 
 
+def require_native_write_fixture_success(
+    result: subprocess.CompletedProcess[bytes], progress: str, *,
+    start_ms: int, launch: dict[str, int] | None, native_seconds: float,
+) -> None:
+    """Keep launch identity outside pytest's abbreviated container rendering."""
+    context = {"start_ms": start_ms, "launch": launch, "native_entry_seconds": native_seconds}
+    assert result.returncode == 0 and not result.stderr, (
+        "native_launch_context=" + json.dumps(context, sort_keys=True)
+        + "\n" + repr((result.stdout, result.stderr, progress))
+    )
+
+
 def native_write_fixture_stderr(stderr: bytes) -> tuple[str, bytes]:
     phases, errors = [], []
     for line in stderr.splitlines(keepends=True):
+        clock = rpc_clock_phase(line)
+        if clock is not None:
+            phases.append(clock)
+            continue
         match = re.fullmatch(
             rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)"
             rb"( cpu_ticks=[0-9]{1,20}( utility=[01] web=[01])?)?\r?\n", line,
@@ -226,7 +247,7 @@ def native_write_fixture_stderr(stderr: bytes) -> tuple[str, bytes]:
     return "\n".join(phases), b"".join(errors)
 
 
-def instrument_prepared_admission(source: str) -> str:
+def instrument_prepared_admission(source: str, *, retain: bool = False) -> str:
     prepared_function = "function Test-PreparedManagedWorktreesSession {"
     prefix, prepared = source.split(prepared_function, 1)
     opened = "        $openedLength = $stream.Length"
@@ -264,28 +285,11 @@ def instrument_prepared_admission(source: str) -> str:
         "    Write-NativeWriteFixtureCpuPhase 'json-deserialized'\n"
         "    return ,$fixtureDecoded", 1,
     )
-    return NATIVE_WRITE_LOAD_WRITER + source
-
-
-def instrument_native_transport(source: str) -> str:
-    for phase, statement, after in (
-        ("rpc-context", "    if (-not (Test-PostToolDiscoveryContext -Discovery $endpoint -RuntimeRoot $runtime)) {", False),
-        ("rpc-dispatch", "    return Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload -Kind $Kind -ValidatedContext", False),
-        ("rpc-entry", "    $timer = [Diagnostics.Stopwatch]::StartNew()", True),
-        ("rpc-payload", "    $payload = ConvertFrom-PostToolJson $PayloadJson", True),
-        ("rpc-elevation", "        } finally { $identity.Dispose() }", True),
-        ("rpc-encoded", '    $bytes = $utf8.GetBytes((ConvertTo-PostToolJson $request) + "`n")', True),
-        ("rpc-connected", "        $offset = 0", False),
-        ("rpc-sent", "        $buffer = [byte[]]::new(4096)", False),
-        ("rpc-received", "        if (-not $complete) { return $null }", True),
-        ("rpc-result", "        $resultJson = ConvertTo-PostToolJson $reply.result", True),
-    ):
-        assert source.count(statement) == 1
-        marker = f"Write-NativeWriteFixtureCpuPhase '{phase}'"
-        source = source.replace(
-            statement, statement + "\n" + marker if after else marker + "\n" + statement, 1,
-        )
-    return source
+    writer = (
+        NATIVE_WRITE_LOAD_WRITER.replace(PHASE_BUFFER_WRITER, SHARED_PHASE_BUFFER_WRITER, 1)
+        if retain else NATIVE_WRITE_LOAD_WRITER
+    )
+    return writer + source
 
 
 def qualify_complete_native_entry(
@@ -329,7 +333,7 @@ def qualify_complete_native_entry(
          "[bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments, [object[]]$ShellBatch",
          "source-proof"),
         ("post-tool-hook.ps1", "Invoke-SelectedResidentToolHook",
-         "[string]$Kind, [string]$Raw, [bool]$PreparedMembership = $false", "policy"),
+         "[string]$Kind, [string]$Raw, [bool]$PreparedMembership = $false, [object]$DecodedPayload", "policy"),
     ):
         declaration = f"function {name}"
         assert instrumented[filename].count(declaration) == 1
@@ -358,7 +362,7 @@ function Read-PreToolJson([string]$Path, [int]$Limit) {
     return FixtureOriginalReadPreToolJson $Path $Limit
 }
 function FixtureOriginalReadPreToolJson""", 1)
-        statement = '            $text = [IO.File]::ReadAllText($path, $utf8).Replace("`r`n", "`n")'
+        statement = '            $text = (Read-PreToolText $path 131072 $true).Replace("`r`n", "`n")'
         assert source.count(statement) == 1
         instrumented["pre-tool-hook.ps1"] = source.replace(
             statement, "            $global:batchSourceReads++\n" + statement, 1,
@@ -487,6 +491,7 @@ function FixtureOriginalReadPreToolJson""", 1)
             names = [
                 name.split(" ", 1)[0] if name.split(" ", 1)[0] in NATIVE_RPC_PHASES else name
                 for _, name in phases
+                if name.split(" ", 1)[0] not in RPC_DETAIL_PHASES
             ]
             if attributed:
                 required = [
@@ -633,6 +638,193 @@ def test_native_write_fixture_launch_rejects_malformed_or_duplicate_frame(change
     assert native_write_fixture_launch(original) == (None, original)
 
 
+@pytest.mark.parametrize("returncode,stderr", [(0, b"resident unavailable"), (1, b"")])
+def test_native_write_fixture_launch_survives_failed_success_assertion(
+    returncode: int, stderr: bytes,
+) -> None:
+    raw = (
+        b"NATIVE_WRITE_FIXTURE_LAUNCH birth_filetime=123 entry_utc_ms=456 "
+        b"qpc=789 frequency=1000 cpu_ticks=0\n"
+    )
+    launch, remaining = native_write_fixture_launch(raw + stderr)
+    assert launch is not None
+    result = subprocess.CompletedProcess(["fixture"], returncode, b"notification", remaining)
+    with pytest.raises(AssertionError) as failure:
+        require_native_write_fixture_success(
+            result, "456 command-entry", start_ms=400, launch=launch, native_seconds=0.25,
+        )
+    message = str(failure.value)
+    assert "notification" in message and "456 command-entry" in message
+    context = json.loads(message.splitlines()[0].removeprefix("native_launch_context="))
+    assert context == {"start_ms": 400, "launch": launch, "native_entry_seconds": 0.25}
+    assert result.stdout == b"notification" and result.stderr == stderr
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_buffered_rpc_phase_source_contract(newline: str) -> None:
+    source = (SCRIPTS / "post-tool-hook.ps1").read_text(encoding="utf-8").replace("\n", newline)
+    generated = instrument_native_transport(source)
+    assert "Shared" not in generated
+    assert "\n" not in generated.replace(newline, "")
+    start = generated.index("function Invoke-ResidentPostTool {")
+    end = generated.index("function Invoke-SelectedResidentToolHook {")
+    body = generated[start:end]
+    assert "Write-NativeWriteFixtureCpuPhase" not in body
+    assert body.index("$fixtureRpcCapture = ") < body.index("$timer = [Diagnostics.Stopwatch]::StartNew()")
+    assert body.index("$socket.Dispose()") < body.index("[Console]::Error.WriteLine")
+    assert body.count("$remaining = 500 - [int]$timer.ElapsedMilliseconds") == 3
+    assert "if ($timer.ElapsedMilliseconds -gt 500) { return $null }" in body
+    for before, statement, after in (
+        (
+            "rpc-encode-start",
+            '$bytes = $utf8.GetBytes((ConvertTo-PostToolJson $request) + "`n")',
+            "rpc-encoded",
+        ),
+        (
+            "rpc-socket-start",
+            "$socket = [Net.Sockets.Socket]::new(",
+            "rpc-socket-created",
+        ),
+    ):
+        assert source.count(statement) == body.count(statement) == 1
+        assert (
+            body.index(f"Add-NativeWriteFixturePhase '{before}'")
+            < body.index(statement)
+            < body.index(f"Add-NativeWriteFixturePhase '{after}'")
+        )
+    assert (
+        body.index("Add-NativeWriteFixturePhase 'rpc-connect-start'")
+        < body.index("[Net.Sockets.SocketTaskExtensions]::ConnectAsync(")
+        < body.index("Add-NativeWriteFixturePhase 'rpc-connect-call-returned'")
+        < body.index("Add-NativeWriteFixturePhase 'rpc-connect-returned'")
+        < body.index("$connection.Wait($remaining)")
+        < body.index("Add-NativeWriteFixturePhase 'rpc-connected'")
+    )
+    with pytest.raises(AssertionError):
+        instrument_native_transport(generated)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows launch observation")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["batch-structured", "cell-protected-write-name-multi_edit"])
+def test_native_pretool_reuses_decoded_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str, case: str, native_resident: ResidentFactory,
+) -> None:
+    instrument = instrument_native_transport
+
+    def reject_second_decode(source: str, **kwargs: Any) -> str:
+        statement = "    $payload = ConvertFrom-PostToolJson $PayloadJson"
+        assert source.count(statement) == 1
+        return instrument(source, **kwargs).replace(
+            statement, "    throw 'The event was decoded again inside the RPC clock'", 1,
+        )
+
+    monkeypatch.setattr(sys.modules[__name__], "instrument_native_transport", reject_second_decode)
+    test_registered_file_local_write_reuses_original_guard_facts(
+        tmp_path, monkeypatch, capsys, shell, case, native_resident,
+    )
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows launch observation")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_rpc_phase_diagnostics_do_not_consume_transport_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str, native_resident: ResidentFactory,
+) -> None:
+    statement = "    $process = [Diagnostics.Process]::GetCurrentProcess()"
+    assert NATIVE_WRITE_LOAD_WRITER.count(statement) == 1
+    slow = NATIVE_WRITE_LOAD_WRITER.replace(
+        statement,
+        "    if ($Name.StartsWith('rpc-')) { [Threading.Thread]::Sleep(150) }\n" + statement,
+        1,
+    )
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "NATIVE_WRITE_LOAD_WRITER", slow)
+    phase_statement = "[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' + "
+    assert NATIVE_WRITE_PHASE_WRITER.count(phase_statement) == 1
+    monkeypatch.setattr(module, "NATIVE_WRITE_PHASE_WRITER", NATIVE_WRITE_PHASE_WRITER.replace(
+        phase_statement,
+        "if ($Name -in @('json-entry', 'json-utility-load', 'json-utility-ready')) "
+        "{ [Threading.Thread]::Sleep(150) }; " + phase_statement,
+        1,
+    ))
+    original = require_native_write_fixture_success
+    observed: list[str] = []
+
+    def retain(
+        result: subprocess.CompletedProcess[bytes], progress: str, *,
+        start_ms: int, launch: dict[str, int], native_seconds: float,
+    ) -> None:
+        observed.append(progress)
+        original(result, progress, start_ms=start_ms, launch=launch, native_seconds=native_seconds)
+
+    monkeypatch.setattr(module, "require_native_write_fixture_success", retain)
+    test_registered_file_local_write_reuses_original_guard_facts(
+        tmp_path, monkeypatch, capsys, shell, "batch-structured", native_resident,
+    )
+    assert len(observed) == 1
+    assert set(NATIVE_RPC_PHASES) <= {line.split(" ", 2)[1] for line in observed[0].splitlines()}
+    details = [
+        line.split(" ", 2)[1] for line in observed[0].splitlines()
+        if line.split(" ", 2)[1] in RPC_DETAIL_PHASES
+    ]
+    assert details in (
+        ["rpc-connect-call-returned"], ["rpc-connect-catch", "rpc-connect-unwrapped"],
+    )
+    clocks = [
+        int(line.split("qpc=", 1)[1].split(" ", 1)[0])
+        for line in observed[0].splitlines() if " qpc=" in line
+    ]
+    assert clocks and clocks == sorted(clocks)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows launch observation")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_rpc_phase_diagnostics_report_truncation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str, native_resident: ResidentFactory,
+) -> None:
+    instrument = instrument_native_transport
+    require = require_native_write_fixture_success
+    observed: list[tuple[subprocess.CompletedProcess[bytes], str]] = []
+
+    def burst(source: str, **kwargs: Any) -> str:
+        statement = "    if ($null -eq $payload -or"
+        assert source.count(statement) == 1
+        return instrument(source.replace(
+            statement,
+            "    for ($fixtureRepeat = 0; $fixtureRepeat -lt 70; $fixtureRepeat++) {\n"
+            "        Write-NativeWriteFixturePhase 'json-entry'\n    }\n" + statement, 1,
+        ), **kwargs)
+
+    def retain(
+        result: subprocess.CompletedProcess[bytes], progress: str, *,
+        start_ms: int, launch: dict[str, int], native_seconds: float,
+    ) -> None:
+        observed.append((result, progress))
+        require(result, progress, start_ms=start_ms, launch=launch, native_seconds=native_seconds)
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "instrument_native_transport", burst)
+    monkeypatch.setattr(module, "require_native_write_fixture_success", retain)
+    with pytest.raises(AssertionError, match="NATIVE_WRITE_FIXTURE_RPC_TRUNCATED"):
+        test_registered_file_local_write_reuses_original_guard_facts(
+            tmp_path, monkeypatch, capsys, shell, "batch-structured", native_resident,
+        )
+    assert len(observed) == 1
+    result, progress = observed[0]
+    assert result.returncode == 0 and result.stderr.strip() == b"NATIVE_WRITE_FIXTURE_RPC_TRUNCATED"
+    assert b"resident policy response" not in result.stdout
+    assert sum(" qpc=" in line for line in progress.splitlines()) == 64
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows launch observation")
@@ -641,12 +833,25 @@ def test_native_write_fixture_launch_observes_native_birth(tmp_path: Path, shell
     executable = shutil.which(shell)
     if not executable:
         pytest.skip(f"{shell} is unavailable")
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command",
-         NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LAUNCH_WRITER
-         + "[Console]::Error.WriteLine('real fixture error')"],
-        input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
-    )
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command",
+             NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LAUNCH_WRITER
+             + "[Console]::Error.WriteLine('real fixture error')"],
+            input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        launch, remaining = native_write_fixture_launch((error.stderr or b"")[:16384])
+        progress, _ = native_write_fixture_stderr(remaining)
+        context = {
+            "launch": launch, "phases": progress[:1024] or None,
+            "phases_truncated": len(progress) > 1024,
+            "stderr_available": error.stderr is not None,
+            "stderr_bytes": len(error.stderr) if error.stderr is not None else None,
+            "stderr_prefix_truncated": error.stderr is not None and len(error.stderr) > 16384,
+        }
+        print("native_launch_timeout_context=" + json.dumps(context, sort_keys=True), file=sys.stderr)
+        raise
     assert result.returncode == 0 and result.stdout == b""
     launch, remaining = native_write_fixture_launch(result.stderr)
     assert launch is not None, result.stderr
@@ -684,6 +889,162 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path: Path, shell: str
     ), progress
     assert errors == b"real fixture error\r\n"
     assert captured.value.stdout == b""
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows timeout retention")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("record_state", ["partial", "invalid"])
+def test_rpc_phase_diagnostics_retained_timeout(
+    tmp_path: Path, shell: str, record_state: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    source = instrument_native_transport(
+        (SCRIPTS / "post-tool-hook.ps1").read_text(encoding="utf-8"), retain=True,
+    )
+    marker = "    [void](Add-NativeWriteFixturePhase 'rpc-entry')"
+    assert source.count(marker) == 1
+    copied = tmp_path / "retained-control.ps1"
+    mutation = (
+        "$global:nativeWriteRpcShared.Write(104, [long]7)"
+        if record_state == "partial" else "$global:nativeWriteRpcShared.Write(96, [long]0)"
+    )
+    copied.write_text(source.replace(
+        marker, marker + "\n    " + mutation + "\n"
+        "    [Threading.Thread]::Sleep(60000)", 1,
+    ), encoding="utf-8")
+    with retained_rpc_phases(enabled=True) as prefix:
+        with pytest.raises(subprocess.TimeoutExpired) as captured:
+            subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 retained_rpc_command(
+                     prefix, ". '" + str(copied).replace("'", "''")
+                     + "'; Invoke-ResidentPostTool -Endpoint @{} -PayloadJson '{}'",
+                 )],
+                input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+            )
+    assert captured.value.stderr in (None, b"")
+    assert captured.value.stdout in (None, b"")
+    report = json.loads(capsys.readouterr().err.removeprefix("retained_rpc_phases="))
+    assert report["status"] == ("partial" if record_state == "partial" else "unavailable")
+    assert report["region_closed"] is True
+    assert report["diagnostic_only"] is True
+    if record_state == "partial":
+        assert not report["truncated"] and not report["error"]
+        assert len(report["records"]) == 1 and report["records"][0]["phase_id"] == 2
+    else:
+        assert report["records"] == []
+    import ctypes
+    from ctypes import wintypes
+
+    if sys.platform != "win32":
+        raise RuntimeError("The native mapping cleanup control requires Windows")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenFileMappingW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.OpenFileMappingW.restype = wintypes.HANDLE
+    name = re.search(r"OpenExisting\('([^']+)'\)", prefix)
+    assert name is not None
+    handle = kernel.OpenFileMappingW(4, False, name[1])
+    if handle:
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle(handle)
+        pytest.fail("Fixture mapping survived parent close and child termination")
+    assert ctypes.get_last_error() == 2
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows bounded retention")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_rpc_phase_diagnostics_retained_capacity(
+    tmp_path: Path, shell: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    source = instrument_native_transport(
+        (SCRIPTS / "post-tool-hook.ps1").read_text(encoding="utf-8"), retain=True,
+    )
+    marker = "    [void](Add-NativeWriteFixturePhase 'rpc-entry')"
+    assert source.count(marker) == 1
+    copied = tmp_path / "retained-control.ps1"
+    copied.write_text(source.replace(
+        marker, marker + "\n    for ($i = 0; $i -lt 70; $i++) { "
+        "[void](Add-NativeWriteFixturePhase 'json-entry') }\n", 1,
+    ), encoding="utf-8")
+    with retained_rpc_phases(enabled=True) as prefix:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command",
+             retained_rpc_command(
+                 prefix, ". '" + str(copied).replace("'", "''")
+                 + "'; Invoke-ResidentPostTool -Endpoint @{} -PayloadJson '{}'",
+             )],
+            input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+        )
+    report = json.loads(capsys.readouterr().err.removeprefix("retained_rpc_phases="))
+    assert result.returncode == 0 and result.stdout == b"", result.stderr
+    assert report["status"] == "complete" and report["region_closed"] is True
+    assert report["truncated"] is True and report["error"] is False
+    assert len(report["records"]) == 64
+    phases = [
+        phase for line in result.stderr.splitlines(keepends=True)
+        if (phase := rpc_clock_phase(line)) is not None
+    ]
+    assert len(phases) == 64
+    assert result.stderr.splitlines()[-1] == b"NATIVE_WRITE_FIXTURE_RPC_TRUNCATED"
+    assert [int(phase.split("qpc=", 1)[1].split()[0]) for phase in phases] == [
+        row["qpc"] for row in report["records"]
+    ]
+
+
+@pytest.mark.parametrize("partial", ["clocks", "unavailable", "oversized"])
+def test_native_launch_timeout_reports_captured_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], partial: str,
+) -> None:
+    launch = {
+        "birth_filetime": 134125000000000000, "entry_utc_ms": 1768026400000,
+        "qpc": 123456, "frequency": 10000000, "cpu_ticks": 0,
+    }
+    stderr = {
+        "clocks": (
+            b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry\r\n"
+            b"NATIVE_WRITE_FIXTURE_LAUNCH birth_filetime=134125000000000000"
+            b" entry_utc_ms=1768026400000 qpc=123456 frequency=10000000 cpu_ticks=0\r\n"
+            b"unrelated diagnostic\r\n"
+        ),
+        "unavailable": None,
+        "oversized": b"unrelated diagnostic" * 2000,
+    }[partial]
+    error = subprocess.TimeoutExpired(["fixture"], 10, output=b"", stderr=stderr)
+    calls: list[dict[str, Any]] = []
+
+    def expire(*args: Any, **kwargs: Any) -> NoReturn:
+        calls.append(kwargs)
+        raise error
+
+    monkeypatch.setattr(shutil, "which", lambda _: "fixture")
+    monkeypatch.setattr(subprocess, "run", expire)
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        test_native_write_fixture_launch_observes_native_birth(tmp_path, "powershell.exe")
+    assert captured.value is error
+    assert len(calls) == 1 and calls[0]["timeout"] == 10
+    assert calls[0]["capture_output"] is True and calls[0]["input"] == b""
+    output = capsys.readouterr()
+    assert output.out == "" and len(output.err) < 4096
+    context = json.loads(output.err.removeprefix("native_launch_timeout_context="))
+    assert context == {
+        "launch": launch if partial == "clocks" else None,
+        "phases": "123 command-entry" if partial == "clocks" else None,
+        "phases_truncated": False,
+        "stderr_available": stderr is not None,
+        "stderr_bytes": len(stderr) if stderr is not None else None,
+        "stderr_prefix_truncated": stderr is not None and len(stderr) > 16384,
+    }
+    assert "unrelated diagnostic" not in output.err
 
 
 def load(name: str) -> ModuleType:
@@ -1731,8 +2092,58 @@ def test_registered_file_local_write_reuses_original_guard_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     shell: str, case: str, native_resident: ResidentFactory,
 ) -> None:
+    qualify_registered_file_local_write(
+        tmp_path, monkeypatch, capsys, shell, case, native_resident,
+        observe_native_phases=True,
+    )
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered phase retention")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["personal-state", "real-policy"])
+@pytest.mark.parametrize("mode", ["report-only", "post-exit"])
+def test_rpc_phase_diagnostics_retained_registered_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str, case: str, mode: str, native_resident: ResidentFactory,
+) -> None:
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", mode)
+    qualify_registered_file_local_write(
+        tmp_path, monkeypatch, capsys, shell, case, native_resident,
+        observe_native_phases=True,
+    )
+    reports = [
+        json.loads(line.removeprefix("retained_rpc_phases="))
+        for line in capsys.readouterr().err.splitlines()
+    ]
+    assert len(reports) == (3 if case == "real-policy" else 1)
+    for index, report in enumerate(reports):
+        assert report["status"] == "complete" and report["region_closed"] is True
+        assert not report["truncated"] and not report["error"]
+        phases = {row["phase_id"] for row in report["records"]}
+        if case == "real-policy" and index == 0:
+            assert not phases
+        else:
+            assert phases >= {
+                NATIVE_RPC_PHASES.index("rpc-entry"), NATIVE_RPC_PHASES.index("rpc-result"),
+            }
+
+
+def qualify_registered_file_local_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str, case: str, native_resident: ResidentFactory, *,
+    observe_native_phases: bool,
+) -> None:
     from agent_worktrees import guarded_anchors
 
+    if not observe_native_phases:
+        assert case in {
+            "personal-state", "cell-personal-state",
+            "write-name-real-policy", "cell-write-name-real-policy",
+            "patch-protected-input",
+        }
     cell = case.startswith("cell-")
     if cell:
         case = case.removeprefix("cell-")
@@ -2358,12 +2769,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(
             "    return $false\n}\n",
             encoding="utf-8",
         )
+    membership_guard = (
+        "\nfunction Get-ManagedWorktreesPython { "
+        + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+        + "throw 'interpreter lookup is forbidden' }\n"
+    )
     with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
-        output.write(
-            "\nfunction Get-ManagedWorktreesPython { "
-            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
-            + "throw 'interpreter lookup is forbidden' }\n"
-        )
+        output.write(membership_guard)
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     observed = native_resident(tmp_path, registry, env, real_policy=real_policy)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
@@ -2401,71 +2813,108 @@ def test_registered_file_local_write_reuses_original_guard_facts(
         assert source.count(boundary) == 1
         prior_reader = NATIVE_READ_V1 if case == "literal-shell-prior-reader" else NATIVE_SHELL_READ_V1
         native_entry.write_text(source.replace(boundary, "\n" + prior_reader + boundary, 1), encoding="utf-8")
-    # Fixture-only markers classify a timeout without retrying or extending the child.
-    instrumented = native_entry.read_text(encoding="utf-8")
-    for boundary, statement in (
-        ("script-entry", "$ErrorActionPreference = 'Stop'"),
-        ("membership-start", "    $preparedMembership = Test-PreparedManagedWorktreesSession -Raw $raw -Facts ([ref]$membershipFacts)"),
-        ("membership-complete", "    $stop = Get-NativePreToolStop"),
-        ("native-proof-start", "function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {"),
-        ("policy-start", "    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership"),
-    ):
-        assert instrumented.count(statement) == 1
-        phase_marker = f"Write-NativeWriteFixturePhase '{boundary}'"
-        instrumented = instrumented.replace(
-            statement,
-            statement + "\n" + phase_marker if statement.endswith("{") else phase_marker + "\n" + statement,
+    retain_rpc = (
+        observe_native_phases
+        and os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {
+            "report-only", "post-exit", "code-stack",
+        }
+    )
+    if observe_native_phases:
+        # Fixture-only markers classify a timeout without retrying or extending the child.
+        instrumented = native_entry.read_text(encoding="utf-8")
+        for boundary, statement in (
+            ("script-entry", "$ErrorActionPreference = 'Stop'"),
+            ("membership-start", "    $preparedMembership = Test-PreparedManagedWorktreesSession -Raw $raw -Facts ([ref]$membershipFacts)"),
+            ("membership-complete", "    $stop = Get-NativePreToolStop"),
+            ("native-proof-start", "function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {"),
+            ("policy-start", "    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership"),
+        ):
+            assert instrumented.count(statement) == 1
+            phase_marker = f"Write-NativeWriteFixturePhase '{boundary}'"
+            instrumented = instrumented.replace(
+                statement,
+                statement + "\n" + phase_marker if statement.endswith("{") else phase_marker + "\n" + statement,
+            )
+        native_entry.write_text(instrumented, encoding="utf-8")
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(
+            instrument_prepared_admission(
+                admission.read_text(encoding="utf-8"), retain=retain_rpc,
+            ), encoding="utf-8",
         )
-    native_entry.write_text(instrumented, encoding="utf-8")
-    admission = scripts / "managed-session.ps1"
-    admission.write_text(
-        instrument_prepared_admission(admission.read_text(encoding="utf-8")), encoding="utf-8",
-    )
-    transport = scripts / "post-tool-hook.ps1"
-    transport.write_text(
-        instrument_native_transport(transport.read_text(encoding="utf-8")), encoding="utf-8",
-    )
+        transport = scripts / "post-tool-hook.ps1"
+        transport_source = transport.read_text(encoding="utf-8")
+        transport.write_text(
+            instrument_native_transport(transport_source, retain=retain_rpc),
+            encoding="utf-8",
+        )
+    phase_writer = NATIVE_WRITE_PHASE_WRITER if observe_native_phases else ""
+    launch_writer = NATIVE_WRITE_LAUNCH_WRITER if observe_native_phases else ""
     raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
-    started = time.monotonic()
-    started_ms = time.time_ns() // 1_000_000
-    try:
-        result = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command",
-             NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LAUNCH_WRITER + entry["powershell"]],
-            input=raw, capture_output=True, timeout=10,
-            cwd=workspace, env=env, **no_window_kwargs(),
-        )
-    except subprocess.TimeoutExpired as error:
-        launch, remaining = native_write_fixture_launch(error.stderr or b"")
-        progress, diagnostic = native_write_fixture_stderr(remaining)
-        raise AssertionError(
-            f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
-            f"launch={launch!r}; phases={progress or 'no command entry'!r}; "
-            f"stdout={error.stdout!r}; stderr={diagnostic!r}"
-        ) from error
-    native_seconds = time.monotonic() - started
+    with retained_rpc_phases(enabled=retain_rpc) as prefix:
+        started = time.monotonic()
+        started_ms = time.time_ns() // 1_000_000
+        try:
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 phase_writer + launch_writer + retained_rpc_command(prefix, entry["powershell"])],
+                input=raw, capture_output=True, timeout=10,
+                cwd=workspace, env=env, **no_window_kwargs(),
+            )
+        except subprocess.TimeoutExpired as error:
+            launch, remaining = native_write_fixture_launch(error.stderr or b"")
+            progress, diagnostic = native_write_fixture_stderr(remaining)
+            raise AssertionError(
+                f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
+                f"launch={launch!r}; phases={progress or 'no command entry'!r}; "
+                f"stdout={error.stdout!r}; stderr={diagnostic!r}"
+            ) from error
+        native_seconds = time.monotonic() - started
     launch, result.stderr = native_write_fixture_launch(result.stderr)
-    assert launch is not None, result.stderr
     progress, result.stderr = native_write_fixture_stderr(result.stderr)
-    assert " command-entry" in progress, result.stderr
+    phase_free_sources: dict[str, bytes] = {}
+    if observe_native_phases:
+        assert launch is not None, result.stderr
+        assert " command-entry" in progress, result.stderr
+    else:
+        assert launch is None and not progress, (launch, progress)
+        phase_free_sources = {
+            name: (scripts / name).read_bytes()
+            for name in ("pre-tool-hook.ps1", "post-tool-hook.ps1", "managed-session.ps1")
+        }
+        for name, value in phase_free_sources.items():
+            guard = membership_guard.replace("\n", os.linesep).encode("utf-8") if name == "managed-session.ps1" else b""
+            assert value == (SCRIPTS / name).read_bytes() + guard
     phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
-    if case == "patch-protected-input":
+    if case == "patch-protected-input" and observe_native_phases:
         assert set(NATIVE_RPC_PHASES) <= {
             line.split(" ", 2)[1] for line in progress.splitlines()
         }, progress
     if "prepared-marker-json" in phase_names:
         assert "prepared-marker-opened" in phase_names, progress
         assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
-    assert result.returncode == 0 and not result.stderr, (result.stdout, result.stderr, progress)
+    require_native_write_fixture_success(
+        result, progress, start_ms=started_ms, launch=launch, native_seconds=native_seconds,
+    )
     with capsys.disabled():
-        print(json.dumps({"native_write_launch": {
+        launch_context: dict[str, Any] = {
             "shell": shell, "case": case, "start_ms": started_ms,
             "native_entry_seconds": native_seconds, "launch": launch,
             "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
             "registered_command_sha256": hashlib.sha256(
                 entry["powershell"].encode("utf-8"),
             ).hexdigest(),
-        }}), flush=True)
+        }
+        if not observe_native_phases:
+            launch_context.update(
+                cell=cell,
+                fixture_source_sha256={
+                    name: hashlib.sha256(value).hexdigest() for name, value in phase_free_sources.items()
+                },
+            )
+        print(json.dumps({
+            "native_write_launch" if observe_native_phases else "phase_free_native_write": launch_context,
+        }), flush=True)
     assert not membership.exists()
     if case == "ordinary-unrelated-inventory":
         assert native_membership.read_text() == "True"
@@ -2499,11 +2948,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(
     if case == "literal-shell-prior-reader":
         observed.clear()
         read_event = {**event, "toolName": "view", "toolArgs": {"path": "read.txt"}}
-        prior_read = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
-            input=json.dumps(read_event).encode("utf-8"), capture_output=True, timeout=10,
-            cwd=workspace, env=env, **no_window_kwargs(),
-        )
+        with retained_rpc_phases(enabled=retain_rpc) as prefix:
+            prior_read = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 NATIVE_WRITE_PHASE_WRITER + retained_rpc_command(prefix, entry["powershell"])],
+                input=json.dumps(read_event).encode("utf-8"), capture_output=True, timeout=10,
+                cwd=workspace, env=env, **no_window_kwargs(),
+            )
         _, prior_read.stderr = native_write_fixture_stderr(prior_read.stderr)
         assert prior_read.returncode == 0 and not prior_read.stderr and prior_read.stdout == b""
         assert not observed
@@ -2518,13 +2969,15 @@ def test_registered_file_local_write_reuses_original_guard_facts(
         value = json.loads(contract.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies")
         contract.write_text(json.dumps(value), encoding="utf-8")
-        started = time.monotonic()
-        fallback = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
-            input=raw, capture_output=True, timeout=10,
-            cwd=workspace, env=env, **no_window_kwargs(),
-        )
-        fallback_seconds = time.monotonic() - started
+        with retained_rpc_phases(enabled=retain_rpc) as prefix:
+            started = time.monotonic()
+            fallback = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 phase_writer + retained_rpc_command(prefix, entry["powershell"])],
+                input=raw, capture_output=True, timeout=10,
+                cwd=workspace, env=env, **no_window_kwargs(),
+            )
+            fallback_seconds = time.monotonic() - started
         _, fallback.stderr = native_write_fixture_stderr(fallback.stderr)
         assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
         assert json.loads(fallback.stdout) == {}
@@ -2536,11 +2989,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(
                 *event["toolCalls"][:-1],
                 {"name": "edit", "args": {"path": "efforts/private.md"}},
             ]
-        denied = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
-            input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
-            cwd=workspace, env=env, **no_window_kwargs(),
-        )
+        with retained_rpc_phases(enabled=retain_rpc) as prefix:
+            denied = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 phase_writer + retained_rpc_command(prefix, entry["powershell"])],
+                input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
+                cwd=workspace, env=env, **no_window_kwargs(),
+            )
         _, denied.stderr = native_write_fixture_stderr(denied.stderr)
         assert denied.returncode == 0 and not denied.stderr, denied.stdout + denied.stderr
         assert json.loads(denied.stdout)["permissionDecision"] == "deny"
@@ -2549,6 +3004,144 @@ def test_registered_file_local_write_reuses_original_guard_facts(
             "shell": shell, "same_fixture": True, "native_entry_seconds": native_seconds,
             "real_policy_entry_seconds": fallback_seconds,
         }))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared write control")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "personal-state", "cell-personal-state",
+    "write-name-real-policy", "cell-write-name-real-policy",
+    "patch-protected-input",
+])
+def test_phase_free_registered_write_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    shell: str, case: str, native_resident: ResidentFactory,
+) -> None:
+    qualify_registered_file_local_write(
+        tmp_path, monkeypatch, capsys, shell, case, native_resident,
+        observe_native_phases=False,
+    )
+
+
+def test_phase_free_control_workflow_placement() -> None:
+    import shlex
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    path = root / ".github" / "workflows" / "prepared-membership-native.yml"
+    jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
+    selected = [
+        (name, index, step)
+        for name, job in jobs.items()
+        for index, step in enumerate(job["steps"])
+        if "phase_free_registered_write_control" in step.get("run", "")
+    ]
+    assert len(selected) == 1
+    name, index, step = selected[0]
+    assert name == "prepared-write-windows"
+    job = jobs[name]
+    original = next(
+        position for position, candidate in enumerate(job["steps"])
+        if candidate.get("name") == "Qualify native writes and original policy fallback"
+    )
+    assert index > original
+    assert step["if"] == "${{ !cancelled() && matrix.packet == 'write-name-policy' }}"
+    assert job["timeout-minutes"] == 10
+    assert "--test-timeout 30 --timeout 300" in step["run"]
+    assert step["env"]["AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP"] == "1"
+    assert all(step["env"][key] == "" for key in (
+        "COPILOT_EXTENSIONS_CI_JOB_OBSERVATION", "PYTEST_PLUGINS",
+        "AGENT_WORKTREES_NATIVE_OBSERVATION_MODE",
+    ))
+    cell_job = jobs["prepared-membership-windows"]
+    cell_steps = cell_job["steps"]
+    cell_original = next(
+        candidate for candidate in cell_steps
+        if candidate.get("name")
+        == "Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls"
+    )
+    sender = next(
+        candidate for candidate in cell_steps
+        if candidate.get("name")
+        == "Observe the exact original packet without accepting an instrumented result"
+    )
+    relocated = [
+        (position, candidate)
+        for position, candidate in enumerate(job["steps"])
+        if candidate.get("name")
+        == "Qualify original post-tool cell group after the original alias-policy packet"
+    ]
+    assert len(relocated) == 1
+    relocated_position, relocated_step = relocated[0]
+    assert original < relocated_position < index
+    assert relocated_step["if"] == step["if"]
+    assert relocated_step["env"] == cell_original["env"]
+    for key in (
+        "COPILOT_EXTENSIONS_CI_JOB_OBSERVATION", "PYTEST_PLUGINS",
+        "AGENT_WORKTREES_NATIVE_OBSERVATION_MODE",
+    ):
+        assert key not in relocated_step["env"]
+        assert job["env"][key] == cell_job["env"][key]
+    selector = (
+        "prepared_cell_membership or registered_prepared_cell or send_debits_allocation "
+        "or prepared_json_engine_retains_shell_semantics or pretool_bounded"
+    )
+    for candidate, files, expression in (
+        (cell_original, [
+            "tests/test_managed_session.py", "tests/test_pre_tool_bounded_reads.py",
+        ], selector),
+        (relocated_step, ["tests/test_post_tool_shell.py"], selector),
+        (sender, [
+            "tests/test_hook_packet_receiver_diagnostics.py", "tests/test_managed_session.py",
+            "tests/test_post_tool_shell.py", "tests/test_pre_tool_bounded_reads.py",
+        ], "enable_original_packet_receiver_observer or " + selector),
+    ):
+        argv = shlex.split(candidate["run"])
+        assert [
+            argv[position + 1] for position, value in enumerate(argv)
+            if value == "--test-file"
+        ] == files
+        assert argv[argv.index("-k") + 1] == expression
+        assert "--test-timeout 30 --timeout 300" in candidate["run"]
+    assert len(jobs) == 4
+    assert len(job["strategy"]["matrix"]["include"]) == 13
+    sender_only = (
+        "${{ !cancelled() && inputs.sender_diagnostics == true "
+        "&& inputs.full_native_diagnostics != true }}"
+    )
+    previous = index
+    for label, full_only in (
+        ("Check diagnostic timeout cleanup after the original packets", True),
+        ("Check bounded RPC phase reporting after the original packets", False),
+    ):
+        placements = [
+            (owner, position, candidate)
+            for owner, definition in jobs.items()
+            for position, candidate in enumerate(definition["steps"])
+            if candidate.get("name") == label
+        ]
+        assert len(placements) == 2, label
+        assert {owner for owner, _, _ in placements} == {
+            "prepared-write-windows", "prepared-membership-windows",
+        }
+        light_position, light = next(
+            (position, candidate) for owner, position, candidate in placements
+            if owner == "prepared-write-windows"
+        )
+        cell = next(candidate for owner, _, candidate in placements
+                    if owner == "prepared-membership-windows")
+        assert light_position > previous
+        previous = light_position
+        expected = "${{ !cancelled() && matrix.packet == 'write-name-policy'"
+        if full_only:
+            expected += " && inputs.full_native_diagnostics == true"
+        assert light["if"] == expected + " }}"
+        assert cell["if"] == sender_only
+        assert light["run"] == cell["run"]
+        assert light["env"] == cell["env"]
+        assert "--test-timeout 30 --timeout 300" in light["run"]
+    assert jobs["prepared-membership-windows"]["timeout-minutes"] == 10
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")

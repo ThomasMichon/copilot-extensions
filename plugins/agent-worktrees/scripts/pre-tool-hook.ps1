@@ -24,13 +24,35 @@ function ConvertFrom-PreToolJson([string]$Text) {
     return $script:preToolJson.DeserializeObject($Text)
 }
 
+function Read-PreToolText([string]$Path, [int]$Limit, [bool]$DetectBom = $false) {
+    $stream = [IO.FileStream]::new(
+        $Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    try {
+        $openedLength = $stream.Length
+        if ($openedLength -gt $Limit) { throw 'Oversized native pre-tool facts' }
+        $bytes = [byte[]]::new([int]$openedLength + 1)
+        $count = 0
+        while ($count -lt $bytes.Length) {
+            $read = $stream.Read($bytes, $count, $bytes.Length - $count)
+            if (-not $read) { break }
+            $count += $read
+        }
+        if ($count -eq $bytes.Length) { throw 'Changed native pre-tool facts' }
+        if (-not $DetectBom) { return $utf8.GetString($bytes, 0, $count) }
+        $memory = [IO.MemoryStream]::new($bytes, 0, $count, $false)
+        $reader = [IO.StreamReader]::new($memory, $utf8, $true)
+        try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+}
+
 function Read-PreToolJson([string]$Path, [int]$Limit) {
     $info = [IO.FileInfo]::new($Path)
     if (-not $info.Exists) { throw 'JSON file is unavailable' }
     if (($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $info.Length -gt $Limit) {
         throw 'JSON file is linked or exceeds its bound'
     }
-    return ConvertFrom-PreToolJson ([IO.File]::ReadAllText($Path, $utf8))
+    return ConvertFrom-PreToolJson (Read-PreToolText $Path $Limit $true)
 }
 
 function Get-NativePreToolStop {
@@ -169,7 +191,7 @@ function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCom
             if (-not $info.Exists -or $info.Length -gt 131072 -or
                 ($info.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
             # Exact normalized source binds the exemption across partial helper upgrades.
-            $text = [IO.File]::ReadAllText($path, $utf8).Replace("`r`n", "`n")
+            $text = (Read-PreToolText $path 131072 $true).Replace("`r`n", "`n")
             $hasher = [Security.Cryptography.SHA256]::Create()
             try {
                 $actual = ([BitConverter]::ToString($hasher.ComputeHash($utf8.GetBytes($text)))).Replace('-', '').ToLowerInvariant()
@@ -231,21 +253,7 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
 
 function Read-NativePreToolText([string]$Path, [int]$Limit) {
     $null = Get-PreparedWorktreesPath $Path
-    $stream = [IO.FileStream]::new(
-        $Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
-        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
-    try {
-        if ($stream.Length -gt $Limit) { throw 'Oversized native pre-tool facts' }
-        $bytes = [byte[]]::new($Limit + 1)
-        $count = 0
-        while ($count -lt $bytes.Length) {
-            $read = $stream.Read($bytes, $count, $bytes.Length - $count)
-            if (-not $read) { break }
-            $count += $read
-        }
-        if ($count -eq $bytes.Length) { throw 'Oversized native pre-tool facts' }
-        return $utf8.GetString($bytes, 0, $count)
-    } finally { $stream.Dispose() }
+    return Read-PreToolText $Path $Limit
 }
 
 function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
@@ -462,13 +470,20 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
     } catch { return $false }
 }
 
+# Detach through path intrinsics without autoloading the optional Management module.
 try {
-    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {
-        try {
-            Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop
-        } catch {}
-    }
-    try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}
+    $null = $ExecutionContext.SessionState.Path.SetLocation(
+        [System.Management.Automation.WildcardPattern]::Escape($env:USERPROFILE))
+} catch {
+    try {
+        $null = $ExecutionContext.SessionState.Path.SetLocation(
+            [System.Management.Automation.WildcardPattern]::Escape(
+                [IO.Path]::GetPathRoot($ExecutionContext.SessionState.Path.CurrentLocation.Path)))
+    } catch {}
+}
+try { [IO.Directory]::SetCurrentDirectory($ExecutionContext.SessionState.Path.CurrentLocation.Path) } catch {}
+
+try {
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
@@ -486,7 +501,7 @@ try {
     if ($stop -eq $false -and $preparedMembership -and (Test-NativePreToolWrite $payload $membershipFacts)) { exit 0 }
     $script:preToolBoundary = 'selected native policy resident'
     . ([IO.Path]::Combine($PSScriptRoot, 'post-tool-hook.ps1'))
-    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership
+    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership -DecodedPayload $payload
     $script:preToolBoundary = 'resident policy response'
     if (-not $result -or -not $result.Trim() -or $utf8.GetByteCount($result) -gt 65536) {
         throw 'Strict pre-tool policy returned no bounded response'

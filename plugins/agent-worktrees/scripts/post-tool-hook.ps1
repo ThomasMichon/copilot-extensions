@@ -1,3 +1,12 @@
+function Initialize-PostToolJson {
+    if (-not $script:postToolJson) {
+        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
+        $script:postToolJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+        $script:postToolJson.MaxJsonLength = [int]::MaxValue
+        $script:postToolJson.RecursionLimit = 100
+    }
+}
+
 function ConvertFrom-PostToolJson {
     param([string]$Text)
     if ($PSVersionTable.PSVersion.Major -ge 6) {
@@ -9,12 +18,7 @@ function ConvertFrom-PostToolJson {
     if ($script:postToolLegacyJson) {
         return ConvertFrom-Json -InputObject $Text -ErrorAction Stop
     }
-    if (-not $script:postToolJson) {
-        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
-        $script:postToolJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
-        $script:postToolJson.MaxJsonLength = [int]::MaxValue
-        $script:postToolJson.RecursionLimit = 100
-    }
+    Initialize-PostToolJson
     try {
         return ,($script:postToolJson.DeserializeObject($Text))
     } catch [ArgumentException], [InvalidOperationException] {
@@ -35,6 +39,7 @@ function ConvertTo-PostToolJson {
     if ($script:postToolLegacyJson) {
         return ConvertTo-Json -InputObject $Value -Depth 100 -Compress
     }
+    Initialize-PostToolJson
     try {
         return $script:postToolJson.Serialize($Value)
     } catch [ArgumentException], [InvalidOperationException] {
@@ -48,7 +53,8 @@ function Invoke-ResidentPostTool {
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Endpoint,
         [Parameter(Mandatory = $true)][string]$PayloadJson,
         [ValidateSet('preToolUse', 'postToolUse')][string]$Kind = 'postToolUse',
-        [switch]$ValidatedContext
+        [switch]$ValidatedContext,
+        [object]$DecodedPayload
     )
     $timer = [Diagnostics.Stopwatch]::StartNew()
     if ($Endpoint.hook_transport -cne 'tcp' -or
@@ -65,7 +71,10 @@ function Invoke-ResidentPostTool {
     if (-not [int]::TryParse($Matches[1], [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
         return $null
     }
-    $payload = ConvertFrom-PostToolJson $PayloadJson
+    $payload = $DecodedPayload
+    if (-not $PSBoundParameters.ContainsKey('DecodedPayload')) {
+        $payload = ConvertFrom-PostToolJson $PayloadJson
+    }
     if ($null -eq $payload -or
         ($payload -isnot [pscustomobject] -and $payload -isnot [Collections.IDictionary])) {
         return $null
@@ -135,23 +144,13 @@ function Invoke-ResidentPostTool {
     $response = [IO.MemoryStream]::new()
     try {
         if ($timer.ElapsedMilliseconds -ge 500) { return $null }
-        $socket.Blocking = $false
-        try {
-            $socket.Connect([Net.IPAddress]::Loopback, $port)
-        } catch {
-            $failure = $_.Exception.GetBaseException()
-            if ($failure -isnot [Net.Sockets.SocketException] -or
-                $failure.SocketErrorCode -notin @(
-                    [Net.Sockets.SocketError]::WouldBlock, [Net.Sockets.SocketError]::InProgress,
-                    [Net.Sockets.SocketError]::AlreadyInProgress)) { throw }
-        }
+        $connection = [Net.Sockets.SocketTaskExtensions]::ConnectAsync(
+            $socket, [Net.IPAddress]::Loopback, $port)
         $remaining = 500 - [int]$timer.ElapsedMilliseconds
-        if ($remaining -le 0 -or -not $socket.Poll(
-                $remaining * 1000, [Net.Sockets.SelectMode]::SelectWrite) -or
-            [int]$socket.GetSocketOption(
-                [Net.Sockets.SocketOptionLevel]::Socket, [Net.Sockets.SocketOptionName]::Error) -ne 0) {
+        if ($remaining -le 0 -or -not $connection.Wait($remaining)) {
             return $null
         }
+        $socket.Blocking = $false
         $offset = 0
         while ($offset -lt $bytes.Length) {
             $remaining = 500 - [int]$timer.ElapsedMilliseconds
@@ -226,7 +225,8 @@ function Invoke-SelectedResidentToolHook {
     param(
         [ValidateSet('preToolUse', 'postToolUse')][string]$Kind,
         [AllowEmptyString()][string]$Raw,
-        [bool]$PreparedMembership = $false
+        [bool]$PreparedMembership = $false,
+        [object]$DecodedPayload
     )
     . ([IO.Path]::Combine($PSScriptRoot, 'hook-facts.ps1'))
     if ($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) {
@@ -241,7 +241,11 @@ function Invoke-SelectedResidentToolHook {
         throw 'Selected resident installation does not match'
     }
     $payload = if ([string]::IsNullOrWhiteSpace($Raw)) { '{}' } else { $Raw }
-    return Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload -Kind $Kind -ValidatedContext
+    $options = @{}
+    if ($PSBoundParameters.ContainsKey('DecodedPayload')) {
+        $options['DecodedPayload'] = $DecodedPayload
+    }
+    return Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload -Kind $Kind -ValidatedContext @options
 }
 
 function Invoke-PostToolHook {

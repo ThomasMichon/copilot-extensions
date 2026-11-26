@@ -183,9 +183,14 @@ native frames cannot establish caller account/host authority, so the resident
 does not substitute its own credentials or start an observation child.
 
 Prepared entry uses native file/path operations without loading PowerShell's
-Management module. Fully qualified source paths defer cwd repair until the
-relative source resolution is needed; relative, drive-relative and root-relative paths
-retain early repair. Runtime-root resolution preserves both normalized-path
+Management module. Before waiting for event input, both per-tool Windows
+ingresses detach the shell's logical location and native process cwd from the
+replaceable payload.
+Path intrinsics and wildcard escaping preserve literal home paths, with the
+current drive root as fallback, without cmdlet discovery. Within prepared
+admission, fully qualified source paths avoid additional cwd repair; relative,
+drive-relative and root-relative paths retain early repair.
+Runtime-root resolution preserves both normalized-path
 validation and literal ancestor/reparse checks, including ancestors hidden by
 dot segments. Prepared admission remains current; missing native helpers do not
 cause an interpreter lookup.
@@ -636,8 +641,18 @@ resolver refreshes the association during that call. Changed sources, incomplete
 or changed cell observations and incompatible declarations retain original
 validation/policy. The default-installation emergency stop never governs a cell.
 This does not qualify installed or composed hook latency.
+The pre-tool declaration, kill-switch and source-proof inputs use the same
+bounded opened-file reader as native text facts. Its buffer contains the opened
+length plus one overflow byte, not the maximum permitted size for every small
+input. Oversized files and growth that fills that sentinel refuse prepared
+reuse. JSON and source-proof reads retain their original BOM detection; native
+text facts retain strict UTF-8 decoding. Each caller keeps its existing path
+eligibility, source hashing and original policy fallback. This bounds input
+work; it does not make managed guard observations reusable input witnesses.
 After guard or proof-dependency source changes, regenerate the shipped contract
-with `python tools/render-hook-read-policy.py`. Registered-consumer fixtures use
+with `python tools/render-hook-read-policy.py`. Required units compare the shipped
+contract with its source renderer; registered-consumer controls separately
+qualify native guard behavior. Registered-consumer fixtures use
 the actual packaged declaration; literal comparator legs explicitly omit only
 its optional proof and record that contract identity. Argument comparator legs
 omit only the optional argument facts, retaining the existing literal proof.
