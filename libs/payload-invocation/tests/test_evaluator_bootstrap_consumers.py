@@ -28,7 +28,10 @@ def binding_fixture(base_binding_fixture: dict[str, Any], request: pytest.Fixtur
     return base_binding_fixture
 
 
-@pytest.fixture(params=("powershell", "pwsh"))
+@pytest.fixture(params=(
+    (os.environ["CODESPACES_EVALUATOR_HOST"],)
+    if os.environ.get("CODESPACES_EVALUATOR_HOST") else ("powershell", "pwsh")
+))
 def host(request: pytest.FixtureRequest) -> str:
     executable = shutil.which(request.param)
     if not executable:

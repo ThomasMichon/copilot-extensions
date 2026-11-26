@@ -59,13 +59,18 @@ json_type() {
 }
 
 resolve_runtime() {
+    local result
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
     local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
-    # Slot misses are resolver control flow, not this dispatcher's errexit failures.
+    # Bash 3.2 does not reliably extend the caller's conditional through source.
+    set +e
     # shellcheck source=/dev/null
-    if ! . "$RUNTIME_RESOLVER"; then
+    . "$RUNTIME_RESOLVER"
+    result=$?
+    set -e
+    if [[ "$result" -ne 0 ]]; then
         printf '[agent-codespaces] runtime resolver failed. Re-enable/update the plugin, then retry.\n' >&2
         exit 126
     fi
@@ -81,7 +86,34 @@ apply_runtime_env() {
     fi
 }
 
+admit_runtime_python() (
+    local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    local capture="$SCRIPT_DIR/native_capture.sh" uv
+    # Admission owns these descriptors only in its subshell, not the application.
+    exec 5>&- 6>&- 7>&- 8>&- 9>&-
+    if [[ ! -f "$capture" ]]; then
+        capture="$PAYLOAD_ROOT/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    fi
+    if [[ ! -f "$provider" || ! -f "$capture" ]]; then
+        printf '%s\n' '[agent-codespaces] application runtime admission support is unavailable; use explicit setup.' >&2
+        return 126
+    fi
+    uv="$(command -v uv)" || {
+        printf '%s\n' '[agent-codespaces] uv is unavailable; prepare the command prerequisites through explicit setup.' >&2
+        return 126
+    }
+    . "$capture"
+    if ! capture_native_process 10 "$BASH" -c \
+        '. "$1"; resolve_uv_runtime_python "$2" "$3"' \
+        codespaces-runtime-admission "$provider" "$expected" "$uv"; then
+        printf '%s\n' '[agent-codespaces] application runtime admission failed; use explicit setup.' >&2
+        return 126
+    fi
+    printf '%s\n' "$__native_capture_output"
+)
+
 run_runtime() {
+    AGENT_RT_PY="$(admit_runtime_python "$AGENT_RT_PY")" || exit 126
     apply_runtime_env
     if [[ "$READINESS_PROBE" == 1 ]]; then
         exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-codespaces --module agent_codespaces -- "$@"

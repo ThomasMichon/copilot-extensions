@@ -282,6 +282,16 @@ Dispatch's [command admission](../../plugins/agent-dispatch/README.md#install)
 uses this contract while preserving its separate global upstream-first and
 payload-local provisioning routes and explicit scoped-installer readiness.
 
+Codespaces' required-context command gates admit the resolved application
+interpreter through the shared prepared-only UV provider before dispatch,
+independently of PowerShell's declared bootstrap evaluator. The bounded native
+capture does not consume command stdin or replace its selected generation.
+Current/LKG/newest, context validation, readiness isolation and Legacy
+PowerShell argument forwarding remain unchanged. Missing UV or admission
+support refuses before application entry without acquiring prerequisites or
+entering first-use provisioning; the existing missing-runtime publication
+policy still owns that separate route.
+
 ### Test isolation
 
 Copied runtime fixtures materialize the selected consumer's declared dependencies

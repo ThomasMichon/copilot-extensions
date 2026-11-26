@@ -56,7 +56,8 @@ def test_readiness_dispatcher_preserves_project_without_importing_it(
         pytest.skip(f"{shell} is unavailable")
     environment = _adopter(binding_fixture, plugin)
     payload, home = binding_fixture["payload"], binding_fixture["home"]
-    shutil.copytree(ROOT / "plugins" / plugin / "bin", payload / "bin")
+    if not (payload / "bin").is_dir():
+        shutil.copytree(ROOT / "plugins" / plugin / "bin", payload / "bin")
     scripts = payload / "scripts"
     project = home / "selected-project"
     project.mkdir()
