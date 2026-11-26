@@ -3,7 +3,17 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-25 - Eighteen publication occurrences: proposed accepted receiving](journal/2026/11.25-publication-occurrence-receiving.md)
+- [2026-11-25 - Four audited publication tracking handoffs, six whole keepers and 784 whole open](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
+
+- [2026-11-25 - Two literal coverage-bound completions, seven tracking handoffs and 788 whole open](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+
+- [2026-11-25 - Twenty-nine source-reuse cases, nine further tracking retirements and separate manifest timeout](journal/2026/11.25-source-reuse-timeout-intake.md)
+
+- [2026-11-25 - Twenty-case source-reuse receiving, nineteen tracking retirements and separate candidate guard](journal/2026/11.25-source-reuse-and-verifier-keepers.md)
+
+- [2026-11-25 - Verifier completions and accepted eleven-case publication receiving](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
+
+- [2026-11-25 - Eighteen publication occurrences: accepted receiving and tracking retirement](journal/2026/11.25-publication-occurrence-receiving.md)
 
 - [2026-11-25 - Source-owned publication: one specific completion proposal](journal/2026/11.25-source-owned-publication-completion.md)
 

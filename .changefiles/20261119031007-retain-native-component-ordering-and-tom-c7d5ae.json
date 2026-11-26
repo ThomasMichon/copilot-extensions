@@ -1,9 +1,0 @@
-{
-  "comment": "Retain native component ordering and tombstone observations under the source writer",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

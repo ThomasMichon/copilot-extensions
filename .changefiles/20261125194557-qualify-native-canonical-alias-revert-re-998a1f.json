@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native canonical-alias revert refusal and explicit synthetic repair across separate workers",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep emitted CodeSpace dispatch guidance on explicit legacy profile startup",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}

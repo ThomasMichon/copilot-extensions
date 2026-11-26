@@ -120,14 +120,107 @@ returns 503, not a false 404.
 
 No new RPC is introduced. An older executing provider refuses `show` before
 the inventory read; legacy commands remain available on rollback.
-`resume`, `stop` and `end` keep their existing selectors.
-Ordinary `send` also retains its existing default; opt-in exact sends are described below.
-`read` and `wait` also keep their existing defaults; explicit adoption is
-described below. No previous form is deprecated or removed.
+`resume`, `stop` and `end` keep their existing selectors. Ordinary `send`,
+`read` and `wait` use the exact default described below. No existing endpoint
+is deprecated or removed.
+
+### Identity-pinned workspace resume provider
+
+The optional `worktree_exact_resume: 1` health capability adds
+`POST /api/v1/worktrees/{worktree_id}/resume/{acp|cli}/exact` with a strict JSON
+body, `{"native_session_id": "<selected native ID>"}`. The explicit
+`BridgeClient.resume_worktree_exact(worktree_id, native_session_id, mode=...)`
+method negotiates that capability from the executing daemon before one POST.
+This is a provider-first expansion within HTTP generation 52. It does not
+migrate the CLI's `resume`, `stop` or `end` selectors.
+
+The workspace's existing native-resume owner still controls admission, history,
+hosting and launch. The selected ID must match its authoritative head before
+metadata import or launch. Pending handoff, changed head, a live foreign holder,
+unconfirmed launch and missing owner capability retain their existing refusals.
+ACP and CLI modes retain the selected native identity; they do not create a
+replacement conversation. The existing singleton owner can load its known
+conversation, but this exact operation never initializes an empty anchor.
+Keyed metadata loss still uses the original retained recovery owner and journal;
+it cannot substitute a different selected native identity.
+
+The client pins the health-check endpoint and validates the returned workspace,
+mode and native identity. It makes no automatic retry or fallback. A lost or
+invalid reply reports `native_resume_unconfirmed` with the original identity;
+inspect the original operation before deciding whether another resume is safe.
+An HTTP failure is not proof that no effects occurred. Older receivers refuse
+before POST when they lack the capability. A downgrade after negotiation reaches
+an unsupported exact route, not a legacy route that could ignore the identity.
+Existing qualified and unqualified resume routes, their callers and their
+supported behavior remain unchanged. No old form is deprecated by this change.
+
+### Ordinary selector defaults and legacy support
+
+The CLI contract `bridge-cli/ordinary-selectors/v2` makes plain `send ID PROMPT`,
+`read ID` and `wait ID` select the same exact, project-scoped conversation as
+`show`. `--bridge` remains a supported explicit alias. These commands do not
+ensure a service, resume a dormant conversation, select an agent profile or
+follow a successor. `--host HOST` selects one configured host without also
+requiring `--bridge`. Capability and identity checks remain at the executing
+owners; unsupported providers refuse before the affected operation, without
+trying the legacy selector.
+
+This is an intentional CLI-default transition. Use `--legacy-selector` on the
+new CLI to retain the previous selector, output and effects, including implicit
+resume for a legacy ordinary send and delivery-cursor reads. The two selector
+flags are mutually exclusive. Exact project/host filters cannot be combined
+with legacy selection. No legacy retirement date is declared: removal needs
+separate review and evidence for the supported consumer-upgrade and
+provider-rollback window.
+
+Explicit specialized options continue to select their existing operations
+unless `--bridge` explicitly requests exact selection. Send modes include
+force/queue, full-history replay, alternate kind/delivery, delivery/reply waits,
+prepared startup, native fences, receipts and settlement. Observation modes
+include event ranges/cursors, `--tail`, message receipts, `--no-follow`,
+attention/position and expansion. Their existing validation, output and effects
+are unchanged. Explicit `--bridge` still applies the exact mode's option
+validation; it does not silently ignore incompatible controls.
+
+Dispatch continuation uses the existing startup-bound send form on local and
+fleet hosts. Its communication/process timeout options explicitly retain that
+continuation operation, including stopped-session resume, rather than ordinary
+exact send. The producer emits no new selector flag to prior CLIs and adds no
+capability probe or second SSH command.
+
+Qualified `live:<machine>:<project>:<worktree>` reply addresses also retain the
+existing peer operation, including exact registered-ID lookup precedence and
+host-qualified delivery. An explicit `--bridge` with that address refuses the
+mixed mode rather than changing owners. Worktree startup requests the existing
+JSON resume response and sends to its returned session ID, not the worktree
+handle. Missing or invalid identity refuses before send. The JSON startup
+result retains that same ID without a second, possibly newer head lookup.
+
+Worktrees' generated related-repository dispatch and exploration examples use
+`--legacy-selector` for venue and machine profiles. Those examples deliberately
+permit startup instead of exact conversation lookup. They target this CLI;
+after rolling the CLI back, use its previous syntax without the new option.
+
+For existing automated observation callers, invocation-scoped
+`AGENT_BRIDGE_LEGACY_OBSERVATION=1` retains the prior read/wait owner when no
+selector flag is supplied. Explicit `--bridge` still wins. Dispatch sets this
+only in each observation child's environment; it does not change the parent
+environment, wait arguments, delivery cursor, output or subprocess deadline.
+Older CLIs ignore that configuration and already use the same prior operation.
+This preserves mixed-version observation without sending an unsupported flag,
+adding a help probe or inferring the worker's project from its controller.
+
+Older CLIs keep their previous syntax against the expanded providers. A new
+CLI with an older daemon gives the declared capability refusal; a caller may
+deliberately choose `--legacy-selector` when its weaker semantics are suitable.
+After rolling the CLI itself back, use that CLI's previous syntax, not the new
+compatibility flag. No automated caller in this change emits a new flag to an
+unqualified older executable. The API/HTTP/carrier contracts and stored data
+are unchanged.
 
 ### Exact local conversation observation
 
-`read ID --bridge` and `wait ID --bridge` use the same exact selector as `show`,
+Ordinary `read ID` and `wait ID` use the same exact selector as `show`,
 with the same project/CWD scope, `--all-projects`, `--machine` and `--namespace`.
 Without `--host`, they require `bridge_inventory: 2` and
 `result_native_identity: 1` from the executing daemon and read its local
@@ -148,12 +241,12 @@ An empty explicit host refuses before client selection. If a remote `read`
 exhausts its finite result deadline, it reports `bridge_observation_timeout`
 (504), not a partial result or local fallback.
 
-This is the explicit-adoption step, not a change to ordinary `read`/`wait`.
-Their existing event-cursor, historical-session, workspace-following and attention
-forms remain available without `--bridge`. Default migration is not complete:
-archive lookup and represented attention still need
-their own consumer contracts. Unsupported providers refuse the new mode before
-reading inventory; there is no fallback to the legacy selector.
+`--bridge` explicitly selects this same mode. Existing event-cursor,
+historical-session, workspace-following and attention operations remain
+available through their explicit options or `--legacy-selector`. Archive lookup
+and represented attention still need their own common consumer contracts.
+Unsupported providers refuse the exact mode before reading inventory; there
+is no automatic fallback to the legacy selector.
 
 The selected row must expose a current managed ID, registered ID or matching
 retained managed ID. Current managed observation takes precedence when both
@@ -291,8 +384,8 @@ carrier's 501 and identity/bounds failures retain their original meaning,
 without history fallback, service recovery or message effects.
 
 This expands the HTTP provider and offers an explicitly selected client
-method. CLI read/wait defaults are
-unchanged. No old endpoint, parameter or response is deprecated or removed.
+method used by ordinary exact read/wait callers. No old endpoint, parameter
+or response is deprecated or removed.
 The real HTTP/carrier/native-result tests in `test_remote_result_snapshot.py`
 check both owning modes and unchanged database state. They do not prove
 installed remote adoption or model-facing message consumption.
@@ -482,8 +575,8 @@ before the POST retains ordinary local interruption behavior and sends
 nothing. Interruption during a later result wait remains a separate
 incomplete observation of already-confirmed admission.
 
-This is an additive provider and explicit client method. The opt-in CLI
-consumer below negotiates it separately; ordinary defaults do not change. Supported old operations
+This is an additive provider and explicit client method. The exact CLI
+consumer below negotiates it separately. Supported old operations
 retain their syntax, response and effects. Provider rollback gives the
 declared capability refusal; it does not select an effectful legacy fallback.
 The synthetic HTTP/carrier/native-API seam in
@@ -493,13 +586,14 @@ model-facing consumption.
 
 ### Exact local ordinary prompt submission
 
-`send ID "prompt" --bridge` adopts the same project-scoped exact selector as
+Ordinary `send ID "prompt"` uses the same project-scoped exact selector as
 `show`, using only the local daemon's inventory when `--host` is absent.
 It accepts `--all-projects`, `--machine` and `--namespace`. Explicit-host
 managed sends are described below. Selection requires
 `bridge_inventory: 2`; unavailable or ambiguous evidence never falls back to
-agent/profile matching. This is opt-in. The legacy `send` selector and defaults
-remain supported, with no retirement in this release.
+agent/profile matching. `--bridge` remains an explicit alias. The legacy
+`send` operation remains available through `--legacy-selector` and specialized
+options, with no retirement in this release.
 An HTTP or connection failure during selection returns `refused_unavailable`
 with reason `bridge_selection_unavailable` and exit code 69, before any admission.
 This includes the real client's initial health and compatibility preflight.
@@ -523,7 +617,7 @@ An enrolled inbox's known pre-admission refusal returns the typed
 missing JSON result or an unknown-admission claim. Other HTTP admission errors
 that have no recognized refusal contract report unknown admission in
 `--bridge` mode and retain the original binding; legacy error handling is unchanged.
-This also applies to managed HTTP 404/409 errors: the opt-in adapter preserves
+This also applies to managed HTTP 404/409 errors: the exact adapter preserves
 the native owner's known refusal messages, not a blanket status-only refusal.
 For registered sends, only the inbox owner's `live session not found` message
 proves the corresponding HTTP 404 refusal; other 404 responses remain unknown.
@@ -540,14 +634,15 @@ to ignore an unknown safety field. Old callers retain the same inbox semantics
 on the expanded provider. No new RPC, database or receiving-enrollment protocol
 is introduced.
 
-This first send consumer accepts ordinary prompts, prompt files/stdin, JSON,
+This exact send consumer accepts ordinary prompts, prompt files/stdin, JSON,
 `--no-wait` and an optional original idempotency key. It refuses creation, resume,
 force/queue, alternate delivery/kind, explicit delivery/reply waits, startup,
 receipt and settlement modes before connecting. Explicit sender/reply-to fields
 apply only to a registered inbox; managed targets refuse them. Existing commands
 retain those specialized contracts. Managed sends still use their existing
 turn/stream result, and registered sends retain their existing message receipt.
-This slice does not yet unify those two admission models or migrate defaults.
+These two admission models remain distinct; changing the ordinary selector
+default does not make inbox admission a completed managed turn.
 
 A lost or invalid admission response reports `outcome: unknown`, not permission
 to retry. JSON retains the selected native/owner binding in `bridge` and the
@@ -639,7 +734,8 @@ owner/wait boundaries. The CLI controls in
 `tests/test_remote_native_prompt_http.py` reach the actual HTTP, carrier and
 native admission API and preserve one turn after a lost response. Prior
 providers retain explicit capability refusal without an effectful fallback.
-No ordinary default is migrated or retired, and no installed rollout is implied.
+The ordinary selector transition above does not retire existing operations or
+imply installed rollout.
 
 ## Metadata only
 

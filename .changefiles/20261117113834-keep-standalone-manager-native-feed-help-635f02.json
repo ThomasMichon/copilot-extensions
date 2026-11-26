@@ -1,9 +1,0 @@
-{
-  "comment": "Keep standalone Manager native-feed helpers aligned with public-profile and internal-feed seasoning support",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

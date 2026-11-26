@@ -140,6 +140,46 @@ or replay path is added.
 
 ## Prerequisites and unsupported cases
 
+Ordinary producer acceptance is separate from these consumer prerequisites.
+The serving daemon advertises `durable_live_inbox: 1` for the existing
+`POST /api/v1/live-sessions/{session_id}/messages` operation. A valid known
+represented conversation accepts ordinary input into `live_messages` even
+when its heartbeat, frontend, enrollment or delivery epoch is unavailable.
+The immutable producer-target observation and original operation key survive
+registration cleanup. Acceptance does not resume a conversation or select a
+replacement; a retired native target is not silently rebound to a successor.
+An exact selector naming a retired routing alias is invalid, while a known
+dormant conversation remains a valid queue target.
+The receipt remains `admitted` with `queue_reason: "awaiting_consumer"` until
+a receiver owns the handoff. This is not SDK acceptance or consumption.
+
+Schema 50 expands the existing queue with nullable producer-target metadata
+and retention/input guards. Preexisting rows and effects remain unchanged.
+An enrolled receiver selects its delivery admission when polling, not when
+the sender writes. Legacy baseline receiving remains supported for unenrolled
+targets, but cannot take unclaimed retained work after receiver enrollment or execute
+unknown message revisions/required semantics. Shared-token authentication,
+valid target assertions and writable prepared storage still apply.
+Controls and typed startup retain their independent effect admission.
+
+A supported legacy body poll durably records its ownership before returning
+new producer input. Later enrollment does not transfer that original to another
+SDK sender or block progress on new input. Until its original acknowledgement,
+the receipt reports `legacy_delivery_unconfirmed`; a lost reply is not proof
+that no effect occurred. Late original acknowledgements remain idempotent after
+enrollment and registration cleanup. Unsupported exact-native or startup polls
+do not claim input they cannot return. Claimed originals cannot be reset into
+fresh delivery, and no new SDK acceptance or consumption is inferred.
+
+This is provider-first expansion: prior ordinary callers keep their wire form,
+and supported current/prior receivers keep the existing retained-inbox wire
+contract. Callers requiring durable acceptance must discover the capability
+on the actual serving peer; older providers do not promise it. Older binaries
+refuse a schema-50 database rather than deleting or downgrading accepted rows.
+Rollback requires a schema-50-capable provider preserving producer metadata,
+original handoffs and unknown outcomes; do not lower the recorded schema.
+CLI dormant-target discovery and ACP producer adoption remain separate work.
+
 The current consumer requires HTTP protocol **50** or newer and the independently
 advertised `compatible_native_inbox: 1` capability from the actual serving
 daemon. It selects `receiving_api: "native-sdk-v1"` on the existing retained
@@ -190,6 +230,8 @@ allocation and mutation controls remain separate from ordinary receiving.
 The same exact native session and admitted endpoint are required; this is not
 permission to create or resume a dormant target. Portable prompts cannot enter
 the legacy inbox while enrollment is pending.
+Durable acceptance records that retained-only boundary with the original input,
+so registration cleanup cannot expose it to legacy polling or acknowledgement.
 Its explicit unique-plugin/root selection is checked through readonly public SDK
 observations before begin and again at the SDK edge. A known missing or duplicate
 loadout therefore cannot consume the one-shot grant, and no private controller
@@ -402,10 +444,11 @@ Before emitting either explicit field, producers must observe
 capabilities. The delivery client enforces that selection before POST; raw
 HTTP callers have the same obligation. Older providers may ignore additive
 JSON fields, so blindly sending required semantics to them is unsupported.
-Without an enrolled retained receiver, an explicit request can use only the
-documented equivalent legacy revision with no additional required semantics;
-other requests refuse before admission rather than escaping through legacy SDK
-polling. This adds no enrollment requirement to ordinary legacy baseline input.
+Without an enrolled retained receiver, only the documented equivalent legacy
+revision with no additional required semantics can enter legacy SDK polling.
+Other well-formed ordinary inputs are durably accepted but remain queued for
+a capable receiver's interpretation or explicit correlated rejection. They
+cannot be acknowledged or marked consumed through legacy delivery.
 
 Conversion runs inside the existing queue transaction and retains the original
 row, payload, IDs, key, order and admission/effect history. Missing metadata uses
@@ -415,7 +458,8 @@ this explicit legacy policy:
 |---|---|
 | `prompt`, `notify`, `status-check`, `reply`, validated `startup:prompt:<id>` | Revision 1 envelope; existing prompt/startup readiness and one-shot SDK admission |
 | `control:replay-history` with empty body | Revision 1; reconstruct bounded represented transcript tail through the existing history owner |
-| `control:set-mode`, `control:set-mode-ready`, `control:answer-question` | Retain original type/body as revision 1; this consumer explicitly rejects them, never executes or silently converts them to prompts |
+| `control:set-mode`, `control:set-mode-ready` | Retain original type/body as revision 1; this consumer explicitly rejects them, never executes or silently converts them to prompts |
+| `control:answer-question` | Reserved for the independent exact-native question poll/ack owner; never offered to, rejected by or executed by the prompt consumer |
 | Other kinds or nonempty legacy replay payload | Unknown revision; terminal correlated rejection, never guessed payload semantics |
 
 `POST .../retained-inbox/disposition` uses the same authenticated local ingress,

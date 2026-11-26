@@ -1,9 +1,0 @@
-{
-  "comment": "Use a neutral package registry in a preservation fixture",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

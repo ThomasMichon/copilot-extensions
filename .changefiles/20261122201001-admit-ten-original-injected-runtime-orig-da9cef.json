@@ -1,9 +1,0 @@
-{
-  "comment": "Admit ten original injected runtime-origin caller controls",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

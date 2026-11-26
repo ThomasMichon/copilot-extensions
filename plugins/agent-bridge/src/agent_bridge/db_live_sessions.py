@@ -250,7 +250,9 @@ class _LiveSessionsMixin(LiveControlsMixin):
                     return False
                 conn.execute(
                     "DELETE FROM live_messages WHERE session_id=? AND disposition_json IS NULL "
-                    "AND runtime_custody_json IS NULL AND handoff_json IS NULL", (session_id,),
+                    "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                    "AND producer_target_json IS NULL "
+                    "AND kind!='control:answer-question'", (session_id,),
                 )
                 conn.execute("DELETE FROM live_session_aliases WHERE alias_session_id=? "
                              "OR target_session_id=?", (session_id, session_id))
@@ -305,6 +307,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 "DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question' "
                 "AND session_id IN ("
                 "SELECT session_id FROM live_sessions "
                 "WHERE worktree_id=? AND status='taken-over')",
@@ -402,6 +405,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question' "
                 f"AND session_id IN ({_in(expire_from_live)})",
                 tuple(expire_from_live),
             )
@@ -428,6 +432,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL AND disposition_json IS NULL "
                 "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question' "
                 f"AND session_id IN ({_in(expire_from_wedged)})",
                 tuple(expire_from_wedged),
             )
@@ -444,7 +449,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
             dead_ids = [r["session_id"] for r in dead]
             self.execute_write(
                 f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)}) AND disposition_json IS NULL "
-                "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
+                "AND producer_target_json IS NULL AND kind!='control:answer-question'",
                 tuple(dead_ids),
             )
             self.execute_write(  # its aliases go with it (live_sessions_drop_orphaned_aliases),
@@ -798,34 +804,16 @@ class _LiveSessionsMixin(LiveControlsMixin):
         message_version: int | None = None,
         message_requires: tuple[str, ...] = (),
     ) -> tuple[int | None, str | None]:
-        """Atomically lease-check the target registration and enqueue, or reject.
+        """Atomically persist input or return its original keyed receipt.
 
-        The freshness lease + supersession check + insert are a **single
-        ``INSERT ... SELECT ... WHERE EXISTS``** statement, so the guard and the
-        write are atomic at the SQLite level -- no other writer (a reaper, a
-        take-over invalidation, a register, or a session roll), **even in a
-        second process sharing the database**, can commit between the check and
-        the insert. This is the race-free enforcement #2906 asks for (NF's
-        client-side pre-send check can only approximate it).
+        ``enrolled_inbox`` ordinary input requires a known target and matching
+        target assertions, not a current frontend, heartbeat or receiver.
+        Receiver selection and effect admission remain consumer operations.
 
-        The guard admits the message only when ``session_id`` is a *fresh live*
-        registration that is also the **current** incarnation for its worktree
-        (the row with the greatest ``registered_at`` among fresh live rows --
-        immune to heartbeat timing), and any ``expected_session_id`` matches it.
-        Represented machine/project identities scope that incarnation atomically;
-        incomplete legacy registrations retain the unqualified worktree check.
-
-        Returns ``(message_id, None)`` on success, or ``(None, reason)`` when
-        rejected. ``reason`` is one of ``not_found`` (map to 404), ``stale``,
-        ``superseded:<sid>``, or ``expected_mismatch:<sid>`` (map to 409). The
-        reason is derived from a follow-up read purely to shape the caller's
-        error message; the accept/reject decision itself is the atomic insert.
-        An identical idempotent retry returns the original id with ``None``, or
-        with ``"duplicate"`` when ``report_duplicate`` is set.
-
-        ``enrolled_inbox`` selects retained custody from durable enrollment in
-        that same transaction. A frontend refusal blocks retained targets, not
-        unrelated legacy queues or recovery of an already committed keyed send.
+        Controls and unenrolled legacy admission retain the atomic freshness,
+        worktree-supersession and runtime-association checks. An identical
+        keyed retry recovers its original input before those delivery checks;
+        ``report_duplicate`` distinguishes that recovery from a new insert.
         """
         from .live_message_enqueue import LiveMessageEnqueue, enqueue_fresh
 
@@ -838,7 +826,9 @@ class _LiveSessionsMixin(LiveControlsMixin):
             exact_session, message_version, message_requires,
         ), runtime_admission, enrolled_inbox=enrolled_inbox, inbox_refusal=inbox_refusal)
 
-    def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
+    def list_pending_live_messages(
+        self, session_id: str, *, exact_native: bool = True, plugin_readiness: bool = True,
+    ) -> list[dict[str, Any]]:
         """Unacknowledged, unconsumed messages, oldest-first (delivery order).
 
         Session controls (``kind`` starting with ``control:``, e.g. a mode
@@ -846,18 +836,12 @@ class _LiveSessionsMixin(LiveControlsMixin):
         so an extension that predates controls never delivers one as a prompt.
         Consumption prevents replay even when the separate SDK ACK is lost.
         """
-        rows = self.execute_read(
-            "SELECT * FROM live_messages "
-            f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
-            "AND disposition_json IS NULL "
-            "AND (exact_session=0 OR NOT EXISTS (SELECT 1 FROM live_session_aliases "
-            "WHERE alias_session_id=live_messages.session_id)) "
-            "AND consumed_at IS NULL AND handoff_json IS NULL "
-            "AND disposition_json IS NULL "
-            "AND runtime_custody_json IS NULL ORDER BY id ASC",
-            (session_id, session_id, session_id),
+        from .legacy_inbox import pending
+
+        return pending(
+            cast("Database", self), session_id,
+            exact_native=exact_native, plugin_readiness=plugin_readiness,
         )
-        return [dict(r) for r in rows]
 
     def ack_live_messages(
         self,
@@ -895,11 +879,19 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 (now, outcome or "applied", session_id, session_id, session_id, QUESTION_CONTROL, *ids),
             )
         else:
+            from .durable_inbox import LEGACY_SUPPORTED_SQL
+
             cur = self.execute_write(
-                f"UPDATE live_messages SET delivered_at=? "
+                "UPDATE live_messages SET delivered_at=?, "
+                "claimed_at=CASE WHEN producer_target_json IS NOT NULL "
+                "THEN COALESCE(claimed_at,?) ELSE claimed_at END "
                 f"WHERE session_id={MESSAGE_TARGET_SQL} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
                 "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
+                "AND disposition_json IS NULL "
+                "AND (producer_target_json IS NULL OR claimed_at IS NOT NULL OR NOT EXISTS ("
+                "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=live_messages.session_id)) "
+                f"AND {LEGACY_SUPPORTED_SQL} "
                 f"AND id IN ({placeholders})",
-                (now, session_id, session_id, session_id, *ids),
+                (now, now, session_id, session_id, session_id, *ids),
             )
         return cur.rowcount

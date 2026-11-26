@@ -1,9 +1,0 @@
-{
-  "comment": "Add an inert retained-task Dispatch consumer adapter and native prepared-request controls",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

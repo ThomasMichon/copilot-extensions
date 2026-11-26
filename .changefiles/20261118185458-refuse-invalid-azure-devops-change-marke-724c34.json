@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse invalid Azure DevOps change markers before incremental acquisition",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -6,10 +6,71 @@ import importlib.util
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
-from typing import Callable
+from types import ModuleType
+from typing import Callable, cast
 
-_HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+_HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
+
+def _prepared_process_helpers() -> tuple[ModuleType, ModuleType]:
+    capsule = Path(__file__).with_name("daemon_instance_runtime.pyz")
+    if not capsule.is_file():
+        raise FileNotFoundError("prepared process-helper capsule is unavailable")
+    sys.path.insert(0, str(capsule))
+    try:
+        from agent_procutil import managed_python, owned_process
+        return managed_python, owned_process
+    finally:
+        sys.path.pop(0)
+
+
+def cleanup_pending(error: BaseException) -> bool:
+    """Keep native cleanup custody distinct from an ordinary failed probe."""
+    if not isinstance(error, subprocess.SubprocessError):
+        return False
+    owner = sys.modules.get("agent_procutil.owned_process")
+    return owner is not None and isinstance(error, owner.OwnedCleanupError)
+
+
+def runtime_probe(
+    interpreter: Path, slot: Path, code: str, *, environment: dict[str, str] | None,
+    error_type: type[Exception],
+    isolated_environment: Callable[..., dict[str, str]],
+) -> subprocess.CompletedProcess[str]:
+    """Admit the selected interpreter through prepared UV, then own its probe."""
+    try:
+        managed, owner = _prepared_process_helpers()
+        selected = managed.resolve_runtime_python(interpreter)
+        return cast(subprocess.CompletedProcess[str], owner.run_caller_owned(
+            [selected, "-I", "-B", "-X", "utf8", "-c", code],
+            cwd=slot, env=isolated_environment(environment),
+            input_text="", timeout=10.0, max_stdout_bytes=65536, max_stderr_bytes=65536,
+        ))
+    except (ImportError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if cleanup_pending(exc):
+            raise
+        raise error_type(
+            f"runtime probe failed ({type(exc).__name__}); "
+            "use explicit installation management"
+        ) from exc
+
+
+def runtime_site_packages(
+    interpreter: Path, slot: Path, *, error_type: type[Exception],
+    isolated_environment: Callable[..., dict[str, str]],
+) -> Path:
+    """Resolve the explicit smoke build's site directory through shared admission."""
+    result = runtime_probe(
+        interpreter, slot,
+        "import site; print(next(p for p in site.getsitepackages() "
+        "if p.endswith(('site-packages','dist-packages'))))",
+        environment=None, error_type=error_type, isolated_environment=isolated_environment,
+    )
+    if result.returncode != 0:
+        raise error_type("smoke runtime could not resolve site-packages")
+    return Path(result.stdout.strip())
 
 
 def isolated_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
@@ -24,7 +85,7 @@ def isolated_environment(environment: dict[str, str] | None = None) -> dict[str,
 def load_versioned_runtime(
     payload_root: Path, *, error_type: type[Exception],
     validate_chain: Callable[[Path, Path, str], None], validate_file: Callable[[Path, str], None],
-):
+) -> ModuleType:
     path = payload_root / "scripts/versioned_runtime.py"
     validate_chain(path, payload_root, "versioned runtime")
     validate_file(path, "versioned runtime")
@@ -38,9 +99,12 @@ def load_versioned_runtime(
 
 def run_checked(command: list[str], *, error_type: type[Exception],
                 environment: dict[str, str] | None = None, cwd: Path | None = None) -> None:
+    # CREATE_NO_WINDOW needs explicit handles to retain inherited redirected output.
     result = subprocess.run(
         command, env=environment, cwd=cwd, text=True, encoding="utf-8",
         errors="replace", check=False, creationflags=_HEADLESS,
+        stdout=sys.stdout if os.name == "nt" else None,
+        stderr=sys.stderr if os.name == "nt" else None,
     )
     if result.returncode != 0:
         raise error_type(
@@ -50,7 +114,7 @@ def run_checked(command: list[str], *, error_type: type[Exception],
 
 
 def install_dependency(
-    payload_root: Path, uv: str, interpreter: Path, source: Path, cwd: Path, *,
+    payload_root: Path, uv: str, interpreter: Path, source: Path | str, cwd: Path, *,
     error_type: type[Exception], validate_file: Callable[[Path, str], None],
     quote: Callable[[str], str], isolated_environment: Callable[..., dict[str, str]],
     execute: Callable[..., None],
@@ -60,11 +124,25 @@ def install_dependency(
     if not engine.is_file():
         engine = payload_root.parent.parent / "libs" / "installer-engine" / engine.name
     validate_file(engine, "canonical installer engine")
-    arguments = ["--python", str(interpreter), str(source), "--quiet"]
+    shell = (
+        shutil.which("pwsh") or shutil.which("powershell")
+        if os.name == "nt" else shutil.which("bash")
+    )
+    if not shell:
+        raise error_type("A native shell is required for the canonical dependency wrapper")
+    uv = str(Path(uv).absolute())
+    try:
+        managed, _owner = _prepared_process_helpers()
+        selected = managed.resolve_runtime_python(interpreter, uv=uv)
+    except (ImportError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if cleanup_pending(exc):
+            raise
+        raise error_type(
+            f"dependency runtime admission failed ({type(exc).__name__}); "
+            "use explicit installation management"
+        ) from exc
+    arguments = ["--python", selected, str(source), "--quiet"]
     if os.name == "nt":
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if not shell:
-            raise error_type("PowerShell is required for the canonical dependency wrapper")
         quoted = ",".join(quote(argument) for argument in arguments)
         body = (
             "$ErrorActionPreference='Stop'; "
@@ -72,16 +150,85 @@ def install_dependency(
             "function Write-Warn($message) { [Console]::Error.WriteLine($message) }; "
             f"$result=Invoke-UvPipInstallResilient -UvCommand {quote(uv)} "
             f"-Arguments @({quoted}); "
-            "[Console]::WriteLine($result.Output); exit $result.ExitCode"
+            "[Console]::Error.WriteLine($result.Output); exit $result.ExitCode"
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-Command", body]
     else:
         command = [
-            "bash", "-c",
+            shell, "-c",
             'source "$1"; shift; _warn() { printf "%s\\n" "$*" >&2; }; '
-            'invoke_uv_pip_install_resilient "$@"',
+            'invoke_uv_pip_install_resilient "$@" >&2',
             "cell-dependency", str(engine), uv, *arguments,
         ]
+    command[0] = str(Path(command[0]).absolute())
+    execute(command, environment=isolated_environment(), cwd=cwd)
+
+
+def construct_runtime(
+    payload_root: Path, uv: str, slot: Path, cwd: Path, *, python_version: str,
+    error_type: type[Exception], validate_file: Callable[[Path, str], None],
+    quote: Callable[[str], str], isolated_environment: Callable[..., dict[str, str]],
+    execute: Callable[..., None],
+) -> None:
+    """Construct a cell through the existing managed UV owner without retiring its slot."""
+    uv_path = Path(uv)
+    if (
+        not uv_path.is_absolute() or not uv_path.is_file()
+        or (os.name != "nt" and not os.access(uv_path, os.X_OK))
+        or (os.name == "nt" and "windowsapps" in {part.casefold() for part in uv_path.parts})
+    ):
+        raise error_type("runtime construction requires the selected UV executable; use explicit setup")
+    suffix = "ps1" if os.name == "nt" else "sh"
+    engine = payload_root / "scripts" / f"installer-engine.{suffix}"
+    if not engine.is_file():
+        engine = payload_root.parent.parent / "libs" / "installer-engine" / engine.name
+    bootstrap = engine.with_name(f"bootstrap-uv.{suffix}")
+    validate_file(engine, "canonical constructor engine")
+    validate_file(bootstrap, "canonical constructor bootstrap")
+    arguments = ["--python", python_version, "--managed-python", "--no-project", "--allow-existing"]
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            raise error_type("PowerShell is required for canonical runtime construction")
+        quoted = ",".join(quote(argument) for argument in arguments)
+        # Modern Core preserves empty values; null overrides must remove provider entries.
+        body = (
+            "$ErrorActionPreference='Stop'; "
+            f". {quote(str(engine))}; . {quote(str(bootstrap))}; "
+            "function Write-Warn($message) { [Console]::Error.WriteLine($message) }; "
+            "foreach ($entry in (Get-UvBootstrapEnvironment).GetEnumerator()) { "
+            "if ($null -eq $entry.Value) { "
+            "Remove-Item -LiteralPath ('Env:'+[string]$entry.Key) -ErrorAction SilentlyContinue "
+            "} else { "
+            "[Environment]::SetEnvironmentVariable([string]$entry.Key,$entry.Value,'Process') } }; "
+            "Remove-Item -LiteralPath Env:UV_CONFIG_FILE -ErrorAction SilentlyContinue; "
+            "[Environment]::SetEnvironmentVariable('UV_NO_CONFIG','1','Process'); "
+            f"$cellUv={quote(uv)}; "
+            "function Invoke-CellConstructionUv { "
+            "param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments) "
+            "& $cellUv @UvArguments }; "
+            f"$result=Invoke-UvVenvResilient -VenvDir {quote(str(slot))} "
+            f"-UvCommand Invoke-CellConstructionUv -Arguments @({quoted}); "
+            "if ($result.Output) { [Console]::Error.WriteLine($result.Output) }; "
+            "exit $result.ExitCode"
+        )
+        command = [shell, "-NoProfile", "-NonInteractive", "-Command", body]
+    else:
+        shell = shutil.which("bash")
+        if not shell:
+            raise error_type("Bash is required for canonical runtime construction")
+        command = [
+            shell, "-c",
+            'engine="$1"; bootstrap="$2"; uv="$3"; slot="$4"; shift 4; '
+            'source "$engine"; source "$bootstrap"; '
+            '_warn() { printf "%s\\n" "$*" >&2; }; '
+            'unset UV_CONFIG_FILE; export UV_NO_CONFIG=1; '
+            '_cell_construct_uv() { invoke_uv_bootstrap_environment "$uv" "$@"; }; '
+            'invoke_uv_venv_resilient _cell_construct_uv "$slot" "$@" >&2',
+            "cell-construction", str(engine), str(bootstrap), uv, str(slot), *arguments,
+        ]
+    # Bind relative PATH results before the native child changes its CWD.
+    command[0] = str(Path(command[0]).absolute())
     execute(command, environment=isolated_environment(), cwd=cwd)
 
 
@@ -92,14 +239,12 @@ def runtime_module_path(
     validate_chain: Callable[[Path, Path, str], None], validate_file: Callable[[Path, str], None],
 ) -> Path:
     try:
-        result = subprocess.run(
-            [
-                str(interpreter), "-I", "-X", "utf8", "-c",
-                "from pathlib import Path; import agent_index; "
-                "print(Path(agent_index.__file__).resolve())",
-            ],
-            cwd=slot, env=isolated_environment(environment), capture_output=True,
-            text=True, encoding="utf-8", errors="replace", check=False, creationflags=_HEADLESS,
+        result = runtime_probe(
+            interpreter, slot,
+            "from pathlib import Path; import agent_index; "
+            "print(Path(agent_index.__file__).resolve())",
+            environment=environment, error_type=error_type,
+            isolated_environment=isolated_environment,
         )
     except OSError as exc:
         raise error_type(f"{label} is unusable; ownership-checked repair is required") from exc

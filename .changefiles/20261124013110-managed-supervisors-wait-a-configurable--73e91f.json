@@ -1,9 +1,0 @@
-{
-  "comment": "Managed supervisors wait a configurable grace window (default 300 seconds) before stopping a suspended pool body.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

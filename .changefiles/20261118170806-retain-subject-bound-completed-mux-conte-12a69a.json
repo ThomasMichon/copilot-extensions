@@ -1,9 +1,0 @@
-{
-  "comment": "Retain subject-bound completed mux content as explicitly stale presentation while its normal refresh is pending.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

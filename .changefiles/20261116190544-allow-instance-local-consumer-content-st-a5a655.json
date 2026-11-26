@@ -1,9 +1,0 @@
-{
-  "comment": "Allow instance-local consumer content-store and repo-matching policies in the shared multi-model facade",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

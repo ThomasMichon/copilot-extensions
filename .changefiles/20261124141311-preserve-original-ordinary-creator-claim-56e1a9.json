@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve original ordinary creator claim and handoff namespaces across local reporter renames",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

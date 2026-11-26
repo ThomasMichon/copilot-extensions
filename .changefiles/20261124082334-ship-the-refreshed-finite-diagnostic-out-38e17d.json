@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the refreshed finite diagnostic output relay archive used by WSL setup",
-  "changes": [
-    {
-      "plugin": "wsl-setup",
-      "type": "patch"
-    }
-  ]
-}

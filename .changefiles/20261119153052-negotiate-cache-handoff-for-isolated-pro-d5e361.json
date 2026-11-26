@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate cache handoff for isolated proposal generations and rebuild incompatible state from independent records.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 import promotion_release_helpers as helpers
-from promotion_unit_contract import COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, relative_file
+from promotion_unit_contract import COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, compact_manifest, relative_file
 import release_controller_contract as control
 
 JsonObject = dict[str, Any]
@@ -253,7 +253,7 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
         return subprocess.CompletedProcess(arguments, 0, result, "")
 
     monkeypatch.setattr(subprocess, "run", read_git)
-    for selected in (manifest, compact):
+    for selected in (manifest, compact, compact_manifest(manifest)):
         _source(tmp_path, "tools/promotion-unit-manifest.json", json.dumps(selected).encode())
         if provided:
             assert cli.main() == 0

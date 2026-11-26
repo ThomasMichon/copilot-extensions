@@ -1,9 +1,0 @@
-{
-  "comment": "Admit 20 unchanged original pure coverage-policy class methods to the guarded unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

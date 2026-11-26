@@ -129,9 +129,14 @@ matching system-owned worktree known to Worktrees or Bridge. ACP Session Hosts
 register with Bridge when created. Live mux-hosted agents register through
 the Driver's receiving connector, not a separately enabled Bridge session
 extension.
-A dormant agent is not a live receiver: raw send rejects it and the caller
-must explicitly request resume first. Sending never silently creates, resumes
-or replaces the addressed agent.
+A valid existing agent target is sufficient for durable message acceptance,
+including while its receiver is dormant, disconnected or not yet admissible.
+Bridge persists the message in its durable per-target queue before returning
+the original receipt. Delivery belongs to the ACP Session Host or CLI-side
+receiving connector at the next admissible point, not the sender. A known
+target's unavailable carrier, changed native generation or outstanding handoff
+is a delivery observation, not an admission refusal. Sending never silently
+creates, resumes or replaces the addressed agent.
 
 Compatible authenticated endpoints and database schemas are sufficient for
 ordinary message admission and delivery. Installation governance, database
@@ -145,7 +150,12 @@ The receipt identifies the original queued message and supports follow-up.
 Queue admission, transport delivery and agent consumption remain distinct
 observations; a caller wait does not enqueue a second message. Reconnects and
 lost responses preserve the original message identity and report uncertainty
-honestly.
+honestly. Accepted input survives coordinator, daemon and receiver restarts.
+Queued, delivered or admitted, superseded and expired outcomes remain observable.
+Authenticated, well-formed ordinary sends fail admission only for an invalid
+target or failure to persist the durable input. A native form answer to a valid
+pending request follows the same acceptance/delivery split; its consumer
+validates the original request before applying it.
 
 This communication contract does not remove authentication, authorize a new
 destination or change independent lifecycle and process-retirement safeguards.

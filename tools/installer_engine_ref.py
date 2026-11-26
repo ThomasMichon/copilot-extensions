@@ -69,6 +69,7 @@ STANDALONE_NATIVE_ADOPTERS = (
 )
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 STANDALONE_NATIVE_EXTRA_FILES = {
+    "plugins/agent-mcp": ("native_capture.sh",),
     "plugins/agent-machines": ("runtime_launcher.py",),
     "plugins/budget-guidance": (
         "bootstrap_uv_capture.py",
@@ -96,7 +97,7 @@ NATIVE_SUPPORT_FILES = {
     ),
     "plugins/agent-dispatch": ("installer_pip_index.py",),
     "plugins/agent-index": (
-        "installer_pip_index.py", "bootstrap-uv.sh", "native_owned.sh",
+        "installer_pip_index.py", "bootstrap-uv.sh", "native_owned.sh", "native_capture.sh",
         "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
     ),
 }
@@ -104,7 +105,7 @@ NATIVE_SUPPORT_FILES = {
 
 def native_source(canonical_dir: Path, name: str) -> Path:
     """Resolve native support from its existing canonical implementation owner."""
-    if name == "native_owned.sh":
+    if name in {"native_owned.sh", "native_capture.sh"}:
         return canonical_dir.parent / "agent-procutil/src/agent_procutil" / name
     return canonical_dir / name
 

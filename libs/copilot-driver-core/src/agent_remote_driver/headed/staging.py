@@ -49,6 +49,57 @@ def connector_selection(
     return selected
 
 
+def selected_connector_roots(
+    selected: dict[str, object], argv: list[str], *, value_options: set[str],
+) -> list[str]:
+    """Validate original support roots and omit their independent SDK bootstraps."""
+    expected = {
+        "agent-bridge": Path(str(selected["bridgePluginRoot"])).resolve(strict=True),
+        "agent-remote-driver": Path(str(selected["driverPluginRoot"])).resolve(strict=True),
+    }
+    found: dict[str, Path] = {}
+    seen: set[Path] = set()
+    support_arguments: set[int] = set()
+    index = 1
+    while index < len(argv):
+        start = index
+        argument = argv[index]
+        if argument == "--":
+            break
+        name, separator, value = argument.partition("=")
+        if not separator and name in value_options | {"-C", "--resume"}:
+            index += 1
+            if index >= len(argv):
+                raise ValueError("Missing selected native argument")
+            value = argv[index]
+        if name == "--plugin-dir":
+            path = Path(value)
+            if not path.is_absolute():
+                raise ValueError("Selected native plugin directories must be absolute")
+            path = path.resolve(strict=True)
+            if path in seen:
+                raise ValueError("Duplicate selected native plugin directory")
+            seen.add(path)
+            manifest = path / "plugin.json"
+            if not manifest.is_file():
+                manifest = path / ".github" / "plugin" / "plugin.json"
+            metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            if not isinstance(metadata, dict) or not isinstance(metadata.get("name"), str):
+                raise ValueError("Selected native plugin identity is unavailable")
+            plugin_name = metadata["name"]
+            if plugin_name in expected:
+                if plugin_name in found or path != expected[plugin_name]:
+                    raise ValueError("Selected native plugin root changed or duplicated")
+                found[plugin_name] = path
+                support_arguments.update(range(start, index + 1))
+            elif plugin_name == "copilot-driver-headed":
+                raise ValueError("The native connector must be staged by its original Host")
+        index += 1
+    if found != expected:
+        raise ValueError("Selected native plugin roots are missing from the original command")
+    return [argument for index, argument in enumerate(argv) if index not in support_arguments]
+
+
 def stage_extension(attempt_directory: Path, *, native_connector: bool = False) -> Path:
     source = files("agent_remote_driver.headed")
     assets = {

@@ -6,43 +6,143 @@ import { pathToFileURL } from "node:url";
 export const isRemoteDriverSource = (source) =>
   typeof source === "string" && /^agent-remote-driver-[0-9a-f-]{36}$/.test(source);
 
+function selectedContextError(reason, message, plugin) {
+  return Object.assign(new Error(message), {
+    selectedContextReason: reason,
+    ...(plugin === undefined ? {} : { selectedContextPlugin: plugin }),
+  });
+}
+
+function selectedIdentityObservation(owner, expectedPid) {
+  return {
+    id: owner.id === "plugin:copilot-driver-headed:copilot-driver-headed" ? "match"
+      : typeof owner.id === "string" && owner.id ? "other" : "missing",
+    name: owner.name === "copilot-driver-headed" ? "directory"
+      : typeof owner.name !== "string" || !owner.name ? "missing"
+      : owner.name === owner.id ? "qualified" : "other",
+    source: ["project", "user", "plugin", "session"].includes(owner.source) ? owner.source : "unknown",
+    status: ["running", "disabled", "failed", "starting"].includes(owner.status) ? owner.status : "unknown",
+    pid: Number.isSafeInteger(owner.pid) && owner.pid > 0
+      ? owner.pid === expectedPid ? "match" : "other"
+      : owner.pid == null ? "missing" : "invalid",
+  };
+}
+
 export async function selectedLoadout(native, {
-  pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector,
+  pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector, extensionPid,
 }) {
   if (bridgePluginRoot === undefined) return;
   const canonical = (path) => realpathSync(resolve(path));
   if (typeof bridgePluginRoot !== "string" || !isAbsolute(bridgePluginRoot)
       || typeof extensionPluginRoot !== "string" || !isAbsolute(extensionPluginRoot)
-      || canonical(nativeConnector?.connectorPluginRoot ?? bridgePluginRoot) !== canonical(extensionPluginRoot)
+      || extensionPid !== undefined && (
+        nativeConnector === undefined || !Number.isSafeInteger(extensionPid) || extensionPid <= 0
+      )
       || nativeConnector !== undefined && (
         nativeConnector.sessionId !== expectedSessionId || nativeConnector.cwd !== cwd
         || nativeConnector.bridgePluginRoot !== bridgePluginRoot
         || nativeConnector.driverPluginRoot !== pluginRoot
-      )
-      || typeof native.rpc?.plugins?.list !== "function") {
-    throw new Error("Portable receiving requires native observation of its selected extension roots");
+      )) {
+    throw selectedContextError("selection-invalid",
+      "Portable receiving requires native observation of its selected extension roots");
   }
-  const before = await native.rpc.metadata.snapshot();
-  const loadout = await native.rpc.plugins.list();
-  const after = await native.rpc.metadata.snapshot();
+  let connectorRoot, extensionRoot;
+  try {
+    connectorRoot = canonical(nativeConnector?.connectorPluginRoot ?? bridgePluginRoot);
+    extensionRoot = canonical(extensionPluginRoot);
+  } catch {
+    throw selectedContextError("selection-root-unavailable", "Selected extension roots are unavailable");
+  }
+  if (connectorRoot !== extensionRoot) {
+    throw selectedContextError("selection-root-mismatch",
+      "Portable receiving requires native observation of its selected extension roots");
+  }
+  const executing = extensionPid !== undefined;
+  const observer = executing ? native.rpc?.extensions : native.rpc?.plugins;
+  if (typeof observer?.list !== "function") {
+    throw selectedContextError(executing ? "extensions-list-unsupported" : "plugins-list-unsupported",
+      "Portable receiving requires native observation of its selected extension roots");
+  }
+  if (typeof native.rpc?.metadata?.snapshot !== "function") {
+    throw selectedContextError("metadata-snapshot-unsupported", "Native metadata observation is unsupported");
+  }
+  const observe = async (operation, reason) => {
+    try { return await operation(); }
+    catch { throw selectedContextError(reason, "Native execution context observation failed"); }
+  };
+  const before = await observe(() => native.rpc.metadata.snapshot(), "metadata-before-failed");
+  const loadout = await observe(() => observer.list(),
+    executing ? "extensions-list-failed" : "plugins-list-failed");
+  const after = await observe(() => native.rpc.metadata.snapshot(), "metadata-after-failed");
   for (const snapshot of [before, after]) {
-    if (snapshot?.sessionId !== expectedSessionId
-        || typeof snapshot.workingDirectory !== "string"
-        || canonical(snapshot.workingDirectory) !== canonical(cwd)) {
-      throw new Error("Portable receiving native execution context changed");
+    if (snapshot?.sessionId !== expectedSessionId) {
+      throw selectedContextError("native-session-mismatch", "Portable receiving native execution context changed");
+    }
+    let observedCwd, selectedCwd;
+    try {
+      if (typeof snapshot.workingDirectory !== "string") throw new Error();
+      observedCwd = canonical(snapshot.workingDirectory);
+      selectedCwd = canonical(cwd);
+    } catch {
+      throw selectedContextError("native-cwd-unavailable", "Native working directory observation is unavailable");
+    }
+    if (observedCwd !== selectedCwd) {
+      throw selectedContextError("native-cwd-mismatch", "Portable receiving native execution context changed");
     }
   }
-  if (!Array.isArray(loadout?.plugins)) throw new Error("Portable receiving plugin observation is unavailable");
-  const required = [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]];
-  if (nativeConnector !== undefined) required.push(["copilot-driver-headed", extensionPluginRoot]);
-  for (const [name, root] of required) {
-    const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
-    if (active.length !== 1 || active[0].installed === false
-        || typeof active[0].installedFrom !== "string"
-        || !isAbsolute(active[0].installedFrom)
-        || canonical(active[0].installedFrom) !== canonical(root)) {
-      throw new Error("Portable receiving extensions are missing, duplicated or from another root");
+  if (executing) {
+    if (!Array.isArray(loadout?.extensions)) {
+      throw selectedContextError("extension-observation-invalid", "Native extension observation is unavailable");
     }
+    const invalid = (reason, role) => selectedContextError(reason,
+      "The launch-bound native connector has another or unavailable executing owner", role);
+    const owners = loadout.extensions.filter((extension) =>
+      extension?.name === "copilot-driver-headed"
+      || typeof extension?.id === "string" && extension.id.startsWith("plugin:copilot-driver-headed:"));
+    if (owners.length !== 1) {
+      throw invalid(owners.length === 0 ? "plugin-missing" : "plugin-duplicated", "connector");
+    }
+    const owner = owners[0];
+    if (owner.id !== "plugin:copilot-driver-headed:copilot-driver-headed"
+        || typeof owner.name !== "string" || !owner.name || owner.source !== "plugin") {
+      throw Object.assign(invalid("extension-identity-mismatch", "connector"), {
+        selectedContextIdentity: selectedIdentityObservation(owner, extensionPid),
+      });
+    }
+    if (owner.status !== "running") throw invalid("extension-not-running", "connector");
+    if (owner.pid !== extensionPid) throw invalid("extension-process-mismatch", "connector");
+    for (const [name, role] of [["agent-bridge", "bridge"], ["agent-remote-driver", "driver"]]) {
+      const peers = loadout.extensions.filter((extension) =>
+        extension?.name === name || typeof extension?.id === "string" && extension.id.startsWith(`plugin:${name}:`));
+      if (peers.some((extension) => !["disabled", "failed"].includes(extension.status))) {
+        throw invalid("extension-competing", role);
+      }
+    }
+    return;
+  }
+  if (!Array.isArray(loadout?.plugins)) {
+    throw selectedContextError("plugin-observation-invalid", "Portable receiving plugin observation is unavailable");
+  }
+  const required = [["agent-bridge", bridgePluginRoot, "bridge"], ["agent-remote-driver", pluginRoot, "driver"]];
+  if (nativeConnector !== undefined) required.push(["copilot-driver-headed", extensionPluginRoot, "connector"]);
+  for (const [name, root, role] of required) {
+    const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
+    const invalid = (reason) => selectedContextError(reason,
+      "Portable receiving extensions are missing, duplicated or from another root", role);
+    if (active.length !== 1) throw invalid(active.length === 0 ? "plugin-missing" : "plugin-duplicated");
+    if (active[0].installed === false) throw invalid("plugin-not-installed");
+    if (typeof active[0].installedFrom !== "string" || !active[0].installedFrom) {
+      throw invalid("plugin-origin-missing");
+    }
+    if (!isAbsolute(active[0].installedFrom)) throw invalid("plugin-origin-relative");
+    let observedRoot, selectedRoot;
+    try {
+      observedRoot = canonical(active[0].installedFrom);
+      selectedRoot = canonical(root);
+    } catch {
+      throw invalid("plugin-origin-unavailable");
+    }
+    if (observedRoot !== selectedRoot) throw invalid("plugin-origin-mismatch");
   }
 }
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify superseded named-target HTTP intake, service completion and client-free retry without body acquisition or native rewrites.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

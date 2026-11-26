@@ -1,9 +1,0 @@
-{
-  "comment": "Document withholding standing recovery until host-ready and reconciling admitted operations under agent-roles",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -51,13 +51,26 @@ A preferred launch whose retained selection is missing also refuses; missing
 launch state is not a legacy capability advertisement.
 No new CLI option, installed setting or global plugin migration is involved.
 
-For that selected launch, the real Bridge and floor Driver facades validate their
-own roots and remain passive. The staged Driver entrypoint owns the one SDK join,
+For that selected launch, Core validates the real Bridge and floor Driver support
+roots in the original command, then omits only their support-only plugin arguments
+from the native child command. Their assets remain retained, but do not start
+independent extension bootstraps that would time out without an SDK join.
+Other plugin arguments and native input stay unchanged. The staged Driver entrypoint owns the one SDK join,
 including Bridge's existing hooks and `/peer`, and binds that exact native object
 to the common headed adapter. Retained Bridge sends pass through the same adapter's
 startup, input-ownership and auth-wait fences rather than another SDK sender or
-Host attachment. Metadata names the actual Driver connector root; delivery still
-observes the exact Bridge, Driver and connector roots in the native loadout.
+Host attachment. Metadata names the actual Driver connector root. The Host
+binds the support roots to the original native command before staging or process
+creation, while startup admission retains that original command. The connector
+validates its own module root and observes the
+live session extension registry: its source-qualified plugin identity must
+name its actual running PID, with no duplicate connector or running/starting
+Bridge or Driver extension. A same-named global installation record is not
+proof of another executing sender. Missing or unknown live observations refuse.
+The source-qualified ID is the identity key. Discovery-name metadata must be a
+non-empty string, but its spelling need not equal the ID's extension component.
+A matching or different display spelling cannot compensate for a different ID,
+source, running state, process or executing module.
 The common adapter repeats that observation before both native-send and ACP
 prompt effects, retaining its input reservation across asynchronous validation
 and rechecking takeover before dispatch.
@@ -65,6 +78,40 @@ Malformed or mismatched selection never triggers a fallback join. Ordinary
 standalone sessions and legacy headed launches keep their existing entrypoints.
 This optional source path does not qualify native plugin precedence, installed
 adoption or withdrawal of independently enabled extensions.
+
+The observer contract is declared in the
+[public SDK `v1.0.28`](https://github.com/github/copilot-sdk/blob/v1.0.28/nodejs/src/generated/rpc.ts),
+[paired with CLI `1.0.105`](https://github.com/github/copilot-sdk/blob/v1.0.28/nodejs/package.json):
+`session.extensions.list` reports extension IDs, discovery source,
+status and running PID. `plugins.list().installedFrom` instead names a live
+plugin's **marketplace** directory; it cannot prove an invocation plugin's
+executing root. The selected connector uses its existing module/launch/Host
+binding and the live registry, not a guessed plugin-origin field. Legacy
+connectors retain their existing plugin-list validation; no observer failure
+selects another connector or retries input.
+
+Selected-context refusals retain JSON-RPC error `-32001` and append a bounded
+`[reason]` or `[reason:role]` diagnostic to the existing pre-dispatch message.
+Reasons distinguish unsupported observers, failed reads, changed session/CWD,
+and missing, duplicate, uninstalled or wrong-origin plugins, as well as an
+unsupported live registry, wrong executing identity/PID or competing sender;
+roles are only
+`bridge`, `driver` and `connector`. Unknown failures use
+`context-validation-failed`, never raw SDK exceptions, metadata or paths.
+The suffix is advisory text, not a new capability or retry permission. A failed
+observation still holds control without input, abort, fallback or replay.
+Older peers retain the same refusal without the diagnostic suffix.
+
+For a connector identity mismatch, an optional second `[owner-checks ...]`
+suffix distinguishes the observed ID comparison, directory/qualified/other
+name shape, known source/status enums and same/other/missing/invalid PID
+comparison. It contains only a fixed vocabulary, not actual IDs, names, PIDs,
+paths or raw registry records. Incomplete, extra or unrecognized diagnostic
+fields are omitted. These are comparisons from the refused observation, not
+proof that another field passed its later admission check or that startup
+completed. The diagnostic does not participate in identity, running-state, PID
+or competing-sender admission and cannot authorize retry or clear the adapter's
+hold.
 
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older

@@ -1,9 +1,0 @@
-{
-  "comment": "Use the public Python package index in clean-room examples",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-maintainer",
-      "type": "patch"
-    }
-  ]
-}

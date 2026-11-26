@@ -1,9 +1,0 @@
-{
-  "comment": "Expose assignment-scoped proposal origins and seal exact pool completion evidence at verified terminal detachment.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

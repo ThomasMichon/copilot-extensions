@@ -1,9 +1,0 @@
-{
-  "comment": "Document and qualify original repository request recovery in the local service",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

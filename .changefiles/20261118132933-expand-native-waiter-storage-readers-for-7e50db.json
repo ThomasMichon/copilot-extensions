@@ -1,9 +1,0 @@
-{
-  "comment": "Expand native waiter storage readers for strict repository-feed intent without enabling delivery",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

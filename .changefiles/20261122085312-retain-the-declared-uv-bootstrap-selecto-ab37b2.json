@@ -1,9 +1,0 @@
-{
-  "comment": "Retain the declared uv bootstrap selector with copied admission helpers.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

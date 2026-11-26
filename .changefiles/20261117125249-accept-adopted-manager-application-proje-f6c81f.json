@@ -1,9 +1,0 @@
-{
-  "comment": "Accept adopted Manager application projects using their exact Manager wheel and source identity while preserving legacy and wrong-package refusals.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

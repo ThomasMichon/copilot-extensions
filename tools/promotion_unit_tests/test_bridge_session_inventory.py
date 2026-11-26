@@ -34,6 +34,108 @@ def package(monkeypatch: pytest.MonkeyPatch, name: str) -> ModuleType:
     return module
 
 
+def exact_resume_client(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, type[Any]]:
+    package(monkeypatch, "_exact_resume")
+    load(monkeypatch, "_exact_resume.client_read_budget", BRIDGE + "client_read_budget.py")
+    load(monkeypatch, "_exact_resume.protocol", BRIDGE + "protocol.py")
+    load(monkeypatch, "_exact_resume.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+
+    class ClientError(Exception):
+        def __init__(self, status: int, detail: Any) -> None:
+            self.status, self.detail = status, detail
+            super().__init__(str(detail))
+
+    monkeypatch.setitem(sys.modules, "_exact_resume.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    return load(
+        monkeypatch, "_exact_resume.client_worktree_exact_resume",
+        BRIDGE + "client_worktree_exact_resume.py",
+    ), ClientError
+
+
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+@pytest.mark.parametrize("capability", [None, False, 0, "1", 1])
+def test_exact_resume_negotiates_before_one_identity_bound_attempt(
+    monkeypatch: pytest.MonkeyPatch, mode: str, capability: Any,
+) -> None:
+    helper, error = exact_resume_client(monkeypatch)
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path, kwargs))
+        if path == "/health":
+            return {"protocol_version": 52, "capabilities": {helper.CAPABILITY: capability}}
+        assert args == ({"native_session_id": "original-native"},)
+        return {
+            "session_id": "managed", "acp_session_id": "original-native",
+            "durable_session_id": "original-native", "worktree_id": "workspace", "mode": mode,
+        }
+
+    client = SimpleNamespace(_base="http://fixture", _request=request)
+    if type(capability) is int and capability == 1:
+        assert helper.resume(client, "workspace", "original-native", mode=mode)["mode"] == mode
+        assert [row[:2] for row in calls] == [
+            ("GET", "/health"), ("POST", f"/api/v1/worktrees/workspace/resume/{mode}/exact"),
+        ]
+    else:
+        with pytest.raises(error) as refused:
+            helper.resume(client, "workspace", "original-native", mode=mode)
+        assert refused.value.status == 426
+        assert [row[:2] for row in calls] == [("GET", "/health")]
+    assert all(row[2]["allow_retry"] is False for row in calls)
+    assert all(row[2]["_endpoint"] == "http://fixture" for row in calls)
+
+
+@pytest.mark.parametrize("fault", ["connection", "interrupt", "native", "workspace", "mode", "managed", "rollback"])
+def test_exact_resume_unknown_or_rollback_never_replays(
+    monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    helper, error = exact_resume_client(monkeypatch)
+    calls: list[str] = []
+
+    def request(_method: str, path: str, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        calls.append(path)
+        if path == "/health":
+            return {"protocol_version": 52, "capabilities": {helper.CAPABILITY: 1}}
+        if fault == "connection":
+            raise ConnectionError("response lost")
+        if fault == "interrupt":
+            raise KeyboardInterrupt
+        if fault == "rollback":
+            raise error(404, "unsupported exact route")
+        result = {
+            "session_id": "managed", "acp_session_id": "original-native",
+            "durable_session_id": "original-native", "worktree_id": "workspace", "mode": "acp",
+        }
+        result[{"native": "acp_session_id", "workspace": "worktree_id",
+                "mode": "mode", "managed": "session_id"}[fault]] = ""
+        return result
+
+    with pytest.raises(error) as refused:
+        helper.resume(SimpleNamespace(_base="http://fixture", _request=request), "workspace", "original-native")
+    assert calls == ["/health", "/api/v1/worktrees/workspace/resume/acp/exact"]
+    if fault != "rollback":
+        assert refused.value.detail["code"] == "native_resume_unconfirmed"
+        assert refused.value.detail["native_session_id"] == "original-native"
+
+
+@pytest.mark.parametrize(
+    "native", [None, True, "", "../other", "native\n", "a" * 201],
+    ids=["missing", "boolean", "empty", "path", "control", "oversized"],
+)
+def test_exact_resume_invalid_native_never_reaches_provider(
+    monkeypatch: pytest.MonkeyPatch, native: Any,
+) -> None:
+    helper, _error = exact_resume_client(monkeypatch)
+
+    def request(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("invalid native identity reached the provider")
+
+    with pytest.raises(ValueError):
+        helper.resume(SimpleNamespace(_request=request), "workspace", native)
+
+
 def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     package(monkeypatch, "_remote_bridge")
     load(monkeypatch, "_remote_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
@@ -937,6 +1039,68 @@ def test_remote_registered_send_retains_binding_without_result_reads_or_replay(
         "host": "host-b", "session_id": "native", "managed_session_id": None,
         "registered_session_id": "native", "sender": "controller",
     }
+
+
+@pytest.mark.parametrize("module", ["bridge_send_cli", "bridge_observation_cli"], ids=["send", "observe"])
+@pytest.mark.parametrize("options,expected", [
+    ([], True), (["--bridge"], True), (["--legacy-selector"], False),
+], ids=["default", "exact", "legacy"])
+def test_selector_defaults(
+    monkeypatch: pytest.MonkeyPatch, module: str, options: list[str], expected: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(monkeypatch, "_default_bridge." + module, BRIDGE + module + ".py")
+    parser = argparse.ArgumentParser()
+    adapter.register(parser)
+    args = parser.parse_args(options)
+    assert adapter.selected(args) is expected
+    with pytest.raises(SystemExit) as conflict:
+        parser.parse_args(["--bridge", "--legacy-selector"])
+    assert conflict.value.code == 2
+
+
+@pytest.mark.parametrize("module,field,value", [
+    ("bridge_send_cli", "force", True),
+    ("bridge_send_cli", "expected_native_session_id", ""),
+    ("bridge_send_cli", "delivery", "queue"),
+    ("bridge_send_cli", "receipt_only", True),
+    ("bridge_observation_cli", "event", 0),
+    ("bridge_observation_cli", "tail", 0),
+    ("bridge_observation_cli", "attention", ["input_required"]),
+    ("bridge_observation_cli", "no_follow", True),
+    ("bridge_send_cli", "target", "live:host-b:worker-project:workspace-a"),
+], ids=["force", "startup", "queued", "receipt", "events", "tail", "attention", "no-follow", "peer"])
+def test_specialized_owners(
+    monkeypatch: pytest.MonkeyPatch, module: str, field: str, value: Any,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(monkeypatch, "_default_bridge." + module, BRIDGE + module + ".py")
+    args = argparse.Namespace(bridge=None, **{field: value})
+    assert adapter.selected(args) is False
+    args.host = "host-b"
+    with pytest.raises(SystemExit, match="exact bridge selection"):
+        adapter.selected(args)
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_observation_env_precedence(
+    monkeypatch: pytest.MonkeyPatch, exact: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(
+        monkeypatch, "_default_bridge.bridge_observation_cli", BRIDGE + "bridge_observation_cli.py",
+    )
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_OBSERVATION", "1")
+    parser = argparse.ArgumentParser()
+    adapter.register(parser)
+    args = parser.parse_args(["--bridge"] if exact else [])
+    assert adapter.selected(args) is exact
 
 
 @pytest.mark.parametrize("option", [

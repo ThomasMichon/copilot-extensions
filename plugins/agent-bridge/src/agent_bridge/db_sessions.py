@@ -361,6 +361,10 @@ class _SessionsMixin:
                     "DELETE FROM delivery_cursor_invalidations WHERE session_id=?",
                     (session_id,),
                 )
+                from .managed_messages import removed
+
+                removed(conn, session_id)
+                conn.execute("DELETE FROM pending_prompts WHERE session_id=?", (session_id,))
                 conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
                 conn.commit()
             except BaseException:

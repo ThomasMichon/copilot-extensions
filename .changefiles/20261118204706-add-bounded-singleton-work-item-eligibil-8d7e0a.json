@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded singleton work-item eligibility with fresh saved-query bindings",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

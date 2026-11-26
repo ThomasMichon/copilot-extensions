@@ -1,0 +1,9 @@
+{
+  "comment": "Give obsolete tasks an automatic closeout path: direct abandon when no worker, finalize-first or worker closeout otherwise",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the optional per-process native capture decoder with existing defaults unchanged.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

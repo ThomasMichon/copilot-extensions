@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse incomplete conditional responses and repeated tokens during continuation inventory acquisition",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

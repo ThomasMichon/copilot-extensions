@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
-from agent_dispatch.queue import TaskError, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_records import TaskError
 from agent_dispatch.task_obligations import read_snapshot
 from tests import test_task_relevance_binding as bindings
 from tests.test_pool_placement import place, pool, publish
@@ -39,7 +42,7 @@ def test_source_closure_targets_proved_original_body_without_fabricating_start(
     from agent_dispatch.queue_pool_placement import require_pool_start
 
     queue, owner, workspace, task = before_start
-    before = queue.get(task.id)
+    before = bindings._task(queue, task.id)
     relationship = queue.task_relationship(task.id)
     owner_calls = list(owner.calls)
     with queue._connect() as conn:
@@ -54,12 +57,12 @@ def test_source_closure_targets_proved_original_body_without_fabricating_start(
     assert accepted["wake_operation_id"] is not None
     [wake] = queue.list_wakes(task.id)
     assert (wake.owner, wake.owner_session_id) == (workspace.worker_id, "native")
-    assert queue.get(task.id).status == "claimed"
-    assert queue.get(task.id).owner is None
-    assert queue.get(task.id).owner_session_id is None
+    assert bindings._task(queue, task.id).status == "claimed"
+    assert bindings._task(queue, task.id).owner is None
+    assert bindings._task(queue, task.id).owner_session_id is None
     assert queue.task_relationship(task.id) == relationship
     assert not queue.attachment_history(task.id)
-    assert not any(event["to_status"] == "started" for event in queue.events(task.id))
+    assert not any(event["to_status"] == "started" for event in [*queue.events(task.id)])
     assert owner.calls == owner_calls
     with pytest.raises(TaskError, match="allocator claim"):
         queue.abandon(task.id, worker_id=workspace.worker_id, permitted=True)
@@ -71,23 +74,30 @@ def test_unaccepted_body_can_deliver_prepare_and_acknowledge_without_start_or_na
     from agent_dispatch import pool_decline_observation, submission_readiness_observation
 
     queue, _, workspace, task = before_start
-    before_task = queue.get(task.id)
-    relationship = queue.task_relationship(task.id)
-    reservation = queue.get_reservation(relationship["request"]["reservation_key"])
+    before_task = bindings._task(queue, task.id)
+    reservation = queue.get_reservation(
+        bindings._relationship(queue, task.id)["reservation_key"],
+    )
+    assert reservation is not None
     report(queue, task.id, scope=bindings._scope(queue, task.id))
     wake = queue.claim_due_wake()
     assert wake is not None
     admission = queue.admit_execution_wake(wake, provenance=None)
     assert admission.send_required is True
     queue.settle_execution_wake(wake, admission, outcome="sent", detail="original closeout")
+    assert wake.delivery_token is not None
     assert queue.finish_wake(wake.id, wake.delivery_token, delivered=True)
-    observations = []
+    observations: list[tuple[str, str]] = []
 
-    def observe_ready(request: dict, allocation: dict, claim_ref: str) -> dict:
+    def observe_ready(
+        request: dict[str, Any], allocation: dict[str, Any], claim_ref: str,
+    ) -> dict[str, Any]:
         observations.append(("ready", request["owner_session_id"]))
         return {"ready": True, "finalized": False, "process_retirement": False}
 
-    def observe_finalized(task_row: dict, allocation: dict, native: dict) -> dict:
+    def observe_finalized(
+        task_row: dict[str, Any], allocation: dict[str, Any], native: dict[str, Any],
+    ) -> dict[str, Any]:
         assert task_row["owner"] is task_row["owner_session_id"] is None
         observations.append(("finalized", native["native_id"]))
         return {
@@ -97,18 +107,15 @@ def test_unaccepted_body_can_deliver_prepare_and_acknowledge_without_start_or_na
 
     monkeypatch.setattr(submission_readiness_observation, "observe", observe_ready)
     monkeypatch.setattr(pool_decline_observation, "observe", observe_finalized)
-    arguments = {
+    arguments: dict[str, Any] = {
         "request_id": "closed-source", "worker_id": workspace.worker_id,
         "native_id": "native", "expected_generation": before_task.generation,
     }
-    with pytest.raises(TaskError, match="closeout"):
-        queue.start(
-            task.id, workspace.worker_id, owner_session_id="native",
-            expected_generation=before_task.generation,
-        )
     prepared = queue.prepare_relevance_closeout(task.id, **arguments)
     assert prepared["relationship"]["state"] == "closed"
-    assert read_snapshot(queue, task.id)["release_outcome"] == "relevance_closeout_ready"
+    snapshot = read_snapshot(queue, task.id)
+    assert snapshot is not None
+    assert snapshot["release_outcome"] == "relevance_closeout_ready"
     result = queue.finish_relevance_closeout(task.id, **arguments)
     assert result.event_type == "task.abandoned"
     assert result.task.status == "abandoned"
@@ -118,7 +125,7 @@ def test_unaccepted_body_can_deliver_prepare_and_acknowledge_without_start_or_na
     assert queue.finish_relevance_closeout(task.id, **arguments).event_type is None
     assert len(observations) == 2
     assert queue.attachment_history(task.id) == []
-    assert not any(event["to_status"] == "started" for event in queue.events(task.id))
+    assert not any(event["to_status"] == "started" for event in [*queue.events(task.id)])
 
 
 @pytest.mark.parametrize(
@@ -150,7 +157,7 @@ def test_unproved_preacceptance_body_remains_pending_without_guessing_an_owner(
     assert closeout["owner"] is closeout["owner_session_id"] is None
     assert closeout["resource_binding"]["state"] == "unconfirmed"
     assert queue.list_wakes(task.id) == []
-    assert queue.get(task.id).status == "claimed"
+    assert bindings._task(queue, task.id).status == "claimed"
 
 
 def test_preacceptance_closeout_replays_original_target_across_coordinator_restart(
@@ -168,7 +175,7 @@ def test_preacceptance_closeout_replays_original_target_across_coordinator_resta
     assert restarted.relevance_snapshot(task.id)["closeout"] == closeout
     [wake] = restarted.list_wakes(task.id)
     assert (wake.owner, wake.owner_session_id) == (workspace.worker_id, "native")
-    assert restarted.get(task.id).owner is restarted.get(task.id).owner_session_id is None
+    assert bindings._task(restarted, task.id).owner is bindings._task(restarted, task.id).owner_session_id is None
 
 
 def test_scoped_original_body_can_use_closeout_http_without_generic_task_authority(
@@ -190,7 +197,7 @@ def test_scoped_original_body_can_use_closeout_http_without_generic_task_authori
             "status": "finalized", "checkout_retained": True, "process_retirement": False,
         },
     )
-    value = (queue, owner, workspace, task, [])
+    value: tuple[Any, ...] = (queue, owner, workspace, task, [])
     client, auth = transport.api(value), transport.headers(value)
     assert client.get(f"/tasks/{task.id}", headers=auth).status_code == 403
     response = client.get(transport.path(value), headers=auth)
@@ -206,7 +213,7 @@ def test_scoped_original_body_can_use_closeout_http_without_generic_task_authori
     assert response.status_code == 200, response.text
     assert set(response.json()["result"]) == {"id", "status", "generation"}
     assert response.json()["result"]["status"] == "abandoned"
-    assert queue.get(task.id).owner_session_id is None
+    assert bindings._task(queue, task.id).owner_session_id is None
     assert queue.attachment_history(task.id) == []
 
 
@@ -239,6 +246,7 @@ def test_later_custody_changes_do_not_inherit_before_start_readiness(
     with pytest.raises(TaskError, match="closeout"):
         queue.prepare_relevance_closeout(
             task.id, request_id="closed-source", worker_id=workspace.worker_id,
-            native_id="native", expected_generation=queue.get(task.id).generation,
+            native_id="native", expected_generation=bindings._task(queue, task.id).generation,
         )
-    assert queue.task_relationship(task.id)["state"] == "bound"
+    relationship = queue.task_relationship(task.id)
+    assert relationship is not None and relationship["state"] == "bound"

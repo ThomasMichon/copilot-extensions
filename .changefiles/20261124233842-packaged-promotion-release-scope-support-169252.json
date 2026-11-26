@@ -1,9 +1,0 @@
-{
-  "comment": "Packaged promotion release scope supports reviewed path patterns that keep vendored library tests off main.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

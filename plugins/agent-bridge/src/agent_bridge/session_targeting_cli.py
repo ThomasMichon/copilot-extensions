@@ -879,10 +879,10 @@ def _mark_resume_if_behind(client: Any, session_id: str, *, caller_id: str | Non
 
 def register_session_targeting_commands(sub: argparse._SubParsersAction[Any]) -> None:
     core = _core()
-    send_p = sub.add_parser("send", help="Send a prompt to an agent or session (reuses/resumes this caller's existing session)")
+    send_p = sub.add_parser("send", help="Send an ordinary prompt to an exact project bridge; specialized modes retain their existing selectors")
     from .hosting_admission_cli import add_argument as add_hosting_argument
     add_hosting_argument(send_p)
-    send_p.add_argument("target", help="Agent name, session ID, or a live session's worktree handle (a worktree handle resolves to whichever session is live now)")
+    send_p.add_argument("target", help="Exact workspace/native/managed identity; use --legacy-selector for prior agent/profile matching and implicit resume")
     send_p.add_argument("prompt", nargs="?", default=None, help="Prompt text to send (omit and use --prompt-file for multi-line prompts that shouldn't transit the shell's argv)")
     send_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")
     send_p.add_argument("--sender", "--from", dest="sender", default=None, help="Attribution label when the target is a live interactive session (default: this caller's worktree/user). Legibility only, not routing.")

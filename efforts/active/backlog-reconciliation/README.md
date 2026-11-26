@@ -484,12 +484,52 @@ the non-public approval conversation.
 
 ## Plan
 
-The [publication-occurrence receiving proposal](publication-occurrence-receiving.md)
-proposes direct retention of eighteen independently unresolved publisher reports
-in existing OPEN #7378 before any redundant-tracking retirement. It proposes no
-bug fix, common cause, native pass or human-request duplicate closure.
-Exact producer lookup markers and a validated recurrence route precede each
-source transition; unroutable sources remain OPEN without producer changes.
+The [six further occurrence outcome](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
+retains four additional independent reuse cases under existing #7872 and two
+publication cases under existing #7378 after reviewed #14672 and whole actual
+accepted receiving. Six independently audited leaf tokens retired
+`NOT_PLANNED`; 39 reuse and 36 publisher technical cases remain OPEN.
+Two equal complete censuses measure 778 whole OPEN: 293 original-cohort and
+485 inflow, still 49 above fixed 729. Only this slice's four local tracker
+gates are resolved; explicit diagnostic keepers, source-correspondence gaps
+and every incumbent Plan/Validation state remain unchanged.
+
+The [publication-guard and explicit-keeper outcome](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
+records four independently audited tracking-only publication handoffs after
+reviewed #14664 and whole actual #7378 receiving. Two legacy exact-candidate
+guard cases remain separate from two later publisher cases; all thirty-four
+registered publication cases stay technically OPEN. Whole #8632/#8634, #8660,
+#9317 and #8985/#9092 acceptance stays OPEN. The complete census is 784 whole,
+293 original-cohort and 491 inflow, still 55 above fixed 729.
+
+The [coverage-bound and further-occurrence outcome](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+records two separately verified evidence-file source completions and seven
+audited tracking-only handoffs to existing receivers. All thirty-five
+source-reuse and thirty publisher technical cases remain OPEN; #8596's whole
+canonical/vendor acceptance remains OPEN and unchanged. Reviewed #14657,
+whole actual receiving, separate final units and routing/acknowledgment/
+disposition audits are settled. The complete census is 788 whole open,
+293 original-cohort and 495 inflow, still 59 above fixed 729.
+
+The [further source-reuse and timeout intake](journal/2026/11.25-source-reuse-timeout-intake.md)
+records accepted receiving of nine more independent OPEN technical cases in
+existing #7872 and nine separately audited tracking retirements. Its entire
+twenty-case incumbent receiving and all settled effects remain intact; all
+twenty-nine technical cases remain OPEN. The complete census is 797 whole open,
+68 above fixed 729. Distinct #8466 remains OPEN for its own uv-manifest fetch
+timeout, not folded into source reuse or credited as fixed.
+The [verifier/further-publication study](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
+records three separately verified and acknowledged source-handling completions
+and an [accepted eleven-case receiving extension](publication-occurrence-extension.md).
+Eleven separately audited tracking retirements preserve all twenty-nine
+publisher technical cases OPEN in #7378. #8369's distinct requests remain open;
+matching titles or later healthy runs supply no inherited completion.
+The [accepted publication-occurrence receiving](publication-occurrence-receiving.md)
+retains eighteen independently unresolved publisher cases in existing OPEN
+#7378. Its [actual delivery record](journal/2026/11.25-publication-occurrence-receiving.md#accepted-intake-and-separate-tracking-retirements)
+records eighteen separately acknowledged `NOT_PLANNED` leaf-tracking
+retirements after verified recurrence handoffs. Technical cases remain OPEN;
+no bug fix, common cause, native pass or human-request duplicate closure follows.
 The [source-owned publication study](journal/2026/11.25-source-owned-publication-completion.md)
 retains #8033's acknowledged specific completion after actual repair and
 hosted-publication correspondence. Its neighboring reports received no
@@ -4980,6 +5020,22 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [accepted source-reuse receiving](source-reuse-occurrences.md) preserves
+  eleven independent OPEN technical cases under existing #7872 and records ten
+  audited tracking retirements after complete actual intake and recurrence routing.
+  Its [separate judgments](journal/2026/11.25-source-reuse-and-verifier-keepers.md)
+  keep seven verifier reports OPEN and record one separate obsolete frozen-input
+  retirement, not a withdrawn verification gate or completed failed run. The
+  complete 15:04:09 PST census is 815 whole open, 293 original-cohort and 522
+  inflow, 86 above fixed 729; eleven verified departures are offset by two
+  metadata-only arrivals. All incumbent parent/global gates remain unchanged.
+  The [accepted nine-case extension](source-reuse-occurrences.md#nine-case-extension)
+  preserves the entire incumbent intake and all twenty technical cases OPEN
+  after nine further audited tracking retirements; distinct #8446 remains OPEN
+  as an unfulfilled remote-candidate guard. The complete 15:35:22 PST census is
+  806 whole open, 293 original-cohort and 513 inflow, net 652 and 77 above fixed
+  729, with exactly those nine departures and no arrivals. Only four new local
+  tracker gates resolve; all parent/global states remain unchanged.
   The [auth/typing/cache outcome and changed-evidence follow-through](journal/2026/11.14-auth-typing-and-cache-intake.md#reviewed-delivery-and-separate-tracking-judgments)
   records actual #12635 merge, complete current receiving bindings and three
   independently audited NOT_PLANNED tracking retirements. All nine technical
@@ -5549,6 +5605,33 @@ record 837 whole open after three arrivals, a bounded #12487 source keeper
 and two new keepers with an explicit excluded source-read incident. No new
 closure credit, resource release or parent checkbox change follows.
 
+The [accepted seventeen-case receiving and audited outcome](journal/2026/11.25-seventeen-cases-and-five-existing-receivers.md)
+retains seventeen independently OPEN reuse, publication, projection-freeze,
+native-prerequisite and installed-TTY cases in five existing receivers.
+All complete incumbents, twenty-two human comments, explicit keepers and
+custodians remain. Reviewed #14681 was followed by seventeen separately
+audited `NOT_PLANNED` leaf-tracking retirements, not technical completions.
+Only four new local delivery gates resolve; every incumbent parent checkbox
+state remains. Two equal complete censuses at 19:52:38 PST measure 763 whole
+open, 293 original-cohort and 470 inflow, net 695 and 34 above fixed 729.
+Exactly seventeen campaign departures are offset by two metadata-only
+arrivals; no unrelated closure is credited. The independent #11506/#11560
+research refinements and all thirteen retained study issues remain OPEN.
+
+The [accepted forty-case installed-TTY outcome and fixed checkpoint](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md)
+retains forty independently OPEN execution cases in existing #11966,
+preserving its whole original, four earlier rows, ten human comments and
+attributed diagnostic distinctions. Six explicit ownership/diagnostic,
+discussion or module keepers and four later studied cases remain OPEN.
+Reviewed #14692 was followed by forty separately audited `NOT_PLANNED`
+leaf-tracking retirements, not technical completions. The complete census
+at 20:51:53 PST is 725 whole open, 293 original-cohort and 432 inflow:
+observed net reduction 733, four below fixed 729. Forty campaign departures,
+three metadata-only arrivals and one unrelated departure are distinguished.
+Only four new local gates and independent checkpoint verification resolve;
+all other incumbent parent/global states remain. Further intake is stopped
+pending the original operator threshold guidance, not a new campaign stretch.
+
 ### Phase 2b - Vision-linked stabilization roadmap
 
 - [x] _(Agent-recommended)_ Establish the reviewed research method and
@@ -5667,23 +5750,59 @@ closure credit, resource release or parent checkbox change follows.
 
 ### Phase 3 - Threshold guidance
 
-- [ ] Re-query the provider, reconcile new inflow and unrelated closures, and
+- [x] Re-query the provider, reconcile new inflow and unrelated closures, and
   independently confirm the fixed checkpoint.
 - [ ] Report the evidence-backed reduction and retained work to the operator;
   request guidance before another campaign stretch.
 - [ ] Resolve campaign documentation and coordination obligations through the
   normal publication flow.
 
+The [complete checkpoint observation](journal/2026/11.25-forty-installed-tty-cases-and-owned-keepers.md#independently-verified-fixed-checkpoint)
+independently confirms 725 whole open against fixed 729, with inflow and
+unrelated departures reconciled. Further intake is stopped. Report the
+observed reduction and retained work, finish the current factual-outcome
+publication, and obtain the original operator guidance before another
+stretch. This verification does not resolve other parent/global gates or
+declare the Active effort complete.
+
 ## Validation Plan
 
+The [four-publication-case delivery gates](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#delivery-gates)
+are settled: reviewed publication, whole accepted receiving and independently
+audited `NOT_PLANNED`/original-preservation/post-route readbacks for all four
+new tokens. Distinct actual job boundaries, all thirty-four OPEN technical
+cases and six whole keeper outcomes remain. The complete equal-pass census
+is 784 whole open at 17:44:26 PST on 2026-11-25. Prior local states, parent
+gates, actual holds and fixed whole target are unchanged; no new technical
+completion or final source-check unit was claimed.
+
+The [new coverage and receiving delivery gates](journal/2026/11.25-coverage-bound-and-further-occurrences.md#delivery-gates)
+are settled: two separate one-unit source checks and acknowledged `COMPLETED`
+readbacks, whole accepted receiving and seven independently audited
+`NOT_PLANNED` tracking handoffs. Actual merged #8508 and current finite packet
+controls support those two narrow source judgments, not successful historical
+runs, hosted release or installed acceptance. The complete equal-pass census
+is 788 whole open at 16:58:53 PST on 2026-11-25. All earlier local and parent
+gate states, source/copy/resource holds and fixed whole target remain.
+
+The [three verifier-completion and eleven-case receiving gates](journal/2026/11.25-verifier-availability-and-publisher-extension.md#separate-final-disposition-gates)
+are settled: each completion consumed its recorded final unit and received
+an audited acknowledgment and independent `COMPLETED` readback; the
+[extension's five tracker-delivery gates](publication-occurrence-extension.md#campaign-delivery-gates)
+passed before eleven independently verified `NOT_PLANNED` retirements.
+The [complete post-disposition census](journal/2026/11.25-verifier-availability-and-publisher-extension.md#complete-post-disposition-census)
+is 824 whole open at 13:52:42 PST on 2026-11-25, 95 above fixed 729.
+Keep 112 completed-source CI reports, six obsolete-gate retirements and
+twenty-nine publisher tracking retirements separate; #8369 stays OPEN.
 The [eighteen publication-occurrence tracker gates](publication-occurrence-receiving.md#campaign-delivery-gates)
-require reviewed receiving content, actual append-only publication and complete
-accepted intake before separate source-specific tracking judgments. Every
-technical case remains directly OPEN; no common cause or repair follows.
-Keep each source OPEN until the producer-equivalent metadata lookup selects
-the receiver; preserve the selector/cooldown and validate routing afterward.
-Keep the original receiver, all human requests, current ownership, source
-holds and all incumbent parent states. Record no prospective subtraction.
+are settled: reviewed receiving, exact additive body publication, preserved
+incumbent text and five human comments, separate acknowledgments/proper-reason
+readbacks, and producer-equivalent first-target checks before and after each
+retirement. All eighteen technical cases remain directly OPEN in #7378.
+The [earlier eighteen-case census](journal/2026/11.25-publication-occurrence-receiving.md#complete-post-disposition-census)
+retains its 837-open observation at 12:14:32 PST on 2026-11-25.
+Its tracking outcomes and historical accounting are not replayed; all
+incumbent parent states and owners remain.
 The [single source-owned publication completion](journal/2026/11.25-source-owned-publication-completion.md#separate-final-check-and-acknowledged-completion)
 retains its separate final unit, audited acknowledgment, proper `COMPLETED`
 reason and independent provider readback. It is settled, not replayed.

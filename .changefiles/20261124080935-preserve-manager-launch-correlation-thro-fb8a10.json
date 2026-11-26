@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve Manager launch correlation through isolated and pane-wrapped deferred commands",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

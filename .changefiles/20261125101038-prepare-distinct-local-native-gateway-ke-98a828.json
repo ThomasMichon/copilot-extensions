@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare distinct local native Gateway keys with same-identity resume and public-only exchange, without transport activation.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare session-independent queued task payload updates without changing ordinary create deduplication.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

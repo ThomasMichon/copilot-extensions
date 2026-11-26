@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve independently qualified undismissed reviewer evidence beside valid dismissed history without inventing causal order.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

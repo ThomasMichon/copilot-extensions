@@ -43,6 +43,16 @@ managed helper independently of wheel-install input, retaining its additional
 external-interpreter/prefix-closure checks. Missing preparation refuses before
 removal; uninstall never acquires Python or changes global PATH.
 
+Both command gates require their prepared bootstrap selector, including
+namespaced cell validation; neither a missing marker nor a cell helper permits
+ambient Python discovery. After completed-generation selection, each gate
+admits that exact application environment through prepared-only UV before its
+own origin check, foreground command or separate setup capture. Admission uses
+the existing finite native capture owner; the application retains its native
+stdio and exit code. Missing admission refuses without acquisition or a new
+provisioning attempt. The cell validator's independent package probes remain
+a separate launch boundary from these gate-owned calls.
+
 Windows installer management uses that prepared helper for activation-role
 reading as well. Service ensure, engine management and stop share the binstub's
 read-only completed-generation resolver, then admit its interpreter through

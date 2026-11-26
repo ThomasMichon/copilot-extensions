@@ -6,12 +6,13 @@ import hashlib
 import json
 import sqlite3
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .runtime_custody import RuntimeAdmission, admission_document
 from .owner_membership_signal import commit as commit_membership
 
 if TYPE_CHECKING:
+    from .db import Database
     from .native_keyed_admission import KeyedNativePrompt
     from .native_send_admission import NativeSendPrompt
     from .turn_custody import NativeTurnConsumer
@@ -30,6 +31,7 @@ class _EventsMixin:
         Used by the resync flow, which rebuilds the event log from the
         agent's authoritative load-time replay.
         """
+        self = cast("Database", self)
         self.flush()
         with self._write_lock:
             conn = self._get_conn()
@@ -45,6 +47,7 @@ class _EventsMixin:
         timestamp: float,
     ) -> None:
         """Atomically invalidate cursors and remove the prior event generation."""
+        self = cast("Database", self)
         self.flush()
         with self._write_lock:
             conn = self._get_conn()
@@ -91,10 +94,12 @@ class _EventsMixin:
         self, session_id: str, turn_index: int, prompt: str, now: float,
         *, delivery_id: str | None = None,
         pending_prompt_id: int | None = None,
+        pending_prompt_native_session_id: str | None = None,
         native_admission: KeyedNativePrompt | NativeSendPrompt | None = None,
         runtime_admission: RuntimeAdmission | None = None,
         native_consumer: NativeTurnConsumer | None = None,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
+        self = cast("Database", self)
         custody = admission_document(runtime_admission)
         handoff = None
         if native_consumer is not None:
@@ -151,14 +156,23 @@ class _EventsMixin:
                 with self._runtime_transaction(write=True) as conn:
                     self._native_context(conn, native_consumer)
                     conn.execute(sql, params)
-            return
+            return None
         if self.read_only:
             raise PermissionError("Read-only database cannot execute writes")
+        managed_message = bool(self.execute_read(
+            "SELECT 1 FROM managed_message_receipts WHERE queue_id=? AND session_id=?",
+            (pending_prompt_id, session_id),
+        ))
         with self._runtime_transaction(
-            write=True, full_sync=runtime_admission is not None,
+            write=True, full_sync=runtime_admission is not None or managed_message,
         ) as conn:
             if native_consumer is not None:
                 self._native_context(conn, native_consumer)
+            from .managed_messages import consume
+
+            admitted = consume(
+                conn, session_id, pending_prompt_id, turn_index, pending_prompt_native_session_id,
+            )
             removed = conn.execute(
                 "DELETE FROM pending_prompts WHERE session_id=? AND id=? AND prompt=?",
                 (session_id, pending_prompt_id, prompt),
@@ -170,7 +184,11 @@ class _EventsMixin:
                 ).fetchone() is None:
                     raise PendingPromptRemovedError("Queued prompt removed before turn admission")
                 raise ValueError("Queued prompt changed before turn admission")
-            conn.execute(sql, params)
+            if admitted:
+                conn.execute(sql, params)
+        if not admitted:
+            raise PendingPromptRemovedError("Queued message belongs to an earlier native target")
+        return None
 
     def update_turn(
         self,
@@ -183,6 +201,7 @@ class _EventsMixin:
         tool_calls_json: str | None = None,
         completed_at: float | None = None,
     ) -> None:
+        self = cast("Database", self)
         updates: list[str] = []
         params: list[Any] = []
         if response_text is not None:
@@ -210,6 +229,7 @@ class _EventsMixin:
         )
 
     def get_turns(self, session_id: str) -> list[dict[str, Any]]:
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT * FROM turns WHERE session_id=? ORDER BY turn_index",
             (session_id,),
@@ -217,6 +237,7 @@ class _EventsMixin:
         return [dict(r) for r in rows]
 
     def get_turn(self, session_id: str, turn_index: int) -> dict[str, Any] | None:
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT * FROM turns WHERE session_id=? AND turn_index=?",
             (session_id, turn_index),
@@ -225,6 +246,7 @@ class _EventsMixin:
 
     def get_latest_completed_turn(self, session_id: str) -> dict[str, Any] | None:
         """Return the newest settled turn with fixed query cost."""
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT turn_index, response_text, stop_reason, started_at, completed_at "
             "FROM turns WHERE session_id=? AND completed_at IS NOT NULL "
@@ -241,6 +263,7 @@ class _EventsMixin:
         data: dict[str, Any],
         timestamp: float,
     ) -> None:
+        self = cast("Database", self)
         self.start_writer()
         self._event_write_q.put((
             session_id, event_id, event_type, json.dumps(data), timestamp,
@@ -249,6 +272,7 @@ class _EventsMixin:
     def get_events(
         self, session_id: str, after: int = 0
     ) -> list[dict[str, Any]]:
+        self = cast("Database", self)
         self.flush()
         rows = self.execute_read(
             "SELECT * FROM events WHERE session_id=? AND event_id>? ORDER BY event_id",
@@ -262,6 +286,7 @@ class _EventsMixin:
         return result
 
     def get_max_event_id(self, session_id: str) -> int:
+        self = cast("Database", self)
         self.flush()
         rows = self.execute_read(
             "SELECT MAX(event_id) as max_id FROM events WHERE session_id=?",
@@ -278,6 +303,7 @@ class _EventsMixin:
         Used for random-access historical reads. Does not touch any
         delivery cursor. ``end_id=None`` means "to the latest event".
         """
+        self = cast("Database", self)
         self.flush()
         if end_id is None:
             rows = self.execute_read(
@@ -306,6 +332,7 @@ class _EventsMixin:
         Backward paging for timeline consumers: the newest ``limit`` events
         strictly older than ``before_id``. Does not touch any delivery cursor.
         """
+        self = cast("Database", self)
         self.flush()
         rows = self.execute_read(
             "SELECT * FROM events WHERE session_id=? AND event_id<? "
@@ -321,6 +348,7 @@ class _EventsMixin:
 
     def get_cursor(self, caller_id: str, session_id: str) -> int:
         """Return the last-acked event id for a caller on a session (0 if none)."""
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT last_acked_id FROM delivery_cursors "
             "WHERE caller_id=? AND session_id=?",
@@ -332,6 +360,7 @@ class _EventsMixin:
         self, caller_id: str, session_id: str
     ) -> dict[str, Any]:
         """Return durable cursor position plus any pending log invalidation."""
+        self = cast("Database", self)
         rows = self.execute_read(
             "SELECT last_acked_id, updated_at FROM delivery_cursors "
             "WHERE caller_id=? AND session_id=?",
@@ -364,6 +393,7 @@ class _EventsMixin:
         self, caller_id: str, session_id: str
     ) -> dict[str, Any]:
         """Read cursor, invalidation, head, and continuity from one DB snapshot."""
+        self = cast("Database", self)
         self.flush()
         conn = self._get_conn()
         while True:
@@ -453,6 +483,7 @@ class _EventsMixin:
         continuity_id: str | None,
     ) -> dict[str, Any]:
         """Conditionally ACK one event-log generation in a single transaction."""
+        self = cast("Database", self)
         self.flush()
         with self._write_lock:
             conn = self._get_conn()
@@ -575,6 +606,7 @@ class _EventsMixin:
         self, caller_id: str, session_id: str, timestamp: float
     ) -> int:
         """Register a zero-position consumer without clearing invalidation."""
+        self = cast("Database", self)
         self.execute_write(
             "INSERT INTO delivery_cursors "
             "(caller_id, session_id, last_acked_id, updated_at) "
@@ -592,6 +624,7 @@ class _EventsMixin:
         The stored value never regresses: a smaller or duplicate ack is
         ignored. Returns the cursor value in effect after the call.
         """
+        self = cast("Database", self)
         with self._write_lock:
             conn = self._get_conn()
             row = conn.execute(
@@ -636,6 +669,7 @@ class _EventsMixin:
         subscribers can force full reconciliation instead of translating the
         stale cursor into an empty or silently restarted stream.
         """
+        self = cast("Database", self)
         with self._write_lock:
             conn = self._get_conn()
             invalidated_at = time.time() if timestamp is None else timestamp
@@ -678,6 +712,7 @@ class _EventsMixin:
         timestamp: float | None = None,
     ) -> None:
         """Fill the replacement epoch after an empty rebuild gets its first event."""
+        self = cast("Database", self)
         with self._write_lock:
             conn = self._get_conn()
             conn.execute(

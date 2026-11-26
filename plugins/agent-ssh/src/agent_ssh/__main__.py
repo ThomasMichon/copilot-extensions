@@ -491,6 +491,20 @@ def build_parser() -> argparse.ArgumentParser:
     add_copilot_subparser(sub)
     add_forward_keeper_subparser(sub)
 
+    from . import driver_dependencies
+
+    dependencies = sub.add_parser(
+        "driver-dependencies", help="Plan or converge selected fleet driver runtime prerequisites.",
+    )
+    dependencies.add_argument(
+        "--project-root", type=Path, action="append",
+        help="Repository context; repeat to maintain all active repositories.",
+    )
+    dependencies.add_argument("--machines", type=Path)
+    dependencies.add_argument("--apply", action="store_true")
+    dependencies.add_argument("--json", action="store_true")
+    dependencies.set_defaults(func=driver_dependencies.command)
+
     for verb, summary in (
         ("setup", "Plan or apply the local machine's SSH driver setup (machines.yaml ssh.driver)."),
         ("status", "Report the local machine's SSH driver status without changing anything."),

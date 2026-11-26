@@ -1,9 +1,0 @@
-{
-  "comment": "Include unchanged original aggregate source-tree budget refusal controls in the guarded promotion unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve Windows native server-authentication CA entries returned as immutable trust sets.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

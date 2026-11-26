@@ -671,16 +671,27 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations/{key}/retire")
     def retire_spawn(key: str, body: RetireSpawnBody) -> Json:
-        result = _reservation_guard(
-            lambda: queue.retire_spawn(
+        abandoned: list[Any] = []
+
+        def retire() -> SpawnReservation:
+            reservation, task = queue.retire_spawn_outcome(
                 key,
                 exact_absence=body.exact_absence,
                 detail=body.detail,
                 conclusion_state=body.conclusion_state,
                 conclusion_detail=body.conclusion_detail,
             )
-        )
+            if task is not None:
+                abandoned.append(task)
+            return reservation
+
+        result = _reservation_guard(retire)
         bus.publish({"type": "spawn.retired", "reservation": result})
+        if abandoned:
+            from .coordinator_relevance import publish_task_transition
+            from .queue_common import CompletionOutcome
+
+            publish_task_transition(queue, bus, CompletionOutcome(abandoned[0], "task.abandoned"))
         return result
 
     @app.post("/spawn-reservations/{key}/fail")

@@ -30,6 +30,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 agent_procutil = [
     "native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh",
+    "native_capture.sh",
     "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_runtime.pyz",
     "windows_broker_task.ps1",
     "private_paths.sh", "private_paths.ps1",

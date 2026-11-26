@@ -130,7 +130,9 @@ After the reviewed proposal, the operator admitted execution:
 - [x] Delay expensive model readiness until a nonempty embedding plan exists.
   Keep search availability independent of indexing-engine lifecycle.
 - [ ] Preserve store-before-checkpoint ordering, partial-write recovery,
-  source isolation and compatibility with #4222/#4220.
+  source isolation and compatibility with #4222/#4220. The bounded native
+  canonical-alias revert qualification is tracked in #14684; broader ownership
+  acceptance remains with the existing receiving effort.
 
 ### Phase 3 - Delta-bounded discovery and reconciliation
 
@@ -205,6 +207,8 @@ After the reviewed proposal, the operator admitted execution:
   retry. An explicit [service binding](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
   composes isolated exact-scope HTTP intake, the existing governed runner and
   joined client lifetime, with paused reconstruction and no ordinary activation.
+  The normal Python `server.serve` entrypoint accepts that same optional factory;
+  default CLI selection and explicit activation remain unchanged.
   Fresh entirely superseded claims can now select qualified higher-version
   completion before named-body acquisition; equal versions retain canonical
   comparison, mixed claims retain whole acquisition and existing pending work
@@ -223,15 +227,19 @@ After the reviewed proposal, the operator admitted execution:
   the [request-bound required-admission refinement](point-required-admission.md)
   was reviewed in #13712 and its receiver merged in #13715. It checks the actual peer,
   selected scope and admission before an owned queue effect and emits an
-  explicit typed receipt. Existing wire callers remain unchanged; the
+  explicit typed receipt. Existing ordinary wire callers remain unchanged; the
   [explicit caller proposal](point-required-admission.md#explicit-caller-migration-proposal)
-  specifies a separately reviewed opt-in API, selected-peer negotiation and
-  typed receipt checks before implementation.
+  was reviewed in #13717. Its opt-in `AgentIndexClient.reindex_points` checks
+  selected-peer support before submission and validates the typed admission
+  receipt without replay after unknown acceptance; implementation merged in
+  #13719. No ordinary caller migrates.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a
-  corpus-wide listing.
+  corpus-wide listing. The bounded opt-in GitHub hinted-item slice
+  [#14679](https://github.com/ThomasMichon/copilot-extensions/issues/14679)
+  uses the existing page journal; larger discussions and full repair stay open.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
   reconciliation slices. A missing checkpoint or expired cursor requests
   visible repair; it must not disguise an unlimited rebuild as a tiny update.
@@ -335,11 +343,15 @@ separately budgeted reconciliation; this proposal authorizes no live operation.
   coalesced with bounded unique-item fetches.
 - [x] Prove no-op rounds produce zero embedding requests, content/vector writes
   and derived-maintenance runs.
-- [ ] Exercise both built-in and external-provider compatibility, including
-  old producers/consumers and incomplete-page refusal.
-- [ ] Retain the existing checkpoint, source-lock, incremental-FTS and
+- [x] Exercise both built-in and external-provider compatibility, including
+  old producers/consumers and incomplete-page refusal. The
+  [compatibility reconciliation](journal/2026/11.25%20delta-acceptance.md)
+  separates supported-contract qualification from provider coverage and repair.
+- [x] Retain the existing checkpoint, source-lock, incremental-FTS and
   processing-full/trailing-incremental tests. Add small contract tests to
   required CI; keep scale/native composition in existing bounded opt-in lanes.
+  The [retained portfolio map](journal/2026/11.25%20delta-acceptance.md#retained-regression-portfolio)
+  distinguishes source retention, required actor-free cases and native execution.
 - [ ] Require separate consumer evidence: shared-engine calls, exact vendored
   provenance, stable retrieval results and measured stage counts on real deltas.
 
@@ -352,6 +364,48 @@ Implementation should use dependency-ordered, reviewable PRs, with explicit
 source-owner coordination rather than one large rewrite.
 
 ## Journal
+
+### 2026-11-25 - Compatibility and retained-regression acceptance
+
+The [acceptance reconciliation](journal/2026/11.25%20delta-acceptance.md)
+closes only the supported-contract compatibility and regression-retention
+Validation items under #14697. Current external page/snapshot/required-page
+controls pass 154 cases; existing built-in, mixed-version and native evidence
+retains its stated limits. Eight parent items remain open, without a new runtime
+mechanism, broader provider-coverage claim or rollout.
+
+### 2026-11-25 - Explicit point binding through service entry
+
+The [service-entry journal](journal/2026/11.25%20point-service-entry.md)
+records the existing factory's synchronous entrypoint composition, native
+active/passive startup and invalid-binding refusal, merged in #14694. This is
+not a serialized selector, ordinary CLI migration, automatic activation or
+parent completion.
+
+### 2026-11-25 - Native alias-revert recovery qualification
+
+The [native alias journal](journal/2026/11.25%20native-alias-recovery.md)
+records #14684's shared-store A/B/C control through separate actual workers,
+pre-acquisition refusal and explicit synthetic repair, merged in #14685.
+It does not complete the broader source-ownership gate or either parent's
+ten open items.
+
+### 2026-11-25 - Bounded GitHub hinted acquisition
+
+The [hinted-acquisition journal](journal/2026/11.25%20github-hinted-acquisition.md)
+records #14679's explicit connector opt-in, existing journal composition and
+single-comment-page bound, merged in #14680. Default callers, full
+reconciliation and the ten open parent Plan/Validation items remain unchanged.
+
+### 2026-11-25 - Explicit point client delivered
+
+The [client-delivery journal](journal/2026/11.25%20point-client-delivery.md)
+records merged #13719, lossless shared-inventory reconciliation, current-head
+review and actual unit CI, followed by explicit-client native acquisition and
+replay counts at three corpus sizes, merged in #14674. Existing callers, source
+activation and rollout remain unchanged. The canonical Plan and Validation Plan
+retain ten open items; bounded source coverage, repair and consumer evidence
+remain separate gates.
 
 ### 2026-11-20 - Named-point native corpus counts
 

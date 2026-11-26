@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the remote-driver consumer of the foreground capture dependency closure.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

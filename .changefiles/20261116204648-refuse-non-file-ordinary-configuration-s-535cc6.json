@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse non-file ordinary configuration sources in the standalone Python reader",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

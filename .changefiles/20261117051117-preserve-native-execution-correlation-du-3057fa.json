@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve native execution correlation during admission-only POSIX launch preparation without claiming retained prompts.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

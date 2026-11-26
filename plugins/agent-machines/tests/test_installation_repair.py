@@ -265,6 +265,255 @@ def invoke(
     )
 
 
+@pytest.mark.parametrize("initial", [None, "stale"])
+def test_explicit_refresh_runs_real_owner_for_missing_or_stale_dependency(
+    repair_fixture: RepairFixture, initial: str | None,
+) -> None:
+    home, project, _, _, identity = repair_fixture
+    state = home / "agent-example-base.ready"
+    if initial is not None:
+        state.write_text(initial, encoding="utf-8")
+    selected = [identity + "::agent-example/base"]
+    plan = repair_api.repair(project, home=home, modules=selected)
+    assert not plan["apply"]
+    assert (state.read_text(encoding="utf-8") if state.exists() else None) == initial
+    result = repair_api.repair(
+        project, home=home, modules=selected, apply=True, refresh=True,
+        expected_plan_digest=plan["planDigest"],
+    )
+    assert result["status"] == "ready"
+    assert result["outcomes"][0]["attempted"]
+    assert state.read_text(encoding="utf-8") == "ready"
+    assert not (home / "agent-example-child.ready").exists()
+    journal = home / ".agent-machines" / "installation-repair" / "restarts.json"
+    assert "inFlight" not in json.loads(journal.read_text())
+
+
+def test_unconfirmed_installer_fences_later_repair(repair_fixture: RepairFixture) -> None:
+    from agent_machines.installation_repair_restarts import RestartJournal
+
+    home, project, _, _, identity = repair_fixture
+    selected = identity + "::agent-example/base"
+    plan = repair_api.repair(project, home=home, modules=[selected])
+    journal = RestartJournal(home)
+    with journal.locked():
+        journal.begin_action(selected, plan["planDigest"])
+    with pytest.raises(RepairAdmissionError, match="unconfirmed installer"):
+        repair_api.repair(
+            project, home=home, modules=[selected], apply=True,
+            expected_plan_digest=plan["planDigest"],
+        )
+    assert not (home / "agent-example-base.ready").exists()
+    assert json.loads(journal.path.read_text())["inFlight"]["module"] == selected
+
+
+def test_cleanup_confirmation_recovers_without_installing_or_bypassing_live_owner(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_machines.__main__ import main
+    from agent_machines.installation_repair_restarts import RestartJournal
+
+    home, project, _, _, identity = repair_fixture
+    selected = identity + "::agent-example/base"
+    plan = repair_api.repair(project, home=home, modules=[selected])
+    journal = RestartJournal(home)
+    with journal.locked():
+        journal.begin_action(selected, plan["planDigest"])
+        pending = journal.action_fence()["pendingDigest"]
+        assert isinstance(pending, str)
+        with pytest.raises(RepairAdmissionError, match="already active"):
+            repair_api.repair(project, home=home, confirm_cleanup=pending)
+    inspection = repair_api.repair(project, home=home)
+    assert inspection["status"] == "cleanup-required"
+    assert inspection["actionFence"]["pendingDigest"] == pending
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    assert main([
+        "installation-repair", "--project-root", str(project), "--confirm-cleanup", pending,
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "cleanup-confirmed"
+    assert not (home / "agent-example-base.ready").exists()
+    fresh = repair_api.repair(project, home=home, modules=[selected])
+    completed = repair_api.repair(
+        project, home=home, modules=[selected], apply=True,
+        expected_plan_digest=fresh["planDigest"],
+    )
+    assert completed["status"] == "ready"
+
+
+def test_cleanup_confirmation_is_generation_bound_and_keeps_restart_obligations(
+    tmp_path: Path,
+) -> None:
+    from agent_machines.installation_repair_restarts import RestartJournal
+
+    journal = RestartJournal(tmp_path)
+    with journal.locked():
+        journal.require("fixture::example/restart", "session", "a" * 64)
+        restart = journal.pending_digest
+        journal.begin_action("fixture::example/runtime", "b" * 64)
+        first = journal.action_fence()["pendingDigest"]
+        assert isinstance(first, str)
+        journal.confirm_action_cleanup(first)
+        journal.begin_action("fixture::example/runtime", "b" * 64)
+        second = journal.action_fence()["pendingDigest"]
+        assert isinstance(second, str) and second != first
+        with pytest.raises(RepairAdmissionError, match="fence changed"):
+            journal.confirm_action_cleanup(first)
+        assert journal.action_fence()["pendingDigest"] == second
+        journal.confirm_action_cleanup(second)
+        assert journal.pending_digest == restart
+        assert journal.action_fence()["pending"] is None
+
+
+@pytest.mark.parametrize("phase", ["begin", "finish"])
+@pytest.mark.parametrize("signal_first", [False, True])
+def test_fence_persistence_finishes_before_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, signal_first: bool,
+) -> None:
+    import signal
+    from agent_machines.installation_repair_restarts import RestartJournal
+
+    journal = RestartJournal(tmp_path)
+    original = RestartJournal._save
+    with journal.locked():
+        if phase == "finish":
+            journal.begin_action("fixture::example/runtime", "a" * 64)
+
+        def interrupted(instance: RestartJournal) -> None:
+            if signal_first:
+                signal.raise_signal(signal.SIGINT)
+            original(instance)
+            if not signal_first:
+                signal.raise_signal(signal.SIGINT)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(RestartJournal, "_save", interrupted)
+            with pytest.raises(KeyboardInterrupt):
+                if phase == "begin":
+                    journal.begin_action("fixture::example/runtime", "a" * 64)
+                else:
+                    journal.finish_action()
+        persisted = json.loads(journal.path.read_text())
+        assert ("inFlight" in persisted) == (phase == "begin")
+        assert (journal._inflight is not None) == (phase == "begin")
+        journal.finish_action()
+    with RestartJournal(tmp_path).locked():
+        pass
+
+
+@pytest.mark.parametrize("phase", ["begin", "finish"])
+def test_fence_write_failure_restores_in_memory_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    import signal
+    from agent_machines.installation_repair_restarts import RestartJournal
+
+    journal = RestartJournal(tmp_path)
+    with journal.locked():
+        if phase == "finish":
+            journal.begin_action("fixture::example/runtime", "a" * 64)
+        previous = journal._inflight
+
+        def failed(instance: RestartJournal) -> None:
+            signal.raise_signal(signal.SIGINT)
+            raise OSError("synthetic persistence failure")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(RestartJournal, "_save", failed)
+            with pytest.raises(OSError, match="persistence failure"):
+                if phase == "begin":
+                    journal.begin_action("fixture::example/runtime", "a" * 64)
+                else:
+                    journal.finish_action()
+        assert journal._inflight == previous
+        journal.finish_action()
+
+
+@pytest.mark.parametrize("initial", [None, "stale"])
+def test_ssh_maintenance_consumer_converges_through_real_repair_owner(
+    repair_fixture: RepairFixture, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], initial: str | None,
+) -> None:
+    """Keep source selection, CLI handler, owner CLI and native actions real."""
+    import argparse
+
+    home, project, payload, _, _ = repair_fixture
+    source = Path(__file__).resolve().parents[2] / "agent-ssh" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_ssh import driver_dependencies
+
+    module = payload / "transports" / "example" / "module.yaml"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "module: example\nruntimeDependencies: [agent-example/base]\n",
+        encoding="utf-8",
+    )
+    composer = payload / "transports" / "topology" / "module.yaml"
+    composer.parent.mkdir(parents=True)
+    composer.write_text("module: topology\ncomposesOutboundDrivers: true\n", encoding="utf-8")
+    machines = project / "machines.yaml"
+    machines.write_text(
+        "machines:\n  worker:\n    ssh:\n"
+        "      driver: {plugin: agent-example, module: topology}\n"
+        "      outbound: [{plugin: agent-example, module: example}]\n",
+        encoding="utf-8",
+    )
+    write_json(home / ".copilot" / "config.json", {"trustedFolders": [str(project)]})
+    subprocess.run(
+        ["git", "-C", str(project), "init", "--quiet"], check=True,
+        **no_window_kwargs(),
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
+    state = home / "agent-example-base.ready"
+    if initial is not None:
+        state.write_text(initial, encoding="utf-8")
+    # This fixture supplies the selected completed executor, not an installer
+    # substitute: all requests enter its real CLI and admitted manifest actions.
+    monkeypatch.setattr(
+        driver_dependencies, "repair_command",
+        lambda: ([sys.executable, "-I", "-B", "-m", "agent_machines"], dict(os.environ)),
+    )
+    preview = argparse.Namespace(project_root=project, machines=machines, apply=False, json=True)
+    assert driver_dependencies.command(preview) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "planned"
+    assert (state.read_text(encoding="utf-8") if state.exists() else None) == initial
+    preview.apply = True
+    assert driver_dependencies.command(preview) == 0, capsys.readouterr().out
+    assert json.loads(capsys.readouterr().out)["state"] == "applied"
+    assert state.read_text(encoding="utf-8") == "ready"
+    assert not (home / "agent-example-child.ready").exists()
+
+
+def test_refresh_restart_chain_resumes_through_the_existing_nonrefresh_owner(
+    repair_fixture: RepairFixture,
+) -> None:
+    home, project, _, configure, identity = repair_fixture
+    configure(restart="session", dependencies=("agent-example/base",))
+    selected = [identity + "::agent-example/child"]
+    plan = repair_api.repair(project, home=home, modules=selected)
+    first = repair_api.repair(
+        project, home=home, modules=selected, apply=True, refresh=True,
+        expected_plan_digest=plan["planDigest"],
+    )
+    assert first["status"] == "incomplete"
+    assert (home / "agent-example-base.ready").exists()
+    assert not (home / "agent-example-child.ready").exists()
+    repair_api.repair(
+        project, home=home, confirm_restart=cast(str, first["restarts"]["pendingDigest"]),
+    )
+    continued = repair_api.repair(
+        project, home=home, modules=selected, apply=True,
+        expected_plan_digest=plan["planDigest"],
+    )
+    assert continued["status"] == "ready"
+    assert continued["outcomes"][0]["attempted"] is False
+    assert (home / "agent-example-child.ready").exists()
+    assert not continued["restarts"]["pending"]
+
+
 def use_installer_runtime(payload: Path) -> None:
     (payload / "payload-invocation.json").unlink()
     manifest_path = payload / "plugin.json"
@@ -2187,7 +2436,7 @@ def test_installation_repair_process_timeout(tmp_path: Path) -> None:
         cwd=tmp_path, environment=os.environ, timeout=0.2, readonly=True,
     )
     assert result.status == "timeout"
-    assert result.exit_code is not None
+    assert (result.exit_code is not None) == (os.name == "nt")
 
 
 def test_caller_owned_readiness_borrows_verified_posix_group_without_detaching(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2228,6 +2477,7 @@ def test_caller_owned_readiness_refuses_a_foreign_group_before_probes(monkeypatc
 
 @pytest.mark.parametrize("extra", [
     ["--apply"], ["--expected-plan-digest", "unselected"], ["--confirm-restart", "unselected"],
+    ["--confirm-cleanup", "unselected"],
 ])
 def test_caller_owned_readiness_never_admits_repair_or_restart_effects(monkeypatch: pytest.MonkeyPatch, extra: list[str]) -> None:
     from agent_machines.__main__ import main
@@ -2280,6 +2530,74 @@ def test_outer_required_read_timeout_reaps_nested_probe(repair_fixture: RepairFi
         _assert_process_stopped(pid, timeout=0)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux caller-loss and PID-handle control")
+@pytest.mark.timeout(30)
+def test_outer_apply_timeout_reaps_installers_and_preserves_fence(
+    repair_fixture: RepairFixture,
+) -> None:
+    if sys.platform != "linux":
+        pytest.skip("Linux caller-loss and PID-handle control")
+    import shlex
+    import signal
+    from agent_procutil.owned_process import run_caller_owned
+
+    home, project, payload, _, identity = repair_fixture
+    marker = home / "installers.json"
+    helper = payload / "scripts" / "held-installer.py"
+    helper.write_text(
+        "import json,os,subprocess,sys,time\nfrom pathlib import Path\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+        "pids=[os.getpid(),child.pid]\n"
+        "identities=[{'pid':pid,'start':Path(f'/proc/{pid}/stat').read_text()"
+        ".split(') ',1)[1].split()[19]} for pid in pids]\n"
+        f"Path({str(marker)!r}).write_text(json.dumps(identities))\n"
+        "time.sleep(60)\n", encoding="utf-8",
+    )
+    action = payload / "scripts" / "action.sh"
+    action.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = install ]; then exec {shlex.quote(sys.executable)} '
+        f"{shlex.quote(str(helper))}; fi\n" + action.read_text(),
+        encoding="utf-8",
+    )
+    selected = identity + "::agent-example/base"
+    plan = repair_api.repair(project, home=home, modules=[selected])
+    environment = ordinary_environment(os.environ, home=home, payload=payload)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_caller_owned(
+                [sys.executable, "-m", "agent_machines", "installation-repair",
+                 "--project-root", str(project), "--module", selected, "--apply", "--refresh",
+                 "--expected-plan-digest", plan["planDigest"], "--json"],
+                cwd=project, env=environment, timeout=10,
+                max_stdout_bytes=65536, max_stderr_bytes=65536,
+            )
+        assert marker.is_file(), "the timeout must interrupt an already-running installer"
+        for item in json.loads(marker.read_text()):
+            _assert_process_stopped(item["pid"])
+        with pytest.raises(RepairAdmissionError, match="unconfirmed installer"):
+            repair_api.repair(
+                project, home=home, modules=[selected], apply=True,
+                expected_plan_digest=plan["planDigest"],
+            )
+    finally:
+        if marker.is_file():
+            for item in json.loads(marker.read_text()):
+                descriptor = None
+                try:
+                    descriptor = os.pidfd_open(item["pid"])
+                    current = Path(f"/proc/{item['pid']}/stat").read_text().split(") ", 1)[1]
+                    if current.split()[19] == item["start"]:
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                except (FileNotFoundError, ProcessLookupError):
+                    pass
+                finally:
+                    if descriptor is not None:
+                        os.close(descriptor)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job launch/cancellation seam")
 def test_installation_repair_process_cancellation_reaps_started_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines import installation_repair_process as process_api
 

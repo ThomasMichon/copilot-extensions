@@ -193,6 +193,7 @@ def _spawn_worker_via_worktree(
     ``_apply_bound_charter()`` path.
     """
     from . import embody
+    from .bridge_continuation_cli import continuation_arguments
 
     if worktree_id:
         ensured_worktree_id = worktree_id
@@ -230,25 +231,22 @@ def _spawn_worker_via_worktree(
             json_output=json_output, timeout=timeout,
         )
 
-    resume_cmd = [*exe, "resume", ensured_worktree_id, "--require-agent-hosting"]
-    resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        resume_cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
+    from . import bridge_reclaim
+
+    resumed, session_id = bridge_reclaim._resume(
+        ensured_worktree_id, exe=exe, force=False, timeout=timeout,
     )
     if resumed.returncode != 0:
         return resumed
+    if session_id is None:
+        return bridge_reclaim._no_session_id_failure(resumed)
 
     send_cmd = [
-        *exe, "send", ensured_worktree_id, "--require-agent-hosting",
-        "--prompt-file", "-", "--caller",
+        *exe, *continuation_arguments(
+            session_id, wait=wait, communication=30.0 if timeout is None else timeout,
+            caller=f"agent-dispatch:{worker_id}",
+        ),
     ]
-    send_cmd.append(f"agent-dispatch:{worker_id}")
-    if not wait:
-        send_cmd.append("--no-wait")
     sent = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         send_cmd,
         input=prompt,
@@ -261,45 +259,12 @@ def _spawn_worker_via_worktree(
     if sent.returncode != 0 or not json_output:
         return sent
 
-    resolved = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        [
-            *exe,
-            "--json",
-            "live-sessions",
-            "resolve",
-            "--handle",
-            ensured_worktree_id,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
-    )
-    if resolved.returncode == 0:
-        try:
-            live = json.loads((resolved.stdout or "").strip() or "{}")
-        except (ValueError, TypeError):
-            live = {}
-        if isinstance(live, dict):
-            session_id = live.get("session_id")
-            if session_id:
-                return subprocess.CompletedProcess(
-                    args=sent.args,
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "session_id": session_id,
-                            "worktree": ensured_worktree_id,
-                            "reused": False,
-                        }
-                    ),
-                    stderr=sent.stderr,
-                )
     return subprocess.CompletedProcess(
         args=sent.args,
         returncode=0,
-        stdout=json.dumps({"worktree": ensured_worktree_id}),
+        stdout=json.dumps({
+            "session_id": session_id, "worktree": ensured_worktree_id, "reused": False,
+        }),
         stderr=sent.stderr,
     )
 
@@ -642,6 +607,7 @@ def resume_worker(
     Unknown observation outcomes raise rather than authorize a replacement.
     """
     from agent_procutil.startup import StartupTimeouts
+    from .bridge_continuation_cli import continuation_arguments
 
     policy = StartupTimeouts(
         communication=30.0 if timeout is None else timeout, process=startup_process,
@@ -649,13 +615,9 @@ def resume_worker(
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
-    argv = ["send", session_id, "--require-agent-hosting", "--prompt-file", "-"]
-    if not wait:
-        argv.append("--no-wait")
-    argv.extend([
-        "--startup-communication-timeout", str(policy.communication),
-        "--startup-process-timeout", str(policy.process),
-    ])
+    argv = continuation_arguments(
+        session_id, wait=wait, communication=policy.communication, process=policy.process,
+    )
     from .launch_debug import begin
 
     trace = begin(
@@ -700,7 +662,7 @@ def resume_session(
     ``fleet-body:<host>:<session>`` reservation handle -- see
     :mod:`agent_dispatch.spawn_factories`); omit it for a local body, which
     delegates straight to :func:`resume_worker`. A fleet resume mirrors that
-    same ``agent-bridge send`` shape over SSH -- the same mesh
+    same startup-bound ``agent-bridge send`` continuation form over SSH -- the same mesh
     :func:`redrive_embodied_worker` uses -- rather than adding a second bridge
     transport. Used by :mod:`agent_dispatch.reattach` to deliver the resume
     prompt once a reattached task is claimed/started/bound, regardless of
@@ -719,9 +681,11 @@ def resume_session(
         return False
     # marketplace-isolation: allow remote-management
     bin_name = "agent-bridge"
-    cmd = [bin_name, "send", session_id, "--require-agent-hosting", "--prompt-file", "-"]
-    if not wait:
-        cmd.append("--no-wait")
+    from .bridge_continuation_cli import continuation_arguments
+
+    cmd = [bin_name, *continuation_arguments(
+        session_id, wait=wait, communication=30.0 if timeout is None else timeout,
+    )]
     remote_cmd = " ".join(shlex.quote(arg) for arg in cmd)
     try:
         proc = run_ssh_command(

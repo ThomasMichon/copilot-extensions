@@ -90,6 +90,17 @@ observability/performance repair within the same PR. Its
 [scope approval](installed-manager-lifecycle.md#november-17-bounded-http-52-capture-repair-approval)
 preserves every probe, the original 240-second aggregate and all prior holds.
 
+The November 25 storage amendment selects
+`reader-first-successor-and-reviewed-source-migration`: implement a successor
+manifest representation reader-first, then migrate through normal review,
+preserving caps, logical witnesses, guards and deadlines. This is source-only
+representation work, not a native run, operational writer/controller change,
+runtime update, rollout, cleanup or guard exception.
+The [successor phase](manifest-storage-successor.md#scope-approval) retains
+the exact question, selected answer and limits separately from the
+agent-recommended realization. The root consolidation goal and all other
+acceptance and custody requirements remain.
+
 **Acceptance:** the Plan and Validation Plan below establish fewer redundant
 executions while preserving validation assurance and contribution gates.
 Installed-suite qualification must prove the real Manager Create/Open/Resume
@@ -464,8 +475,302 @@ The concrete new-file split and shared-interface coordination below are
 **agent-recommended**. The existing Main adoption remains with its owner;
 its completion is not a prerequisite for independent Dev qualification work.
 
+### November 25 reader-first storage direction
+
+The operator selects `reader-first-successor-and-reviewed-source-migration`
+at the verified 29-byte frontier. The exact public-safe question, selected
+option and source-only exclusions are preserved in the
+[scope approval](manifest-storage-successor.md#scope-approval).
+This supersedes only the prior representation hold needed for that source
+successor and reviewed migration; it does not waive limits, witnesses,
+eligibility, guards, failed-attempt holds or existing operational ownership.
+
 ## Plan
 
+- [ ] Qualify the original explicit-clock startup controls and whole
+  diagnostic outer-frame refusal function as one coherent source slice.
+  Preserve all four startup functions and all fifteen invalid-budget rows,
+  including exact NaN/Inf/bool types and values; compare collection metadata
+  with exact floating-point bytes before unchanged guarding.
+  Select only the complete four-case diagnostic refusal function, preserving
+  its explicit IDs and exact original module-level contract mark.
+  Exclude both whole diagnostic rendering/selection functions before execution:
+  their shared redactor reads ambient environment values even when a mapping
+  is supplied. No environment patch, source/fixture rewrite, preload or guard
+  exception may substitute. Check original file/function uniqueness and
+  complete metadata, then actual per-case owner calls before exact admission.
+  Retain every prior node/hash/target/helper/limit and refusal.
+  Fresh review/full CI, normal merge and persistence remain.
+  Complete metadata collection confirms all eighteen startup cases through
+  four functions and four of ten diagnostic cases through one whole function;
+  both other whole diagnostic functions/six cases remain excluded.
+  Original objects/globals/fixtures, exact parameter types/float bytes,
+  all marks, module-mark identity, IDs and order agree.
+  First unchanged guarded trials pass eighteen in 1.16 pytest / 21.282
+  observation seconds and four in 0.97 pytest / 24.390 observation seconds.
+  All 66 phases pass with zero prohibited effects and sixteen bound reads
+  per trial; every case records actual owner call lines.
+  All four diagnostic traces avoid the ambient redactor's complete source
+  range. Complete observations are read before admission.
+  Only 22 nodes, four bindings and two existing covered targets are added:
+  11,100 nodes, 1,531 sources, 557 targets, unchanged 92 helpers,
+  300 seconds and 734,924 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass; review/full hosted CI/merge/persistence remain.
+- [x] Qualify the original explicit-data ownership-decision controls as one
+  coherent source slice: ten whole ZDD claim functions and nine whole
+  single-instance reaper functions. Exclude both whole default-current-PID
+  tests before collection/execution; preserve assertions, injected liveness/
+  termination callbacks, objects, globals, fixtures, typed values, marks,
+  IDs and order. Check original file/function admission uniqueness and
+  complete metadata before unchanged guarding; require actual owner call
+  lines per case before admission. Preserve all prior inventory, hashes,
+  helpers, limits and refusals. No live claim, lease, process table, terminate,
+  clock/host observation, native/runtime/controller effect or cleanup is
+  authorized. Fresh review/full CI, normal merge and persistence remain.
+  Complete metadata collection confirms eleven original claim cases with
+  ten adapted, and ten original reaper cases with nine adapted, preserving
+  every original object/global, fixture, typed parameter, mark, ID and order.
+  Both current-PID default functions remain wholly excluded. First unchanged
+  trials pass ten in 0.97 pytest / 16.485 observation seconds and nine in
+  1.00 pytest / 17.563 observation seconds. All 57 phases pass with zero
+  prohibited effects, seventeen/twenty bound reads and actual owner call
+  lines per case; complete witnesses are read before admission.
+  Only nineteen nodes, five bindings and two covered targets are added:
+  11,069 nodes, 1,526 sources, 555 targets, unchanged 92 helpers,
+  300 seconds and 733,015 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass; review/full hosted CI/merge/persistence remain.
+  Pre-publication reconciliation preserves both #14712 driver binding
+  refreshes and every peer item. All 24 actually observed inputs remain
+  exact without replay; inventory, helpers and limits are unchanged.
+  Fresh exact-head review and natural complete hosted CI must qualify
+  this union before normal merge and persistence.
+  Published #14718 receives clean exact-head approval and required green CI,
+  but the final live fence detects a later actual manifest conflict before
+  any merge invocation. A second reconciliation preserves #14716's nine
+  Index dependency cases, one adapter binding and refreshed process-helper
+  hash. All 24 observed inputs remain exact without replay. The current
+  union is 11,078 nodes, 1,527 sources, unchanged 555 targets,
+  92 helpers, 300 seconds and 733,523 bytes. Fresh review and complete
+  hosted CI must qualify the replacement head before normal merge.
+  Source #14718 merges at `af7f6cb08b6741fb3acf1bfdd04112ff1c77b4a7`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,078 units in 180.859 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, backup-retaining supported
+  alignment and managed sync, all six owned reviewed/merged/working blobs,
+  exact candidate, all bindings/helpers and all 24 observed inputs verify
+  without replay. Only this nineteen-case leaf is Done; the parent stays active.
+- [x] Qualify all forty complete original local-context functions as one
+  coherent source slice: 38 context functions against local execution and
+  the two registry-only normalization functions against registry.
+  Preserve original objects, code/global origins, fixtures, typed parameter
+  values, module/function marks, IDs and order. Check original file/function
+  uniqueness and complete collection metadata before unchanged guarding.
+  Require actual owning-module call lines per case before exact admission.
+  Add only the two adapters and one shared original binding, with no new
+  coverage target, production edit, host observation, file load, OS patch,
+  process, native action or guard exception. Retain all inventory, hashes,
+  helpers, limits and prior refusals. Fresh review, full CI, normal merge
+  and independent persistent verification precede completion.
+  Complete collection confirms 232 original cases: 228 context cases through
+  38 functions and four registry-only cases through two functions. Original
+  file/function uniqueness, object/global origins, fixtures, typed parameter
+  values, module/function marks, IDs and order agree. First unchanged guarded
+  trials pass 228 in 3.17 pytest / 18.016 observation seconds and four in
+  0.97 pytest / 13.782 observation seconds, with all 696 phases passing,
+  zero prohibited effects and 25 bound reads per trial. Every case exercises
+  actual owner call lines. Complete phase/input/per-case witnesses are read
+  before admission. Only 232 nodes and three bindings are added:
+  11,035 nodes, 1,520 sources, unchanged 553 targets and 92 helper decisions,
+  300 seconds and 730,642 bytes. Fatal Ruff and strict Linux/Windows
+  whole-file typing pass; review, full hosted CI, merge and persistence remain.
+  Pre-publication reconciliation preserves the complete #14707 Index peer:
+  fifteen cases, one adapter binding and two refreshed source hashes.
+  All 26 locally observed inputs remain exact without replay. The current
+  union is 11,050 nodes, 1,521 sources, unchanged 553 targets,
+  92 helpers, 300 seconds and 731,256 bytes. Fresh review and complete
+  hosted CI must qualify this union before normal merge and persistence.
+  Source #14714 merges at `0b09279b99cec390524bd9c99f82edbf3c50966e`
+  after fresh approval and complete required CI; natural execution passes
+  all 11,050 units in 188.716 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, managed sync, all six owned
+  reviewed/merged/working blobs, exact candidate, all bindings/helpers and
+  26 observed input hashes verify without replay. Only this 232-case leaf
+  is Done. The two remaining unbound machine-transport originals retain
+  their actual host/process boundaries and are not rewritten or executed
+  under pure-unit qualification.
+- [x] Qualify the still-unrepresented original local-execution binding and
+  profile controls as one coherent source PR, only after checking original
+  file/function admission uniqueness rather than new adapter node IDs.
+  Preserve every complete function and parameter row, original code/global
+  origins, fixtures, typed values, module-level contract marks, function
+  marks, IDs and order. Metadata comparison precedes unchanged guarding;
+  actual owner call lines per case precede admission. Use only explicit
+  mapping/hostname/environment inputs, with no host observation, OS patch,
+  file loading, native process or guard exception. Retain all current
+  inventory, hashes, helpers, limits and refusals. Current-head review,
+  full CI, normal merge and persistence remain required.
+  Complete metadata collection confirms 116 binding cases through all
+  23 original functions and 72 profile cases through all thirteen.
+  Neither original file/function set is already admitted; module contract
+  marks are the exact original objects and all inherited/function marks agree.
+  First unchanged guarded trials pass 116 in 1.94 pytest / 19.094 observation
+  seconds and 72 in 2.30 pytest / 21.563 observation seconds.
+  All 564 phases pass, zero prohibited effects occur, each trial has
+  25 bound reads, and actual local-context/registry call lines cover every
+  case. Complete lossless phase/input/per-case witnesses are read before
+  admission. Add only 188 nodes, four adapter/original bindings and one
+  already-bound local-context target: 10,780 nodes, 1,516 sources,
+  552 targets, 92 helpers, 300 seconds and 720,834 bytes.
+  Existing combined control-plane/identity admission remains unchanged;
+  no redundant candidate cases are present. Fatal Ruff and strict
+  Linux/Windows whole-file typing pass; review/full CI/merge/persistence remain.
+  Initial #14708 receives clean exact-head approval and required green CI,
+  but a later Bridge merge causes a real manifest conflict. Reconciliation
+  retains its one `client_prompt.py` hash refresh and every other peer item;
+  all 27 locally observed input hashes remain exact without replay.
+  Inventory and limits are unchanged. Fresh current-head review and complete
+  hosted CI must qualify this union before normal merge and persistence.
+  A second real conflict retains the complete #14705 exact-resume peer:
+  23 cases, one source/target and two refreshed bindings, with all 27
+  observed local inputs unchanged and no replay. Final inventory is
+  10,803 nodes, 1,517 sources, 553 targets, 92 helpers, 300 seconds
+  and 721,579 bytes.
+  Source #14708 merges at `870f49f60642e51fef9f32e09644c3943b5e0ca6`
+  after fresh approval and complete required CI; natural execution passes
+  all 10,803 units in 227.208 packet seconds. Independent merged/open-parent
+  readback, identical reviewed/merged trees, backup-retaining supported
+  alignment and managed sync, all seven owned reviewed/merged/working blobs,
+  exact candidate, all bindings/helpers and observed input hashes verify
+  without replay. Only this 188-case leaf is Done; the parent remains active.
+- [x] Disposition the proposed control-plane/identity expansion as duplicate,
+  not new assurance. Review #14700 identifies that all 28 proposed cases
+  already run through the admitted combined adapter from merged #14611.
+  Complete existing adapter and node inventory readback confirms the finding.
+  Explicit `close-duplicate-continue` directs closure; #14700 is closed,
+  unmerged, at 05:48:48 UTC. Its green full CI and corrected local trials
+  remain historical evidence only, not added coverage or parent completion.
+  Remove only the two redundant candidate adapters, their 28 extra nodes
+  and two new bindings; preserve every existing selection and peer change.
+  Retain the candidate, review, refused environment and consumed correction
+  decision. No worktree finalization or evidence deletion is authorized.
+- [x] Qualify adjacent pure registry policy and alias controls as one coherent
+  source PR: all three original consumer-default functions (five cases), and
+  twelve complete original alias-matrix functions with every parameter row.
+  Exclude both whole observed-local/standalone-host identity functions before
+  execution. Preserve original objects, code/global origins, fixtures,
+  parameter types/values, marks, IDs and order. Compare complete metadata
+  before each unchanged guarded trial; require actual registry-call coverage
+  per case. Add only exact nodes and four adapter/original bindings, retaining
+  existing targets, hashes, helpers, limits and all retained refusals.
+  No host observation, environment patch, YAML file load or native/guest
+  process is authorized. Review/full CI/merge/persistence precede completion.
+  Complete metadata collection confirms all five consumer cases and 123 of
+  129 alias cases, including all 96 contextual-grid rows. Both whole identity
+  functions (six cases) remain excluded. Original function objects, code/global
+  origins, fixtures, parameter types/values, marks, IDs and order agree.
+  Initial unchanged guarded trials pass five in 1.77 pytest / 19.000
+  observation seconds and 123 in 2.50 pytest / 27.141 observation seconds.
+  All 384 phases pass, zero prohibited effects occur, each trial has 25 bound
+  reads, and every case exercises actual registry call lines. All phase,
+  input and per-case call witnesses are read before admission.
+  Only 128 nodes and four adapter/original bindings are added: 10,559 nodes,
+  1,508 sources, the same 549 targets, 92 unchanged helper decisions,
+  300 seconds and 711,753 bytes. All preceding inventory and hashes remain;
+  fatal Ruff and whole-file strict Linux/Windows typing pass. Current-head
+  review, fresh full CI, normal merge and persistence remain.
+  Publication #14683 conflicts with a subsequent Bridge merge.
+  Reconciliation preserves all seventeen peer cases and four peer binding
+  refreshes; the complete 27-source observed-input union remains unchanged,
+  without trial replay. Final inventory is 10,576 nodes, 1,508 sources,
+  549 targets and 712,076 bytes, with the same helpers/deadline. Fresh
+  current-head review and complete hosted CI must qualify this union.
+  Source #14683 merges after fresh exact-head approval and required checks.
+  Natural CI executes all 10,576 cases in 183.036 packet seconds; this is
+  fresh execution, not reuse. Independent merged state, full-tree equality,
+  supported pull-forward, all seven reviewed/merged/working blobs, exact
+  reconciled candidate, 1,508 bindings, 92 helpers and all 27 observed
+  input hashes verify without replay. Only this 128-case leaf is Done.
+- [x] Qualify original pure registry projections through eleven complete
+  functions and the entire `TestMachineName` and `TestFindMachineEntry`
+  classes. Preserve original classes/methods, code/global origins, fixtures,
+  parameter types/values, marks, class-qualified IDs and order.
+  Exclude the whole file-parser class, entire mixed merge class, fallback
+  import/file test and backend-identity constant-only test before execution.
+  No YAML file load, backend replacement, hostname/platform probe, SSH,
+  environment patch or native/guest process may be introduced.
+  Compare full original/adapted metadata before unchanged guarding; require
+  real registry-call coverage per selected case before exact admission.
+  Retain preceding inventory, hashes, targets, helpers, limits and all holds;
+  review, full CI, normal merge and persistent readback remain required.
+  Complete metadata collection confirms 88 original and 32 adapted cases,
+  retaining all original class/function, fixture, parameter and ID metadata.
+  Initial unchanged guarding passes all 32 in 1.60 pytest / 21.469
+  observation seconds: all 96 phase reports pass, zero prohibited effects,
+  25 bound reads and actual registry-call coverage per case.
+  V3 admission adds only 32 nodes, two bindings and one already-bound target:
+  10,431 nodes, 1,504 bindings, 549 targets, 92 unchanged helper decisions,
+  300 seconds and 702,241 bytes. Ruff and strict Linux/Windows typing pass;
+  review, full hosted CI, merge and persistent readback remain.
+  The first head passes clean review and all 10,431 hosted cases but becomes
+  conflicted after a peer merge. Reconciliation retains both native-connector
+  binding refreshes and every ordered inventory item; all 25 observed inputs
+  remain exact without local replay. Counts/bytes/helpers/deadline are
+  unchanged. Fresh current-head review and complete CI remain required.
+  Source #14675 merges after fresh exact-head approval and required checks.
+  Reconciled CI executes all 10,431 cases in 214.481 packet seconds.
+  Independent merged state, exact complete owned-patch equivalence, supported
+  pull-forward, all six reviewed/merged/working blobs, exact candidate,
+  all 1,504 bindings, 92 helpers and 25 observed input hashes verify without
+  replay. Peer changes remain intact; only this 32-case leaf is Done.
+- [x] Qualify the original pure transport-projection controls through the exact
+  ambiguous-profile function and three complete original classes:
+  default shell (three), SSH-target selection (six) and command wrapping (three).
+  Preserve class/method objects, code/global origins, fixtures, parameter rows,
+  marks and class-qualified IDs. Exclude the logical-host profile test, the
+  entire owner-platform-detection function and the entire mixed
+  `TestGetMachineTransport` class before execution. No SSH, hostname/platform
+  observation, environment patch or native/guest process may be introduced.
+  Complete metadata comparison precedes unchanged guarded execution of all
+  thirteen prospective cases, with real transport-owner call coverage per case.
+  Add only the exact adapter/original bindings and already-bound transport
+  target after proof; retain all preceding inventory, helpers and limits.
+  Complete collection confirms 31 original and thirteen adapted cases with
+  unchanged original classes/methods, code/global origins and metadata.
+  Initial unchanged guarding passes all thirteen in 1.62 pytest / 16.906
+  observation seconds, with all 39 phase reports, zero prohibited effects,
+  25 bound reads and actual production-call coverage per case.
+  V3 admission retains all preceding inventory and adds only thirteen nodes,
+  two bindings and one target: 10,395 nodes, 1,501 bindings, 547 targets,
+  92 helper decisions, 300 seconds and 699,500 bytes. Current-head review,
+  full hosted CI, normal merge and persistent readback remain.
+  Publication safely stops on a concurrent manifest conflict. Reconciliation
+  retains all four peer nodes, its new binding/target and both binding
+  refreshes; all 25 observed inputs remain exact without trial replay.
+  Final inventory is 10,399 nodes, 1,502 bindings, 548 targets and 699,981
+  bytes, with unchanged helpers/deadline. Fresh full CI must cover that union.
+  Source #14671 merges after current-head clean approval and all required
+  checks; natural CI executes all 10,399 cases in 218.581 packet seconds.
+  Independent merged state, all six reviewed/merged/working blobs, exact
+  reconciled candidate, all current bindings/helpers and all 25 observed
+  inputs verify without trial replay. Only this thirteen-case leaf is Done.
+- [x] Qualify the remaining two complete original logical-environment functions:
+  six invalid/conflicting identities and one native/guest-distinction case.
+  Their earlier hold was storage only, not a failed effect observation.
+  Preserve the existing eight-row table and original objects, fixtures,
+  parameter values/types, marks and IDs. Compare complete metadata before a
+  fresh unchanged guarded observation with actual production-call coverage.
+  Add only those seven nodes and honestly refresh the existing adapter hash;
+  keep every other source, target, helper, budget and refusal unchanged.
+  Encode through the merged v3 codec, then use normal review/full CI/merge and
+  persistent readback. This is not whole-census or parent completion.
+  Complete metadata comparison passes all fifteen original/adapter cases.
+  The new seven pass in 1.49 pytest / 21.610 observation seconds with all
+  21 phase reports, zero prohibited effects, 25 bound reads and actual owner
+  calls per case. V3 admission produces 10,382 nodes, 1,499 bindings,
+  546 targets and 698,148 bytes. Source #14667 merges with all 10,382 cases
+  freshly passing; current-head review, required checks and independent merged
+  bytes, supported pull-forward, all current bindings/helpers and all 25
+  observed input hashes verify. Only this leaf is complete.
 - [x] Qualify the two complete original core-profile early-refusal functions:
   three registered-manifest schema cases and one expired-deadline/explicit-limit
   case. Metadata-only collection measures 22 originals / four selected cases
@@ -531,7 +836,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   12,677 bytes of headroom; all parent, owner, native, release and custody
   gates remain open.
 
-- [ ] Qualify the eight complete original session-liveness-probe functions.
+- [x] Qualify the eight complete original session-liveness-probe functions.
   Static inspection covers the original module, path-only conftest and
   canonical implementation: script construction and supplied-output parsing
   do not execute the generated script or inspect live processes.
@@ -552,7 +857,190 @@ its completion is not a prerequisite for independent Dev qualification work.
   Only eight nodes, three source bindings and one production target are added:
   10,272 nodes, 1,482 sources, 540 targets, 92 unchanged helper decisions and
   1,036,892 fully minified bytes, leaving 11,684 under the same cap.
-  Review, current required CI, merge and readback remain open.
+  Source #14605 merges at `f863abf64371b9e0bdfeab6eb128259b66214bf3`
+  on November 25 at 20:17:24 UTC. Natural Linux CI passes all 10,272 cases
+  and required aggregate `139480601043` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  every source/helper check and all sixteen retained observed inputs verify
+  without test replay. The actual Goal, own leaf and full Validation Plan
+  are reread before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Continue the unchanged census;
+  broader native, every-release, timing, owner and custody gates remain.
+
+- [x] Qualify the complete original control-plane parser suite and five
+  complete pure execution-identity functions as one coherent library cohort.
+  Preserve original objects, fixtures, parameter values/types, marks, IDs and
+  assertions. Metadata-only comparison must precede unchanged guarding and
+  actual per-case production call coverage. The complete package import
+  closure and selected function helpers are statically inspected; all
+  production inputs are already bound. Tests use supplied topology objects
+  or temporary YAML, not live machine/configuration state.
+  Exclude the other complete identity functions and the entire platform suite:
+  no environment/OS substitution or repository-test inspection is executed.
+  Retain every existing witness, helper decision, profile, proof, limit and
+  operational hold. Require typing, lint, normal review, required CI, merge
+  and readback before resolving only this source leaf.
+  Metadata-only collection measures 29/29 control-plane cases and 5/14
+  identity cases across thirteen complete selected functions, with exact
+  object/code/global origins and matching fixtures, parameters/types, marks
+  and IDs. The other nine identity cases remain excluded as three complete
+  functions. The fresh unchanged guarded trial passes all 34 selected cases
+  in 2.64 pytest / 25.375 observation seconds, with 102 phase reports,
+  zero prohibited effects, 26 bound source reads and call-phase production
+  coverage for every case. Strict Linux/Windows typing and Ruff pass.
+  Add only 34 nodes, three source bindings and two existing production
+  modules as targets: 10,306 nodes, 1,485 sources, 542 targets,
+  92 unchanged helper decisions and 1,039,616 minified bytes, leaving 8,960
+  under the same cap.
+  Source #14611 merges at `15caba6c46a4071d0bd3f54e5a95f6c3ef5fc8d3`
+  on November 25 at 20:43:14 UTC. Natural Linux CI passes all 10,306 cases;
+  required aggregate `139495385151` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all 26 retained observed inputs verify without
+  test replay. The actual Goal, own leaf and full Validation Plan are reread
+  before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [x] Qualify the complete original pure PR-filter suite without provider I/O.
+  The original module and both canonical production files are fully inspected:
+  bounded parsing, matching and acquisition planning use supplied data only.
+  Preserve every complete function and parameter row, including long integer
+  IDs, exact original object/code/global origins, fixtures, types, marks and
+  assertions. Metadata-only comparison must precede unchanged guarding.
+  Require per-case production call coverage, exact observed inputs, typing,
+  lint, normal review, required CI, merge and readback. Add no provider call,
+  live acquisition, data-admission change, profile/limit/guard exception,
+  native execution or operational authority.
+  Metadata-only collection measures all 34 original cases across twelve
+  complete functions with exact object/code/global origins, fixtures,
+  parameter values/types, marks and IDs; the longest original suffix is
+  484 UTF-8 bytes and remains unchanged. The fresh guarded trial passes all
+  34 in 1.26 pytest / 17.453 observation seconds, with 102 phase reports,
+  zero prohibited effects, seventeen bound source reads and call-phase
+  production coverage for every case. Strict Linux/Windows typing and Ruff
+  pass. Add only 34 nodes, four bindings and two targets: 10,340 nodes,
+  1,489 sources, 544 targets, 92 unchanged helper decisions and 1,043,757
+  fully minified bytes, leaving 4,819 under the same cap.
+  Source #14616 merges at `603d45229a60ef39e790c22e22b4bcd2613c6add`
+  on November 25 at 21:01:45 UTC. Natural Linux CI passes all 10,340 cases;
+  required aggregate `139507070985` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all seventeen retained observed inputs verify
+  without test replay. The actual Goal, own leaf and full Validation Plan
+  are reread before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [x] Qualify the complete original byte-stream HTTP framing suite only if
+  exact metadata and its unchanged import closure fit the existing envelope.
+  The original five functions use in-memory buffered bytes, not a daemon,
+  socket, subprocess or resource mutation. The actual parser, ordinary error
+  class, package import statements, eager class bodies/defaults and path-only
+  conftest are inspected; do not execute the conftest.
+  Preserve every original object, fixture, parameter row/type, mark, ID and
+  assertion. Measure the complete existing-v2 minified addition before any
+  guarded trial or admission. Require unchanged guarding, per-case production
+  coverage, exact observed inputs, typing, lint, normal review, required CI,
+  merge and readback. Add no client construction, provider effect, import
+  bypass, native qualification, data-admission change or guard/limit exception.
+  Metadata-only collection measures all 27 original cases across five complete
+  functions with exact object/code/global origins, fixtures, parameter
+  rows/types, marks and IDs; the longest unchanged suffix is 110 UTF-8 bytes.
+  The measured full addition fits before any trial. The fresh unchanged
+  guarded trial then passes all 27 in 0.90 pytest / 12.218 observation seconds,
+  with 81 passing phase reports, zero prohibited effects, 21 bound source
+  reads and parser call coverage for every case. Strict Linux/Windows typing
+  and Ruff pass. Add only 27 nodes, eight bindings and one parser target:
+  10,367 nodes, 1,497 sources, 545 targets, 92 unchanged helper decisions and
+  1,047,467 minified bytes, leaving 1,109 under the same cap.
+  Source #14620 merges at `16ec3d7aece6db998f14384718d61f53859d9efe`
+  on November 25 at 21:21:14 UTC. Natural Linux CI passes all 10,367 cases;
+  required aggregate `139517963323` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all 21 retained observed inputs verify without
+  test replay. The actual Goal, own leaf and full Validation Plan are reread
+  before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [x] Disposition the complete original installed-inventory prospect under
+  unchanged metadata, storage and eligibility requirements.
+  Static inspection closes the original fixture and its actual readers:
+  supplied temporary JSON and `.git/config` text, not Git execution,
+  installed-user state, registration mutation or native locking.
+  Preserve the exact original `inventory` fixture object, test functions,
+  code/global origins, parameter values/types, marks, IDs and assertions.
+  The path-only conftest is inspected but not executed.
+  A write-free length-only storage projection fits all five with the adapter,
+  original and three newly bound production files in 1,048,513 bytes,
+  leaving 63 under the same cap; this is not collection or qualification.
+  Actual metadata confirms all five cases, exact original fixture/function
+  objects and the same 1,048,513-byte fit. The first unchanged guarded case
+  then refuses the original helper's fixture `.git/config` write as
+  `actual Git storage access`; it is not passing evidence or a Git subprocess.
+  Every whole function calls that same helper, so all five remain excluded;
+  the other four are not executed. Withdraw the unpublished adapter and
+  admit nothing. Preserve the metadata/candidate/refusal evidence without
+  replay, fixture relocation/substitution, preload or guard exception.
+  The manifest remains at 10,367 nodes and 1,047,467 bytes with 1,109 free.
+  This resolves only the prospect's eligibility disposition, not any parent
+  or retained native/owner/coverage requirement.
+- [x] Qualify the complete eight-row original logical-environment tuple
+  function without admitting a partial parameter table.
+  The original module and pure string-decomposition owner are inspected;
+  package import closure is already bound. Metadata-only original collection
+  measures fifteen cases in three whole functions. The full addition would
+  be 1,049,014 bytes, 438 over the unchanged cap. The complete eight-row
+  `test_logical_and_tuple_forms` function fits at 1,048,547 bytes, leaving 29.
+  The other two complete functions/seven cases remain storage-held, not
+  technically refused or deleted.
+  Compare the exact adapter/original objects, code/global origins, fixtures,
+  parameter rows/types, marks and IDs before unchanged guarding.
+  Require per-case production call coverage, exact observed inputs, typing,
+  lint, ordinary review, required CI, merge and readback. Add no OS or
+  environment-variable substitution, native call, new admission policy,
+  source/profile/schema change, guard exception or limit increase.
+  Exact adapter/original comparison measures fifteen originals and eight
+  aliases, retaining every row of the selected function. The fresh unchanged
+  guarded trial passes all eight in 1.09 pytest / 11.422 observation seconds:
+  24 passing phase reports, zero prohibited effects, 25 bound source reads
+  and production call coverage for every case. Strict Linux/Windows typing
+  and Ruff pass. Add only eight identities, two bindings and one already-bound
+  owner as target: 10,375 nodes, 1,499 sources, 546 targets,
+  92 unchanged helper decisions and 1,048,547 minified bytes, leaving 29.
+  Source #14625 merges at `6e2637ccbb65bfc0e4295f52358142c571ade943`
+  on November 25 at 21:56:32 UTC. Natural Linux CI passes all 10,375 cases;
+  required aggregate `139535763823` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all 25 retained observed inputs verify without
+  test replay. The actual Goal, own leaf and full Validation Plan are reread
+  before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [x] Resolve the next storage direction before further census admission in
+  this campaign. The fully minified existing-v2 manifest is 1,048,547 bytes
+  under the unchanged 1,048,576-byte cap, leaving 29.
+  Even a shortest possible new source binding requires 73 bytes.
+  The two known storage-held functions require at least 51 or 68 bytes per
+  case before parameters or a new group; neither fits.
+  No further whitespace removal is available under the approved format.
+  Preserve every current witness, binding, target, helper decision, proof,
+  eligibility rule, parser bound, deadline and operational hold.
+  The operator now selects the reader-first successor and reviewed source
+  migration recorded in the [scope approval](manifest-storage-successor.md#scope-approval).
+  No larger cap, test omission, eligibility/guard exception or operational
+  authority follows. The original-census, every-release and parent gates stay open.
+- [x] Deliver the [reader-first manifest successor](manifest-storage-successor.md)
+  through reviewed intent, actual consumer/bootstrap closure, compatible reader
+  delivery and a separately reviewed source-data migration. Complete that
+  phase's Plan and Validation before resuming further original-unit admission.
+  Reader #14658 is merged with the full 10,375-case packet; persistent reviewed
+  blobs and all current bindings/helpers match. The separate format-only
+  migration preserves that exact post-reader inventory in 697,907 bytes.
+  Data #14662 is independently confirmed merged; current-head review,
+  complete fresh packet, required checks and persistent blob/binding/helper
+  readback complete that bounded phase. Resume original census admission
+  with v3 storage and unchanged eligibility/effect gates.
+  Preserve the parent completion gate and all retained owners and holds.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 
@@ -4991,6 +5479,14 @@ regressions, retained-owner seams and the completion gate.
 
 ## Validation Plan
 
+- [x] Manifest successor satisfies the
+  [phase validation](manifest-storage-successor.md#validation): existing-format
+  compatibility, exact ordered logical equivalence, unchanged bounds and
+  eligibility, actual consumer readiness before migration, focused fresh
+  execution and the complete admitted packet. No representation-only milestone
+  establishes the historical census, every-release or parent acceptance.
+  Reader #14658 and separate data #14662 pass each source-only phase item;
+  final baseline preserves all thirteen intervening peer binding refreshes.
 - [ ] Installed-Manager acceptance satisfies every positive, falsifying,
   isolation, identity and actual promotion-admission case in the
   [lifecycle matrix](installed-manager-lifecycle.md#validation-plan).
@@ -5086,6 +5582,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-26 UTC - Manifest successor implementation](journal/2026/11.26-manifest-successor.md)
 - [2026-11-25 UTC - Original unit delivery and documentation assessment](journal/2026/11.25-original-unit-delivery.md)
 - [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
 - [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)

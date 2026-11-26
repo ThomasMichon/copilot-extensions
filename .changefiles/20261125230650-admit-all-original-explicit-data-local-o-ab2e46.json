@@ -1,0 +1,9 @@
+{
+  "comment": "Admit all original explicit-data local observation and normalization unit contracts",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

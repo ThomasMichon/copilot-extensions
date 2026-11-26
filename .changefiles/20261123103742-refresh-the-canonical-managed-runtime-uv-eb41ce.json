@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the canonical managed-runtime uv support shipped in the bootstrap guard bundle.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

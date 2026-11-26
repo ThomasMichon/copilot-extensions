@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify pinned mux discovery through the installed target-list command.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

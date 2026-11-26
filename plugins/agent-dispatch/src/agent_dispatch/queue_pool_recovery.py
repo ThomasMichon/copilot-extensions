@@ -135,7 +135,7 @@ def _current(
         or reservation_native_identity(conn, reservation) != task.owner_session_id
     ):
         raise TaskError("suspended pool recovery requires its current unheld owner and retained native")
-    require_execution_admission(conn, task.id)
+    require_execution_admission(conn, task.id, closeout_start=True)
     from .queue_execution_custody import PoolLaneUnavailable
     try:
         require_pool_workspace(
@@ -245,7 +245,7 @@ def request_recovery(
     if not math.isfinite(ts):
         raise TaskError("pool recovery requires finite time")
     continuing = task.resume_requested and assignment["recovery_requested_at"] is not None
-    if continuing and (not wake_requested or assignment["recovery_wake_id"] is not None):
+    if continuing and not wake_requested:
         return task
     from .queue_execution_custody import require_execution_send_reconciliation
     require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
@@ -253,6 +253,19 @@ def request_recovery(
         "SELECT 1 FROM wake_outbox WHERE task_id=? AND status='delivering' LIMIT 1", (task.id,),
     ).fetchone():
         raise TaskError("original owner wake is still delivering; retain its custody")
+    if wake_requested:
+        # Only a pending relevance closeout admits this wake, and only its linked
+        # closeout wake is current and sendable; a recovery wake would go stale.
+        from .queue_relevance_delivery import rearm_closeout
+        wake = rearm_closeout(owner, conn, task, ts=ts)
+        if wake is not None:
+            owner._audit(
+                conn, task.id, ts=ts, from_status=Status.SUSPENDED, to_status=Status.SUSPENDED,
+                worker=task.owner, note="pool recovery wake routed to the pending relevance closeout",
+            )
+            return owner._fetch(conn, task.id)
+    if continuing and assignment["recovery_wake_id"] is not None:
+        return task
     if continuing:
         deadline = _decision_deadline(conn, assignment)
         if deadline is None or ts >= deadline:
@@ -406,6 +419,7 @@ def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
     from .queue_execution_handoff import require_execution_admission
     require_execution_admission(
         conn, task.id, owner_wake=wake if table == "wake_outbox" else None,
+        closeout_start=getattr(wake, "pool_recovery_revision", None) is not None,
     )
     if getattr(wake, "pool_recovery_revision", None) is not None:
         assignment = recovery_assignment(conn, task.id)

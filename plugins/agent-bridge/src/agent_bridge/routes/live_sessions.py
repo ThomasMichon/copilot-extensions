@@ -736,13 +736,8 @@ async def post_live_message(
         )
         now = time.time()
 
-    # Freshness lease (#2906): validate the target registration's heartbeat
-    # lease and enqueue *atomically* -- the check + insert run under one write
-    # lock, so a concurrent reaper / take-over invalidation / session roll can't
-    # strand a message on a just-expired registration. Rejects a stale, expired,
-    # or superseded target (409) rather than durably queuing a write that a
-    # later, unrelated incarnation could receive. The race-free enforcement NF's
-    # client-side pre-send freshness guard (#2905) can only approximate.
+    # Ordinary acceptance records the exact selected conversation, not a lease
+    # on its current receiver. Consumer admission independently fences effects.
     after = 0
     if body.wait:
         # Capture the represented head WITHOUT creating a store entry -- a
@@ -849,6 +844,7 @@ MODE_POLL_SECONDS = 0.25
 async def plugin_readiness(
     session_id: str, body: PluginReadinessRequest, request: Request,
 ) -> PluginReadinessResult:
+    live_startup_controls.require_original_control_target(_db(request), session_id)
     try:
         return await wait_plugin_readiness(_db(request), session_id, body)
     except PluginReadinessError as exc:
@@ -951,7 +947,9 @@ async def list_live_messages(
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
-    rows = db.list_pending_live_messages(target_session_id)
+    rows = db.list_pending_live_messages(
+        target_session_id, exact_native=exact_native, plugin_readiness=plugin_readiness,
+    )
     messages = []
     for r in rows:
         if r["exact_session"] and not exact_native:
@@ -986,11 +984,13 @@ async def ack_live_messages(
     Idempotent and scoped to ``session_id``: re-acking an already-delivered id
     is a no-op, so a redelivered ack never errors or double-counts.
     """
+    from ..legacy_inbox import owns
+
     db = _db(request)
     row = db.get_live_session(session_id)
-    if row is None:
+    if row is None and not owns(db, session_id, body.ids):
         raise HTTPException(status_code=404, detail="live session not found")
-    target_session_id = row["session_id"]
+    target_session_id = row["session_id"] if row else session_id
     now = time.time()
     acked = db.ack_live_messages(session_id, body.ids, now=now)
     if acked:

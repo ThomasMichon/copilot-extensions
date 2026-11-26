@@ -1,9 +1,0 @@
-{
-  "comment": "Admit all 104 unchanged original fallback-equivalence cases to the guarded unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

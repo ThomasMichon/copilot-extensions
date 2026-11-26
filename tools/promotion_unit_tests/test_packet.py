@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 import promotion_unit_packet as packet
-from promotion_unit_contract import COMPACT_PROFILE, PROFILE, UnitEvidenceError, manifest_digest, windows_native_manifest
+from promotion_unit_contract import COMPACT_PROFILE, PROFILE, UnitEvidenceError, compact_manifest, manifest_digest, windows_native_manifest
 
 SOURCE = "a" * 40
 TEST = "tools/promotion_unit_tests/test_example.py"
@@ -139,6 +139,21 @@ def test_compact_source_and_packet_normalize_without_relabelling_proof(packet_ca
     assert changed["profile"] == PROFILE and changed["manifest_sha256"] == flat["manifest_sha256"]
     assert changed["manifest_file_sha256"] != flat["manifest_file_sha256"]
     assert changed["packet_sha256"] != flat["packet_sha256"]
+    prefixed = compact_manifest(manifest)
+    raw_prefix = _write(root / "selection.json", prefixed)
+    loaded_prefix, prefix_digest = load_manifest(root, "selection.json")
+    assert loaded_prefix == manifest and prefix_digest == hashlib.sha256(raw_prefix).hexdigest()
+    assert prefix_digest != raw_digest
+    from_prefix = packet.verify_packet(
+        directory, expected_source_sha=SOURCE, expected_manifest=prefixed, source_root=root,
+    )
+    _write(directory / "unit-manifest.json", prefixed)
+    prefix_packet = _verify(packet_case, source_root=root)
+    assert prefix_packet["manifest"] == manifest and prefix_packet["proof"] == proof
+    assert prefix_packet["profile"] == PROFILE
+    assert prefix_packet["manifest_sha256"] == from_prefix["manifest_sha256"]
+    assert prefix_packet["manifest_file_sha256"] != from_prefix["manifest_file_sha256"]
+    assert prefix_packet["packet_sha256"] != from_prefix["packet_sha256"]
 
 
 def test_packet_refuses_copied_self_declared_manifest_and_proof_digests(packet_case: PacketCase) -> None:

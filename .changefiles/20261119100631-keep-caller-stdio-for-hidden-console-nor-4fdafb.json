@@ -1,9 +1,0 @@
-{
-  "comment": "Keep caller stdio for hidden-console normalized backend launches on Windows",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

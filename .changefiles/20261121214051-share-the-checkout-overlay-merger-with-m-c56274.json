@@ -1,9 +1,0 @@
-{
-  "comment": "Share the checkout overlay merger with Manager onboarding while retaining tracked-pair refresh.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

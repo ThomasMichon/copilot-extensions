@@ -1,9 +1,0 @@
-{
-  "comment": "Add the Entra Gateway user-caller driver library (agent-gateway-entra) from an adopting harness; behavior is unchanged.",
-  "changes": [
-    {
-      "plugin": "libs/gateway-entra",
-      "type": "dev"
-    }
-  ]
-}

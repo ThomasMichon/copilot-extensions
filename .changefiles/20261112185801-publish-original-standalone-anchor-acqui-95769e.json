@@ -1,9 +1,0 @@
-{
-  "comment": "Publish original standalone-anchor acquisition observations through existing bounded guard facts, retain finite helper/bytecode removal parity, and add opt-in registered membership tail diagnostics",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

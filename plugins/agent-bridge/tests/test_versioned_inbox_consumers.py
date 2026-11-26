@@ -279,9 +279,13 @@ def test_required_message_semantics_cannot_fall_through_to_legacy_delivery(servi
     response = client.post("/api/v1/live-sessions/native-a/messages", json={
         "sender": "sender", "body": "never dispatch", "message_version": 9,
     })
-    assert response.status_code == 409 and "cannot enforce" in response.text
+    assert response.status_code == 200, response.text
+    assert response.json()["receipt"]["queue_reason"] == "awaiting_consumer"
     assert db.list_pending_live_messages(consumer.session_id) == []
-    assert db.execute_read("SELECT * FROM live_messages") == []
+    message_id = response.json()["message_id"]
+    assert db.ack_live_messages(consumer.session_id, [message_id], time.time()) == 0
+    assert db.consume_live_message(consumer.session_id, message_id, time.time()) == 0
+    assert len(db.execute_read("SELECT * FROM live_messages")) == 1
     baseline = client.post("/api/v1/live-sessions/native-a/messages", json={
         "sender": "sender", "body": "equivalent baseline", "message_version": 1,
     })

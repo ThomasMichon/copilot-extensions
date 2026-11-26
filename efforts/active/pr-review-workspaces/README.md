@@ -13,11 +13,13 @@
 
 Let one reviewer obtain PR data, analyze exact source, synchronize subsequent
 changes, and submit its selected comments and verdict through one PR-domain
-toolset. The current amendment proposes backward-compatible, negotiated bulk
-materialization for the read-only CLI observer within the existing transport
-limits and unchanged 60-second invocation lifetime. Review and merge this plan
-before bulk implementation; source acceptance remains separate from release,
-configuration adoption and live qualification.
+toolset. The current source amendment plans truthful first-party test-source
+version identity and dependency-first acceptance of the CLI observer, while
+retaining its reviewed negotiated bulk contract and unchanged 60-second
+invocation lifetime. Independently review, merge and adopt the
+[source-version plan](first-party-source-versioning.md) before policy code;
+source acceptance remains separate from release, configuration adoption and
+live qualification.
 
 ## Guiding Intent
 
@@ -111,6 +113,13 @@ credentials/access changes, runtime installation/update/restart, deployment,
 live provider effects, desktop experiments and new runtime resources remain
 outside this source-only scope.
 
+The source contribution continuation includes ordinary dependency/source fixes,
+contained tests and normal isolated source PR delivery. The
+[first-party source-version proposal](first-party-source-versioning.md) is
+agent-recommended design, not an already implemented compatibility mechanism.
+Its independent plan gate precedes metadata/test-policy code; no future
+compatible version, operational release or runtime effect is selected by it.
+
 ## Plan
 
 The decomposition and technical acceptance below are **agent-recommended**.
@@ -199,6 +208,11 @@ extension of the existing `ReplayStore` envelope, not a second posting ledger.
   data, even if they share an owning service or physical database.
 
 ### Phase 4 - Integrate and qualify the reviewer after admission
+
+- [ ] Review, merge and adopt the [first-party source-version and dependency-first
+  acceptance plan](first-party-source-versioning.md), then qualify its source
+  preparation, actual dependency upgrade and existing observer return path.
+
 The [existing-owner tool surface](tool-surface-slice.md) is source-accepted in
 #9845/#9928; actual adoption remains open. The next planning-only
 [CLI observer adopter](cli-observer-adopter-slice.md) composes the existing
@@ -251,6 +265,18 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-25 - Propose first-party source-version composition before code
+
+- The real source-test owner retains release minima even with canonical local
+  overrides; a contained frozen-source diagnostic rejected the incompatible
+  numeric minimum. This is not an installed-upgrade or compatible-API result.
+- Proposed release-owned candidate metadata preparation and dependency-first
+  qualification in [the source-version subplan](first-party-source-versioning.md).
+  Policy code, a compatible released floor and the actual application-only
+  upgrade remain unimplemented; independent plan acceptance comes first.
+- Existing #11084, its dependency finding and the wider source/adopter gates
+  remain open. No runtime, manual release or operational effect is included.
 
 ### 2026-11-05 - Plan the CLI-first observer adopter
 - The operator clarified CLI tools as the intended PR-observation interface;

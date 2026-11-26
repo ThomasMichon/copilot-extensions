@@ -45,6 +45,26 @@ warm-engine shortcuts, systemd ingress, direct-start session custody and native
 stop error handling remain with their current owners. This is not a new
 cross-platform supervisor or installed-host lifetime qualification.
 
+The non-Linux foreground `engine.sh` launcher also uses prepared-only exact UV
+admission. Its installed, engine-local shell resolver selects completed
+current/LKG/newest slots without first executing a stale interpreter; the
+legacy engine environment is used only when both selector paths are absent;
+dangling selector symlinks still request versioned resolution. The launcher
+retains editable engine environment settings, binds the prepared UV after that overlay, and execs isolated,
+bytecode-disabled Python with the original arguments and stdio. A finite portable
+native capture owner bounds admission to ten seconds and retires its UV group
+on cancellation or caller loss before application execution. The original
+foreground PID remains the application PID; capture adds no resident process.
+Missing support
+or admission refuses instead of acquiring prerequisites or invoking ambient
+Python. Linux's native selector custody remains separate; this adds no Darwin
+supervisor, restart policy or installed-host lifetime guarantee.
+
+Finite PowerShell uninstall selects its remover beside the already-addressed
+installer dependency policy. Raw canonical-reference sources and materialized
+payloads therefore use their own engine's current removal inventory, rather
+than a stale sibling helper left in the source tree.
+
 The container engine shim admits its default worker's current environment through
 prepared-only UV (`AGENT_INDEX_UV` when bound, otherwise PATH) before reserving
 an instance or creating a process. It starts isolated Python with the same cache
@@ -174,6 +194,23 @@ full path. Built-in Git revision snapshots use this journal as described below.
 External providers can opt into this same journal through the negotiated
 bridge below; no production provider is implicitly upgraded. There are no new
 state cursor owners, source locks or automatic full repairs.
+
+The built-in GitHub connector can explicitly opt into the existing hinted-page
+contract with Python `GitHubConnector(..., paged_hints=True)`. Its selected
+`discover_hints_page` callable advertises both v1 capabilities. Each unit reads
+one exact hinted item and one fresh comment page, accepting at most 100 comments.
+A larger declared discussion or a continuation link refuses rather than
+performing unbounded nested work. This limits logical acquisition requests, not
+response bytes, retry attempts or elapsed time. Completed items are retained by
+the existing journal; a reconstructed run reacquires only its interrupted item.
+The continuation binds the entire hint envelope, base polling checkpoint and
+connector recovery identity. Every page preserves that checkpoint and carries
+no tombstones. Empty hints complete without item acquisition.
+The constructor defaults to `paged_hints=False`, preserving default/legacy
+selection and the direct `discover_hints` API, including its multipage comments.
+No configured/ordinary caller is migrated. Durable recovery within larger
+discussions, immutable full coverage and authoritative deletion remain open;
+this is not a new snapshot capability or a complete-reconciliation certificate.
 
 GitHub ordinary polls use a fresh, **single page of at most 100 identities**
 updated since their committed timestamp, replaying the existing 60-second
@@ -931,6 +968,43 @@ Client runtime selection requires the canonical exact four-field
 slot. POSIX permits only the standard `bin/python` venv symlink after validating
 its owned parent slot and resolved executable; all other linked/reparse runtime
 artifacts remain rejected. A partial or corrupt slot is never dispatched.
+
+The cell validator admits each package-origin probe through one prepared-only,
+offline UV lookup of that exact interpreter before importing application code.
+The explicit smoke builder's site-directory probe uses the same boundary.
+Both reuse the bundled stdlib process helpers and caller-owned capture, with a
+ten-second execution bound and 64 KiB limit on each output stream. Missing UV
+or helper support refuses rather than acquiring prerequisites or selecting a
+different environment. Unconfirmed native cleanup propagates with its original
+process/Job/resource custody and cannot trigger failed-candidate deletion.
+Settled output-limit and UTF-8 capture failures remain ordinary cell errors,
+so existing invalid-target rollback still runs. These capture diagnostics name
+the exception class without exposing captured child output.
+Other construction commands retain their existing installation owners.
+
+Regular cell environment creation now uses Installer Engine's resilient UV
+constructor with explicit managed runtime `3.11`, matching the current native
+Index policy rather than borrowing the bootstrap interpreter or ambient
+project/selector settings. Canonical bootstrap-environment helpers isolate
+the constructor child; UV storage, caller CWD/environment, slot receipts,
+health/profile checks and cleanup remain with their existing owners.
+Selected UV and shell paths are bound before the native child changes CWD.
+Progress goes to stderr, preserving coordinator JSON stdout. Windows headless
+commands explicitly retain the coordinator's redirected standard handles.
+Missing prerequisites or failed requested construction has no helper/system-Python or
+unversioned fallback. Explicit setup retains its acquisition policy; completed
+runtime use does not construct an environment. The smoke-test builder remains
+separate, and full declared-project/environment adoption is not implied.
+
+Cell dependency installation binds UV and the native shell before changing CWD,
+then admits the already selected application interpreter through the prepared
+process-helper capsule's exact-runtime UV owner. Missing prerequisites and
+ordinary admission failures become cell errors before dependency execution;
+uncertain native cleanup retains its original custody. The existing Installer
+Engine dependency-policy/resilience functions still own seasoning, captured
+resolver settings, retries and native execution. Only the admission lookup
+isolates UV selectors; package resolution keeps its actual configuration.
+Dependency progress uses stderr so it cannot contaminate coordinator JSON.
 
 The default durable tier now registers the same stable launchers with the
 lowest-privilege host mechanism that satisfies "restart on next logon without a

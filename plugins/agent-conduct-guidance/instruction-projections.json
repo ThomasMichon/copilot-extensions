@@ -82,6 +82,15 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "blocker-review-fallback",
+      "deliveryMode": "selector",
+      "template": "instructions/blocker-review-fallback.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/blocker-review-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }

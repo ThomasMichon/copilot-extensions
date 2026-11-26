@@ -1,0 +1,25 @@
+{
+  "comment": "process-telemetry: register agent-worktrees, agent-codespaces and agent-containers command sources with closed stage, PR-activity and hook.lifecycle.v1 projections, a finite tool owner and a content-free hook journal",
+  "changes": [
+    {
+      "plugin": "libs/process-telemetry",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

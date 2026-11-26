@@ -1,9 +1,0 @@
-{
-  "comment": "Support multiple first-party package roots in standalone builds",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the canonical opt-in Python foreground provisioning receiver without changing native caller activation.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

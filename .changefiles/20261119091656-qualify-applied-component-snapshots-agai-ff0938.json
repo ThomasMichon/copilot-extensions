@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify applied component snapshots against native, routed-coverage and complete checkpoint evidence",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

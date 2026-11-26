@@ -8,22 +8,23 @@ import json
 import subprocess
 import sys
 import threading
+from typing import Any, cast
 
 import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.runtime_custody import RuntimeCustodyError
-from test_inbox_custody import close, inbox as inbox
+from test_inbox_custody import Inbox, close, inbox as inbox
 
 
 @pytest.mark.parametrize("winner", ["send", "closure"])
-def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner: str) -> None:
+def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox: Inbox, winner: str) -> None:
     db, owner, _, admission, consumer = inbox
     other = Database(db.db_path)
     entered, release, competing = threading.Event(), threading.Event(), threading.Event()
     timeouts = []
 
-    def operate(selected: Database, action: str, pause: bool = False):
+    def operate(selected: Database, action: str, pause: bool = False) -> Any:
         conn = selected._get_conn()
         effect = False
 
@@ -32,6 +33,7 @@ def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner:
             if not pause and statement == "BEGIN IMMEDIATE":
                 competing.set()
             if statement.startswith(("INSERT OR IGNORE INTO live_messages",
+                                     "INSERT INTO live_messages",
                                      "UPDATE bridge_runtime_epoch SET epoch=")):
                 effect = True
             if pause and effect and statement == "COMMIT":
@@ -61,8 +63,8 @@ def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner:
             release.set()
             first.result(timeout=10)
             if winner == "closure":
-                with pytest.raises(RuntimeCustodyError, match="original open epoch"):
-                    second.result(timeout=10)
+                message_id, reason = second.result(timeout=10)
+                assert message_id is not None and reason is None
             else:
                 # The competing closure observed its revision before the send
                 # committed. Its failed CAS must reconcile, not ignore that send.
@@ -70,19 +72,20 @@ def test_enrolled_producer_and_closure_commit_in_one_serial_order(inbox, winner:
                     second.result(timeout=10)
                 close(inbox)
             assert not timeouts
-        rows = db.runtime_custody_inventory(owner)["rows"]["live_messages"]
-        assert len(rows) == (1 if winner == "send" else 0)
+        rows = cast(dict[str, Any], db.runtime_custody_inventory(owner))["rows"]["live_messages"]
+        assert len(rows) == 1
         if rows:
             retained = db.execute_read("SELECT * FROM live_messages")[0]
             assert retained["body"] == "original body"
-            assert retained["runtime_custody_json"] == admission.document()
+            assert retained["runtime_custody_json"] is None
+            assert retained["producer_target_json"] is not None
             assert retained["handoff_json"] is None
     finally:
         release.set()
         other.close()
 
 
-def test_producer_process_exits_before_reply_and_replay_recovers_identical_original(inbox) -> None:
+def test_producer_process_exits_before_reply_and_replay_recovers_identical_original(inbox: Inbox) -> None:
     db, owner, _, admission, consumer = inbox
     child = """
 import json, os, sys
@@ -101,7 +104,7 @@ os._exit(0)
     subprocess.run(
         [sys.executable, "-c", child, json.dumps(asdict(owner)), admission.document()],
         check=True, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     original = dict(db.execute_read("SELECT * FROM live_messages")[0])
     close(inbox)

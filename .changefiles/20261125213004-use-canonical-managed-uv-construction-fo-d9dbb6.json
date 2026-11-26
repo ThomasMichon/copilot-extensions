@@ -1,0 +1,9 @@
+{
+  "comment": "Use canonical managed UV construction for default installation-cell environments",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

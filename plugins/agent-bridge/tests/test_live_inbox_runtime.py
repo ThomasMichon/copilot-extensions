@@ -121,6 +121,8 @@ def test_versioned_control_start_is_one_shot_and_unknown_cannot_be_rejected(serv
 
 
 def test_versioned_old_database_first_touch_and_original_key_survive_rejection(serving: Serving) -> None:
+    from legacy_inbox_schema import restore_v49_inbox
+
     app, client, db, consumer = serving
     message_id = db.enqueue_live_message(
         consumer.session_id, "sender", "body", time.time(),
@@ -129,6 +131,7 @@ def test_versioned_old_database_first_touch_and_original_key_survive_rejection(s
     path = db.db_path
     db.close()
     with sqlite3.connect(path) as old:
+        restore_v49_inbox(old)
         for name in disposition_guards():
             old.execute(f"DROP TRIGGER {name}")
         old.execute(f"DROP INDEX {UNRESOLVED_INDEX}")
@@ -476,30 +479,39 @@ def test_native_inbox_survives_closed_installation_epoch_without_relaxing_contro
     interrupt = client.post("/api/v1/live-sessions/native-a/messages", json={
         "sender": "peer", "body": "unsupported by the old receiver", "delivery": "interrupt",
     })
-    assert interrupt.status_code == 409
+    assert interrupt.status_code == 200
+    assert client.post(PREFIX + "/poll", json=current(body)).status_code == 200
+    rejected = db.live_message_receipt(consumer.session_id, interrupt.json()["message_id"])
+    assert rejected is not None and rejected["stage"] == "rejected"
     for changes in ({"kind": "control:set-mode"}, {"kind": "startup:prompt:1"}):
         response = client.post("/api/v1/live-sessions/native-a/messages", json={
             "sender": "peer", "body": "unsupported", "delivery": "steer",
             "idempotency_key": str(changes), **changes,
         })
         assert response.status_code == 400, response.text
-    assert len(db.execute_read("SELECT * FROM live_messages")) == 2
+    assert len(db.execute_read("SELECT * FROM live_messages")) == 3
     app.state.ready = False
     assert client.post(PREFIX + "/poll", json=current(body)).status_code == 503
     assert client.post("/api/v1/live-sessions/native-a/messages", json={
         "sender": "peer", "body": "not serving", "delivery": "steer",
-    }).status_code == 503
+    }).status_code == 200
 
 
 def test_native_poll_does_not_promote_unverified_legacy_startup_input(serving: Serving) -> None:
     _, client, db, consumer = serving
-    db.enqueue_live_message(
+    message_id = db.enqueue_live_message(
         consumer.session_id, "peer", "unverified startup", time.time(),
         kind="startup:prompt:1",
     )
     body = native_enroll(client, consumer)
-    assert client.post(PREFIX + "/poll", json=current(body)).status_code == 409
-    assert db.execute_read("SELECT handoff_json FROM live_messages")[0][0] is None
+    response = client.post(PREFIX + "/poll", json=current(body))
+    assert response.status_code == 200 and response.json()["messages"] == []
+    assert db.execute_read("SELECT handoff_started_at FROM live_messages")[0][0] is None
+    receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None
+    assert receipt["stage"] == "rejected"
+    assert receipt["disposition"]["code"] == "unsupported_reader"
+    assert receipt["sdk_accepted_at"] is None
 
 
 @pytest.mark.parametrize("old_state", ["claimed", "unknown", "begun"])

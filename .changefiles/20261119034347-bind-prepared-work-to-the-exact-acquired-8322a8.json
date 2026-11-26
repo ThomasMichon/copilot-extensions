@@ -1,9 +1,0 @@
-{
-  "comment": "Bind prepared work to the exact acquired manifest before cache creation",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

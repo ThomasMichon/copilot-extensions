@@ -1,9 +1,0 @@
-{
-  "comment": "Keep configuration annotation aliases out of runtime import requirements",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

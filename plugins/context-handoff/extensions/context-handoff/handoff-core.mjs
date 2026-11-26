@@ -38,6 +38,7 @@ import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
 import { captureHandoffIdentity } from "./handoff-identity.mjs";
 import { collectLocalIntentFacts } from "./intent-goal.mjs";
 import { INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { gitStatusHasOutput } from "./git-status.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -1040,11 +1041,7 @@ async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout)
 // window where a file could become dirty between the check and the
 // locked sync actually running.
 async function worktreeIsDirty(cwd) {
-  const result = await execFileAsync(
-    "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
-    { cwd, encoding: "utf-8", timeout: 5000, env: sanitizedGitEnv() },
-  );
-  return Boolean(result.stdout.trim());
+  return gitStatusHasOutput(cwd, sanitizedGitEnv());
 }
 
 // Fully async (execFile, not execFileSync/runCli) end to end: this is invoked
@@ -1231,7 +1228,7 @@ async function attemptWorktreeSyncLocked(cwd) {
     return {
       attempted: false,
       synced: false,
-      reason: `not a git checkout or git unavailable: ${describeSyncError(error)}`,
+      reason: `could not inspect worktree status; automatic sync was skipped: ${describeSyncError(error)}`,
     };
   }
   if (dirty) {

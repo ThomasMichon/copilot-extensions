@@ -1,0 +1,9 @@
+{
+  "comment": "Admit completed PowerShell command runtimes through prepared-only exact UV selection and existing native capture.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

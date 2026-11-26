@@ -1,9 +1,0 @@
-{
-  "comment": "Charge post-tool asynchronous setup to the existing shared sender deadline",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Run the session-guidance hook's Python through uv-managed Python 3.11 instead of a system python3/python/py search.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

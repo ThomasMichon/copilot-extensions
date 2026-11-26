@@ -1,9 +1,0 @@
-{
-  "comment": "Allow a Windows caller to select an exact closed-wheel runtime without forcing repair.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

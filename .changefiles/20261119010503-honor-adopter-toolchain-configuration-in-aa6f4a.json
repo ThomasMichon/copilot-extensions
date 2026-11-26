@@ -1,9 +1,0 @@
-{
-  "comment": "Honor adopter toolchain configuration in standard native bootstrap and setup",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

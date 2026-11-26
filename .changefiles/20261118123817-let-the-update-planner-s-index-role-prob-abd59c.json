@@ -1,9 +1,0 @@
-{
-  "comment": "Let the update planner's Index role probe outlast its nested Worktrees owner read so a loaded host no longer aborts update preflight",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

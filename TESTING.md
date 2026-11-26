@@ -1,5 +1,20 @@
 # Testing copilot-extensions
 
+Bridge's `tests/test_installer_watchdog.py` exercises the shared PowerShell
+self-stage block in fresh synthetic homes under both Windows shell hosts.
+The contained selection is `tools/run-tests.ps1 agent-bridge --test-file
+tests/test_installer_watchdog.py`. It scales the default allowance in the
+fixture, not the installed policy. Controls cover partial-line progress on
+each output channel, quiet stalls, explicit deadlines, disabled limits, exit
+codes, byte fidelity and a retained native handle proving grandchild exit.
+Four undrained-output controls cover both hosts, both channels and default or
+explicit deadlines under strict, non-breakaway caller-owned Jobs.
+Four root-exit controls preserve exit code and buffered bytes while a live
+descendant retains inherited output handles, with default or disabled deadlines.
+Eight controls execute the Worktrees and Dispatch preambles under both hosts,
+distinguishing built-in inactivity budgets from explicit elapsed-time overrides.
+These are native integration controls, not installed-service qualification.
+
 The closed-wheel Source controls in `tools/test_local_install_closed_wheels.py`
 check ordinary and configuration-disabled application preparation followed by
 the actual offline `uv lock --check` with normal project discovery. The retained
@@ -37,6 +52,104 @@ commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
 CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
+
+Dispatch's `tests/test_managed_ready_ingress_ps1.py` exercises the actual payload
+and installed compatibility PowerShell command gates with inert CPython 3.10.20
+applications and a separately prepared 3.11.18 bootstrap. Twelve scenarios per
+shell preserve current/LKG/newest and namespaced selection, board dispatch,
+configuration-only telemetry, readiness isolation, caller selection variables,
+arguments, stdin, both output streams and exit status. Missing UV/provider/capture
+refusals cannot enter the application or installer; slot and payload bytes remain
+unchanged. The source adapter avoids unrelated application dependencies. Existing
+Windows and Linux command-bootstrap native jobs require all applicable controls
+and their repeated offline measurements within unchanged eight-minute deadlines.
+Windows qualifies both Windows PowerShell and Core; Linux qualifies Core, not
+Windows native capture or installed-host lifetime. An additional real UV
+lookup checks native store inference with no install-directory override,
+including Windows' different managed-interpreter directory depth.
+
+MCP's `tests/test_managed_command_gate.py` runs its actual foreground command
+gates with real prepared UV and an inert 3.10.20 application independent of the
+3.11.18 bootstrap. Raw and materialized layouts cover current/LKG/newest and
+namespaced selection, readiness isolation, and missing UV/provider/capture
+refusals before application entry or provisioning. The Bash LKG control also
+retains resolver fallback after an incomplete current slot under gate `errexit`.
+Successful controls run twice and retain argv, stdin, both output streams, exit
+status and caller/application descriptors; poisoned Python/selectors cannot
+replace the addressed environment. Payload and slot bytes remain unchanged.
+Test-only observation counts the actual single prepared-only UV lookup per
+launch without replacing UV or capture. The path-gated native workflow requires
+all sixteen cases and reports per applicable Bash/PowerShell host on Ubuntu,
+macOS and Windows within eight-minute job limits. These fixtures isolate
+installation-context decisions and do not qualify installed-host lifetime,
+every MCP child producer or complete command latency.
+
+Index's `tests/test_managed_command_gate.py` runs the actual Bash and PowerShell
+gates with independent prepared 3.11.18 bootstrap and 3.10.20 application
+interpreters. Fourteen scenarios per shell cover current/LKG/newest, namespaced
+bootstrap reuse, setup capture, readiness, missing marker/selector/UV/support
+and an unprepared store, with poisoned ambient Python and inherited selectors.
+Explicit first-use provisioning retains its parent lock while admitting the
+new runtime; a missing-UV control isolates application admission after bootstrap.
+Successful paths run twice and preserve arguments, stdin, both output streams,
+exit status and existing bytecode options. The Bash current-generation control
+retains caller/application descriptors 5-9. Test-only instrumentation records
+the exact native UV invocation sequence without replacing UV or capture:
+one version check and bootstrap lookup, then one application lookup per
+successful call, with no retries or acquisition. Refusals must precede the gate's
+origin import and must not enter or retry provisioning. The path-gated native workflow
+requires every Bash control on Ubuntu/macOS and both PowerShell hosts on
+Windows, plus every measured offline report without skips. These fixtures
+isolate context/configuration ownership and do not qualify the cell validator's
+independent package probes, installed-host adoption or complete command latency.
+
+Index's `tests/test_managed_cell_probes.py` separately covers those package-origin
+probes and the smoke-build site-directory probe. Eighteen raw/materialized controls
+execute real prepared UV and caller-owned capture with independent 3.11.18
+bootstrap and inert 3.10.20 application environments. Successful paths run twice;
+missing UV/support/runtime refuses before application import, failed imports
+remain failures, and outside-slot origins remain rejected. Settled output-limit
+and UTF-8 capture failures retain invalid-target rollback, while unconfirmed
+cleanup propagates without rollback. Poisoned ambient
+Python/selectors cannot replace the addressed environment; runtime bytes remain
+unchanged. The same three native command-gate jobs require every control and
+offline work-count/elapsed report within their existing eight-minute deadlines.
+Actor-free units retain original uncertain-cleanup process/Job/resource custody
+without candidate deletion and verify smoke-build delegation. These probes are
+not full installation, installed-service health or composed-command qualification.
+
+Index's `tests/test_managed_cell_construction.py` exercises the default cell
+constructor adapter through the existing Installer Engine UV-venv owner.
+Eight Bash controls on each of Ubuntu/macOS and sixteen controls across the two
+Windows PowerShell hosts cover raw/materialized layouts, real prepared managed
+construction, missing UV/support and an unavailable requested version.
+Successful controls construct two fresh private slots with an independent
+3.11.18 helper and 3.10.20 application request; they are not ordinary-reuse
+measurements. Test-only native instrumentation records the actual UV arguments
+without replacing UV or capture. Poisoned Python/project selectors cannot
+replace the request, caller CWD/environment and unrelated environments remain
+unchanged, preallocated ownership receipts survive construction/refusal, and
+constructor progress cannot corrupt JSON stdout. The same
+path-gated native jobs require every applicable case/report within unchanged
+eight-minute deadlines. Fifteen actor-free units cover the actual builder's
+current `3.11` policy, existing-interpreter constructor bypass, original failure
+propagation, callback ownership, redirected headless handles and pre-execution
+prerequisite refusal.
+The smoke-test builder and full project declarations remain separate; no
+installed service, model or host setup is qualified by these fixtures.
+
+Index's `tests/test_managed_cell_dependencies.py` exercises native dependency
+ingress through the existing Installer Engine wrapper with an explicitly inert
+policy observer, not a package installation. Eight Bash controls on each of
+Ubuntu/macOS and sixteen controls across the two Windows PowerShell hosts
+retain raw/materialized layouts, relative UV/shell bindings, independent
+3.11.18 helper and 3.10.20 application interpreters, missing UV/helper and native
+policy refusal. The observer retains actual resolver settings and verifies
+application argv/CWD, stderr diagnostics and exit fidelity without invoking
+package resolution. Prepared controls run twice. Exact lookup/observation counts,
+unchanged caller/payload state and offline elapsed reports are required in the
+same path-gated eight-minute native jobs. Nine actor-free units retain
+pre-effect refusal, callback/CWD and original uncertain-cleanup custody.
 
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
@@ -160,6 +273,40 @@ runner-contained behavior; these inert applications do not qualify installed
 service lifetime, full installation, CPU or latency tails. No worker or deadline
 is added.
 
+Index's `tests/test_managed_portable_engine_sh.py` adds thirty-four raw/materialized
+non-Linux engine-launcher controls. Real offline UV admits an independent
+3.10.20 environment with poisoned ambient tools and inherited selectors.
+Current, LKG, newest and legacy cases repeat twice, preserving foreground PID,
+argv including empty/Unicode arguments, stdin/stdout/stderr, exit status, engine
+environment precedence, CWD and runtime bytes. Incomplete runtime, missing UV,
+denied/foreign UV and missing-support cases refuse without running the stale or
+ambient interpreter. TERM cancellation, abrupt caller loss and a timed-out UV
+with a TERM-resistant descendant require actual group and temporary-file cleanup.
+Background launch retains explicitly supplied stdin and ignored SIGINT;
+exported errexit must preserve denied status and timed-out group cleanup.
+An explicit post-release gate kills the actual caller before stdout consumption
+and still requires group and temporary-file settlement. `ps` is poisoned:
+production custody and the test's exit observations use native null-signal probes.
+Caller-loss observations poll within the existing finite cleanup allowance,
+waiting through transient permission errors but accepting only actual process
+disappearance, never extending the launch observation bound. Two deterministic
+source-adapter controls require eventual disappearance and reject persistent
+permission errors at that same deadline.
+Setup controls deliver TERM after FIFO allocation but before guardian creation,
+requiring temporary-file cleanup, no UV execution and the original signal status.
+Linux exercises generated portable Bash, not Darwin
+supervision; separate five-minute Ubuntu/macOS jobs require all
+thirty-four controls and measurement properties on each native host. Seven serial
+batches contain at most six fixtures; the observation controls retain their own
+two-case no-skip report check. The existing Linux service job and
+deadlines are unchanged. These inert children do not qualify installed
+supervision, production models, CPU or latency tails.
+The existing Linux native job also runs the canonical nested-engine removal
+plan through its native removal primitive, requiring deletion of the published
+capture helper while retaining configuration, unknown helpers and the original
+transaction lock. This focused control does not qualify whole-uninstall
+application admission or current-user process census.
+
 Index's `tests/test_managed_bootstrap_reader_ps1.py` retains 38 controls across
 Windows PowerShell and PowerShell Core. Raw and materialized prepared-only
 readers reject missing UV, interpreter, provider and request inputs without
@@ -257,15 +404,14 @@ selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments
 environment, CWD and immutable slots. Activation-role reading uses the prepared
 bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
 Actual repository-role/ensure entry also accepts private prepared UV without
-changing PATH or acquiring anything. The existing Windows command-bootstrap job
-requires all sixteen controls and ten repeated
-selection reports in serial batches of at most four, with no added worker or
-larger eight-minute limit. These fixtures do not start a service, enroll tasks,
+changing PATH or acquiring anything. The dedicated Windows Index job requires
+all sixteen controls and ten repeated selection reports in serial batches of
+at most four, retaining its eight-minute limit. These fixtures do not start a service, enroll tasks,
 qualify actual detached lifetime or measure child CPU, full install or latency
-tails. The intact packet moved from the launch job after it exhausted eight
-minutes during final cleanup despite passing every step. That run measured
-43 seconds for this packet and 5m10s for command-bootstrap; the relocation adds
-no worker, removes no control and changes no deadline or native process.
+tails. Index management and engine packets were split intact from the broader
+command-bootstrap jobs after aggregate Windows work exhausted eight minutes.
+Static Windows/Linux sibling jobs share the same preparation and preserve every
+command, report, assertion and original deadline; no native process is pooled.
 Existing lifecycle and scheduling controls remain independent.
 
 Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
@@ -276,7 +422,11 @@ wheel-input substitution are forbidden. The source adapter also exports the
 original actual nested-runtime removal and preview controls, preserving data,
 unknown siblings, coordination identity and absent-root behavior.
 The existing POSIX command job requires nine native controls and eight selector
-reports; the Windows launch job requires twenty-two controls and sixteen reports.
+reports; the Windows launch job requires twenty-six controls and sixteen reports.
+Four added raw/materialized PowerShell controls execute the remover beside the
+addressed installer engine while poisoning the unused sibling/canonical location.
+They retain isolated, bytecode-disabled Python, literal arguments and no runtime
+mutation; an older helper in the development payload must not override its owner.
 Serial packets contain at most four cases, without new jobs or larger limits.
 Windows transactions run on Windows and POSIX transactions on POSIX; Core's
 cross-platform selector controls do not substitute for Windows removal.
@@ -9203,7 +9353,8 @@ the existing higher-covered HTTP/service path beside the same three native
 content/vector/checkpoint/ordering-ledger cardinalities. Select this Linux T3
 filesystem/service packet with `--test-file
 tests/test_native_azure_devops_point_service_matrix.py --allow-explicit-tiers`;
-run it separately from the native consumer matrix to retain the existing caps.
+select `-k http_supersession` separately from the native consumer matrix to
+retain the existing caps.
 Initial application and corpus setup are outside operation measurement.
 Actual HTTP intake stays parked until explicit service activation, completes
 through the governed runner, and closes the joined client. Reopened completed
@@ -9220,6 +9371,43 @@ time and separate setup time are observations, not flat-byte, physical-disk
 or whole-resource acceptance. Ordinary v2 execution remains unadvertised.
 No new required-unit node, production repair, provider activation or rollout
 is introduced; the small service/recovery controls remain separate.
+
+The same file's `test_explicit_client_acquires_and_replays_beside_unrelated_native_history`
+adds fresh named-target acquisition and equal-version replay through the actual
+`AgentIndexClient.reindex_points`, HTTP receiver, governed runner and configured
+two-model native owners. Run its content and comment-tombstone cases separately
+with `-k 'explicit_client and content'` and `-k 'explicit_client and tombstone'`
+under the same budgets. Each application submits one health read and one required
+POST, acquires only the named item revision and comment version, and compares
+qualified component content and complete selected vectors with a clean small
+reference. Replay reacquires those two bodies but performs no embedding,
+identical projection writes or derived maintenance. Reconstructed service
+lifetimes preserve polling bytes, sampled unrelated content/vector/checkpoint/
+ordering records and complete native row counts.
+
+The twelve `POINT_CLIENT_NATIVE_WORK` records separate application from replay
+at all three cardinalities and both deletion states. Logical provider and
+native query/row/read-I/O counts must match across cardinalities; full checkpoint
+enumeration is trapped. Setup, clean-reference construction and post-round
+comparisons are outside measurement. As above, diagnostic query-plan replay
+contributes to process I/O; no flat-byte, physical-disk, whole-resource,
+live-provider, broader polling/repair or rollout claim follows from this packet.
+
+`tests/test_source_alias_recovery_native.py` supplies one separate T3
+filesystem/process control for the canonical-alias A/B/C revert case. Run
+`tools/run-tests agent-index --test-file tests/test_source_alias_recovery_native.py
+--allow-explicit-tiers`. Five contained workers use one synthetic Git repository
+and native store, with inference substituted and engine startup/fetch disabled.
+Git and worker launches remove inherited `GIT_*` overrides and ignore global/
+system Git configuration; deliberately poisoned fixture overrides cannot create
+their redirected paths. Clustering is disabled explicitly, with zero measured
+clustering attempts required from every worker.
+Both aliases reach A; one stores B; C reverts a file omitted by net A..C.
+The stale alias must refuse before acquisition without changing native table
+versions, vectors, path checkpoints or source-state bytes. Explicit synthetic
+full repair then restores C and removes B's stale vectors. This is native Linux
+qualification, not mixed-generation takeover, live-store repair or completion
+of the broader source-ownership contract. No runtime or required-CI lane changes.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
@@ -9798,6 +9986,14 @@ The Driver connector-selection packet substitutes storage and native execution.
 It exercises explicit launch binding, old/new capability selection, unchanged
 defaults, provider rollback, immutable retained choice and actual child
 environment construction without a process, socket or service.
+The existing selection case additionally executes seven fixture-only controls
+of Core's actual staging command-root validator with its canonical native argument
+options. They retain split/equal
+plugin-directory syntax, selected manifest identity and refusal of missing,
+duplicate, substituted or option/positional-hidden roots. The adapter exports
+the existing hash-bound staging module; it does not import the
+launcher runtime or create a Host. The ordinary launcher suite separately
+checks refusal before staging or native process creation.
 The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
 controls exercise the actual entrypoints with a synthetic SDK, shared adapter
 input ownership, startup/auth-wait, takeover and unknown-send refusal.
@@ -12567,14 +12763,22 @@ remove admitted cases to accommodate formatting.
 
 ### Unit-manifest storage compatibility
 
-The checked-in source inventory uses the compact source-storage profile
-`copilot-extensions.promotion-units/v2`. The admission reader also accepts
-`copilot-extensions.promotion-units/v1`, with flat, ordered `nodes`.
+The checked-in source inventory uses the prefix-group source-storage profile
+`copilot-extensions.promotion-units/v3`. The compatible reader landed in
+#14658 before the separately reviewed data migration.
+The admission reader accepts flat, ordered v1 `nodes`, v2 file
+groups, and `copilot-extensions.promotion-units/v3` prefix groups.
 V2 replaces only `nodes` with
 `node_groups`: an ordered list of `[test_file, [case_suffix, ...]]` pairs.
 Each full identity is `test_file + "::" + case_suffix`. Repeated nonadjacent
 file groups are allowed and their order is significant; grouping by a
 dictionary must not reorder interleaved selections.
+V3 keeps the root fields but represents each file's cases as ordered
+`[prefix, [suffix, ...]]` runs. Every identity is
+`test_file + "::" + prefix + suffix`; prefixes and suffix lists are nonempty,
+while an individual suffix may be empty. Repeated noncontiguous runs remain
+separate. `compact_manifest` is a data-only v3 encoder for development-unit
+manifests, not candidate/native profiles or an automatic writer switch.
 All other required fields remain `max_seconds`, `sources` and `coverage_targets`.
 Unknown fields, incomplete/empty groups, invalid UTF-8, duplicate full identities
 and every original path/source/target/budget violation refuse admission.
@@ -12582,12 +12786,12 @@ Expanded identifier bytes are bounded by the existing 128 MiB
 `MAX_PACKET_FILE_BYTES` limit before each full identifier is constructed.
 The repository's separate 1 MiB source-file cap is unchanged.
 
-The committed v2 JSON uses whitespace-minified UTF-8 with one final newline.
+The committed source JSON uses whitespace-minified UTF-8 with one final newline.
 Formatting preserves object/array order, every stored value and the normalized
 logical manifest; it does not change the representation, admission policy,
 source-file cap, parser bound, packet deadline or proof contract.
 
-Admission normalizes v2 storage to the existing logical v1 manifest.
+Admission normalizes v2/v3 storage to the existing logical v1 manifest.
 For identical logical data, complete node order, source/target sets, limits
 and canonical manifest digest are identical. Raw source/packet file hashes
 still bind actual bytes: storage conversion cannot relabel a prior artifact
@@ -12604,23 +12808,59 @@ The shared admission module also ships in Worktree Manager's declared
 proof that an installed consumer has selected the capable reader.
 Its source preparer copies the inventory opaquely; this operation does not
 decode the source node list. Packaged evidence readers still consume flat v1.
-The actual prior source runner accepts v1 and refuses v2 before source
+The historical pre-v2 source runner accepts v1 and refuses v2 before source
 verification, output-directory creation or test execution. Rolling that runner
 back requires the matching v1 source inventory too; decoder-only rollback with
 v2 storage is explicitly incompatible. A representation-only migration retains
 the matching v1 source revision with identical admission data; rollback must
 not silently discard newer admissions to regain compatibility.
+The frozen pre-v3 reader accepts v1/v2 and refuses v3. Fresh-process receipt-file
+checks compare both readers across all three forms, preserving complete ordered
+logical data and truthful unsupported-version refusal. Reader-only rollback
+with unsupported stored data remains incompatible; no admitted witness may be
+dropped to manufacture a matching older representation.
 Future format changes must prove capable readers at each actual selected
 consumer, reconcile raw node-list assertions, and retain an equivalent supported
 rollback or explicit pre-effect incompatibility. They must not infer support
 from a package version, drop tests to produce a fallback, weaken limits or
 activate an independently owned control path.
 
-Fourteen focused compact-format controls cover strict admission, bounded
+Fifteen focused existing controls cover strict admission, bounded
 expansion, ordered normalization, actual source/packet loading and candidate
-composition. The existing real compatibility-CLI controls exercise both storage
-forms without running Git or release actors. These source results do not prove
+composition. Both existing real compatibility-CLI cases exercise v1/v2/v3
+without running Git or release actors. New assertions run under existing
+admitted identities; old parameter tables, assertions and selection remain.
+The reader-only stage honestly rebinds changed existing code/test hashes while
+keeping the active source profile v2. The subsequent data-only conversion
+freezes that post-reader baseline at
+`7006b6fdc0e6de4f0dcf87eb76aa5d1658cc4a46`: all 10,375 ordered nodes,
+1,499 source bindings, 546 targets, 92 helper decisions and the 300-second
+deadline remain identical. Stored bytes fall from 1,048,547 to 697,907.
+Independent expansion and recursive type/order comparison, plus fresh-process
+receipt-file reads, verify equivalence before replacing the source file.
+The final baseline includes thirteen peer-owned binding refreshes after the
+reader merge; migration preserves those exact hashes too.
+The matching v2 inventory at that immutable revision is a supported rollback
+pair with the reader; later admissions must not be discarded to reuse it.
+PR CI selects the head's reader; qualification/publication select helpers and
+data from the same immutable Dev SHA. Main
+`73554ecb6359f06ef8248fdf090c92686be719fe` retains the previously traced
+consumer selectors. No operational writer or installed reader is switched.
+These source results do not prove
 deployed reader adoption, installed/native qualification or full-census coverage.
+
+The logical-machine environment adapter now exports all fifteen original cases
+from three complete functions. Its remaining six invalid/conflicting identity
+rows and one native/guest-distinction case were held only by the former v2
+storage frontier. Complete original/adapter metadata comparison preserves
+objects, code/global origins, fixtures, parameter values/types, marks and IDs
+before execution. All seven new cases pass unchanged effect guarding with
+actual decomposition call coverage, zero prohibited effects and 25 bound reads.
+Only their seven identities and the existing adapter hash are added/refreshed;
+the original tests, pure string/regex/dataclass owner, existing eight identities,
+other source bindings, targets, helper decisions and limits are unchanged.
+These cases do not probe an OS, change environment variables or execute a native
+or guest process. They do not qualify broader native/environment integration.
 
 The version-bump guard packet exports eleven original cases through eight exact
 test objects and the original `guard_module` fixture. Mocked Git protocol and

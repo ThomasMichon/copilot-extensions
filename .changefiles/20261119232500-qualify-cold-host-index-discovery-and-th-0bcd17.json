@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify cold host-index discovery and the managed-session status boundary.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

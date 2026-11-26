@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+import argparse
+import importlib.util
 import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +15,55 @@ import pytest
 
 from agent_bridge import __main__ as cli
 from agent_bridge.client import BridgeClientError
+
+
+@pytest.mark.parametrize("controller_project", [None, "other-controller-project"])
+def test_dispatch_observation_config_preserves_wait_across_project_boundaries(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    controller_project: str | None,
+) -> None:
+    source = (
+        Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"
+        / "agent_dispatch" / "bridge_continuation_cli.py"
+    )
+    spec = importlib.util.spec_from_file_location("_dispatch_observation_contract", source)
+    assert spec is not None and spec.loader is not None
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    monkeypatch.setenv(
+        "AGENT_BRIDGE_LEGACY_OBSERVATION",
+        producer.observation_environment()["AGENT_BRIDGE_LEGACY_OBSERVATION"],
+    )
+    monkeypatch.setattr(cli, "_sender_repo", lambda: controller_project)
+    monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "observation-controller")
+    observed: list[str] = []
+
+    def session(handle: str) -> dict[str, str]:
+        observed.append(handle)
+        return {"session_id": handle, "status": "idle"}
+
+    client = SimpleNamespace(get_session=session)
+    monkeypatch.setattr(cli, "_get_client", lambda: client)
+    argv = ["wait", "worker-a", "--json"]
+    cli.main(argv)
+    assert observed == ["worker-a"] and "already idle" in capsys.readouterr().out
+    prior = argparse.ArgumentParser()
+    wait = prior.add_subparsers(dest="command", required=True).add_parser("wait")
+    wait.add_argument("session_id")
+    wait.add_argument("--json", action="store_true")
+    assert prior.parse_args(argv).session_id == "worker-a"
+
+
+def test_explicit_exact_selection_overrides_legacy_observation_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_OBSERVATION", "1")
+    _client, calls = client_for(monkeypatch)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    result = json.loads(capsys.readouterr().out)
+    assert result["settled"] is True and result["reason"] == "idle"
+    assert result["snapshot"]["identity"]["native_session_id"] == "native-a"
+    assert calls[0][0] == "resolve"
 
 
 def snapshot(session_id: str, *, idle: bool = True) -> dict[str, Any]:
@@ -84,18 +136,26 @@ def client_for(
 
 @pytest.mark.parametrize("represented", [False, True])
 @pytest.mark.parametrize("command", ["read", "wait"])
+@pytest.mark.parametrize("selection", [[], ["--bridge"]])
+@pytest.mark.parametrize("project", [None, "explicit-demo"])
 def test_remote_observation_pins_host_and_owner_without_local_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     represented: bool,
     command: str,
+    selection: list[str],
+    project: str | None,
 ) -> None:
+    monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
     _client, calls = client_for(monkeypatch, represented=represented, remote=True)
-    cli.main(["--json", command, "workspace-a", "--bridge", "--host", "host-b"])
+    cli.main([
+        *(["--project", project] if project else []),
+        "--json", command, "workspace-a", *selection, "--host", "host-b",
+    ])
     session_id = "native-a" if represented else "managed-a"
     assert calls == [
         ("resolve", ("workspace-a", {
-            "hosts": ["host-b"], "project": "demo", "all_projects": False,
+            "hosts": ["host-b"], "project": project or "demo", "all_projects": False,
             "machine": None, "namespace": None,
         })),
         ("snapshot", (session_id, {
@@ -122,6 +182,63 @@ def test_empty_explicit_host_never_selects_local_or_legacy_mode(
     with pytest.raises(SystemExit, match="host"):
         cli.main([command, "workspace-a", "--host", host, *(["--bridge"] if bridge else [])])
     assert not calls
+
+
+@pytest.mark.parametrize("command", ["read", "wait"])
+def test_explicit_legacy_selector_preserves_existing_observation_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    calls: list[tuple[str, Any]] = []
+    payload = {"legacy": "represented history"}
+
+    def read(handle: str, **bounds: Any) -> dict[str, Any]:
+        calls.append(("snapshot", (handle, bounds)))
+        return payload
+
+    def session(handle: str) -> dict[str, Any]:
+        calls.append(("session", handle))
+        return {"status": "idle"}
+
+    client = SimpleNamespace(
+        daemon_supports=lambda *_args, **_kwargs: True,
+        resolve_live_result_target=lambda _target: {"session_id": "represented"},
+        get_live_result_snapshot=read,
+        get_session=session,
+    )
+
+    def get_client(**kwargs: Any) -> SimpleNamespace:
+        assert kwargs == ({"ensure": False} if command == "read" else {})
+        return client
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
+    monkeypatch.setattr(cli, "_caller_id_for", lambda _args: None)
+    cli.main(["--json", command, "workspace-a", "--legacy-selector"])
+    output = capsys.readouterr().out
+    if command == "read":
+        assert json.loads(output) == payload
+        assert calls == [("snapshot", (
+            "represented", {"max_items": None, "max_text_chars": None},
+        ))]
+    else:
+        assert "already idle" in output
+        assert calls == [("session", "workspace-a")]
+
+
+@pytest.mark.parametrize("command", ["read", "wait"])
+@pytest.mark.parametrize("specialized", [False, True])
+def test_project_override_still_rejects_legacy_observation_before_client(
+    monkeypatch: pytest.MonkeyPatch, command: str, specialized: bool,
+) -> None:
+    monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: pytest.fail("legacy project reached client"))
+    options = (
+        ["--event", "0"] if command == "read" else ["--attention", "input_required"]
+    ) if specialized else ["--legacy-selector"]
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["--project", "demo", command, "workspace-a", *options])
+    assert refused.value.code == 2
 
 
 def test_remote_read_timeout_is_classified_without_traceback_or_fallback(
@@ -463,7 +580,7 @@ def test_explicit_project_is_consumed_only_by_bridge_observations(
         assert json.loads(capsys.readouterr().out)
     else:
         with pytest.raises(SystemExit) as exc:
-            cli.main(argv)
+            cli.main([*argv, "--legacy-selector"])
         assert exc.value.code == 2
         assert not calls
         assert "not meaningful" in capsys.readouterr().err
@@ -973,10 +1090,10 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
         ["wait", "workspace-a", "--bridge", "--all-attention"],
         ["wait", "workspace-a", "--bridge", "--attention", "input_required"],
         ["wait", "workspace-a", "--bridge", "--position", "position-a"],
-        ["read", "workspace-a", "--all-projects"],
-        ["wait", "workspace-a", "--machine", "host-a"],
-        ["read", "workspace-a", "--host", "host-b"],
-        ["wait", "workspace-a", "--host", "host-b"],
+        ["read", "workspace-a", "--legacy-selector", "--all-projects"],
+        ["wait", "workspace-a", "--legacy-selector", "--machine", "host-a"],
+        ["read", "workspace-a", "--legacy-selector", "--host", "host-b"],
+        ["wait", "workspace-a", "--legacy-selector", "--host", "host-b"],
     ],
 )
 def test_bridge_options_never_silently_change_legacy_meaning(

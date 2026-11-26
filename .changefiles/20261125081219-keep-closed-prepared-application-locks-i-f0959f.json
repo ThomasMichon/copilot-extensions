@@ -1,9 +1,0 @@
-{
-  "comment": "Keep closed prepared-application locks independent of relative resolver cutoffs",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

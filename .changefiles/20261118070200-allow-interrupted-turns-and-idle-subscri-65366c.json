@@ -1,9 +1,0 @@
-{
-  "comment": "Allow interrupted turns and idle subscriptions to settle together after confirmed local Host exit.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

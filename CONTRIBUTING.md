@@ -129,6 +129,16 @@ independent same-name producers. Do not combine it with promotion inputs or omit
 the selector for a scoped repair: omission retains the existing global refresh.
 This route becomes available only after its source is promoted to `main`;
 a successful read-only metadata job alone does not repair historical direct checks.
+The scoped owner permits up to three observations, paced one second apart,
+for known pre-write or newly pending results to become visible. Unexpected
+owned IDs or states still refuse immediately. Only a returned 404 completing
+the newly created check can retry its write, up to three attempts with fresh
+metadata validation; lost or unclassified write responses are never replayed.
+These operations retain the existing request budget and reserved failure fencing.
+The path-gated `source-attribution-units.yml` workflow runs the explicit
+in-memory Node packet with coverage and no GitHub mutations. Locally, install
+the committed parser lock with `npm --prefix .github/actions ci --ignore-scripts`
+and run `node --test .github/actions/required-pr-attribution*.test.cjs`.
 
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,

@@ -1,9 +1,0 @@
-{
-  "comment": "Complete prepared Manager command/setup publication, preserve scoped installation custody, start fresh owned daemons, and support native launch working directories and older selected launcher helpers",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

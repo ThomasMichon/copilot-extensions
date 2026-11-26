@@ -567,9 +567,12 @@ ingestion behavior are unchanged.
 
 ### Explicit service binding
 
-`server.build_app(point_service_factory=...)` optionally constructs a
+`server.build_app(point_service_factory=...)` and the synchronous
+`server.serve(..., point_service_factory=...)` entrypoint optionally construct a
 `indexing.point_service.PointService` when the service's existing task runner
 starts. A passive application does not invoke that factory until promotion.
+Both entrypoints use the same factory and lifecycle; the default CLI supplies
+none. Passing a factory does not activate execution.
 The binding takes an explicit `IndexConfig`, complete `PointScope`, and
 `executor_context`: an async-context-manager factory yielding the synchronous
 point executor. That context owns the configured connector and all model
@@ -700,7 +703,21 @@ typed task union. It confirms admission, not applied content or continued
 activation. Lost/malformed confirmation remains an unknown acceptance; never
 replay it under an old form. Absent requirements preserve existing paused
 v1/v2 retention. See the [reviewed request contract](../../../efforts/active/incremental-indexing-delta-pipeline/point-required-admission.md)
-for compatibility and rollback requirements. Caller migration remains separate.
+for compatibility and rollback requirements.
+
+`AgentIndexClient.reindex_points(PointChangeHints)` explicitly opts into this
+boundary. Its constructor must already select the installation and a nonempty
+instance token; it does not acquire or mutate identity from health. One health
+request checks that same peer, complete scope, active production pair and the
+additive admission capability before at most one required POST. A declaration-only
+provider is insufficient. The method validates the returned peer, admission
+version/fingerprint and complete typed target/correlation union, not the v1
+receipt parser. Exact `accepted: false` is refusal. Malformed, contradictory,
+missing or lost confirmation, including transport/status errors after submission,
+is unknown acceptance and never triggers retry, downgrade or generation switching.
+The receipt certifies admission only. Existing `reindex(...)`, CLI/MCP callers
+and retained recovery remain unchanged; no caller or point source activates
+automatically, and optional feature incompatibility is not a replacement veto.
 
 There is no second scheduler, timer or child process. The existing governed
 `TaskRunner` iteration executes at most one point claim before its legacy queue

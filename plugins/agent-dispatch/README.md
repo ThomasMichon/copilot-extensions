@@ -9,6 +9,14 @@ environment, reusable registrar/identity fields and configuration boundaries.
 Windows scheduling is optional and separate from service capability; see
 [scheduling and classic-lane readiness](docs/windows-scheduling.md).
 
+Payload-local and installed compatibility command gates admit their selected
+completed application environment through prepared-only exact UV selection.
+The PowerShell gate uses the existing bounded native capture owner, independent
+of the declared bootstrap interpreter. Missing UV or admission support refuses
+application entry without acquisition or a new self-provision attempt. Current,
+last-known-good and newest-complete selection, configuration-only telemetry,
+readiness isolation and native argument/stdio/exit behavior remain unchanged.
+
 `telemetry hourly --hour YYYY-MM-DDTHH:00:00Z` exports a bounded, privacy-reduced
 hour from the existing retained telemetry namespace without starting the
 coordinator, capture or a schedule. Its selected runtime ships the optional
@@ -2839,6 +2847,18 @@ agent-bridge so the live session picks the new task straight back up --
 explicitly told to pass that recovery-handle worker id on every owner-gated
 command going forward, since it won't resolve from the resumed session's own
 CWD identity.
+
+Local and fleet resume prompts use the same published startup-bound Bridge
+continuation form, with hosting enforcement and the prompt on stdin. Fleet
+delivery keeps one SSH command and its existing wall timeout. It uses the
+pre-existing startup timeout options supported by prior Bridge CLIs, not the
+new `--legacy-selector` flag or an effectful fallback after ordinary send fails.
+The same continuation producer supplies startup sends after worktree resume
+and reclaim; their caller cursor identities remain unchanged. Synchronous
+ordinary/acquisition observations retain the prior wait contract through
+child-scoped `AGENT_BRIDGE_LEGACY_OBSERVATION=1`. Their existing arguments,
+output, cursor and wall timeout are unchanged, including on an older CLI that
+ignores this configuration. No worker project is inferred from the controller.
 
 **Known limitation:** `abandon --override-live` (see below) leaves the
 source task's own reservation active; supervisor reconciliation may treat a

@@ -11,6 +11,19 @@ from .session_status import SessionStatus
 
 
 class PromptClientMixin(_Base):
+    def submit_managed_message(
+        self, session_id: str, prompt: str, *, idempotency_key: str,
+        caller_id: str | None = None, expected_native_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Accept into the existing queue; never implicitly resume, retry or submit a turn."""
+        from .client_managed_message import submit
+        from .managed_messages import ManagedMessage
+
+        return submit(self, session_id, ManagedMessage(
+            prompt=prompt, idempotency_key=idempotency_key, caller_id=caller_id,
+            expected_native_session_id=expected_native_session_id,
+        ))
+
     def submit_remote_exact_live_prompt(
         self, host: str, *, session_id: str, invocation_key: str,
         sender: str, prompt: str,

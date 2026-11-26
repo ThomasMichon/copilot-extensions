@@ -112,7 +112,7 @@ test("attemptWorktreeSync skips a worktree with an in-progress rebase, even when
   }
 });
 
-test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", async () => {
+test("attemptWorktreeSync reports the inspection boundary for a plain directory", async () => {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-nosync-"));
   try {
     const result = await attemptWorktreeSync(dir);
@@ -122,7 +122,59 @@ test("attemptWorktreeSync reports not-a-git-checkout for a plain directory", asy
     // review finding: checking cleanliness before the lock left a window
     // for a file to become dirty between the check and the locked sync),
     // so a non-git directory now fails at lock-path resolution first.
-    assert.match(result.reason, /not a git checkout|git unavailable|could not resolve a lock path/);
+    assert.match(result.reason, /could not inspect worktree status|could not resolve a lock path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync streams status larger than execFile's default buffer", async () => {
+  const dir = initGitRepo();
+  try {
+    const blob = execFileSync("git", ["hash-object", "file.txt"], {
+      cwd: dir, encoding: "utf-8", windowsHide: true,
+    }).trim();
+    const entries = Array.from({ length: 6000 }, (_, index) =>
+      `100644 ${blob}\tmissing-${index}-${"x".repeat(180)}.txt\n`,
+    ).join("");
+    execFileSync("git", ["update-index", "--index-info"], {
+      cwd: dir, input: entries, windowsHide: true,
+    });
+
+    const before = execFileSync("git", ["write-tree"], {
+      cwd: dir, encoding: "utf-8", windowsHide: true,
+    }).trim();
+    const status = execFileSync(
+      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
+      { cwd: dir, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+    );
+    assert.ok(status.length > 1024 * 1024, "fixture must exceed the old stdout limit");
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /uncommitted, untracked, or ignored content/);
+    assert.equal(execFileSync("git", ["write-tree"], {
+      cwd: dir, encoding: "utf-8", windowsHide: true,
+    }).trim(), before, "the failed-closed inspection must not change the index");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync reports status failure in a valid checkout with a corrupt index", async () => {
+  const dir = initGitRepo();
+  try {
+    const index = execFileSync("git", ["rev-parse", "--git-path", "index"], {
+      cwd: dir, encoding: "utf-8", windowsHide: true,
+    }).trim();
+    writeFileSync(join(dir, index), "invalid index\n");
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /could not inspect worktree status/);
+    assert.match(result.reason, /Git status inspection failed \(exit 128\)/);
+    assert.doesNotMatch(result.reason, /not a git checkout or git unavailable/);
+    assert.equal(readFileSync(join(dir, index), "utf-8"), "invalid index\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -530,6 +582,30 @@ test("attemptWorktreeSync skips when only an ignored file is present (plain --po
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
     assert.match(result.reason, /uncommitted, untracked, or ignored content/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync handles ignored status output exceeding one MiB without buffering it", async () => {
+  const dir = initGitRepo();
+  try {
+    writeFileSync(join(dir, ".gitignore"), "*.artifact\n");
+    execFileSync("git", ["add", ".gitignore"], { cwd: dir, windowsHide: true });
+    execFileSync("git", ["commit", "-q", "-m", "ignore artifacts"], { cwd: dir, windowsHide: true });
+    for (let index = 0; index < 7000; index++) {
+      writeFileSync(join(dir, `${String(index).padStart(5, "0")}-${"x".repeat(145)}.artifact`), "");
+    }
+    const status = execFileSync(
+      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
+      { cwd: dir, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+    );
+    assert.ok(status.length > 1024 * 1024);
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /uncommitted, untracked, or ignored content/);
+    assert.ok(existsSync(join(dir, `00000-${"x".repeat(145)}.artifact`)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

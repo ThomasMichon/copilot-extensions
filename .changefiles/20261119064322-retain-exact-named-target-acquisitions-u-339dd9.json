@@ -1,9 +1,0 @@
-{
-  "comment": "Retain exact named-target acquisitions under the existing pending parent and compose only whole-claim candidates without enabling execution.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

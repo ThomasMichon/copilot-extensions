@@ -83,12 +83,41 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   docs, tests and native workflow match Main `859ea59968e2`, Bridge
   `0.9.558-dev1`. All 94 inventory nodes, 70 selected source hashes and 44
   coverage targets remain admitted. The opt-in explicit-host registered-inbox
-  CLI consumer is implemented and locally qualified: all 164 contained
-  parser/client/carrier controls and 102 actor-free units pass. It preserves
-  exact host/session/sender/key binding and reports admission only. Review,
-  exact-source strict CI, native qualification, merge and normal release
-  remain required; default and lifecycle migration remain open. No competing
-  release repair, qualification bypass or installed adoption is claimed.
+  CLI consumer merged in #14549 after exact-head approval, strict source CI
+  and both native OS jobs. All 164 contained parser/client/carrier controls
+  and 102 actor-free units pass. It preserves exact host/session/sender/key
+  binding and reports admission only. Its eight released content paths match
+  Main `138d0ac9dbc43f05ed843c372c6053052290d195`, Bridge `0.9.561-dev1`,
+  after normal promotion `45625102510` (#14564). All 102 inventory nodes,
+  70 development-source manifest entries and 44 Bridge coverage targets remain
+  admitted under the unchanged profile and 300-second budget.
+  The ordinary send/read/wait default slice merges in #14572 as
+  `aa075be82f91a08a33b28cf85bb568f25c5652c8` after clean hosted and local
+  review, resolved threads, canonical source CI and both native OS jobs.
+  Normal Main release initially fails installed-Manager TTY qualification
+  in run `45751230461`: the rendered consumer exits `4294967295` before
+  its keyboard-driven quit dialog. Watchdog #14688 records this occurrence;
+  the existing #12203/#12680 investigation retains diagnosis and ownership.
+  This is not a root-cause finding or accepted-flake exception.
+  The externally started successor `45752176044` succeeds. All 31 runtime,
+  test, workflow and public-document files match normal Main
+  `c230cde9b46f1ab704e2aa52c28577175a680bb4`, Bridge `0.9.569-dev1`,
+  after #14691. Its logical admission retains all 119 Bridge controls in
+  their original order, every original unit node and the 300-second budget.
+  The released manifest uses the existing release projection; effort files
+  remain Dev-only under the independently owned release-scope policy.
+  This verifies source release, not diagnosis of the earlier TTY fault.
+  Lifecycle migration remains open. The next provider-first slice adds
+  identity-pinned workspace resume through the existing native, retained and
+  singleton owners. Its separate capability and exact route prevent a selected
+  conversation from becoming a newer head during lookup-to-resume.
+  Its 58 exact/retained controls, 178 legacy native controls and 142 actor-free
+  controls pass locally. A retained-successor correction passes 30 focused
+  controls. All 11 changed Python files pass whole-file strict checks for Linux
+  and Windows targets; install, documentation and module-size guards pass.
+  Source publication and hosted qualification remain; no CLI migration,
+  delivered provider or installed adoption is claimed.
+  No competing release repair, qualification bypass or installed adoption is claimed.
   The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
@@ -97,8 +126,62 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   The carrier and HTTP expansions did not themselves migrate ordinary CLI
   callers. The managed consumer above is separate opt-in adoption; legacy
   defaults remain unchanged.
-  Default migration, remote registered sends, effectful selectors and potential
-  targets follow.
+  The current source slice qualifies plain send/read/wait defaults over the
+  released exact selector, with an explicit legacy escape and unchanged
+  specialized delivery/history/receipt operations. The root project guard and
+  Dispatch continuation/startup/observation producers preserve their intended
+  owners across project boundaries. Profile and implicit-startup examples use
+  explicit legacy selection. Qualified peer replies retain their existing
+  host owner; worktree startup pins the session ID returned by JSON resume.
+  The current source passes 119 actor-free controls, 55 focused Bridge
+  parser/peer controls and the final 83-case Dispatch rerun. The preceding
+  201-case Bridge and 117-case Dispatch packets retain qualification for
+  unchanged neighboring behavior. Whole-file strict checks pass all seven
+  files in the latest delta on both target platforms through the repository's
+  selected-file checker; the canonical local inventory stalled before checking.
+  Unchanged files retain their earlier whole-file qualification.
+  Install-contract, documentation, module-size and whitespace checks pass.
+  Worktrees' generated related-repository dispatch and exploration examples
+  now select legacy startup explicitly. All 39 selected resolver/acquisition
+  controls pass under the unchanged limits, including five complete-command
+  cases. Both complete touched Worktrees files pass strict checking for Linux
+  and Windows. The cold preparation attempt exceeded its aggregate budget;
+  verified prepared-environment reuse passes and does not erase that limit.
+  The latest correction qualifies the real root parser's legacy caller reuse,
+  complete hint argument order and specialized receipt-wait owner: all 13
+  selected controls pass and run in both existing normal native OS jobs.
+  The generated guard and CodeSpace-map startup hints now agree with the
+  related-repository planner. The current contained rerun passes 39 resolver,
+  128 guard and 18 CodeSpace emitter cases under the unchanged limits.
+  Local whole-file checking of the seven-file delta stopped during ordinary
+  consumer materialization before MyPy started; it supplies no type verdict.
+  The first current canonical CI run then finds two typing errors in the
+  complete CodeSpace emitter: an implicit exception re-export and an empty
+  list. The correction imports the same exception from its defining owner
+  and annotates the existing list. Both complete CodeSpace files now pass
+  strict Linux/Windows checks; all 18 emitter cases pass unchanged.
+  Final exact-head canonical source CI supplies the passing verdict after
+  that typing correction.
+  The existing owner's reader #14658 and separate data migration #14662 now
+  remove the storage prerequisite without a competing implementation.
+  The pinned target integration uses that delivered v3 encoder and preserves
+  all 10,375 target nodes, all 119 Bridge controls, source/target order and
+  the 300-second budget. The 698,230-byte manifest meets the unchanged
+  1 MiB cap. Strict type/order roundtrip, all 72 selected input bindings,
+  a fresh actual receipt-file consumer and all 119 focused unit controls pass.
+  The only change among the other 38 owned paths is an upstream Dispatch
+  README addition; the remaining 37 retain their qualified bytes.
+  A later catalog-only rebase preserves all 10,382 nodes from target
+  `3c9f2140dc39`, yielding 10,399 nodes and 698,471 stored bytes with the same
+  119 Bridge controls, bindings, targets and budget. All 38 other owned paths
+  retain their published bytes before this status update.
+  Final head `ece0d66c208e` preserves all 10,431 target nodes and yields
+  10,448 admitted nodes, 1,504 bindings and 549 targets under the same budget.
+  All 38 other authored files are byte-identical to the clean-reviewed code.
+  The actual required checks and both native jobs pass before normal
+  role-scoped self-merge. All 39 published blobs match the confirmed squash
+  merge. Source release is the remaining gate for this slice; effectful
+  lifecycle selectors, potential targets and the full root remain separate.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
   Queued-delivery attribution remains separately open at the installed-adoption
@@ -406,12 +489,34 @@ Installed fleet adoption is not claimed.
   explicit client method before ordinary CLI adoption. #14524 passes
   current-head review, required strict CI and both native jobs. Its source
   matches normal Main `859ea59968e2`, Bridge `0.9.558-dev1`, after successful
-  promotion `45598981628` (#14547).   The local strict timeout is not passing
+  promotion `45598981628` (#14547). The local strict timeout is not passing
   evidence; exact-source CI supplies the type verdict.
+- [x] Qualify and release opt-in explicit-host registered-inbox ordinary sends.
+  #14549 merged as `17f79f778e6532790b05b89e26a0c586a1e1da75` after approval,
+  strict exact-source CI, eligible-unit coverage and both native OS jobs.
+  Local whole-file strict checks and all 164 contained consumer/102 actor-free
+  controls pass. All eight released content paths match Main
+  `138d0ac9dbc43f05ed843c372c6053052290d195`, Bridge `0.9.561-dev1`,
+  after normal promotion `45625102510` (#14564).
+- [x] Qualify and release plain send/read/wait defaults over the released exact
+  selector, preserving an explicit legacy escape, specialized operations and
+  truthful provider-rollback refusal without automatic fallback.
+  Source #14572 is merged with passing review, required CI and native gates.
+  Main `c230cde9b46f`, Bridge `0.9.569-dev1`, matches all 31 released content
+  paths after normal successor `45752176044` and #14691. All 119 Bridge
+  controls and the original source-unit census and budget are preserved.
+  The earlier TTY occurrence remains under #14688/#12203/#12680; no fault
+  repair, self-triggered retry or installed adoption is claimed.
+- [ ] Qualify and release identity-pinned workspace resume through existing
+  native, keyed-retained and singleton lifecycle owners before migrating the
+  common CLI selector. Preserve prior-peer refusal, one attempt, original
+  history, pending handoff and unknown outcomes.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local and explicit-host read/wait and managed sends have landed;
-  default migration, remote registered sends and lifecycle selectors remain open.
+  default migration and lifecycle selectors remain open. The opt-in registered
+  consumer merged in #14549; its normal source release is verified in Main
+  `138d0ac9dbc4`, Bridge `0.9.561-dev1`.
   The remote HTTP adapter merged in #14365 and matches normal Main promotion
   `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Explicit-host CLI observations merged
   in #14370 and match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`.
@@ -422,8 +527,9 @@ Installed fleet adoption is not claimed.
   The exact remote registered-inbox carrier provider merged in #14419.
   Both changes are verified in normal Main `b05bf87c6cd7`.
   The additive registered-inbox HTTP adapter merged in #14524; its normal
-  source release is verified in Main `859ea59968e2`. Qualify its ordinary
-  CLI consumer next.
+  source release is verified in Main `859ea59968e2`. The ordinary CLI
+  consumer's normal release is also verified; default migration and lifecycle
+  consumers are the next source work.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
@@ -522,6 +628,7 @@ not another permanent public discovery path.
 
 Dated pages retain every original journal entry.
 
+- [2026-11-25](journal/2026/11.25-default-selection-review.md) - Default-selector review corrections and consumer qualification.
 - [2026-11-24](journal/2026/11.24-remote-results-and-validation.md) - Result bounds, delivery and validation.
 - [2026-11-23](journal/2026/11.23-exact-observations-and-sends.md) - Exact inspection, observations and sends.
 - [2026-11-22](journal/2026/11.22-inventory-and-selectors.md) - Fleet inventory and selectors.

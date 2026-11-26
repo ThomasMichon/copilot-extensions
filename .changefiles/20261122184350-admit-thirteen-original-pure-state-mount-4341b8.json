@@ -1,9 +1,0 @@
-{
-  "comment": "Admit thirteen original pure state-mount validation controls",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

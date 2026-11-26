@@ -1,9 +1,0 @@
-{
-  "comment": "Add effect-free watch transition path/phase observation and refuse unqualified transition state before legacy reads or final writes.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

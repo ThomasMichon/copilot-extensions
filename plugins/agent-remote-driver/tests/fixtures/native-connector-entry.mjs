@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const [connectorRoot, bridgeRoot, driverRoot, config, mode] = process.argv.slice(2);
 const sessionId = "11111111-1111-4111-8111-111111111111";
+const connectorId = "plugin:copilot-driver-headed:copilot-driver-headed";
 const nonce = "fixture-".repeat(8), handlers = new Set(), sends = [];
 let joins = 0, peer, handshake, reply;
 let bound, answered;
@@ -56,11 +57,20 @@ try {
       sessionId, log: async () => {}, getEvents: async () => [],
       rpc: {
         metadata: { snapshot: async () => ({ sessionId, workingDirectory: process.cwd() }) },
-        plugins: { list: async () => ({ plugins: [
-          { name: "agent-bridge", enabled: true, installedFrom: bridgeRoot },
-          { name: "agent-remote-driver", enabled: true, installedFrom: driverRoot },
-          { name: "copilot-driver-headed", enabled: true,
-            installedFrom: mode === "wrong-loadout" ? driverRoot : connectorRoot },
+        plugins: { list: () => assert.fail("Installer records cannot establish executing origins") },
+        extensions: mode === "missing-observer" ? {} : { list: async () => ({ extensions: [
+          { id: connectorId,
+            name: mode === "discovery-name" ? "runtime-discovery-label" : "copilot-driver-headed",
+            source: "plugin", status: "running",
+            pid: mode === "missing-origin" ? undefined : mode === "wrong-loadout" ? process.pid + 1 : process.pid,
+            ...(mode === "identity-observation" ? {
+              name: connectorId, source: "session", status: "starting", pid: process.pid + 1,
+            } : {}),
+          },
+          ...(mode === "competing-driver" ? [{
+            id: "plugin:agent-remote-driver:agent-remote-driver", name: "agent-remote-driver",
+            source: "plugin", status: "running", pid: process.pid + 2,
+          }] : []),
         ] }) },
       },
       on(handler) { handlers.add(handler); return () => handlers.delete(handler); },
@@ -92,11 +102,22 @@ try {
     params: { sessionId, prompt: 'literal\n"quote" & $value', mode: "immediate" },
   }) + "\n");
   await response;
-  if (mode === "wrong-loadout") {
-    assert.match(reply.error.message, /Selected native execution context/);
+  const refusal = {
+    "wrong-loadout": "extension-process-mismatch:connector",
+    "missing-origin": "extension-process-mismatch:connector",
+    "missing-observer": "extensions-list-unsupported",
+    "competing-driver": "extension-competing:driver",
+    "identity-observation": "extension-identity-mismatch:connector",
+  }[mode];
+  if (refusal) {
+    assert.equal(reply.error.code, -32001);
+    const observation = mode === "identity-observation"
+      ? " [owner-checks id=match name=qualified source=session status=starting pid=other]" : "";
+    assert.equal(reply.error.message,
+      `Selected native execution context is unavailable; no input was dispatched [${refusal}]${observation}`);
     assert.equal(sends.length, 0);
     assert.equal(joins, 1);
-    console.log("observed wrong loadout refused before native input; no fallback join");
+    console.log(`observed ${mode.replaceAll("-", " ")} refused before native input; bounded reason; no fallback join`);
   } else {
     assert.equal(reply.result.messageId, "native-message");
     assert.equal(sends.length, 1);

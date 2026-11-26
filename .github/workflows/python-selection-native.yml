@@ -30,6 +30,12 @@ on:
       - libs/payload-invocation/templates/posix-shim.tmpl
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
+      - libs/payload-invocation/tests/test_mcp_ready_source.py
+      - plugins/agent-mcp/scripts/runtime-gate.sh
+      - plugins/agent-mcp/scripts/runtime-gate.ps1
+      - plugins/agent-mcp/tests/test_managed_command_gate.py
+      - plugins/agent-mcp/tests/test_payload_invocation.py
+      - tools/installer_engine_ref.py
       - libs/installer-engine/bootstrap-capture.cs
       - libs/installer-engine/bootstrap-capture.exe
       - libs/installer-engine/bootstrap-capture.ps1
@@ -138,6 +144,8 @@ on:
       - plugins/agent-dispatch/tests/test_managed_bootstrap_reader.py
       - plugins/agent-dispatch/tests/test_managed_bootstrap_reader_sh.py
       - plugins/agent-dispatch/tests/test_managed_cold_readers_ps1.py
+      - plugins/agent-dispatch/tests/test_managed_ready_ingress_ps1.py
+      - libs/payload-invocation/tests/test_dispatch_ready_source.py
       - plugins/agent-dispatch/tests/test_action_native_ps1.py
       - plugins/agent-dispatch/tests/test_windows_bootstrap_reconcile_lifecycle.py
       - plugins/agent-dispatch/tests/test_managed_index_reader_sh.py
@@ -212,20 +220,23 @@ permissions:
 jobs:
   command-bootstrap-uv-windows:
     runs-on: windows-latest
-    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
     timeout-minutes: 8
     steps: &command-bootstrap-steps
-      - uses: actions/checkout@v4
+      - &command-native-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - &command-native-python
+        uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
-      - uses: astral-sh/setup-uv@v9.0.0
+      - &command-native-uv
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
-      - name: Prepare isolated managed interpreters, including old PATH Python
+      - &command-native-interpreters
+        name: Prepare isolated managed interpreters, including old PATH Python
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'command-bootstrap-python'
@@ -264,6 +275,28 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify prepared Dispatch command admission and acquisition-free refusals
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_ready_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/dispatch-ready-admission
+      - name: Require each applicable native Dispatch command and measurement
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-ready-admission').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          native=[c for c in cases if c.find('skipped') is None];
+          expected=24 if os.name=='nt' else 12;
+          assert len(cases)==32 and len(native)==expected+8;
+          assert all(c.find(t) is None for c in native for t in ('error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_ready_admission'];
+          assert len(reports)==expected;
+          assert {r['shell'] for r in reports}==({'powershell','pwsh'} if os.name=='nt' else {'pwsh'});
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if 'missing-' in r['scenario'] else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports)"
       - name: Preserve evaluator, retained selector, configuration, and YAML controls
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -665,6 +698,14 @@ jobs:
           assert all(r['cycles']==2 and r['uv_calls']==(0 if r['scenario']=='missing-uv' else 4)
           and r['network']=='disabled' and r['removal']=='not-invoked' for r in reports)"
 
+  index-engine-uv-windows:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps: &index-engine-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
       - name: Qualify prepared-only Index management on both PowerShell hosts
         if: runner.os == 'Windows'
         env:
@@ -789,9 +830,12 @@ jobs:
 
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
-    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
     timeout-minutes: 8
     steps: *command-bootstrap-steps
+  index-engine-uv-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps: *index-engine-steps
   budget-uv-launch:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
@@ -900,6 +944,7 @@ jobs:
         run: |
           $packets = @('uninstall_external_helper and raw',
                        'uninstall_external_helper and packaged',
+                       'finite_uninstall_uses_addressed_engine',
                        'real_native_preview or (real_native_removal_includes and installed and False)')
           foreach ($hostName in @('pwsh', 'powershell.exe')) {
             for ($packet = 0; $packet -lt $packets.Count; $packet++) {
@@ -915,7 +960,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-uninstall').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==22 and len({c.attrib['name'] for c in cases})==22;
+          assert len(cases)==26 and len({c.attrib['name'] for c in cases})==26;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_external_uninstall'];
@@ -1220,6 +1265,92 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+  mcp-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      MCP_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &mcp-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Observe native macOS process-group admission prerequisites
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ctypes
+          import json
+          import os
+          import sys
+          sys.path.insert(0, "libs/agent-procutil/src")
+          from agent_procutil._darwin_caller_owned import GroupCensus, _BSDInfo
+          census = GroupCensus()
+          group = os.getpgrp()
+          pids = (ctypes.c_int * 1024)()
+          ctypes.set_errno(0)
+          count = census.list_pids(group, pids, ctypes.sizeof(pids))
+          print(json.dumps({"group_count": count, "errno": ctypes.get_errno()}), flush=True)
+          assert 0 <= count < len(pids)
+          for pid in pids[:count]:
+              data = _BSDInfo()
+              ctypes.set_errno(0)
+              returned = census.info(pid, 3, 0, ctypes.byref(data), ctypes.sizeof(data))
+              print(json.dumps({
+                  "self": pid == os.getpid(),
+                  "leader": pid == group,
+                  "returned": returned,
+                  "expected": ctypes.sizeof(data),
+                  "errno": ctypes.get_errno(),
+                  "same_pid": data.pid == pid,
+                  "same_group": data.pgid == group,
+              }), flush=True)
+          PY
+      - name: Qualify raw and materialized prepared MCP foreground entry
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_mcp_ready_source.py --allow-explicit-tiers
+          -k "${{ env.MCP_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/mcp-ready
+      - name: Require every native control and repeated work report without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.MCP_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/mcp-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='mcp_command_admission'];
+          assert len(reports)==16 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['application_uv_lookups']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'mcp_command_admission':reports},sort_keys=True))"
+
+  mcp-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      MCP_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *mcp-ready-steps
+
+  mcp-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      MCP_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *mcp-ready-steps
+
   mixed-python:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.

@@ -1,9 +1,0 @@
-{
-  "comment": "Restore native seed acceptance fixtures to the receiving ledger, checkout namespace and observed reporter identity",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
