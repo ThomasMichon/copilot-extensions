@@ -522,6 +522,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Git deadline and optional snapshot-batching correspondence](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
+proposes two conditional finite-source completions after actual code/test
+inspection and current Main/Dev comparison. The explicit foreground-fetch
+successor, twelve independently unfinished originals and all parent gates
+remain; review precedes any separately verified tracker disposition.
+
 The [seven further TTY cases and two source keepers](journal/2026/11.26-seven-further-tty-cases-and-two-source-keepers.md)
 records reviewed #14780, complete accepted receiving and seven separately
 audited `NOT_PLANNED` tracking retirements. All 128 case keys stay
@@ -529,8 +535,8 @@ independently OPEN in #11966; #14690's older shared Git fixture helper and
 #14729's bounded manifest-contention objective remain separately OPEN.
 Two equal complete censuses measure 599 whole OPEN: 293 original-cohort and
 306 inflow, with exactly seven departures from 606 and no arrivals or unrelated
-departures. Factual publication remains. All parent Plan/Validation states,
-spent units, owners and holds are unchanged.
+departures. The factual outcome merged in #14782. All parent Plan/Validation
+states, spent units, owners and holds are unchanged.
 
 The [source fulfillment and four retained execution cases](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
 records reviewed #14775, whole accepted receiving and twelve separately
