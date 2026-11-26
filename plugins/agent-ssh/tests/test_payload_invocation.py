@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,9 @@ def test_payload_manifest_describes_installation_context_runtime() -> None:
         "module": "agent_ssh",
         "legacyRuntimeRoot": ".agent-ssh",
         "installationContext": "required",
+        "bootstrapPython": "3.11.18",
+        "bootstrapLauncher": "uv",
+        "powershellGuidance": True,
         "installerLifecycle": True,
         "noSelfProvisionEnv": "AGENT_SSH_NO_SELFPROVISION",
         "purpose": "Emit inspect and verify SSH fabric profiles",
@@ -82,6 +86,22 @@ def _fake_runtime_gate_payload(root: Path, *, windows: bool) -> Path:
     )
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
+    previous = sys.path[:]
+    try:
+        owner = runpy.run_path(str(PLUGIN.parents[1] / "libs/payload-invocation/bootstrap_python.py"))
+        manifest = PLUGIN / "payload-invocation.json"
+        for path, content in owner["expected_files"](
+            manifest, {**json.loads(manifest.read_text(encoding="utf-8")), "plugin": "agent-ssh"},
+        ).items():
+            target = root / path.relative_to(PLUGIN)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+    finally:
+        sys.path[:] = previous
+    shutil.copy2(
+        PLUGIN.parents[1] / "libs/agent-procutil/src/agent_procutil/native_capture.sh",
+        scripts / "native_capture.sh",
+    )
     subdir = scripts / "installation-context"
     subdir.mkdir()
     suffix = "ps1" if windows else "sh"
