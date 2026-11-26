@@ -25,6 +25,10 @@ def test_payload_manifest_describes_agent_mcp_runtime() -> None:
         "module": "agent_mcp",
         "legacyRuntimeRoot": ".agent-mcp",
         "installationContext": "required",
+        "bootstrapPython": "3.11.18",
+        "bootstrapLauncher": "uv",
+        "powershellGuidance": True,
+        "posixGuidance": True,
         "noSelfProvisionEnv": "AGENT_MCP_NO_SELFPROVISION",
         "purpose": "Wrap authenticate and materialize MCP servers",
         "installer": "init",
@@ -96,14 +100,14 @@ def test_runtime_gates_keep_first_use_provisioning_lock() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer test")
-def test_posix_bootstrap_stamps_the_compatibility_wrapper(
+def test_posix_explicit_stamp_publishes_the_compatibility_wrapper(
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
     env = os.environ.copy()
     env["HOME"] = str(home)
-    command = ["bash", str(PLUGIN / "scripts" / "bootstrap-check.sh")]
+    command = ["bash", str(PLUGIN / "scripts" / "init.sh"), "stamp"]
     result = subprocess.run(
         command,
         cwd=tmp_path,
@@ -205,6 +209,26 @@ def _fake_runtime_gate_payload(
     )
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
+    # These context/forwarding controls isolate admission; native controls use UV.
+    support = scripts / "_bootstrap_python"
+    support.mkdir()
+    if windows:
+        (support / "bootstrap-uv.ps1").write_text(
+            "function Resolve-UvRuntimePython { param($ExpectedPython,$InvokeCaptured)\n"
+            " [pscustomobject]@{Status='selected';Python=$ExpectedPython}\n}\n",
+            encoding="utf-8",
+        )
+        for name in ("bootstrap-capture.ps1", "versioned_runtime_native.ps1"):
+            (support / name).write_text("", encoding="utf-8")
+    else:
+        (support / "bootstrap-uv.sh").write_text(
+            'resolve_uv_runtime_python() { printf "%s\\n" "$1"; }\n',
+            encoding="utf-8",
+        )
+        (scripts / "native_capture.sh").write_text(
+            'capture_native_process() { shift; __native_capture_output="$("$@")"; }\n',
+            encoding="utf-8",
+        )
     subdir = scripts / "installation-context"
     subdir.mkdir()
     suffix = "ps1" if windows else "sh"

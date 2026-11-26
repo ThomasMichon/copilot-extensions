@@ -44,14 +44,47 @@ json_get() {
 }
 
 resolve_runtime() {
+    local result
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    # Bash 3.2 does not reliably extend the caller's conditional through source.
+    set +e
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
+    result=$?
+    set -e
+    return "$result"
 }
 
+admit_runtime_python() (
+    local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    local capture="$SCRIPT_DIR/native_capture.sh" uv
+    # Admission owns these descriptors only in its subshell, not the application.
+    exec 5>&- 6>&- 7>&- 8>&- 9>&-
+    if [[ ! -f "$capture" ]]; then
+        capture="$PAYLOAD_ROOT/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    fi
+    if [[ ! -f "$provider" || ! -f "$capture" ]]; then
+        printf '%s\n' '[agent-mcp] application runtime admission support is unavailable; use explicit setup.' >&2
+        return 126
+    fi
+    uv="$(command -v uv)" || {
+        printf '%s\n' '[agent-mcp] uv is unavailable; prepare the command prerequisites through explicit setup.' >&2
+        return 126
+    }
+    . "$capture"
+    if ! capture_native_process 10 "$BASH" -c \
+        '. "$1"; resolve_uv_runtime_python "$2" "$3"' \
+        mcp-runtime-admission "$provider" "$expected" "$uv"; then
+        printf '%s\n' '[agent-mcp] application runtime admission failed; use explicit setup.' >&2
+        return 126
+    fi
+    printf '%s\n' "$__native_capture_output"
+)
+
 run_runtime() {
+    AGENT_RT_PY="$(admit_runtime_python "$AGENT_RT_PY")" || exit 126
     export AGENT_MCP_HOME="$RUNTIME_ROOT"
     if [[ -n "$MARKETPLACE_ROOT" ]]; then
         export AGENT_MCP_MARKETPLACE_ROOT="$MARKETPLACE_ROOT"
