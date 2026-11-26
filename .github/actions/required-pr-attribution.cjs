@@ -250,7 +250,7 @@ function ownedCheck(check, context) {
       (check.details_url.startsWith(runPrefix) && /^[0-9]+$/.test(check.details_url.slice(runPrefix.length))));
 }
 
-async function reconcilePR(github, context, number, budget) {
+async function reconcilePR(github, context, number, budget, pause) {
   const initial = await currentPR(github, context, number, budget);
   if (initial.state !== "open" || initial.base.ref !== "dev") {
     throw new Error("Scoped source refresh requires a current open dev pull request.");
@@ -262,6 +262,11 @@ async function reconcilePR(github, context, number, budget) {
     ...context.repo, ref: initial.head.sha, check_name: CONTEXT, filter: "all", per_page: 100,
   })).filter((check) => ownedCheck(check, context));
   const owned = await ownedRuns();
+  const priorStates = new Map(owned.map((check) => [check.id, {
+    external_id: check.external_id, status: check.status, conclusion: check.conclusion,
+  }]));
+  const sameState = (check, state) => state && check.external_id === state.external_id &&
+    check.status === state.status && (check.conclusion ?? null) === (state.conclusion ?? null);
   // Every attempted rewrite needs a reserved failure write, even if its response is lost.
   budget.protectPending(owned.length);
   const attempted = [];
@@ -285,6 +290,9 @@ async function reconcilePR(github, context, number, budget) {
       details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
       output: { title: output.title, summary: "Validating current source metadata." },
     }));
+    priorStates.set(created.data.id, {
+      external_id: observed.snapshot, status: "in_progress", conclusion: null,
+    });
     for (const check of owned) {
       attempted.push(check.id);
       await invoke(budget, () => github.rest.checks.update({
@@ -295,16 +303,40 @@ async function reconcilePR(github, context, number, budget) {
     if ((await headPolicy(github, context, number, initial.head.sha, budget)).snapshot !== observed.snapshot) {
       throw new Error("Scoped pull request metadata changed; retry the check.");
     }
-    await invoke(budget, () => github.rest.checks.update({
-      ...context.repo, check_run_id: created.data.id, status: "completed",
-      conclusion: observed.error ? "failure" : "success", output,
-    }));
+    const target = {
+      external_id: observed.snapshot, status: "completed",
+      conclusion: observed.error ? "failure" : "success",
+    };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await invoke(budget, () => github.rest.checks.update({
+          ...context.repo, check_run_id: created.data.id, ...target, output,
+        }));
+        break;
+      } catch (error) {
+        // A returned 404 is a known refusal, not a lost write response.
+        if (error?.status !== 404 || attempt === 2) throw error;
+        await pause(1000);
+        if ((await headPolicy(github, context, number, initial.head.sha, budget)).snapshot !== observed.snapshot) {
+          throw new Error("Scoped pull request metadata changed; retry the check.");
+        }
+      }
+    }
     const expected = new Set([...owned.map((check) => check.id), created.data.id]);
-    const confirmed = await ownedRuns();
-    if (confirmed.length !== expected.size || confirmed.some((check) =>
-      !expected.has(check.id) || check.external_id !== observed.snapshot ||
-      check.status !== "completed" || check.conclusion !== (observed.error ? "failure" : "success"))) {
-      throw new Error("Owned source check series changed during reconciliation; retry the check.");
+    for (let attempt = 0; ; attempt++) {
+      const confirmed = await ownedRuns();
+      const changed = confirmed.some((check) => !expected.has(check.id) ||
+        (!sameState(check, target) && !sameState(check, priorStates.get(check.id))));
+      if (changed) throw new Error("Owned source check series changed during reconciliation; retry the check.");
+      if (confirmed.length === expected.size && new Set(confirmed.map((check) => check.id)).size === expected.size &&
+          confirmed.every((check) => sameState(check, target))) break;
+      if (attempt === 2) {
+        throw new Error("Owned source check series visibility did not settle during reconciliation; retry the check.");
+      }
+      await pause(1000);
+      if ((await headPolicy(github, context, number, initial.head.sha, budget)).snapshot !== observed.snapshot) {
+        throw new Error("Scoped pull request metadata changed; retry the check.");
+      }
     }
     stable = (await headPolicy(github, context, number, initial.head.sha, budget)).snapshot === observed.snapshot;
     if (!stable) throw new Error("Scoped pull request metadata changed; retry the check.");
@@ -340,7 +372,7 @@ async function backfill({ github, context, core, head, pullRequest, requestLimit
         head !== undefined || context.payload.inputs?.promotion_sha || context.payload.inputs?.promotion_run) {
       throw new Error("Invalid or conflicting scoped pull request metadata.");
     }
-    await reconcilePR(github, context, Number(pullRequest), new RefreshBudget(requestLimit));
+    await reconcilePR(github, context, Number(pullRequest), new RefreshBudget(requestLimit), pause);
     core.info("Selected dev pull request source metadata checks reconciled.");
     return;
   }
