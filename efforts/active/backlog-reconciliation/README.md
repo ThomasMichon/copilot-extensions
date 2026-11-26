@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source fulfillment and four retained execution cases](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
+proposes ten individually gated `COMPLETED` reports against inspected merged
+source deliveries, including four reports of one precise candidate-admission
+repair. Four other automation cases remain independently OPEN in proposed
+additive receiving at #7378/#11966 before tracking-only retirement.
+Six broader, open-PR or incomplete-qualification originals remain OPEN.
+No proposed disposition has occurred; review, receiving and final issue
+checks precede effects. The last settled census remains 618 whole OPEN.
+All incumbent parent Plan/Validation states and actual holds are unchanged.
+
 The [four source deliveries and twelve retained execution cases](journal/2026/11.26-four-source-deliveries-and-twelve-retained-cases.md)
 records reviewed #14772, whole accepted receiving and sixteen separately
 audited dispositions: four acknowledged source-request `COMPLETED` outcomes
@@ -530,8 +540,9 @@ cases remain independently OPEN in #7378/#11966; neither stage identity nor
 later green runs proves repair. Distinct #14423/#14424 and unfinished
 #14435/#14461 remain OPEN. Two equal complete censuses measure 618 whole OPEN:
 293 original-cohort and 325 inflow, with exactly sixteen departures from 634
-and no arrivals or unrelated departures. Factual outcome publication remains;
-parent Plan/Validation states and all existing gates are unchanged.
+and no arrivals or unrelated departures. The factual outcome merged in
+#14774. Parent Plan/Validation states and all
+existing gates are unchanged.
 
 The [materialization repair and ten retained cases](journal/2026/11.26-materialization-repair-and-ten-retained-cases.md)
 records reviewed #14764, whole accepted receiving and nineteen separately
