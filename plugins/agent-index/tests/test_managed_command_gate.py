@@ -97,6 +97,8 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
     )
     (package / "__main__.py").write_text(
         "import json,os,sys\n"
+        "if os.environ.get('INHERITED_FD_TARGET'):\n"
+        " for fd in range(5,10): os.write(fd,('application-fd-%s\\n'%fd).encode())\n"
         "print(json.dumps({'executable':sys.executable,'prefix':sys.prefix,"
         "'version':list(sys.version_info[:3]),'argv':sys.argv[1:],'stdin':sys.stdin.read(),"
         "'isolated':sys.flags.isolated,'bytecode':sys.dont_write_bytecode,"
@@ -226,6 +228,20 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
     elif scenario == "readiness":
         arguments = ["installer-readiness"]
     command = [executable, str(gate), *arguments]
+    inherited_fds = tmp_path / "inherited-fds"
+    if host == "bash" and scenario == "current":
+        env["INHERITED_FD_TARGET"] = str(inherited_fds)
+        command = [
+            executable, "-c",
+            'exec 5>>"$INHERITED_FD_TARGET" 6>>"$INHERITED_FD_TARGET" '
+            '7>>"$INHERITED_FD_TARGET" 8>>"$INHERITED_FD_TARGET" 9>>"$INHERITED_FD_TARGET"\n'
+            '"$@"\nstatus=$?\n'
+            "printf 'caller-fd-5\\n' >&5\nprintf 'caller-fd-6\\n' >&6\n"
+            "printf 'caller-fd-7\\n' >&7\nprintf 'caller-fd-8\\n' >&8\n"
+            "printf 'caller-fd-9\\n' >&9\n"
+            'exit "$status"\n',
+            "index-command-inherited-fds", *command,
+        ]
     if host != "bash":
         quoted = ["'" + value.replace("'", "''") + "'" for value in arguments]
         harness = tmp_path / "invoke.ps1"
@@ -266,6 +282,11 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
         }, details
         assert "application stderr" in result.stderr, result.stderr
         assert Path(env["ORIGIN_MARKER"]).is_file()
+        if host == "bash" and scenario == "current":
+            assert inherited_fds.read_text(encoding="utf-8").splitlines() == (
+                [f"application-fd-{fd}" for fd in range(5, 10)]
+                + [f"caller-fd-{fd}" for fd in range(5, 10)]
+            ) * (_cycle + 1)
         if scenario == "readiness":
             assert not list(slot.rglob("*.pyc"))
     if scenario == "namespaced":

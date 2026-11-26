@@ -406,10 +406,8 @@ _configured_role() {
 _admit_runtime_python() (
     local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
     local capture="$SCRIPT_DIR/native_capture.sh" uv
-    if [ "${PROVISION_LOCK_FD_HELD:-0}" -eq 1 ]; then
-        # The parent retains its provision lock; capture needs its own FD 9.
-        exec 9>&-
-    fi
+    # Release only this subshell's copies; the caller and provision lock retain theirs.
+    exec 5>&- 6>&- 7>&- 8>&- 9>&-
     if [ ! -f "$capture" ]; then
         capture="$PLUGIN_DIR/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
     fi
