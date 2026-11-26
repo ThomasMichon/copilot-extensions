@@ -82,6 +82,15 @@ async def hydrate_worktree(worktree_id: str, request: Request) -> JSONResponse:
 async def resume_native_worktree(
     worktree_id: str, request: Request, mode: Mode, reclaim: bool = False, strict: bool = False,
 ) -> SessionInfo | JSONResponse:
+    return await _resume_native_worktree(
+        worktree_id, request, mode, reclaim=reclaim, strict=strict,
+    )
+
+
+async def _resume_native_worktree(
+    worktree_id: str, request: Request, mode: Mode, *,
+    reclaim: bool = False, strict: bool = False, expected_native: str | None = None,
+) -> SessionInfo | JSONResponse:
     from .routes import worktrees as wt
 
     singleton = repo_name_from_anchor_key(worktree_id) if isinstance(worktree_id, str) else None
@@ -103,15 +112,22 @@ async def resume_native_worktree(
                 if not singleton:
                     from .retained_worktree_resume import resume
 
-                    recovered = await resume(request, worktree_id, mode)
+                    recovered = await resume(
+                        request, worktree_id, mode, expected_native=expected_native,
+                    )
                     if recovered is not None:
                         return recovered
                 with executor(db, worktree_id):
                     if singleton:
                         from .singleton_resume import resume_singleton_anchor
 
-                        return await resume_singleton_anchor(worktree_id, request, mode, strict=strict)
-                    return await _resume(worktree_id, request, mode, manager, db, resolver)
+                        return await resume_singleton_anchor(
+                            worktree_id, request, mode, strict=strict, expected_native=expected_native,
+                        )
+                    return await _resume(
+                        worktree_id, request, mode, manager, db, resolver,
+                        expected_native=expected_native,
+                    )
             finally:
                 manager._active_acquisitions -= 1
         except AcquisitionRefused as exc:
@@ -134,7 +150,7 @@ async def resume_native_worktree(
 
 async def _resume(
     worktree_id: str, request: Request, mode: Mode,
-    manager: Any, db: Any, resolver: Any,
+    manager: Any, db: Any, resolver: Any, *, expected_native: str | None = None,
 ) -> SessionInfo:
     from .routes import worktrees as wt
     from .routes.sessions import _session_info
@@ -180,6 +196,8 @@ async def _resume(
             raise _refuse("head_unavailable", "No active native head, or a handoff is pending")
         if not isinstance(value.get("head_session"), str) or not value["head_session"]:
             raise _refuse("head_unavailable", "The owner has no native conversation to resume")
+        if expected_native is not None and value["head_session"] != expected_native:
+            raise _refuse("native_identity_changed", "The owner no longer asserts the selected conversation")
         return value
 
     initial = await head()
@@ -224,6 +242,8 @@ async def _resume(
                 and session.client is not None and session.client.is_running
                 and already_live
             ):
+                if expected_native is not None:
+                    await head()
                 store.release_workspace_gate(worktree_id, delivery)
                 return _session_info(session, manager)
             if session.status != SessionStatus.STOPPED:
@@ -238,6 +258,8 @@ async def _resume(
             if any(row["session_id"] != native for row in represented):
                 raise _refuse("live_holder", "A conflicting represented execution holds this workspace")
             registration = next((row for row in represented if row["session_id"] == native), None)
+            if expected_native is not None:
+                await head()
             store.release_workspace_gate(worktree_id, delivery)
             _release_cli_reservation(db, worktree_id, native)
             return _cli_info(native, owner, entry, config, registration)
@@ -255,6 +277,8 @@ async def _resume(
     live = db.list_fresh_live_sessions(worktree_id, now=time.time())
     if live:
         if mode == "cli" and len(live) == 1 and live[0]["session_id"] == native:
+            if expected_native is not None:
+                await head()
             store.release_workspace_gate(worktree_id, delivery)
             _release_cli_reservation(db, worktree_id, native)
             return _cli_info(native, owner, entry, config, live[0])

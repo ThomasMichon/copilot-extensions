@@ -25,6 +25,7 @@ def _held(message: str) -> AcquisitionRefused:
 
 async def resume(
     request: Any, worktree_id: str, mode: str, *, metadata_only: bool = False,
+    expected_native: str | None = None,
 ) -> JSONResponse | None:
     """Recover discovered keyed metadata before the generic native-import path."""
     from . import retained_metadata_recovery as metadata
@@ -59,6 +60,8 @@ async def resume(
                 and native_for(original, session.session_id) == session.acp_session_id
             ):
                 return None
+    if expected_native is not None and expected_native != original["native_session_id"]:
+        raise _held("The selected conversation does not match the retained native owner")
     if mode != "acp":
         raise _held("Missing keyed metadata requires its original ACP recovery owner")
     resolver = request.app.state.resolver
@@ -82,6 +85,8 @@ async def resume(
         if refreshed is None:
             raise _held("The original keyed journal disappeared during ordinary resume")
         original = refreshed
+        if expected_native is not None and expected_native != original["native_session_id"]:
+            raise _held("The retained native owner changed before recovery")
 
         async def observe_head() -> dict[str, Any]:
             async with retained(db, original):
@@ -96,6 +101,7 @@ async def resume(
             if (
                 head.get("tracked") is not True or head.get("state") != "active"
                 or head.get("head_session") != original["native_session_id"]
+                or expected_native is not None and head.get("head_session") != expected_native
                 or head.get("pending_handoffs") or type(head.get("head_revision")) is not int
             ):
                 raise _held("Ordinary resume requires the unchanged authoritative native head")

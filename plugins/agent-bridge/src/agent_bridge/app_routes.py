@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from repository_policy import AgentHostingError
 
-from . import __version__, worktree_native_resume
+from . import __version__, worktree_exact_resume, worktree_native_resume
 from .auth import BearerAuthMiddleware
 from .auth_custody import AuthCustody, AuthCustodyMiddleware
 from .live_representation import LiveEventStore
@@ -57,7 +57,7 @@ def configure_serving_app(
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
     app.add_middleware(AuthCustodyMiddleware, custody=app.state.auth_custody)
     for router in (
-        worktree_native_resume.router,
+        worktree_native_resume.router, worktree_exact_resume.router,
         acquisitions.router, health.router, ui.router, acp_ws.router,
         sessions.router, session_observations.router, owner_membership.router, live_sessions.router,
         live_inbox.router, live_questions.router, live_delivery_state.router,

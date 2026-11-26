@@ -18,6 +18,9 @@ on:
       - "plugins/agent-bridge/pyproject.toml"
       - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
       - "plugins/agent-bridge/tests/test_bridge_remote_send_cli.py"
+      - "plugins/agent-bridge/tests/test_worktree_exact_resume.py"
+      - "plugins/agent-bridge/tests/test_worktree_native_resume.py"
+      - "plugins/agent-bridge/tests/test_retained_metadata_recovery.py"
       - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_result_snapshot.py"
       - "plugins/agent-bridge/tests/test_bridge_observation_cli.py"
@@ -86,6 +89,17 @@ jobs:
             --test-file tests/test_process_telemetry.py `
             --allow-explicit-tiers --timeout 180 --plugin-timeout 600 `
             --junit-dir "$env:RUNNER_TEMP/consumer-telemetry-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_worktree_exact_resume.py `
+            --test-file tests/test_retained_metadata_recovery.py `
+            --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 30 `
+            --junit-dir "$env:RUNNER_TEMP/bridge-exact-resume-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_worktree_native_resume.py `
+            --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 30 `
+            --junit-dir "$env:RUNNER_TEMP/bridge-native-resume-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-bridge `
             --test-file tests/test_session_selection.py `
@@ -177,6 +191,17 @@ jobs:
             --test-file tests/test_process_telemetry.py `
             --allow-explicit-tiers --timeout 180 --plugin-timeout 600 `
             --junit-dir "$env:RUNNER_TEMP/consumer-telemetry-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_worktree_exact_resume.py `
+            --test-file tests/test_retained_metadata_recovery.py `
+            --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 30 `
+            --junit-dir "$env:RUNNER_TEMP/bridge-exact-resume-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_worktree_native_resume.py `
+            --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 30 `
+            --junit-dir "$env:RUNNER_TEMP/bridge-native-resume-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-bridge `
             --test-file tests/test_session_selection.py `
