@@ -9329,6 +9329,18 @@ comparisons are outside measurement. As above, diagnostic query-plan replay
 contributes to process I/O; no flat-byte, physical-disk, whole-resource,
 live-provider, broader polling/repair or rollout claim follows from this packet.
 
+`tests/test_source_alias_recovery_native.py` supplies one separate T3
+filesystem/process control for the canonical-alias A/B/C revert case. Run
+`tools/run-tests agent-index --test-file tests/test_source_alias_recovery_native.py
+--allow-explicit-tiers`. Five contained workers use one synthetic Git repository
+and native store, with inference substituted and engine startup/fetch disabled.
+Both aliases reach A; one stores B; C reverts a file omitted by net A..C.
+The stale alias must refuse before acquisition without changing native table
+versions, vectors, path checkpoints or source-state bytes. Explicit synthetic
+full repair then restores C and removes B's stale vectors. This is native Linux
+qualification, not mixed-generation takeover, live-store repair or completion
+of the broader source-ownership contract. No runtime or required-CI lane changes.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
