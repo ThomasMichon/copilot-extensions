@@ -26,6 +26,14 @@ and 702,241 bytes. Fatal Ruff and strict Linux/Windows typing pass.
 Review, full CI, merge and persistence remain. This is not parent completion,
 native qualification or a measured whole-flow savings claim.
 
+The initial head passes clean review and natural CI `45744246823`: all
+10,431 cases pass in 159.96 pytest / 183.315 packet seconds, with fresh
+execution rather than reuse. A subsequent peer merge makes that head
+conflicted. Reconciliation retains both native-connector binding refreshes
+and all ordered inventory; none of the 25 locally observed inputs changes.
+No local trial is replayed. Counts, bytes, helpers and deadline are unchanged;
+fresh current-head review and full CI must qualify the resulting union.
+
 ## November 26 original pure transport projections
 
 The adapter exports the exact ambiguous-profile function and three entire

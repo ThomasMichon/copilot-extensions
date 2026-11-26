@@ -508,6 +508,11 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   10,431 nodes, 1,504 bindings, 549 targets, 92 unchanged helper decisions,
   300 seconds and 702,241 bytes. Ruff and strict Linux/Windows typing pass;
   review, full hosted CI, merge and persistent readback remain.
+  The first head passes clean review and all 10,431 hosted cases but becomes
+  conflicted after a peer merge. Reconciliation retains both native-connector
+  binding refreshes and every ordered inventory item; all 25 observed inputs
+  remain exact without local replay. Counts/bytes/helpers/deadline are
+  unchanged. Fresh current-head review and complete CI remain required.
 - [x] Qualify the original pure transport-projection controls through the exact
   ambiguous-profile function and three complete original classes:
   default shell (three), SSH-target selection (six) and command wrapping (three).
