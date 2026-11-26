@@ -68,6 +68,21 @@ Windows native capture or installed-host lifetime. An additional real UV
 lookup checks native store inference with no install-directory override,
 including Windows' different managed-interpreter directory depth.
 
+Index's `tests/test_managed_command_gate.py` runs the actual Bash and PowerShell
+gates with independent prepared 3.11.18 bootstrap and 3.10.20 application
+interpreters. Fourteen scenarios per shell cover current/LKG/newest, namespaced
+bootstrap reuse, setup capture, readiness, missing marker/selector/UV/support
+and an unprepared store, with poisoned ambient Python and inherited selectors.
+Explicit first-use provisioning retains its parent lock while admitting the
+new runtime; a missing-UV control isolates application admission after bootstrap.
+Successful paths run twice and preserve arguments, stdin, both output streams,
+exit status and existing bytecode options. Refusals must precede the gate's
+origin import and must not enter or retry provisioning. The path-gated native workflow
+requires every Bash control on Ubuntu/macOS and both PowerShell hosts on
+Windows, plus every measured offline report without skips. These fixtures
+isolate context/configuration ownership and do not qualify the cell validator's
+independent package probes, installed-host adoption or complete command latency.
+
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
 Its five cross-platform controls cover current, last-known-good and legacy environments,

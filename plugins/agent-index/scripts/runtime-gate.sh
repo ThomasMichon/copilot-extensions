@@ -350,17 +350,6 @@ else
     exit 126
 fi
 
-_find_management_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1; then
-            command -v "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
 if [ "$COMMAND" = __session-stamp ]; then
     [ -z "${AGENT_INDEX_FORWARDED:-}" ] || exit 0
     if [ "$ACTUAL_MODE" = namespaced ] &&
@@ -414,6 +403,35 @@ _configured_role() {
     esac
 }
 
+_admit_runtime_python() (
+    local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    local capture="$SCRIPT_DIR/native_capture.sh" uv
+    if [ "${PROVISION_LOCK_FD_HELD:-0}" -eq 1 ]; then
+        # The parent retains its provision lock; capture needs its own FD 9.
+        exec 9>&-
+    fi
+    if [ ! -f "$capture" ]; then
+        capture="$PLUGIN_DIR/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    fi
+    if [ ! -f "$provider" ] || [ ! -f "$capture" ]; then
+        printf '%s\n' '[agent-index] application runtime admission support is unavailable; use explicit setup.' >&2
+        return 126
+    fi
+    uv="$(command -v uv)" || {
+        printf '%s\n' '[agent-index] uv is unavailable; prepare the command prerequisites through explicit setup.' >&2
+        return 126
+    }
+    # Capture owns the finite admission shell and UV, not the foreground application.
+    . "$capture"
+    if ! capture_native_process 10 "$BASH" -c \
+        '. "$1"; resolve_uv_runtime_python "$2" "$3"' \
+        index-runtime-admission "$provider" "$expected" "$uv"; then
+        printf '%s\n' '[agent-index] application runtime admission failed; use explicit setup.' >&2
+        return 126
+    fi
+    printf '%s\n' "$__native_capture_output"
+)
+
 _runtime_origin_ok() {
     local python="$1" expected_versions="${2:-}"
     local slot origin origin_dir origin_abs slot_abs expected_abs
@@ -458,11 +476,7 @@ _resolve_ready_runtime() {
             printf '%s\n' '[agent-index] installation-cell runtime validator is unavailable.' >&2
             exit 126
         }
-        cell_python="$(_find_management_python 2>/dev/null || true)"
-        [ -n "$cell_python" ] || {
-            printf '%s\n' '[agent-index] Python is unavailable for installation-cell validation.' >&2
-            exit 126
-        }
+        cell_python="$PY_GATE"
         local validation_args=("$cell_runtime")
         if [ "$COMMAND" = installer-readiness ]; then
             validation_args=(-B "$PROBE_BOOTSTRAP" --plugin agent-index --module agent_index
@@ -486,6 +500,9 @@ _resolve_ready_runtime() {
             start|transaction) ;;
             *) unset AGENT_INDEX_CELL_LOCK_TOKEN AGENT_INDEX_CELL_LOCK_ROOT ;;
         esac
+        if [ -n "${AGENT_RT_PY:-}" ]; then
+            AGENT_RT_PY="$(_admit_runtime_python "$AGENT_RT_PY")" || exit 126
+        fi
         if [ -n "${AGENT_RT_PY:-}" ] &&
            _runtime_origin_ok "$AGENT_RT_PY" "$ROOT/versions"; then
             if [ -n "$AGENT_RT_VERSION" ]; then
@@ -502,6 +519,9 @@ _resolve_ready_runtime() {
         export AGENT_RT_ROOT
         # shellcheck source=/dev/null
         . "$RESOLVER"
+    fi
+    if [ -n "${AGENT_RT_PY:-}" ]; then
+        AGENT_RT_PY="$(_admit_runtime_python "$AGENT_RT_PY")" || exit 126
     fi
     if [ -n "${AGENT_RT_PY:-}" ] \
         && ! _runtime_origin_ok "$AGENT_RT_PY"; then
@@ -597,11 +617,13 @@ _select_snapshot_installer() {
 }
 
 PROVISION_LOCK_DIR=""
+PROVISION_LOCK_FD_HELD=0
 _acquire_provision_lock() {
     mkdir -p "$ROOT"
     if command -v flock >/dev/null 2>&1; then
         exec 9>"$ROOT/.provision.lock"
         flock 9
+        PROVISION_LOCK_FD_HELD=1
         return 0
     fi
     PROVISION_LOCK_DIR="$ROOT/.provision.lock.d"
@@ -625,6 +647,7 @@ _release_provision_lock() {
     else
         flock -u 9 2>/dev/null || true
         exec 9>&-
+        PROVISION_LOCK_FD_HELD=0
     fi
 }
 

@@ -49,14 +49,12 @@ $Command = if ($InvocationArgs.Count -gt 0) { [string]$InvocationArgs[0] } else 
 if ($Command -in @('__cell-bootstrap', '__cell-service-ensure')) { exit 0 }
 $VersionLine = Select-String -LiteralPath (Join-Path $PluginDir 'pyproject.toml') -Pattern '^\s*version\s*=' | Select-Object -First 1
 $PackageVersion = if ($VersionLine) { $VersionLine.Line -replace '.*=\s*"([^"]+)".*', '$1' } else { '' }
-$GatePython = ''
-if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bootstrap-python-launcher.txt')) {
-    $GatePython = & (Join-Path $PSScriptRoot '_bootstrap_python\select.ps1')
-} else {
-    $gateCommand = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $gateCommand) { $gateCommand = Get-Command py -ErrorAction SilentlyContinue }
-    if ($gateCommand) { $GatePython = $gateCommand.Source }
+$bootstrapSelector = Join-Path $PSScriptRoot '_bootstrap_python\select.ps1'
+if (-not (Test-Path -LiteralPath $bootstrapSelector -PathType Leaf)) {
+    [Console]::Error.WriteLine('[agent-index] prepared bootstrap selector is unavailable; use explicit setup. No installation was attempted.')
+    exit 1
 }
+$GatePython = & $bootstrapSelector
 $EffectiveResolver = Join-Path $PSScriptRoot 'resolve_effective_config.py'
 $ProbeBootstrap = Join-Path $PSScriptRoot 'versioned_runtime_probe.py'
 if ($Command -eq 'installer-readiness') {
@@ -436,22 +434,6 @@ else {
     exit 126
 }
 
-function Get-ManagementPython {
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if (-not $found) { continue }
-        if ($candidate -eq 'py') {
-            $resolved = @(& $found.Source -3 -c 'import sys; print(sys.executable)' 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $resolved.Count -gt 0) {
-                return ("$($resolved[-1])").Trim()
-            }
-        } else {
-            return $found.Source
-        }
-    }
-    return $null
-}
-
 if ($Command -ceq '__session-stamp') {
     if ($env:AGENT_INDEX_FORWARDED) { exit 0 }
     if ($ActualMode -ceq 'namespaced' -and
@@ -550,6 +532,41 @@ function Get-ConfiguredRole {
     return $null
 }
 
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $PSScriptRoot '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-index] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
 function Test-RuntimeOrigin(
     [string]$Interpreter,
     [string]$ExpectedVersionsRoot = ''
@@ -629,13 +646,7 @@ function Resolve-ReadyRuntime {
             )
             exit 126
         }
-        $cellPython = Get-ManagementPython
-        if (-not $cellPython) {
-            [Console]::Error.WriteLine(
-                '[agent-index] Python is unavailable for installation-cell validation.'
-            )
-            exit 126
-        }
+        $cellPython = $GatePython
         $validationArgs = @('-I', '-X', 'utf8', $cellRuntime)
         if ($Command -eq 'installer-readiness') {
             $validationArgs = @(Get-PayloadReaderArguments $cellRuntime)
@@ -668,6 +679,7 @@ function Resolve-ReadyRuntime {
             Remove-Item Env:AGENT_INDEX_CELL_LOCK_ROOT -ErrorAction SilentlyContinue
         }
         $selected = [string]$validation.interpreter
+        if ($selected) { $selected = Get-AdmittedRuntimePython $selected }
         if (Test-RuntimeOrigin `
             -Interpreter $selected `
             -ExpectedVersionsRoot (Join-Path $Root 'versions')) {
@@ -686,6 +698,7 @@ function Resolve-ReadyRuntime {
         . $Resolver
     }
     if ($AgentRtPy) {
+        $AgentRtPy = Get-AdmittedRuntimePython $AgentRtPy
         $previous = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         $ready = Test-RuntimeOrigin $AgentRtPy
@@ -944,7 +957,14 @@ function Invoke-AgentIndexRuntime {
             $entry = @($ProbeBootstrap, '--plugin', 'agent-index',
                 '--module', 'agent_index', '--')
         }
-        & $Python @pythonOptions @entry @InvocationArgs
+        $nativeArgs = @($pythonOptions) + $entry + $InvocationArgs
+        $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+        if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+            $nativeArgs = @($nativeArgs | ForEach-Object {
+                '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+            })
+        }
+        & $Python @nativeArgs
     } finally {
         $ErrorActionPreference = $previousPreference
     }
@@ -1045,7 +1065,7 @@ if ($Command -eq 'setup') {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $setupOutput = & $Python -I -X utf8 -m agent_index @InvocationArgs | Out-String
+        $setupOutput = Invoke-AgentIndexRuntime | Out-String
     } finally {
         $ErrorActionPreference = $previousPreference
     }
