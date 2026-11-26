@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 import tarfile
 import time
@@ -21,6 +21,42 @@ from test_local_install_export import (
     test_export_never_falls_back_around_archive_or_deadline_refusals
     as test_export_never_falls_back_around_archive_or_deadline_refusals,
 )
+
+
+@pytest.mark.parametrize("selected_root", ["apps/demo", "apps/demo/module.py", "."])
+def test_prefix_selection_work_scales_with_path_depth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected_root: str,
+) -> None:
+    files = {
+        "apps/demo/module.py": b"selected\n",
+        "apps/demolition/module.py": b"not a path-component match\n",
+        **{f"unrelated/{index}/data.txt": b"excluded\n" for index in range(64)},
+    }
+    archive = tmp_path / "source.tar"
+    with tarfile.open(archive, "w") as stream:
+        for name, content in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            stream.addfile(member, io.BytesIO(content))
+    prefixes = tuple(f"absent/{index}" for index in range(256)) + (selected_root,)
+    probes = 0
+
+    class MeasuredPath(PurePosixPath):
+        @property
+        def parts(self) -> tuple[str, ...]:
+            nonlocal probes
+            probes += 1
+            return super().parts
+
+    monkeypatch.setattr(preparation, "PurePosixPath", MeasuredPath)
+    destination = tmp_path / "source"
+    destination.mkdir()
+    preparation._extract_archive(
+        archive, destination, include_paths=prefixes, deadline=time.monotonic() + 30,
+    )
+    expected = set(files) if selected_root == "." else {"apps/demo/module.py"}
+    assert {path.relative_to(destination).as_posix() for path in destination.rglob("*") if path.is_file()} == expected
+    assert probes <= 6 * len(prefixes) + 40 * len(files)
 
 
 def test_export_never_writes_unrelated_payloads(

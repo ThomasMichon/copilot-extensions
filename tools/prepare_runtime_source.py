@@ -209,7 +209,7 @@ def _extract_archive(
     include_paths: tuple[str, ...] | None = None,
     archive_stream: tarfile.TarFile | None = None,
 ) -> None:
-    selected: list[tuple[str, ...]] | None = None
+    selected: set[tuple[str, ...]] | None = None
     files: set[Path] = set()
     directories: set[Path] = set()
     if include_paths is not None:
@@ -217,14 +217,14 @@ def _extract_archive(
             raise SourcePreparationError("Source archive selection requires portable relative paths")
         if not include_paths or any(destination.iterdir()):
             raise SourcePreparationError("Scoped source extraction requires paths and an empty destination")
-        selected = []
+        selected = set()
         for value in include_paths:
             if not isinstance(value, str) or not value:
                 raise SourcePreparationError("Source extraction selection requires relative paths")
             path = PurePosixPath(value)
             if path.is_absolute() or ".." in path.parts or "\\" in value or ":" in value:
                 raise SourcePreparationError("Source extraction selection contains an unsafe path")
-            selected.append(path.parts)
+            selected.add(path.parts)
     previous_parent: Path | None = None
     with nullcontext(archive_stream) if archive_stream is not None else tarfile.open(archive, "r:") as source:
         for member in source:
@@ -250,7 +250,7 @@ def _extract_archive(
                     raise SourcePreparationError("Source archive contains colliding paths")
                 directories.update(parents)
                 (directories if member.isdir() else files).add(target)
-                if not any(name.parts[:len(prefix)] == prefix for prefix in selected):
+                if not any(name.parts[:length] in selected for length in range(len(name.parts) + 1)):
                     continue
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
