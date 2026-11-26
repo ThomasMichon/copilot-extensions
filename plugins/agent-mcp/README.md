@@ -95,6 +95,15 @@ changing native decoding, stdin, arguments or construction ownership. Direct
 installer invocation keeps its original encoding. This declaration does not
 format the MCP bridge, CLI JSON or stdio protocol.
 
+Before foreground application entry, the Bash and PowerShell command gates
+admit their selected completed interpreter through PATH `uv` using prepared-only,
+managed-Python selection. UV cannot download Python, synchronize dependencies or
+choose another application generation on this READY path. Missing UV or capture/
+selection support exits 126 with an explicit-setup diagnostic before application
+entry, without starting a new provisioning attempt. Foreground arguments, stdin,
+both output streams, exit status and isolated readiness remain unchanged. A
+genuinely absent runtime retains its existing first-use provisioning policy.
+
 1. Enable/install the `agent-mcp` plugin. Session-facing skills receive an exact
    payload-local command through the session command catalog; static MCP
    frontmatter and generated materialized fleets continue using the

@@ -30,6 +30,12 @@ on:
       - libs/payload-invocation/templates/posix-shim.tmpl
       - libs/payload-invocation/templates/powershell-shim.tmpl
       - libs/payload-invocation/tests/test_uv_runtime_launch.py
+      - libs/payload-invocation/tests/test_mcp_ready_source.py
+      - plugins/agent-mcp/scripts/runtime-gate.sh
+      - plugins/agent-mcp/scripts/runtime-gate.ps1
+      - plugins/agent-mcp/tests/test_managed_command_gate.py
+      - plugins/agent-mcp/tests/test_payload_invocation.py
+      - tools/installer_engine_ref.py
       - libs/installer-engine/bootstrap-capture.cs
       - libs/installer-engine/bootstrap-capture.exe
       - libs/installer-engine/bootstrap-capture.ps1
@@ -1259,6 +1265,92 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+  mcp-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      MCP_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &mcp-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Observe native macOS process-group admission prerequisites
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ctypes
+          import json
+          import os
+          import sys
+          sys.path.insert(0, "libs/agent-procutil/src")
+          from agent_procutil._darwin_caller_owned import GroupCensus, _BSDInfo
+          census = GroupCensus()
+          group = os.getpgrp()
+          pids = (ctypes.c_int * 1024)()
+          ctypes.set_errno(0)
+          count = census.list_pids(group, pids, ctypes.sizeof(pids))
+          print(json.dumps({"group_count": count, "errno": ctypes.get_errno()}), flush=True)
+          assert 0 <= count < len(pids)
+          for pid in pids[:count]:
+              data = _BSDInfo()
+              ctypes.set_errno(0)
+              returned = census.info(pid, 3, 0, ctypes.byref(data), ctypes.sizeof(data))
+              print(json.dumps({
+                  "self": pid == os.getpid(),
+                  "leader": pid == group,
+                  "returned": returned,
+                  "expected": ctypes.sizeof(data),
+                  "errno": ctypes.get_errno(),
+                  "same_pid": data.pid == pid,
+                  "same_group": data.pgid == group,
+              }), flush=True)
+          PY
+      - name: Qualify raw and materialized prepared MCP foreground entry
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_mcp_ready_source.py --allow-explicit-tiers
+          -k "${{ env.MCP_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/mcp-ready
+      - name: Require every native control and repeated work report without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.MCP_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/mcp-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='mcp_command_admission'];
+          assert len(reports)==16 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['application_uv_lookups']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'mcp_command_admission':reports},sort_keys=True))"
+
+  mcp-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      MCP_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *mcp-ready-steps
+
+  mcp-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      MCP_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *mcp-ready-steps
+
   mixed-python:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.

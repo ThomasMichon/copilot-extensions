@@ -183,8 +183,44 @@ function Resolve-RuntimePython {
     return $AgentRtPy
 }
 
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $scriptDir '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-mcp] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
+    $Python = Get-AdmittedRuntimePython $Python
     $env:AGENT_MCP_HOME = $runtimeRoot
     if ($marketplaceRoot) {
         $env:AGENT_MCP_MARKETPLACE_ROOT = $marketplaceRoot
@@ -206,13 +242,21 @@ function Invoke-Runtime {
     if ($readinessProbe) {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
     }
+    $nativeArgs = @('-m', 'agent_mcp') + $forwardArgs
+    if ($readinessProbe) {
+        $nativeArgs = @(
+            (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),
+            '--plugin', 'agent-mcp', '--module', 'agent_mcp', '--'
+        ) + $forwardArgs
+    }
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+        $nativeArgs = @($nativeArgs | ForEach-Object {
+            '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+        })
+    }
     try {
-        if ($pythonOptions.Count) {
-            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
-            & $Python @pythonOptions $probeEntry --plugin agent-mcp --module agent_mcp -- @forwardArgs
-        } else {
-            & $Python -m agent_mcp @forwardArgs
-        }
+        & $Python @pythonOptions @nativeArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }
