@@ -131,6 +131,13 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   Local whole-file checking of the seven-file delta stopped during ordinary
   consumer materialization before MyPy started; it supplies no type verdict.
   Fresh exact-head canonical source CI must supply that verdict.
+  Target integration is now blocked by manifest storage capacity: the pinned
+  target leaves 29 bytes under the unchanged 1 MiB cap; retaining all target
+  groups and this slice's 119 controls produces 1,049,174 bytes, 598 over.
+  The existing storage owner has merged the reader-first successor plan in
+  #14648 under #6237. Preserve its ownership and wait for compatible readers
+  and the reviewed source-data migration; do not remove witnesses, raise the
+  cap or publish a competing repair.
   Fresh published-head review, required CI, native qualification, merge and
   normal release remain open. Effectful lifecycle selectors and potential
   targets remain separate.
