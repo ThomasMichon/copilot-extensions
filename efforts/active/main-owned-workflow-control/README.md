@@ -487,7 +487,32 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify only the whole original invalid-workspace refusal function
+- [ ] Qualify only the whole original invalid-budget refusal function,
+  retaining all four rows, including the exact NaN value, original
+  objects/globals/fixtures, own row objects, typed values, all marks, IDs
+  and order. All fourteen other whole functions remain excluded before
+  execution. Complete original/adapted metadata and unchanged guarding
+  precede admission; require actual budget validation calls per case.
+  Complete collection confirms 25 original cases and exactly four adapter
+  cases through the same whole function. First unchanged guarded execution
+  passes four in 0.87 pytest / 14.641 observation seconds: all twelve phases
+  pass, zero prohibited effects, nineteen bound reads and budget-validation
+  call lines for every case, without execution or cleanup budget consumers.
+  The full observation is read before admission. Only four nodes, two
+  adapter/original bindings and one already-bound production coverage target
+  are added: 11,183 nodes, 1,545 sources, 564 targets, unchanged 92 helpers,
+  300 seconds and 739,577 bytes. Fresh review/full CI, normal merge and
+  persistence remain before Done.
+- [ ] The passive cleanup-diagnostic candidate is disqualified by first-touch
+  Linux CI collection: its original module imports a native fixture helper,
+  whose `ctypes` import triggers forbidden `ctypes.dlopen`.
+  The local eight-case pass does not qualify that import path.
+  All eight candidate nodes, three new bindings, the added target and adapter
+  are withdrawn before any further execution; every prior admission/limit
+  is restored exactly first. Keep the failed CI and evidence.
+  No preload, fixture/original rewrite, environment change or guard exception
+  may make this module eligible. This remains blocked, not Done.
+- [x] Qualify only the whole original invalid-workspace refusal function
   with its original tmp-path fixture and both missing-path/file-path checks.
   Complete metadata and unchanged guarding must establish eligibility before
   admission; require actual workspace-validation calls without policy reads
@@ -509,6 +534,14 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   adapter binding are added: 11,179 nodes, 1,543 sources, unchanged 563
   targets, 92 helpers, 300 seconds and 739,114 bytes.
   Fresh review/full CI, normal merge and persistence remain before Done.
+  Source #14737 merges at `3c6e7699cfb18eb0adcf898851b2c184afb19eb0`
+  after exact-head approval and complete required CI. Both natural runs
+  execute all 11,179 units; neither is a reuse hit.
+  Independent merged/open-parent readback and managed sync complete.
+  All five owned raw blobs, the exact candidate, all 1,543 bindings,
+  92 helpers and sixteen observed inputs verify without replay.
+  Reviewed and merged trees match. Actual parent Goal, own Plan and the
+  whole Validation Plan are reread before only this one-case leaf is Done.
 - [x] Qualify the whole original invalid-marketplace-identity refusal
   function without discovering a repository or reading policy.
   Preserve all seven original rows, the original tmp-path fixture, marks,
