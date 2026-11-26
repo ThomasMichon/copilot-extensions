@@ -123,12 +123,19 @@ def test_finite_command_drains_the_journal_through_its_route(
     assert str(tmp_path) not in json.dumps([e for _, e in offered])
 
 
+@pytest.mark.parametrize("refusal", ["policy", "receiver"])
 def test_refused_route_leaves_hook_records_pending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: str,
 ) -> None:
-    _admit(tmp_path, monkeypatch)
+    root = _admit(tmp_path, monkeypatch)
     install = tmp_path / "install"
     hook_telemetry.finish(hook_telemetry.begin(install), None)
-    (install / "consumer-telemetry.json").write_text(json.dumps({"schema_version": 9}), encoding="utf-8")
+    if refusal == "policy":
+        (install / "consumer-telemetry.json").write_text(json.dumps({"schema_version": 9}), encoding="utf-8")
+    else:
+        # A valid owner policy whose receiver configuration refuses the route.
+        (root / ".agent-telemetry" / "config.json").write_text(
+            json.dumps({"schema_version": 1, "mode": "off"}), encoding="utf-8",
+        )
     assert _run(monkeypatch, ["create"], lambda: 0) == 0
     assert len(hook_journal.drain(install / "consumer-telemetry-hooks")) == 1

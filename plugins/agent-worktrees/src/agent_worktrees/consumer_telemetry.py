@@ -316,11 +316,15 @@ def _offer_hook_journal() -> None:
         )
         if owner.legacy or owner.refusal is not None:
             return
-        events = hook_journal.drain(directory)
-        if not events:
+        try:
+            if (directory / "pending.jsonl").stat().st_size == 0:
+                return
+        except OSError:
             return
         with owner:
-            for event in events:
+            if not owner.active:
+                return
+            for event in hook_journal.drain(directory):
                 owner.emit(event)
     except Exception:
         return
