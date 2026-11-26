@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
+from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
-from agent_dispatch import bridge, bridge_agent_registry, bridge_reclaim, procutil
-from agent_dispatch.queue import Status
+from agent_dispatch import bridge, bridge_agent_registry, bridge_reclaim, bridge_remote
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 from tests._hosting_owner import admission_owner as admission_owner
 
@@ -17,31 +22,33 @@ from tests._hosting_owner import admission_owner as admission_owner
 
 
 @pytest.fixture
-def q(tmp_path):
+def q(tmp_path: Path) -> TaskQueue:
     return TaskQueue(tmp_path / "tasks.db")
 
 
-def test_claim_specific_task_by_id(q):
+def test_claim_specific_task_by_id(q: TaskQueue) -> None:
     a = q.create("a")
     b = q.create("b")
     # claim the *second*, older-ordering notwithstanding
     got = q.claim_one("w1", task_id=b.id)
-    assert got is not None and got.id == b.id
+    assert isinstance(got, Task) and got.id == b.id
     # a is still queued
-    assert q.get(a.id).status == Status.QUEUED
+    remaining = q.get(a.id)
+    assert remaining is not None and remaining.status == Status.QUEUED
 
 
-def test_claim_by_id_respects_eligibility(q):
+def test_claim_by_id_respects_eligibility(q: TaskQueue) -> None:
     t = q.create("needs-cap", requires=["review"])
     assert q.claim_one("w1", task_id=t.id) is None  # lacks capability
-    assert q.claim_one("w1", ["review"], task_id=t.id).id == t.id
+    claimed = q.claim_one("w1", ["review"], task_id=t.id)
+    assert isinstance(claimed, Task) and claimed.id == t.id
 
 
-def test_claim_by_id_missing_returns_none(q):
+def test_claim_by_id_missing_returns_none(q: TaskQueue) -> None:
     assert q.claim_one("w1", task_id="does-not-exist") is None
 
 
-def test_claim_by_id_already_claimed_returns_none(q):
+def test_claim_by_id_already_claimed_returns_none(q: TaskQueue) -> None:
     t = q.create("x")
     q.claim_one("w1", task_id=t.id)
     assert q.claim_one("w2", task_id=t.id) is None  # no longer queued
@@ -50,7 +57,7 @@ def test_claim_by_id_already_claimed_returns_none(q):
 # -- bridge spawn ------------------------------------------------------------
 
 
-def test_worker_prompt_mentions_task_and_verbs():
+def test_worker_prompt_mentions_task_and_verbs() -> None:
     prompt = bridge.worker_prompt("abc123", worker_id="w9")
     assert "abc123" in prompt
     assert "w9" in prompt
@@ -62,7 +69,7 @@ def test_worker_prompt_mentions_task_and_verbs():
     assert "agent-dispatch progress abc123 w9" in prompt
 
 
-def test_worker_prompt_threads_shared_moniker_route():
+def test_worker_prompt_threads_shared_moniker_route() -> None:
     prompt = bridge.worker_prompt("abc123", worker_id="w9", route=" --shared")
     assert "agent-dispatch --shared show abc123" in prompt
     assert "agent-dispatch --shared claim abc123 --worker w9" in prompt
@@ -70,14 +77,16 @@ def test_worker_prompt_threads_shared_moniker_route():
     assert "http://" not in prompt
 
 
-def test_spawn_worker_unavailable_when_no_bridge(monkeypatch):
+def test_spawn_worker_unavailable_when_no_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
     assert bridge.bridge_available() is False
     with pytest.raises(bridge.BridgeUnavailable):
         bridge.spawn_worker("t1", worker_id="w1")
 
 
-def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(monkeypatch, tmp_path):
+def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """The autopilot seed carries cmd.exe metacharacters (``&``, ``()``, ``<>``,
     backtick). Launching the Windows ``agent-bridge.cmd`` shim makes cmd.exe
     re-parse ``%*`` and corrupt the seed (WinError 2, BatBadBut -- #4395). So when
@@ -90,10 +99,10 @@ def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(monkeypatch, tmp_
     slot_py.parent.mkdir(parents=True)
     slot_py.write_text("")  # only needs to exist as a file
     (tmp_path / ".agent-bridge" / "current-version").write_text("0.1.0-dev9")
-    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     # Even with a .cmd binstub on PATH, the versioned interpreter wins.
     monkeypatch.setattr(
-        procutil.shutil, "which", lambda _n: r"C:\bin\agent-bridge.cmd"
+        shutil, "which", lambda _n: r"C:\bin\agent-bridge.cmd"
     )
     prefix = bridge._agent_bridge_launch_prefix()
     assert prefix == [str(slot_py), "-m", "agent_bridge"]
@@ -101,39 +110,45 @@ def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(monkeypatch, tmp_
     assert not prefix[0].lower().endswith((".cmd", ".bat"))
 
 
-def test_launch_prefix_falls_back_to_binstub_on_posix(monkeypatch, tmp_path):
+def test_launch_prefix_falls_back_to_binstub_on_posix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """Without an installed versioned runtime, fall back to the ``agent-bridge``
     binstub on PATH **on POSIX only** (its shims are plain exec scripts -- no
     cmd.exe re-parse)."""
-    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(procutil.os, "name", "posix")
-    monkeypatch.setattr(procutil.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/agent-bridge")
     assert bridge._agent_bridge_launch_prefix() == ["/usr/bin/agent-bridge"]
 
 
-def test_launch_prefix_no_ps1_fallback_on_windows(monkeypatch, tmp_path):
+def test_launch_prefix_no_ps1_fallback_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """On Windows, with no versioned runtime, do NOT fall back to the ``.ps1``
     binstub (``subprocess`` cannot exec it -> WinError 2). Return ``None`` so the
     caller degrades deliberately (the #974 fix)."""
-    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(procutil.os, "name", "nt")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(os, "name", "nt")
     monkeypatch.setattr(
-        procutil.shutil, "which", lambda _n: r"C:\bin\agent-bridge.ps1"
+        shutil, "which", lambda _n: r"C:\bin\agent-bridge.ps1"
     )
     assert bridge._agent_bridge_launch_prefix() is None
 
 
-def test_launch_prefix_none_when_unresolvable(monkeypatch, tmp_path):
-    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(procutil.os, "name", "posix")
-    monkeypatch.setattr(procutil.shutil, "which", lambda _n: None)
+def test_launch_prefix_none_when_unresolvable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(shutil, "which", lambda _n: None)
     assert bridge._agent_bridge_launch_prefix() is None
 
 
-def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
-    calls = {}
+def test_spawn_worker_invokes_agent_bridge_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
@@ -141,7 +156,7 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
         "task42", agent="task-worker", worker_id="w1", wait=False
@@ -153,20 +168,20 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
-def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
+def test_spawn_worker_charter_appends_to_direct_create(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression for the venue/charter split: `charter` must
     ride the direct `agent-bridge create <venue> <prompt> --charter <charter>`
     call -- independent of, and never substituting for, the venue target."""
-    calls = {}
+    calls: dict[str, Any] = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
         "task42", agent="Atlas-Core-wsl", charter="cab-sweep-reconciler",
@@ -179,12 +194,14 @@ def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
     assert cmd[cmd.index("--charter") + 1] == "cab-sweep-reconciler"
 
 
-def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch, admission_owner):
-    calls: list[tuple[list[str], dict]] = []
+def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(
+    monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+) -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((cmd, kwargs))
-        if cmd[1:3] == ["--json", "live-sessions"]:
+        if cmd[1:3] == ["--json", "resume"]:
             return subprocess.CompletedProcess(
                 cmd,
                 0,
@@ -205,7 +222,7 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
             "spawnable_as_target": False,
         },
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
         "task42",
@@ -218,22 +235,20 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
 
     assert result.returncode == 0
     assert json.loads(result.stdout)["session_id"] == "sid-123"
-    assert calls[0][0] == ["/usr/bin/agent-bridge", "resume", "wt-1", "--require-agent-hosting"]
+    assert calls[0][0] == [
+        "/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--require-agent-hosting",
+    ]
     assert calls[1][0][:5] == [
-        "/usr/bin/agent-bridge", "send", "wt-1", "--require-agent-hosting", "--prompt-file",
+        "/usr/bin/agent-bridge", "send", "sid-123", "--require-agent-hosting", "--prompt-file",
     ]
     assert calls[1][1]["input"]
-    assert calls[2][0] == [
-        "/usr/bin/agent-bridge",
-        "--json",
-        "live-sessions",
-        "resolve",
-        "--handle",
-        "wt-1",
-    ]
+    assert len(calls) == 2
+    assert json.loads(result.stdout)["worktree"] == "wt-1"
 
 
-def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeypatch, admission_owner):
+def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(
+    monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+) -> None:
     """A bound-charter worker (the non-direct-spawn-target path) with
     reclaim=True must go through the same stop-then-revalidate-then-force
     sequence as the direct-spawn path -- not a blind 'resume --force', which
@@ -251,11 +266,17 @@ def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeyp
             "spawnable_as_target": False,
         },
     )
-    calls = []
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def resume(
+        worktree_id: str, prompt: str, **kw: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((worktree_id, prompt, kw))
+        return subprocess.CompletedProcess([], 0, stdout='{"session_id": "sid-9"}', stderr="")
+
     monkeypatch.setattr(
         bridge_reclaim, "resume_worktree_and_send",
-        lambda worktree_id, prompt, **kw: calls.append((worktree_id, prompt, kw))
-        or subprocess.CompletedProcess([], 0, stdout='{"session_id": "sid-9"}', stderr=""),
+        resume,
     )
 
     result = bridge.spawn_worker(
@@ -274,7 +295,9 @@ def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeyp
     assert kw["json_output"] is True
 
 
-def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypatch, admission_owner):
+def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(
+    monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+) -> None:
     """``resume_worktree=True`` is the non-forcing conversation-recovery path
     (distinct from ``reclaim=True`` above, which is an explicit forceful
     take-over): it must delegate with ``allow_takeover=False`` so
@@ -287,11 +310,17 @@ def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypa
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    calls = []
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def resume(
+        worktree_id: str, prompt: str, **kw: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((worktree_id, prompt, kw))
+        return subprocess.CompletedProcess([], 0, stdout='{"session_id": "sid-9"}', stderr="")
+
     monkeypatch.setattr(
         bridge_reclaim, "resume_worktree_and_send",
-        lambda worktree_id, prompt, **kw: calls.append((worktree_id, prompt, kw))
-        or subprocess.CompletedProcess([], 0, stdout='{"session_id": "sid-9"}', stderr=""),
+        resume,
     )
 
     result = bridge.spawn_worker(
@@ -307,7 +336,9 @@ def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypa
     assert kw["allow_takeover"] is False
 
 
-def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeypatch, admission_owner):
+def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(
+    monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+) -> None:
     """End-to-end (through ``spawn_worker``, not just ``resume_worktree_and_
     send`` directly): a missing bridge session record must surface as the
     caller's own refusal, never a swallowed/retried fresh session."""
@@ -315,7 +346,7 @@ def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeyp
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if cmd[1:3] == ["--json", "resume"]:
             assert "--strict" in cmd
             return subprocess.CompletedProcess(
@@ -329,7 +360,7 @@ def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeyp
             )
         raise AssertionError(f"unexpected subprocess call: {cmd}")
 
-    monkeypatch.setattr(bridge_reclaim.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
         "task42", agent="task-worker", worker_id="w1",
@@ -341,22 +372,22 @@ def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeyp
     assert detail["reason"] == "resume_requires_existing_session"
 
 
-def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch):
+def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch: pytest.MonkeyPatch) -> None:
     """copilot-extensions#2202: without --caller, the spawned worktree has no
     caller_worktree stamped, so agent-worktrees' resolved_origin falls through
     to "user" (Picker-visible) instead of "delegate" (Picker-hidden) -- every
     autopilot worker looked exactly like an operator-created worktree. --caller
     must ride every `create` invocation, keyed to this specific spawn attempt."""
-    calls = {}
+    calls: dict[str, Any] = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     bridge.spawn_worker("task42", agent="task-worker", worker_id="worker-abc123")
 
@@ -366,9 +397,9 @@ def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch):
     assert caller_value == "agent-dispatch:worker-abc123"
 
 
-def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
+def test_spawn_worker_passes_no_window_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     """The console launcher runs windowless (CREATE_NO_WINDOW on Windows)."""
-    calls = {}
+    calls: dict[str, Any] = {}
 
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
@@ -377,28 +408,30 @@ def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
         bridge, "no_window_kwargs", lambda: {"creationflags": 0x08000000}
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     bridge.spawn_worker("t", worker_id="w")
     assert calls["kwargs"].get("creationflags") == 0x08000000
 
 
-def test_spawn_worker_wait_omits_no_wait(monkeypatch):
+def test_spawn_worker_wait_omits_no_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
-        bridge.subprocess, "run",
+        subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
     result = bridge.spawn_worker("t", worker_id="w", wait=True)
     assert result.returncode == 0
 
 
-def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
+def test_spawn_worker_reclaim_resumes_then_sends(
+    monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+) -> None:
     """``reclaim=True`` (#6744 Phase 3, since ``create --reclaim`` was removed
     from agent-bridge) resolves via ``resume <worktree_id>`` (no ``--force`` --
     see ``bridge_reclaim``'s own docstring on why this never bypasses the
@@ -406,9 +439,9 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
     at all -- so a coordinator-judged-stale worktree occupant (e.g. an
     unclaimed handoff past its reconciliation window) is replaced in place
     instead of refused 409."""
-    calls = []
+    calls: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         if cmd[1:4] == ["--json", "resume", "wt-1"]:
             return subprocess.CompletedProcess(
@@ -424,7 +457,7 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
         "_agent_bridge_launch_prefix",
         lambda: ["/usr/bin/agent-bridge"],
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
         "task42", agent="task-worker", worker_id="w1",
@@ -440,7 +473,7 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
     assert "--no-wait" in calls[2]
 
 
-def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch):
+def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
@@ -448,17 +481,19 @@ def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch):
         bridge.spawn_worker("task42", worker_id="w1", reclaim=True)
 
 
-def test_spawn_worker_omits_reclaim_by_default(monkeypatch, admission_owner):
-    calls = {}
+def test_spawn_worker_omits_reclaim_by_default(
+    monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+) -> None:
+    calls: dict[str, Any] = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, "ok", "")
 
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     bridge.spawn_worker(
         "task42", agent="task-worker", worker_id="w1", worktree_id="wt-1",
@@ -467,17 +502,17 @@ def test_spawn_worker_omits_reclaim_by_default(monkeypatch, admission_owner):
     assert "create" in calls["cmd"]
 
 
-def test_stop_worker_reaps_owned_session_host(monkeypatch):
-    calls = {}
+def test_stop_worker_reaps_owned_session_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.stop_worker("session-1") is True
     assert calls["cmd"] == [
         "/usr/bin/agent-bridge",
@@ -487,13 +522,13 @@ def test_stop_worker_reaps_owned_session_host(monkeypatch):
     ]
 
 
-def test_stop_worker_falls_back_for_unsupported_reap_host(monkeypatch):
-    calls = []
+def test_stop_worker_falls_back_for_unsupported_reap_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         if "--reap-host" in cmd:
             return subprocess.CompletedProcess(
@@ -504,7 +539,7 @@ def test_stop_worker_falls_back_for_unsupported_reap_host(monkeypatch):
             )
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert bridge.stop_worker("session-1") is True
     assert calls == [
@@ -513,13 +548,13 @@ def test_stop_worker_falls_back_for_unsupported_reap_host(monkeypatch):
     ]
 
 
-def test_stop_worker_does_not_fallback_for_general_failure(monkeypatch):
-    calls = []
+def test_stop_worker_does_not_fallback_for_general_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         return subprocess.CompletedProcess(
             cmd,
@@ -528,7 +563,7 @@ def test_stop_worker_does_not_fallback_for_general_failure(monkeypatch):
             "session teardown failed",
         )
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert bridge.stop_worker("session-1") is False
     assert calls == [
@@ -536,17 +571,17 @@ def test_stop_worker_does_not_fallback_for_general_failure(monkeypatch):
     ]
 
 
-def test_end_worker_requires_atomic_idle_state(monkeypatch):
-    calls = {}
+def test_end_worker_requires_atomic_idle_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.end_worker("session-1") is True
     assert calls["cmd"] == [
         "/usr/bin/agent-bridge",
@@ -556,22 +591,22 @@ def test_end_worker_requires_atomic_idle_state(monkeypatch):
     ]
 
 
-def test_force_end_session_runs_unconditional_end(monkeypatch):
-    calls = {}
+def test_force_end_session_runs_unconditional_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.force_end_session("session-1") is True
     assert calls["cmd"] == ["/usr/bin/agent-bridge", "end", "session-1", "--force"]
 
 
-def test_force_end_session_returns_false_without_bridge(monkeypatch):
+def test_force_end_session_returns_false_without_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
     assert bridge.force_end_session("session-1") is False
 
@@ -579,7 +614,9 @@ def test_force_end_session_returns_false_without_bridge(monkeypatch):
 @pytest.mark.parametrize(
     "raised", [OSError("no such file"), subprocess.TimeoutExpired(cmd="agent-bridge", timeout=20)]
 )
-def test_force_end_session_degrades_to_false_on_subprocess_exception(monkeypatch, raised):
+def test_force_end_session_degrades_to_false_on_subprocess_exception(
+    monkeypatch: pytest.MonkeyPatch, raised: Exception,
+) -> None:
     """PR #2913 review: the docstring promises this never raises -- a missing
     binary (OSError) or a stuck process (TimeoutExpired) must degrade to
     `False` like every other failure mode, since `force_stop` calls this
@@ -588,20 +625,20 @@ def test_force_end_session_degrades_to_false_on_subprocess_exception(monkeypatch
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> NoReturn:
         raise raised
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.force_end_session("session-1") is False
 
 
-def test_resume_worker_sends_to_existing_session(monkeypatch):
-    calls = {}
+def test_resume_worker_sends_to_existing_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         calls["input"] = kwargs.get("input_text")
         return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -624,11 +661,13 @@ def test_resume_worker_sends_to_existing_session(monkeypatch):
     assert calls["input"] == "continue"
 
 
-def test_resume_session_local_delegates_to_resume_worker(monkeypatch):
+def test_resume_session_local_delegates_to_resume_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     """``host=None`` delegates straight to :func:`resume_worker`."""
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def fake_resume_worker(session_id, prompt, *, wait=False, timeout=20.0):
+    def fake_resume_worker(
+        session_id: str, prompt: str, *, wait: bool = False, timeout: float | None = 20.0,
+    ) -> bool:
         seen.update(session_id=session_id, prompt=prompt, wait=wait, timeout=timeout)
         return True
 
@@ -639,21 +678,25 @@ def test_resume_session_local_delegates_to_resume_worker(monkeypatch):
     }
 
 
-def test_resume_session_fleet_normalizes_host_and_runs_over_ssh(monkeypatch):
+def test_resume_session_fleet_normalizes_host_and_runs_over_ssh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A fleet ``host`` is normalized (case/whitespace) before it reaches the
     SSH argv -- an un-normalized alias could pass the fleet liveness gate
     (which normalizes) yet fail delivery here if it didn't (#2889 review)."""
-    calls = {}
+    calls: dict[str, Any] = {}
 
-    def fake_which(name):
+    def fake_which(name: str) -> str | None:
         return "/usr/bin/ssh" if name == "ssh" else None
 
-    def fake_run_ssh_command(argv, *, input=None, timeout=None):
+    def fake_run_ssh_command(
+        argv: list[str], *, input: str | None = None, timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         calls["argv"] = argv
         calls["input"] = input
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(bridge.shutil, "which", fake_which)
+    monkeypatch.setattr(shutil, "which", fake_which)
     monkeypatch.setattr(bridge, "run_ssh_command", fake_run_ssh_command)
 
     assert bridge.resume_session("session-1", "continue", host=" Pool-A ") is True
@@ -665,18 +708,18 @@ def test_resume_session_fleet_normalizes_host_and_runs_over_ssh(monkeypatch):
     assert calls["input"] == "continue"
 
 
-def test_resume_session_fleet_no_ssh_binary_fails_closed(monkeypatch):
-    monkeypatch.setattr(bridge.shutil, "which", lambda name: None)
+def test_resume_session_fleet_no_ssh_binary_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     assert bridge.resume_session("session-1", "continue", host="pool-a") is False
 
 
 # -- steer-owner resume ------------------------------------------------------
 
 
-def test_resume_steered_owner_queues_work_prompt(monkeypatch):
-    calls = {}
+def test_resume_steered_owner_queues_work_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -685,7 +728,7 @@ def test_resume_steered_owner_queues_work_prompt(monkeypatch):
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert bridge.resume_steered_owner(
         "host/worktree-1", "task-42", owner_session_id="session-42"
@@ -708,8 +751,8 @@ def test_resume_steered_owner_queues_work_prompt(monkeypatch):
     assert "re-read the task" in calls["kwargs"]["input"]
 
 
-def test_resume_steered_headless_owner_uses_exact_session(monkeypatch):
-    calls = {}
+def test_resume_steered_headless_owner_uses_exact_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge,
         "resume_worker",
@@ -726,24 +769,26 @@ def test_resume_steered_headless_owner_uses_exact_session(monkeypatch):
     assert "task-42" in calls["prompt"]
 
 
-def test_resume_steered_owner_degrades_when_bridge_unavailable(monkeypatch):
+def test_resume_steered_owner_degrades_when_bridge_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
     monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
     assert bridge.resume_steered_owner("host/worktree-1", "task-42") is False
 
 
-def test_resume_steered_owner_forwards_idempotency_key(monkeypatch):
-    calls = {}
+def test_resume_steered_owner_forwards_idempotency_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["agent-bridge"]
     )
     monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
 
-    def fake_run(cmd, **_kwargs):
+    def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
-        return type("Result", (), {"returncode": 0})()
+        return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.resume_steered_owner(
         "host/worktree-1",
         "task-42",
@@ -754,10 +799,10 @@ def test_resume_steered_owner_forwards_idempotency_key(monkeypatch):
     assert calls["cmd"][index + 1] == "wake:task-42:1:1"
 
 
-def test_resume_steered_owner_preserves_custom_message(monkeypatch):
-    calls = {}
+def test_resume_steered_owner_preserves_custom_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, Any] = {}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 1, "", "not live")
@@ -766,7 +811,7 @@ def test_resume_steered_owner_preserves_custom_message(monkeypatch):
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert (
         bridge.resume_steered_owner(
@@ -781,32 +826,34 @@ def test_resume_steered_owner_preserves_custom_message(monkeypatch):
     assert calls["kwargs"]["input"] == "Continue with the operator's choice."
 
 
-def test_resume_steered_owner_requires_captured_session(monkeypatch):
+def test_resume_steered_owner_requires_captured_session(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     assert bridge.resume_steered_owner("host/worktree-1", "task-42") is False
 
 
-def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
-    calls = {}
+def test_resume_steered_owner_routes_remote_machine_over_ssh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge.remote_dispatch, "local_machine", lambda: "coordinator"
     )
     monkeypatch.setattr(
-        bridge.shutil,
+        shutil,
         "which",
         lambda command: "/usr/bin/ssh" if command == "ssh" else None,
     )
     monkeypatch.setattr(
-        bridge.bridge_remote.LocalBridgeRemoteClient,
+        bridge_remote.LocalBridgeRemoteClient,
         "send_live_message",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            bridge.bridge_remote.RemoteBridgeUnavailable("not installed")
+            bridge_remote.RemoteBridgeUnavailable("not installed")
         ),
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls["cmd"] = cmd
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -837,26 +884,28 @@ def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
     assert calls["kwargs"]["input"] == "resume now"
 
 
-def test_resume_steered_owner_uses_standard_command_not_carrier(monkeypatch):
-    calls = {}
+def test_resume_steered_owner_uses_standard_command_not_carrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, Any] = {}
     monkeypatch.setattr(
         bridge.remote_dispatch, "local_machine", lambda: "coordinator"
     )
 
-    def send(*_args, **_kwargs):
+    def send(*_args: Any, **_kwargs: Any) -> NoReturn:
         pytest.fail("owner delivery must use the standard Bridge command")
 
     monkeypatch.setattr(
-        bridge.bridge_remote.LocalBridgeRemoteClient,
+        bridge_remote.LocalBridgeRemoteClient,
         "send_live_message",
         send,
     )
     monkeypatch.setattr(
-        bridge.shutil,
+        shutil,
         "which",
         lambda name: "/usr/bin/ssh" if name == "ssh" else None,
     )
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.update(argv=argv, **kwargs)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -876,19 +925,21 @@ def test_resume_steered_owner_uses_standard_command_not_carrier(monkeypatch):
     assert calls["input"] == "resume now"
 
 
-def test_resume_steered_owner_requires_standard_command_transport(monkeypatch):
+def test_resume_steered_owner_requires_standard_command_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         bridge.remote_dispatch, "local_machine", lambda: "coordinator"
     )
     monkeypatch.setattr(
-        bridge.bridge_remote.LocalBridgeRemoteClient,
+        bridge_remote.LocalBridgeRemoteClient,
         "send_live_message",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            bridge.bridge_remote.RemoteBridgeOperationError("remote rejected")
+            bridge_remote.RemoteBridgeOperationError("remote rejected")
         ),
     )
     monkeypatch.setattr(
-        bridge.shutil,
+        shutil,
         "which",
         lambda _name: None,
     )
@@ -908,19 +959,19 @@ _AGENTS_JSON = (
 )
 
 
-def test_parse_agent_names_extracts_names():
+def test_parse_agent_names_extracts_names() -> None:
     names = bridge.parse_agent_names(_AGENTS_JSON)
     assert names == {"general-loop-worker", "sweep-worker", "document-intake-processor"}
 
 
-def test_parse_agent_names_skips_human_preamble():
+def test_parse_agent_names_skips_human_preamble() -> None:
     out = "Loading agents...\n" + _AGENTS_JSON
     assert bridge.parse_agent_names(out) == {
         "general-loop-worker", "sweep-worker", "document-intake-processor"
     }
 
 
-def test_parse_agent_names_indeterminate_on_junk():
+def test_parse_agent_names_indeterminate_on_junk() -> None:
     # Empty / unparseable / wrong-shape all mean "couldn't tell" (None), never {}.
     assert bridge.parse_agent_names("") is None
     assert bridge.parse_agent_names(None) is None
@@ -928,33 +979,33 @@ def test_parse_agent_names_indeterminate_on_junk():
     assert bridge.parse_agent_names('{"name": "x"}') is None  # object, not a list
 
 
-def test_registered_agent_names_none_when_no_bridge(monkeypatch):
+def test_registered_agent_names_none_when_no_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: None)
     assert bridge.registered_agent_names() is None
 
 
-def test_registered_agent_names_none_on_nonzero_exit(monkeypatch):
+def test_registered_agent_names_none_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
-        bridge.subprocess, "run",
+        subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
     )
     assert bridge.registered_agent_names() is None
 
 
-def test_registered_agent_names_parses_list(monkeypatch):
-    seen = {}
+def test_registered_agent_names_parses_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, _AGENTS_JSON, "")
 
     monkeypatch.setattr(
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.registered_agent_names() == {
         "general-loop-worker", "sweep-worker", "document-intake-processor"
     }
@@ -962,12 +1013,12 @@ def test_registered_agent_names_parses_list(monkeypatch):
     assert seen["cmd"] == ["/usr/bin/agent-bridge", "--json", "agents"]
 
 
-def test_registered_agents_skips_human_preamble(monkeypatch):
+def test_registered_agents_skips_human_preamble(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
-        bridge.subprocess,
+        subprocess,
         "run",
         lambda cmd, **kw: subprocess.CompletedProcess(
             cmd, 0, "Loading agents...\n" + _AGENTS_JSON, ""
@@ -981,7 +1032,7 @@ def test_registered_agents_skips_human_preamble(monkeypatch):
     ]
 
 
-def test_registered_agent_project_reads_explicit_project(monkeypatch):
+def test_registered_agent_project_reads_explicit_project(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge_agent_registry,
         "registered_agent",
@@ -997,8 +1048,8 @@ def test_registered_agent_project_reads_explicit_project(monkeypatch):
 
 
 def test_registered_agent_project_strictly_rejects_indeterminate_registry(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(bridge_agent_registry, "registered_agent", lambda name, **_kw: None)
 
     with pytest.raises(bridge.BridgeUnavailable, match="local agent registry"):
@@ -1006,8 +1057,8 @@ def test_registered_agent_project_strictly_rejects_indeterminate_registry(
 
 
 def test_registered_agent_project_strict_does_not_raise_on_confirmed_absence(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # A legitimately-absent agent (registry read fine, agent just isn't
     # registered) must NOT raise even under strict=True -- only a truly
     # indeterminate read (None) does. Conflating "confirmed absent" with
@@ -1018,10 +1069,10 @@ def test_registered_agent_project_strict_does_not_raise_on_confirmed_absence(
     assert bridge.registered_agent_project("missing", strict=True) is None
 
 
-def test_registered_agent_uses_fast_single_lookup_command(monkeypatch):
-    seen = {}
+def test_registered_agent_uses_fast_single_lookup_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
         return subprocess.CompletedProcess(
             cmd, 0, json.dumps({"name": "reviewer", "project": "review-harness"}), ""
@@ -1030,7 +1081,7 @@ def test_registered_agent_uses_fast_single_lookup_command(monkeypatch):
     monkeypatch.setattr(
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert bridge.registered_agent("reviewer") == {
         "name": "reviewer", "project": "review-harness"
     }
@@ -1039,26 +1090,28 @@ def test_registered_agent_uses_fast_single_lookup_command(monkeypatch):
     assert seen["cmd"] == ["/usr/bin/agent-bridge", "--json", "agent-show", "reviewer"]
 
 
-def test_registered_agent_not_found_is_distinct_from_indeterminate(monkeypatch):
+def test_registered_agent_not_found_is_distinct_from_indeterminate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     # agent-show exits 1 for a confirmed-absent agent (see agent-bridge's
     # _cmd_agent_show) -- distinct from a crash/timeout/absent-bridge (None).
     monkeypatch.setattr(
-        bridge.subprocess, "run",
+        subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", ""),
     )
     assert bridge.registered_agent("no-such-agent") is bridge._AGENT_NOT_FOUND
 
     monkeypatch.setattr(
-        bridge.subprocess, "run",
+        subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 3, "", "crashed"),
     )
     assert bridge.registered_agent("whatever") is None
 
 
-def test_registered_agent_unsupported_subcommand_is_distinct(monkeypatch):
+def test_registered_agent_unsupported_subcommand_is_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
     # An older, independently-updated agent-bridge (version skew) rejects
     # 'agent-show' with argparse's usual exit 2 -- must be distinguishable
     # from every other failure so callers can fall back to the full listing
@@ -1067,7 +1120,7 @@ def test_registered_agent_unsupported_subcommand_is_distinct(monkeypatch):
         bridge_agent_registry, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
     monkeypatch.setattr(
-        bridge.subprocess, "run",
+        subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(
             cmd, 2, "",
             "agent-bridge: error: argument command: invalid choice: 'agent-show'",
@@ -1076,7 +1129,9 @@ def test_registered_agent_unsupported_subcommand_is_distinct(monkeypatch):
     assert bridge.registered_agent("reviewer") is bridge._AGENT_SHOW_UNSUPPORTED
 
 
-def test_resolve_agent_record_falls_back_when_agent_show_unsupported(monkeypatch):
+def test_resolve_agent_record_falls_back_when_agent_show_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         bridge_agent_registry, "registered_agent", lambda name, **_kw: bridge._AGENT_SHOW_UNSUPPORTED
     )
@@ -1090,14 +1145,21 @@ def test_resolve_agent_record_falls_back_when_agent_show_unsupported(monkeypatch
     assert bridge.registered_agent_project("reviewer") == "review-harness"
 
 
-def test_resolve_agent_record_never_calls_fast_path_for_namespaced_name(monkeypatch):
+def test_resolve_agent_record_never_calls_fast_path_for_namespaced_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # 'codespace:foo' can never be answered by agent-show (it deliberately
     # never enumerates namespace resolvers) -- must go straight to the full
     # listing, not even attempt the fast path first.
-    called = []
+    called: list[str] = []
+
+    def lookup(name: str, **_kw: Any) -> bridge._NotFound:
+        called.append(name)
+        return bridge._AGENT_NOT_FOUND
+
     monkeypatch.setattr(
         bridge_agent_registry, "registered_agent",
-        lambda name, **_kw: called.append(name) or bridge._AGENT_NOT_FOUND,
+        lookup,
     )
     monkeypatch.setattr(
         bridge_agent_registry, "registered_agents",
@@ -1109,7 +1171,7 @@ def test_resolve_agent_record_never_calls_fast_path_for_namespaced_name(monkeypa
     assert called == []
 
 
-def test_agent_is_registered_tri_state(monkeypatch):
+def test_agent_is_registered_tri_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bridge_agent_registry, "registered_agent", lambda name, **_kw: {"name": name})
     assert bridge.agent_is_registered("x") is True
 
@@ -1122,7 +1184,7 @@ def test_agent_is_registered_tri_state(monkeypatch):
     assert bridge.agent_is_registered("x") is None
 
 
-def test_preflight_local_warns_when_agent_absent(monkeypatch):
+def test_preflight_local_warns_when_agent_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bridge_agent_registry, "_resolve_agent_record", lambda name, **_kw: bridge._AGENT_NOT_FOUND)
     warnings = bridge.preflight_headless_agent("task-worker")
     assert len(warnings) == 1
@@ -1130,20 +1192,20 @@ def test_preflight_local_warns_when_agent_absent(monkeypatch):
     assert "task-worker" in w and "not registered" in w and "this host" in w
 
 
-def test_preflight_local_silent_when_agent_present(monkeypatch):
+def test_preflight_local_silent_when_agent_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge_agent_registry, "_resolve_agent_record", lambda name, **_kw: {"name": name, "managed": False}
     )
     assert bridge.preflight_headless_agent("sweep-worker") == []
 
 
-def test_preflight_local_silent_when_indeterminate(monkeypatch):
+def test_preflight_local_silent_when_indeterminate(monkeypatch: pytest.MonkeyPatch) -> None:
     # None registry (couldn't check) must never produce a false warning.
     monkeypatch.setattr(bridge_agent_registry, "_resolve_agent_record", lambda name, **_kw: None)
     assert bridge.preflight_headless_agent("task-worker") == []
 
 
-def test_preflight_local_warns_when_agent_is_managed(monkeypatch):
+def test_preflight_local_warns_when_agent_is_managed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bridge_agent_registry,
         "_resolve_agent_record",
@@ -1154,7 +1216,9 @@ def test_preflight_local_warns_when_agent_is_managed(monkeypatch):
     assert "managed" in warnings[0]
 
 
-def test_preflight_local_uses_full_listing_fallback_for_namespaced_agent(monkeypatch):
+def test_preflight_local_uses_full_listing_fallback_for_namespaced_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # A user-configured --headless-agent can legitimately be namespace-
     # prefixed (codespace:, container:, admin:); agent_is_registered's own
     # fallback (see _resolve_agent_record) must make this correctly silent,
@@ -1171,19 +1235,20 @@ def test_preflight_local_uses_full_listing_fallback_for_namespaced_agent(monkeyp
     assert bridge.preflight_headless_agent("codespace:my-cs") == []
 
 
-def test_preflight_fleet_probes_each_pool_host(monkeypatch):
+def test_preflight_fleet_probes_each_pool_host(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import embody
 
-    probed = []
+    probed: list[str] = []
 
-    def fake_remote(host, agent, **_kw):
+    def fake_remote(host: str, agent: str, **_kw: Any) -> dict[str, Any] | bridge._NotFound | None:
         probed.append(host)
         # present on the first host, absent on the second, indeterminate on third
-        return {
+        records: dict[str, dict[str, Any] | bridge._NotFound | None] = {
             "pool-a": {"name": "sweep-worker", "managed": False},
             "pool-b": bridge._AGENT_NOT_FOUND,
             "pool-c": None,
-        }[host]
+        }
+        return records[host]
 
     monkeypatch.setattr(embody, "remote_registered_agent_record", fake_remote)
     warnings = bridge.preflight_headless_agent(

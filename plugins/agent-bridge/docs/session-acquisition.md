@@ -214,7 +214,7 @@ native-bound delivery still owns the first prompt. Provider creation grants no
 task, token or claim authority, and the provider's ordinary launch restrictions
 and process-lifetime admission continue to apply.
 Provider-keyed sessions never use native recreation, including an ordinary
-send's automatic resume after an interrupted creation acknowledgement.
+legacy send's automatic resume after an interrupted creation acknowledgement.
 A failed load or missing original native ID remains a refusal, not a new
 conversation under the old bridge handle. Caller handoff changes only the
 caller session fragment: valid owner references are compared by their

@@ -1,0 +1,90 @@
+name: Index command gate native admission
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/index-command-gate-native.yml
+      - plugins/agent-index/scripts/runtime-gate.sh
+      - plugins/agent-index/scripts/runtime-gate.ps1
+      - plugins/agent-index/tests/test_managed_command_gate.py
+      - plugins/agent-index/tests/test_runtime_gate.py
+      - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
+      - libs/payload-invocation/tests/test_index_command_gate_source.py
+      - libs/payload-invocation/bootstrap_python.py
+      - libs/payload-invocation/templates/bootstrap-python-*.tmpl
+      - libs/installer-engine/bootstrap-uv.sh
+      - libs/installer-engine/bootstrap-uv.ps1
+      - libs/installer-engine/bootstrap-capture.ps1
+      - libs/installer-engine/bootstrap-capture.exe
+      - libs/agent-procutil/src/agent_procutil/native_capture.sh
+
+permissions:
+  contents: read
+
+jobs:
+  index-command-gate-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GATE_SELECTOR: bash
+      EXPECTED_CASES: "14"
+    steps: &command-gate-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.7"
+      - name: Prepare independent bootstrap and application interpreters
+        run: uv python install --no-bin --no-registry cpython@3.11.18 cpython@3.10.20
+      - name: Qualify actual command gates
+        env:
+          PYTEST_ADDOPTS: "--tb=short -vv"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_command_gate_source.py --allow-explicit-tiers
+          -k "${{ env.GATE_SELECTOR }}"
+          --junit-dir qualification-evidence/index-command-gate
+      - name: Require every native control and repeated offline report
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-command-gate').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==len({c.attrib['name'] for c in cases})==int(os.environ['EXPECTED_CASES']);
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_command_gate_performance'];
+          assert len(reports)==len(cases);
+          assert all(r['network']=='disabled' and r['status']=='measured' and
+          r['completed']==len(r['samples_seconds']) and
+          r['completed']==(2 if r['scenario'] in
+          ('current','lkg','newest','namespaced','setup','readiness','missing-marker','provisioned') else 1)
+          for r in reports);
+          assert all(r['bootstrap_uv_lookups']==
+          (r['completed'] if r['completed']==2 or r['scenario']=='unprepared' else 0)
+          and r['application_uv_lookups']==(r['completed'] if r['completed']==2 else 0)
+          and r['uv_invocations']==2*r['bootstrap_uv_lookups']+r['application_uv_lookups']
+          for r in reports);
+          print(json.dumps({'index_command_gate_performance':reports},sort_keys=True))"
+  index-command-gate-macos:
+    runs-on: macos-latest
+    timeout-minutes: 8
+    env:
+      GATE_SELECTOR: bash
+      EXPECTED_CASES: "14"
+    steps: *command-gate-steps
+  index-command-gate-windows:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      GATE_SELECTOR: not bash
+      EXPECTED_CASES: "28"
+    steps: *command-gate-steps

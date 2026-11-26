@@ -31,6 +31,14 @@ source evidence and refuses ambiguous matches; it never creates, resumes or
 hydrates a conversation. Inspection requires `bridge_inventory: 2` for
 alias-preserving identity support; version 1 remains supported for `list`.
 
+Plain `send ID PROMPT`, `read ID` and `wait ID` use that exact, project-scoped
+identity by default, without ensuring a service or resuming a dormant session.
+Use `--legacy-selector` for prior ordinary profile/session matching and effects.
+Explicit specialized delivery, history, receipt and attention options retain
+their existing operations; `--bridge` explicitly forces exact selection.
+Unsupported exact-provider contracts refuse without automatic legacy fallback.
+See [ordinary selector defaults and legacy support](docs/target-inventory.md#ordinary-selector-defaults-and-legacy-support).
+
 `sessions` lists the union of managed sessions, extension registrations,
 Session Hosts and workspaces, including local registered repositories that do
 not expose an agent. `--json sessions` preserves the legacy managed-record array;
