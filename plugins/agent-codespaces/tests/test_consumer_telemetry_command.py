@@ -304,6 +304,27 @@ def test_a_final_transport_failure_is_not_overwritten_by_an_embody_result(seams:
     assert ct._last_reason == "transport_failed"
 
 
+@pytest.mark.parametrize("stdout", ["", _launch_tests._CREATED])
+def test_a_timed_out_detached_command_is_an_ssh_timeout(seams: Any, stdout: str) -> None:
+    inner = _launch_tests._ssh(seams, stdout=stdout, code=-1)
+
+    def session(ns: Any, **kwargs: Any) -> int:
+        sink = kwargs["result_sink"]
+
+        def timed_out(result: Any) -> int:
+            result.timed_out = True
+            return int(sink(result))
+
+        return int(inner(ns, **{**kwargs, "result_sink": timed_out}))
+
+    ct.start_launch()
+    copilot_detach.cmd_detach(_launch_tests._args(), ssh_session=session)
+    final = [r for r in ct._records if r["stage"] in ("ssh", "remote_embody")][-1]
+    assert (final["stage"], final["outcome"], final["reason"]) == ("ssh", "timeout", "transport_failed")
+    assert type(final["limit_ms"]) is int and final["limit_ms"] > 0
+    assert not any(r["stage"] == "remote_embody" for r in ct._records)
+
+
 def test_a_zero_exit_malformed_snapshot_is_not_a_resolved_account(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

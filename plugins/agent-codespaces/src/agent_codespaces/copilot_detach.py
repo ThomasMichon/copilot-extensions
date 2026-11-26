@@ -730,6 +730,9 @@ def cmd_detach(
             # A relay refusal or an exhausted connect deadline already noted
             # its own cause; keep it rather than a generic connect failure.
             ct.fail_with_cause("connect_failed")
+        elif getattr(result, "timed_out", False):
+            # Partial output from an exhausted deadline is not a completed embody.
+            ct.ssh_timed_out(launch_timeout)
         elif _is_transient_result(result) and not embodied:
             ct.fail("transport_failed")
         else:
