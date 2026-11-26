@@ -523,13 +523,14 @@ the non-public approval conversation.
 ## Plan
 
 The [seven further TTY cases and two source keepers](journal/2026/11.26-seven-further-tty-cases-and-two-source-keepers.md)
-proposes seven additive, independently OPEN case keys in existing #11966
-before separately audited tracking-only retirement. #14690's older shared
-Git fixture helper and #14729's bounded manifest-contention objective remain
-separately OPEN; nearby partial work and search absence do not establish
-fulfillment. No proposed disposition has occurred. The last settled census
-remains 606 whole OPEN, and all parent Plan/Validation states, spent units,
-owners and holds are unchanged.
+records reviewed #14780, complete accepted receiving and seven separately
+audited `NOT_PLANNED` tracking retirements. All 128 case keys stay
+independently OPEN in #11966; #14690's older shared Git fixture helper and
+#14729's bounded manifest-contention objective remain separately OPEN.
+Two equal complete censuses measure 599 whole OPEN: 293 original-cohort and
+306 inflow, with exactly seven departures from 606 and no arrivals or unrelated
+departures. Factual publication remains. All parent Plan/Validation states,
+spent units, owners and holds are unchanged.
 
 The [source fulfillment and four retained execution cases](journal/2026/11.26-source-fulfillment-and-four-retained-cases.md)
 records reviewed #14775, whole accepted receiving and twelve separately
