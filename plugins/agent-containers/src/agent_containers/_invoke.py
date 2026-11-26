@@ -126,6 +126,14 @@ def current_provider_argv() -> list[str]:
     return [*command, "--fleet-repository", str(repository)] if repository else command
 
 
+def current_provider_environment() -> dict[str, str | None]:
+    """Reproduce installation routing, including absent values, on replay."""
+    return {key: os.environ.get(key) for key in (
+        "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_STATE_DIR",
+        _PAYLOAD_ROOT_ENV, "COPILOT_EXTENSIONS_CONTEXT",
+    )}
+
+
 _ROOT = runtime_root()
 #: Legacy single-venv layout (pre versioned-runtime). Kept only as a last-resort
 #: fallback -- the versioned-runtime migration stopped updating it, so it goes

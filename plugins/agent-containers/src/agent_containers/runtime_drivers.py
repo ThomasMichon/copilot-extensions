@@ -35,6 +35,7 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from .config import INTERNAL_LIFECYCLE_OWNER, ContainersConfig, FleetConfig
@@ -147,6 +148,7 @@ class RuntimeDriver(ABC):
     """Runtime operations for the members of one fleet."""
 
     name: str
+    retired: bool = False
 
     @property
     @abstractmethod
@@ -170,7 +172,7 @@ class RuntimeDriver(ABC):
     # operation must apply to that incarnation only and fail otherwise.
 
     @abstractmethod
-    def inspect(self, name: str, *, instance_id: str | None = None) -> dict:
+    def inspect(self, name: str, *, instance_id: str | None = None) -> dict[str, Any]:
         """A Docker-inspect-shaped document (Id, Name, State, Config.Labels)."""
 
     @abstractmethod
@@ -264,33 +266,34 @@ class DockerDriver(RuntimeDriver):
 
     # Docker pins an incarnation by addressing its container id directly.
 
-    def inspect(self, name, *, instance_id=None) -> dict:
+    def inspect(self, name: str, *, instance_id: str | None = None) -> dict[str, Any]:
         from . import lifecycle
 
         return lifecycle.inspect_container(instance_id or name)
 
-    def state(self, name, *, instance_id=None) -> str | None:
+    def state(self, name: str, *, instance_id: str | None = None) -> str | None:
         from . import lifecycle
 
         return lifecycle.inspect_state(instance_id or name)
 
-    def start(self, name, *, instance_id=None) -> None:
+    def start(self, name: str, *, instance_id: str | None = None) -> None:
         from . import lifecycle
 
         lifecycle.start_container(instance_id or name)
 
-    def stop(self, name, *, instance_id=None) -> None:
+    def stop(self, name: str, *, instance_id: str | None = None) -> None:
         from . import lifecycle
 
         lifecycle.stop_container(instance_id or name)
 
-    def remove(self, name, *, force=False, instance_id=None) -> None:
+    def remove(self, name: str, *, force: bool = False, instance_id: str | None = None) -> None:
         from . import lifecycle
 
         lifecycle.remove_container(instance_id or name, force=force)
 
     def _exec_prefix(
-        self, name, *, interactive, user, env, inherit_env, workdir,
+        self, name: str, *, interactive: bool, user: str | None,
+        env: dict[str, str] | None, inherit_env: list[str] | None, workdir: str | None,
     ) -> list[str]:
         args = ["docker", "exec"]
         if interactive:
@@ -305,8 +308,11 @@ class DockerDriver(RuntimeDriver):
             args += ["-u", user]
         return [*args, name]
 
-    def exec(self, name, argv, *, user=None, env=None, workdir=None,
-             stdin=None, timeout=30.0, instance_id=None) -> ExecResult:
+    def exec(
+        self, name: str, argv: list[str], *, user: str | None = None,
+        env: dict[str, str] | None = None, workdir: str | None = None,
+        stdin: str | None = None, timeout: float = 30.0, instance_id: str | None = None,
+    ) -> ExecResult:
         from agent_procutil import no_window_flags
 
         command = self._exec_prefix(
@@ -324,14 +330,19 @@ class DockerDriver(RuntimeDriver):
             raise RuntimeError(f"docker exec {name} timed out") from exc
         return ExecResult(done.returncode, done.stdout, done.stderr)
 
-    def stream_exec_argv(self, name, argv, *, user=None, env=None,
-                         inherit_env=None, workdir=None, instance_id=None) -> list[str]:
+    def stream_exec_argv(
+        self, name: str, argv: list[str], *, user: str | None = None,
+        env: dict[str, str] | None = None, inherit_env: list[str] | None = None,
+        workdir: str | None = None, instance_id: str | None = None,
+    ) -> list[str]:
         return self._exec_prefix(
             instance_id or name, interactive=True, user=user, env=env,
             inherit_env=inherit_env, workdir=workdir,
         ) + list(argv)
 
-    def copy_in(self, name, source, target, *, instance_id=None) -> None:
+    def copy_in(
+        self, name: str, source: Path, target: str, *, instance_id: str | None = None,
+    ) -> None:
         from . import lifecycle
 
         res = lifecycle._docker(
@@ -413,7 +424,8 @@ def _superseded(driver: RuntimeDriver) -> bool:
     """True when ``driver`` was retired or replaced (call under ``_lock``)."""
     if getattr(driver, "retired", False):
         return True
-    current = _drivers.get((getattr(driver, "fleet_name", None), driver.name))
+    fleet_name = getattr(driver, "fleet_name", None)
+    current = _drivers.get((fleet_name, driver.name)) if fleet_name is not None else None
     return current is not None and current is not driver
 
 
@@ -426,7 +438,7 @@ def bind_member(
     drivers both reporting instance id ``1``) becomes ambiguous and is
     refused rather than silently re-pointed.
     """
-    handles = {info.name: None}
+    handles: dict[str, str | None] = {info.name: None}
     if info.container_id:
         if include_bare_id:
             handles[info.container_id] = info.container_id
@@ -440,20 +452,20 @@ def bind_member(
     return True
 
 
-def _claim_docker(handles, name: str) -> None:
+def _claim_docker(handles: Iterable[str | None], name: str) -> None:
     with _lock:
         for handle in handles:
             if handle:
                 _claims.setdefault(handle, {})[(DOCKER_CLAIM, None, name)] = (None, name, None)
 
 
-def _forget(predicate) -> None:
+def _forget(predicate: Callable[[str, _Claimant], bool]) -> None:
     """Drop every claim whose ``(handle, claimant)`` matches ``predicate``."""
     with _lock:
         _forget_locked(predicate)
 
 
-def _forget_locked(predicate) -> None:
+def _forget_locked(predicate: Callable[[str, _Claimant], bool]) -> None:
     for handle in list(_claims):
         claims = _claims[handle]
         for claimant in [c for c in claims if predicate(handle, c)]:
@@ -477,7 +489,9 @@ def reconcile(config: ContainersConfig) -> None:
         _forget_locked(lambda handle, c: c[0] != DOCKER_CLAIM and current.get(c[1]) != c[0])
 
 
-def _reconcile_listing(fleet_name: str, driver: RuntimeDriver, members) -> None:
+def _reconcile_listing(
+    fleet_name: str, driver: RuntimeDriver, members: Iterable[DockerContainerInfo],
+) -> None:
     """Make a successful listing the truth for its fleet's mutable names.
 
     Names the driver no longer reports stop routing. Instance-id and
@@ -549,6 +563,7 @@ def owner_of(target: str) -> Route | None:
             "driver; address the member by its unique fleet name"
         )
     driver, name, pinned = drivers[0]
+    assert driver is not None  # only Docker claims lack a driver
     return Route(driver, name, pinned)
 
 
@@ -630,7 +645,7 @@ def _query_fleets(
 
     reconcile(config)
     deadline = time.monotonic() + timeout
-    results: queue.Queue = queue.Queue()
+    results: queue.Queue[tuple[str, list[DockerContainerInfo], Exception | None]] = queue.Queue()
     pending: set[str] = set()
     drivers_by_fleet: dict[str, RuntimeDriver] = {}
 
@@ -644,7 +659,7 @@ def _query_fleets(
                 listed = [member] if member is not None else []
             results.put((fleet_name, listed, None))
         except Exception as exc:  # noqa: BLE001 -- always report, never strand the wait
-            results.put((fleet_name, None, exc))
+            results.put((fleet_name, [], exc))
 
     for fleet_name, fleet in fleets.items():
         try:
@@ -709,8 +724,8 @@ def list_driver_members(
 
 
 def merge_driver_members(
-    config: ContainersConfig, containers: list, all_containers: bool,
-) -> list:
+    config: ContainersConfig, containers: list[DockerContainerInfo], all_containers: bool,
+) -> list[DockerContainerInfo]:
     """Append driver-reported members to a Docker inventory.
 
     Docker rows labelled with a driver fleet are dropped even when its driver
@@ -915,41 +930,6 @@ def _driver_identity(driver: RuntimeDriver) -> str:
     return f"driver:{driver.name}/{getattr(driver, 'fleet_name', None)}@{digest}"
 
 
-def _proxy_fleets(config: ContainersConfig, name: str) -> list[str]:
-    return [
-        key for key, fleet in config.fleets.items()
-        if fleet.driver and _owns(key, fleet, name)
-    ]
-
-
-def proxy_binding(
-    config: ContainersConfig, name: str, fleet: str, driver: RuntimeDriver,
-) -> dict[str, int | str] | None:
-    """Advertise exact proxy support only for uniquely owned namespaces."""
-    if _proxy_fleets(config, name) != [fleet]:
-        return None
-    return {"version": 1, "execution_runtime": _driver_identity(driver)}
-
-
-def bound_proxy_route(
-    config: ContainersConfig, fleet: str, name: str, instance_id: str, runtime: str,
-) -> Route:
-    """Re-establish ownership in a fresh proxy process before any driver effect."""
-    from .external_driver import _ID_RE, _MEMBER_RE
-
-    if not _MEMBER_RE.fullmatch(name) or not _ID_RE.fullmatch(instance_id):
-        raise RuntimeError("Bound runtime proxy requires an exact member name and instance ID")
-    if _proxy_fleets(config, name) != [fleet]:
-        raise RuntimeError(f"'{name}' no longer has a unique configured runtime-driver fleet")
-    driver = driver_for_fleet(config, fleet, config.fleets[fleet])
-    if _driver_identity(driver) != runtime:
-        raise RetiredIncarnation(f"Runtime registration changed for '{name}'; resolve it again")
-    docker_id = _docker_id_for_name(name)
-    if docker_id is not None and docker_id != instance_id:
-        raise RuntimeError(f"'{name}' also identifies a distinct Docker container")
-    return Route(driver, name, instance_id)
-
-
 def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> str:
     """The handle for exactly the prepared incarnation ``instance_id`` of ``name``.
 
@@ -981,7 +961,7 @@ def prepared_handle(name: str, instance_id: str, runtime: str | None = None) -> 
     return instance_id
 
 
-def inspect_pinned(name: str, instance_id: str | None) -> dict | None:
+def inspect_pinned(name: str, instance_id: str | None) -> dict[str, Any] | None:
     """Inspect ``instance_id`` through the driver owning member ``name``.
 
     A recreated member's previous incarnation is no longer enumerated, so its

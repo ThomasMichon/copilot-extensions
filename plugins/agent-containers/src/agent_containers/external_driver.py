@@ -393,7 +393,9 @@ class ExternalDriver(RuntimeDriver):
         info = self._member_or_error("inspect", response.get("member"), name)
         if instance_id and info.container_id != instance_id:
             return None
-        return self._bind(info)[0]
+        # A single inspection cannot establish ownership of an unqualified ID.
+        bind_member(self, info, include_bare_id=False)
+        return info
 
     def inspect(self, name: str, *, instance_id: str | None = None) -> dict[str, object]:
         info = self._inspect_member(name, instance_id)

@@ -763,9 +763,13 @@ def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
     from ssh_manager import SSHConfig
 
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
-    config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=False, size=2)
     fleet.reconcile_up(config, "example")
-    member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    state = fake.state()
+    instance = state["members"]["example-1"]["id"]
+    state["members"]["example-2"]["id"] = instance
+    (fake.root / "state.json").write_text(json.dumps(state))
+    runtime_drivers.clear_bindings()
     prepared: list[str] = []
     monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
 
@@ -777,16 +781,23 @@ def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
 
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
 
-    assert prepared == [f"example-1.{member.container_id}"]
+    assert prepared == [f"example-1.{instance}"]
     container = spec["container"]
     assert container["ssh"]["host_alias"] == "fixture"
     assert container["acp_command"]
-    assert container["instance_id"] == member.container_id
+    assert container["instance_id"] == instance
     assert container["portable_receiving_policy"] == {"version": 1}
     assert container["provider_command"] == ["/payload/bin/agent-containers"]
     assert "portable_receiving_policy" not in spec["venue"]
     assert spec["venue"]["transport"] == "ssh"
     assert spec["venue"]["capabilities"]["session_host"] is True
+    assert runtime_drivers.owner_of(instance) is None
+    assert _route(f"example-1.{instance}").instance_id == instance
+
+    lifecycle.list_containers(config)
+    asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+    with pytest.raises(RuntimeError, match="more than one runtime"):
+        runtime_drivers.owner_of(instance)
 
 
 def test_resolver_fails_closed_on_missing_relay_capability(

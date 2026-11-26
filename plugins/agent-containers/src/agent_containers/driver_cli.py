@@ -5,7 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 
-from .external_driver import BUNDLED_DRIVERS, PATH_PREFIX, drivers_dir, scan_drivers
+
+def add_runtime_proxy_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--fleet")
+    parser.add_argument("--member")
+    parser.add_argument("--expected-runtime")
+    parser.add_argument("argv", nargs=argparse.REMAINDER)
+    parser.set_defaults(func=cmd_runtime_proxy)
 
 
 def cmd_runtime_proxy(args: argparse.Namespace) -> int:
@@ -18,8 +24,9 @@ def cmd_runtime_proxy(args: argparse.Namespace) -> int:
     import sys
 
     from . import lifecycle, runtime_drivers
+    from .bound_proxy import bound_proxy_route
     from .config import load_config
-    from .routed_exec import _parse_docker_exec, _run_exec
+    from .routed_exec import _parse_docker_exec, _run_exec, run_routed
 
     argv = list(args.argv[1:] if args.argv[:1] == ["--"] else args.argv)
     inspect = len(argv) == 2 and argv[0] == "inspect"
@@ -37,8 +44,13 @@ def cmd_runtime_proxy(args: argparse.Namespace) -> int:
     if bound:
         if not (fleet and args.member and args.expected_runtime):
             raise RuntimeError("Bound runtime proxy requires --fleet, --member and --expected-runtime")
-        route = runtime_drivers.bound_proxy_route(
-            config, fleet, args.member, argv[1] if inspect else parsed.target,
+        if inspect:
+            target = argv[1]
+        else:
+            assert parsed is not None
+            target = parsed.target
+        route = bound_proxy_route(
+            config, fleet, args.member, target,
             args.expected_runtime,
         )
     else:
@@ -57,7 +69,7 @@ def cmd_runtime_proxy(args: argparse.Namespace) -> int:
     payload = sys.stdin.read() if parsed.interactive else None
     done = (
         _run_exec(parsed, route, input_text=payload, timeout=600) if route is not None
-        else runtime_drivers.run_routed(["docker", *argv], input_text=payload, timeout=600)
+        else run_routed(["docker", *argv], input_text=payload, timeout=600)
     )
     if done is None:
         raise RuntimeError("runtime-proxy exec target is not a runtime-driver member")
@@ -67,6 +79,8 @@ def cmd_runtime_proxy(args: argparse.Namespace) -> int:
 
 
 def cmd_drivers(args: argparse.Namespace) -> int:
+    from .external_driver import BUNDLED_DRIVERS, PATH_PREFIX, drivers_dir, scan_drivers
+
     specs, findings = scan_drivers()
     if args.json:
         print(json.dumps({

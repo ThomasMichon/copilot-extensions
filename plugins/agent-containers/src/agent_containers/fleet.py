@@ -46,7 +46,7 @@ from .lifecycle import (
     start_container,
     stop_container,
 )
-from .devcontainer_launch import _devcontainer_up  # noqa: F401 -- DockerDriver.provision looks it up here
+from .devcontainer_launch import _devcontainer_up as _devcontainer_up
 from .lifecycle_ownership import lifecycle_blocker, require_internal_fleet
 from .fleet_results import FleetOperationResult, RecreateMemberError
 

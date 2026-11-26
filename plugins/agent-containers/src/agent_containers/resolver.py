@@ -37,7 +37,7 @@ from agent_procutil import no_window_flags
 from plugin_resolve.reflection import selection_spec
 
 from . import lifecycle
-from ._invoke import current_provider_argv, payload_command_argv
+from ._invoke import current_provider_argv, current_provider_environment, payload_command_argv
 from .config import (
     DISPATCH_ONLY_LABEL,
     DISPATCH_BINDING_LABEL,
@@ -805,6 +805,7 @@ class ContainerResolver:
         plan = None
         if getattr(fleet, "driver", None) and not restricted:
             from . import runtime_drivers
+            from .bound_proxy import proxy_binding
 
             # Fails closed when the driver lacks a capability the fleet needs.
             plan = await asyncio.to_thread(
@@ -812,12 +813,13 @@ class ContainerResolver:
             )
             spec["venue"]["driver"] = fleet.driver
             binding = (
-                runtime_drivers.proxy_binding(config, name, info.fleet, plan.driver)
+                proxy_binding(config, name, info.fleet, plan.driver)
                 if plan.driver is not None else None
             )
             if binding is not None:
                 spec["venue"]["runtime_proxy"] = {
                     **binding, "provider_command": current_provider_argv(),
+                    "provider_environment": current_provider_environment(),
                 }
             spec["venue"]["transport"] = "ssh" if plan.ssh else "driver-exec"
             spec["venue"]["capabilities"]["session_host"] = plan.ssh

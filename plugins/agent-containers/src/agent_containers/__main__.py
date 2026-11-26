@@ -36,6 +36,7 @@ from . import claim_provider_cli, consumer_telemetry, hosting_policy, plugin_con
 from . import copilot_process_auth as process_auth
 from .application_provider import add_install_parsers
 from .config import RESTRICTED_PROFILE, ContainersConfig, FleetConfig, load_config
+from .driver_cli import add_runtime_proxy_parser
 from .resolver import (
     _append_copilot_args,
     build_restricted_acp_spawn_command,
@@ -123,11 +124,7 @@ def _main(argv: list[str] | None = None) -> int:
     plugin_config.add_subparsers(sub)
     sub.add_parser("drivers", help="List registered external runtime drivers").add_argument(
         "--json", action="store_true", help="Emit JSON")
-    proxy = sub.add_parser("runtime-proxy", help=argparse.SUPPRESS)
-    proxy.add_argument("--fleet")
-    proxy.add_argument("--member")
-    proxy.add_argument("--expected-runtime")
-    proxy.add_argument("argv", nargs=argparse.REMAINDER)
+    add_runtime_proxy_parser(sub.add_parser("runtime-proxy", help=argparse.SUPPRESS))
     rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
@@ -338,10 +335,9 @@ def _dispatch(args: argparse.Namespace) -> int:
             return lifecycle.dispatch_stop_or_remove(args)
         if args.command == "leases":
             return _cmd_leases()
-        if args.command in ("drivers", "runtime-proxy"):
+        if args.command == "drivers":
             from . import driver_cli
-            return (driver_cli.cmd_drivers if args.command == "drivers"
-                    else driver_cli.cmd_runtime_proxy)(args)
+            return driver_cli.cmd_drivers(args)
         if args.command == "lifecycle-clear":
             return _cmd_lifecycle_clear(args)
         if args.command == "exec":

@@ -9,7 +9,7 @@ from pathlib import Path
 import shlex
 import shutil
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from repository_policy import AgentHostingError
 
@@ -22,6 +22,10 @@ SSH_TRANSPORT_FAILURE_EXIT = 255
 
 class CodeSpaceNotRunning(AgentHostingError):
     """A read-only check cannot inspect this exact receiving CodeSpace."""
+
+
+class _ProviderEnvironment(TypedDict, total=False):
+    environment: dict[str, str | None]
 
 
 def _require_workspace(workspace: str) -> None:
@@ -184,6 +188,8 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     runtime = ["docker"]
     bound = "runtime_proxy" in venue
     binding = venue.get("runtime_proxy")
+    environment: dict[str, str | None] = {}
+    bound_provider: list[str] | None = None
     fleet = venue.get("fleet")
     driver = venue.get("driver")
     if driver:
@@ -212,6 +218,19 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
                 raise AgentHostingError("Bound runtime proxy lacks its attributed provider command")
             if not Path(provider[0]).is_file():
                 raise AgentHostingError("Bound runtime proxy provider is unavailable; resolve the container again")
+            scope = binding.get("provider_environment")
+            if (
+                not isinstance(scope, dict)
+                or scope.keys() != {
+                    "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_STATE_DIR",
+                    "AGENT_CONTAINERS_PAYLOAD_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
+                }
+                or any(value is not None and (not isinstance(value, str) or "\0" in value)
+                       for value in scope.values())
+            ):
+                raise AgentHostingError("Invalid bound runtime proxy installation environment")
+            environment = scope
+            bound_provider = provider
             runtime = [*provider, "runtime-proxy", "--fleet", fleet,
                        "--member", name, "--expected-runtime", binding["execution_runtime"]]
         else:
@@ -223,7 +242,8 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
             )]
     elif bound:
         raise AgentHostingError("Bound container runtime proxy requires an external driver")
-    rc, output, error = await _run_provider([*runtime, "inspect", identity], timeout=30)
+    options: _ProviderEnvironment = {"environment": environment} if bound else {}
+    rc, output, error = await _run_provider([*runtime, "inspect", identity], timeout=30, **options)
     if rc:
         raise AgentHostingError(f"Container hosting inspection failed: {error.decode(errors='replace')}")
     try:
@@ -255,10 +275,10 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     )
     user = target.user
     if not user or not workspace:
-        resolver = _provider_command(metadata)
+        resolver = bound_provider if bound else _provider_command(metadata)
         if resolver is None or not isinstance(name, str) or not name:
             raise AgentHostingError("Container receiver lacks an attributed context resolver")
-        rc, output, error = await _run_provider([*resolver, "namespace-resolve", name], timeout=30)
+        rc, output, error = await _run_provider([*resolver, "namespace-resolve", name], timeout=30, **options)
         try:
             spec = json.loads(output)
             refreshed_venue = spec.get("venue") if isinstance(spec, dict) else None
@@ -287,7 +307,7 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
             "agent-worktrees resolve --json --dry-run --no-fast-forward --defer-projections "
             f"--worktree-id {shlex.quote(target.worktree_id)}"
         )
-        rc, output, error = await _run_provider([*prefix, command], timeout=30)
+        rc, output, error = await _run_provider([*prefix, command], timeout=30, **options)
         if rc:
             raise AgentHostingError(f"Container execution checkout unavailable: {error.decode(errors='replace')}")
         workspace = parse_execution_checkout(output.decode())
@@ -297,7 +317,7 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     argv = [*runtime, "exec", *(["-i"] if payload is not None else []),
             "-u", user, instance, "bash", "-lc", command]
     if payload is None:
-        rc, output, error = await _run_provider(argv, timeout=90)
+        rc, output, error = await _run_provider(argv, timeout=90, **options)
     else:
-        rc, output, error = await _run_provider(argv, timeout=90, input_bytes=payload)
+        rc, output, error = await _run_provider(argv, timeout=90, input_bytes=payload, **options)
     return _answer(rc, output.decode(), error.decode(), portable=payload is not None)

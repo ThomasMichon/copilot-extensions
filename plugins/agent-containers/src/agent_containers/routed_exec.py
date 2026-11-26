@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .runtime_drivers import Route
 
 
-def _owner_of(target: str):
+def _owner_of(target: str) -> Route | None:
     from . import runtime_drivers  # late: runtime_drivers re-exports this module
 
     return runtime_drivers.owner_of(target)
@@ -86,7 +86,7 @@ def _parse_docker_cp(argv: list[str]) -> tuple[str, str, str] | None:
 
 def _run_exec(
     parsed: _ExecArgs, route: Route, *, input_text: str | None, timeout: float,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     driver, name = route.driver, route.name
     if parsed.unsupported:
         raise RuntimeError(
@@ -110,7 +110,7 @@ def _run_exec(
 
 def run_routed(
     argv: list[str], *, input_text: str | None = None, timeout: float = 30.0,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[str] | None:
     """Run a Docker-shaped exec/cp through the owning external driver.
 
     Returns ``None`` (the caller runs ``argv`` unchanged) unless ``argv``
