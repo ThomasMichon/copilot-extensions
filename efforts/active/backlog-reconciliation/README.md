@@ -523,10 +523,12 @@ the non-public approval conversation.
 ## Plan
 
 The [Git deadline and optional snapshot-batching correspondence](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
-proposes two conditional finite-source completions after actual code/test
-inspection and current Main/Dev comparison. The explicit foreground-fetch
-successor, twelve independently unfinished originals and all parent gates
-remain; review precedes any separately verified tracker disposition.
+records reviewed #14787 and two separately consumed final units after actual
+code/test inspection and current Main/Dev comparison. Source-review assessment
+gaps leave both candidates OPEN, alongside twelve independently unfinished
+originals: zero tracker dispositions, not two completed bugs. Two equal
+complete censuses remain 599 whole OPEN, with no arrivals or departures;
+all parent states, spent procedures and actual holds remain.
 
 The [seven further TTY cases and two source keepers](journal/2026/11.26-seven-further-tty-cases-and-two-source-keepers.md)
 records reviewed #14780, complete accepted receiving and seven separately

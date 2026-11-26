@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-26 - Git deadline and optional snapshot-batching source correspondence; twelve originals retained](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
+- [2026-11-26 - Git deadline and snapshot-batching verification gaps; fourteen originals retained and 599 whole open](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
 
 - [2026-11-26 - Seven audited TTY tracking retirements, two source keepers and 599 whole open](journal/2026/11.26-seven-further-tty-cases-and-two-source-keepers.md)
 
