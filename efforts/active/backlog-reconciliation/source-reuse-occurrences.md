@@ -145,7 +145,7 @@ records all nine independent audits, including two sources kept OPEN during
 unsuitable initial routing. Only these four extension tracker gates are newly
 resolved; neither the original four gates nor any parent gate was reset.
 
-## Proposed further nine-case extension
+## Further nine-case extension
 
 The preceding twenty technical cases and nineteen tracking retirements are
 settled, not a license to replay them. Nine further originals, each without
@@ -167,12 +167,12 @@ job and original-success/source-bytes verification step for each row.
 | #8482 | Signature: 124bf2645363 | `33409b1ff714ab660ffd5ce7d33532fb94bbfc30` | [40065491202 / 120788588710](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40065491202/job/120788588710) | OPEN |
 | #8483 | Signature: 87c67f547563 | `4ff7e0f87267d832d2dfbe5fc21e23b6bd332e7a` | [40065724679 / 120789595320](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40065724679/job/120789595320) | OPEN |
 
-After review, append these nine independent OPEN technical cases to existing
-OPEN #7872. Preserve its entire incumbent original and twenty-case receiving
-body, metadata, discussion, one disclosure, component custodians, technical
-acceptance, selector and issue-level cooldown. Independently read the whole
-actual receiving issue before any new source effect; prior receiving acceptance
-does not qualify an addition in advance.
+After reviewed #14651, the whole actual OPEN #7872 receiving body independently
+retained these nine independent OPEN technical cases and its entire incumbent
+original and twenty-case receiving body, metadata, discussion, one disclosure,
+component custodians, technical acceptance, selector and issue-level cooldown.
+The whole actual receiving issue was independently read before any new source
+effect; prior receiving acceptance was not treated as advance qualification.
 
 Only these nine new tracking tokens may conditionally retire `NOT_PLANNED`,
 each after current eligibility/custody qualification, exact-signature
@@ -192,10 +192,16 @@ runtime, service or resource operation is included.
 
 ### Further extension Validation Plan
 
-- [ ] The further nine-case proposal passes review and required CI and merges.
-- [ ] Whole actual receiving preserves all incumbent content and acceptance
+- [x] The further nine-case proposal passes review and required CI and merges.
+- [x] Whole actual receiving preserves all incumbent content and acceptance
   and independently retains all twenty-nine technical cases OPEN.
-- [ ] Each new source passes current qualification, exact routing, disclosed
+- [x] Each new source passes current qualification, exact routing, disclosed
   acknowledgment and independent proper-reason/original-preservation audits.
-- [ ] A new complete census separates actual effects and inflow from technical
+- [x] A new complete census separates actual effects and inflow from technical
   completion, preserving all settled local and incumbent parent check states.
+
+The [actual further extension outcome](journal/2026/11.25-source-reuse-timeout-intake.md#accepted-receiving-and-nine-audited-tracking-retirements)
+records all nine independent audits, including two sources kept OPEN during
+initial routing delay. Only these four further-extension tracker gates are
+newly resolved. All twenty-nine technical cases and every incumbent parent
+gate remain; the preceding eight local tracker gates were not reset or replayed.

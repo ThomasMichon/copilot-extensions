@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Twenty-nine source-reuse cases, nine further tracking retirements and separate manifest timeout](journal/2026/11.25-source-reuse-timeout-intake.md)
+
 - [2026-11-25 - Twenty-case source-reuse receiving, nineteen tracking retirements and separate candidate guard](journal/2026/11.25-source-reuse-and-verifier-keepers.md)
 
 - [2026-11-25 - Verifier completions and accepted eleven-case publication receiving](journal/2026/11.25-verifier-availability-and-publisher-extension.md)

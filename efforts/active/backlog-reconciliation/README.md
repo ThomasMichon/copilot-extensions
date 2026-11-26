@@ -485,10 +485,12 @@ the non-public approval conversation.
 ## Plan
 
 The [further source-reuse and timeout intake](journal/2026/11.25-source-reuse-timeout-intake.md)
-proposes nine more independent OPEN technical cases in existing #7872 before
-any separate tracking retirement. Its entire twenty-case incumbent receiving
-and all settled effects remain intact. Distinct #8466 is kept OPEN for its
-own uv-manifest fetch timeout, not folded into source reuse or credited as fixed.
+records accepted receiving of nine more independent OPEN technical cases in
+existing #7872 and nine separately audited tracking retirements. Its entire
+twenty-case incumbent receiving and all settled effects remain intact; all
+twenty-nine technical cases remain OPEN. The complete census is 797 whole open,
+68 above fixed 729. Distinct #8466 remains OPEN for its own uv-manifest fetch
+timeout, not folded into source reuse or credited as fixed.
 The [verifier/further-publication study](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
 records three separately verified and acknowledged source-handling completions
 and an [accepted eleven-case receiving extension](publication-occurrence-extension.md).
