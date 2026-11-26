@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -2890,6 +2891,87 @@ def test_native_profile_with_only_associated_wheels_does_not_acquire_registry_in
         assert len(inputs.distributions) == 1
         inputs.verify()
     assert not (output / "acquisition.json").exists()
+
+
+@pytest.mark.parametrize("changed", [None, "application-wheel", "unselected-wheel"])
+def test_ordinary_profile_retains_unselected_optional_wheels_only_in_snapshot(
+    native_source: tuple[ModuleType, Path], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, changed: str | None,
+) -> None:
+    native: ModuleType = importlib.import_module("local_install_profile")
+    from wheel_input_fixture import wheel_bytes as untyped_wheel_bytes
+
+    wheel_bytes = cast(Callable[..., bytes], untyped_wheel_bytes)
+    source, snapshot = native_source
+    selected = source.select_project(snapshot, "demo-app")
+    assert not selected.closed_wheel_source
+    profile = source._read(snapshot / selected.project["profile"])
+    wheels = {row["name"]: dict(row) for row in profile["wheels"]}
+    directory = snapshot / selected.project["wheels"]
+    app = directory / wheels["demo-app"]["filename"]
+    with zipfile.ZipFile(app) as archive:
+        metadata = archive.read("demo_app-1.0.0.dist-info/METADATA")
+        body = archive.read("demo_app/__init__.py")
+    app.write_bytes(wheel_bytes(
+        name="demo_app", prefix="demo_app-1.0.0.dist-info/",
+        metadata=metadata.rstrip() + (
+            b'\nProvides-Extra: bootstrap\nRequires-Dist: agent-procutil; extra == "bootstrap"\n\n'
+        ),
+        extra={"demo_app/__init__.py": body},
+    ))
+    wheels["demo-app"]["sha256"] = "sha256:" + hashlib.sha256(app.read_bytes()).hexdigest()
+    optional = directory / "agent_procutil-1.0.0-py3-none-any.whl"
+    optional.write_bytes(wheel_bytes(
+        name="agent_procutil", prefix="agent_procutil-1.0.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: agent-procutil\nVersion: 1.0.0\n\n",
+    ))
+    wheels["agent-procutil"] = {
+        "name": "agent-procutil", "version": "1.0.0", "filename": optional.name,
+        "sha256": "sha256:" + hashlib.sha256(optional.read_bytes()).hexdigest(),
+    }
+    selected.project["artifact"]["wheels"] = list(wheels.values())
+    monkeypatch.setattr(native, "_profile_feed", lambda *a, **kw: (
+        {"policyId": "fixture-policy"}, SimpleNamespace(policy_id="fixture-acquisition"),
+    ))
+    original_lock = native._lock_application
+
+    def lock(application: Path, **options: Any) -> None:
+        original_lock(application, **options)
+        if changed is not None:
+            path = (
+                application / "wheels" / app.name if changed == "application-wheel"
+                else application.parent.parent / "wheels" / "demo-app" / optional.name
+            )
+            before = path.stat()
+            content = path.read_bytes()
+            path.write_bytes(bytes((content[0] ^ 1,)) + content[1:])
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    monkeypatch.setattr(native, "_lock_application", lock)
+    output = tmp_path / "optional-profile"
+    output.mkdir()
+
+    def prepare() -> Path:
+        return cast(Path, native._prepare_profile(
+            snapshot, selected, wheels,
+            {"files": [], "target": profile["target"], "roots": profile["roots"]},
+            output, cast("RetainedUVInstall", None), [], uv=_required_executable("uv"),
+            download_origins=(), deadline=time.monotonic() + 120,
+        ))
+
+    if changed is not None:
+        with pytest.raises((ValueError, RuntimeError), match="changed|digest"):
+            prepare()
+        return
+    prepared = prepare()
+    observed = source.select_project(prepared, "demo-app")
+    assert (prepared / observed.project["wheels"] / optional.name).is_file()
+    application = prepared / observed.project["application"]
+    assert {path.name for path in (application / "wheels").iterdir()} == {app.name}
+    assert (application / "uv.lock").is_file()
+    with source.project_inputs(prepared, "demo-app") as (_, inputs):
+        assert len(inputs.distributions) == 1
+        inputs.verify()
 
 
 def test_associated_application_supplies_the_acquisition_process_owner(native_source: tuple[ModuleType, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
