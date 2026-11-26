@@ -370,6 +370,17 @@ class ExternalDriver(RuntimeDriver):
         parsed = [self._member_or_error("list", member) for member in members]
         return list(self._bind(*parsed))
 
+    def lookup_member(self, name: str, *, timeout: float) -> DockerContainerInfo | None:
+        if not _MEMBER_RE.fullmatch(name):
+            return None  # not a valid protocol member name
+        try:
+            response = self.call("inspect", self._identity(name, None), timeout=timeout)
+        except DriverError as exc:
+            if exc.code == "not_found":
+                return None
+            raise
+        return self._member_or_error("inspect", response.get("member"), name)
+
     def _inspect_member(
         self, name: str, instance_id: str | None = None,
     ) -> DockerContainerInfo | None:

@@ -162,6 +162,10 @@ class RuntimeDriver(ABC):
     def list_members(self, *, timeout: float | None = None) -> list[DockerContainerInfo]:
         """Every member of this fleet, including stopped ones."""
 
+    def lookup_member(self, name: str, *, timeout: float) -> DockerContainerInfo | None:
+        """Read an exact fleet member without binding routing aliases."""
+        raise NotImplementedError
+
     # Every per-member operation accepts ``instance_id``: when set, the
     # operation must apply to that incarnation only and fail otherwise.
 
@@ -413,7 +417,9 @@ def _superseded(driver: RuntimeDriver) -> bool:
     return current is not None and current is not driver
 
 
-def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
+def bind_member(
+    driver: RuntimeDriver, info: DockerContainerInfo, *, include_bare_id: bool = True,
+) -> bool:
     """Record that ``info`` lives in ``driver``'s runtime.
 
     A handle already bound to a different member or runtime (for example two
@@ -422,14 +428,16 @@ def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
     """
     handles = {info.name: None}
     if info.container_id:
-        handles[info.container_id] = info.container_id
+        if include_bare_id:
+            handles[info.container_id] = info.container_id
         handles[route_handle(info)] = info.container_id
     claimant = (driver.name, getattr(driver, "fleet_name", None), info.name)
     with _lock:
         if _superseded(driver):
-            return  # a delayed listing from a replaced registration binds nothing
+            return False  # a delayed response from a replaced registration binds nothing
         for handle, pinned in handles.items():
             _claims.setdefault(handle, {})[claimant] = (driver, info.name, pinned)
+    return True
 
 
 def _claim_docker(handles, name: str) -> None:
@@ -606,17 +614,16 @@ def _driver_fleets(
     return fleets
 
 
-def _enumerate(
+def _query_fleets(
     config: ContainersConfig, fleets: dict[str, FleetConfig], *, timeout: float,
     failures: dict[str, str] | None = None,
+    exact_name: str | None = None,
 ) -> list[DockerContainerInfo]:
-    """List ``fleets`` concurrently within one overall deadline.
+    """Query ``fleets`` concurrently within one overall deadline.
 
     Each fleet is its own fault boundary: a failing or hung driver is logged
-    and skipped. Every listing runs as an owned process tree bounded by the
-    deadline, so none outlives it and none delays another fleet. Results are
-    bound only after all listings settle or the deadline passes, so a handle
-    two answering drivers report is always detected as ambiguous.
+    and skipped. Every query runs as an owned process tree bounded by the
+    deadline. Exact lookup binds only after every candidate fleet answers.
     """
     import queue
     import time
@@ -630,7 +637,12 @@ def _enumerate(
     def worker(fleet_name: str, driver: RuntimeDriver) -> None:
         try:
             limit = max(0.1, deadline - time.monotonic())
-            results.put((fleet_name, driver.list_members(timeout=limit), None))
+            if exact_name is None:
+                listed = driver.list_members(timeout=limit)
+            else:
+                member = driver.lookup_member(exact_name, timeout=limit)
+                listed = [member] if member is not None else []
+            results.put((fleet_name, listed, None))
         except Exception as exc:  # noqa: BLE001 -- always report, never strand the wait
             results.put((fleet_name, None, exc))
 
@@ -659,13 +671,33 @@ def _enumerate(
             if failures is not None:
                 failures[fleet_name] = str(error)
         else:
-            _reconcile_listing(fleet_name, drivers_by_fleet[fleet_name], listed)
+            if exact_name is None:
+                _reconcile_listing(fleet_name, drivers_by_fleet[fleet_name], listed)
+            elif not listed:
+                driver = drivers_by_fleet[fleet_name]
+                with _lock:
+                    if not _superseded(driver):
+                        _forget_locked(lambda handle, c: handle == exact_name
+                                       and c == (driver.name, fleet_name, exact_name))
             members.extend(listed)
     for fleet_name in sorted(pending):
         log.warning("Runtime driver for fleet '%s' did not answer within %.0fs",
                     fleet_name, timeout)
         if failures is not None:
             failures[fleet_name] = f"did not answer within {timeout:.0f}s"
+    if exact_name is not None:
+        assert failures is not None
+        with _lock:
+            for name, driver in drivers_by_fleet.items():
+                if _superseded(driver):
+                    failures[name] = "driver registration changed during lookup"
+        if not failures and len(members) == 1:
+            # No inventory was read: the bare id could also belong to a sibling.
+            member = members[0]
+            assert member.fleet is not None  # validated by the external driver client
+            driver = drivers_by_fleet[member.fleet]
+            if not bind_member(driver, member, include_bare_id=False):
+                failures[member.fleet] = "driver registration changed during lookup"
     return members
 
 
@@ -673,7 +705,7 @@ def list_driver_members(
     config: ContainersConfig, *, timeout: float = INVENTORY_TIMEOUT,
 ) -> list[DockerContainerInfo]:
     """Enumerate every external-driver fleet; failing or slow drivers are skipped."""
-    return _enumerate(config, _driver_fleets(config), timeout=timeout)
+    return _query_fleets(config, _driver_fleets(config), timeout=timeout)
 
 
 def merge_driver_members(
@@ -756,6 +788,7 @@ def launch_plan(
 
 def scoped_member(
     config: ContainersConfig, name: str, *, timeout: float = DISCOVERY_TIMEOUT,
+    inspect_exact: bool = False,
 ) -> tuple[bool, DockerContainerInfo | None]:
     """Find ``name`` through only the driver fleet whose namespace owns it.
 
@@ -777,13 +810,18 @@ def scoped_member(
         return False, None
     failures: dict[str, str] = {}
     matches = [
-        m for m in _enumerate(config, fleets, timeout=timeout, failures=failures)
+        m for m in _query_fleets(
+            config, fleets, timeout=timeout, failures=failures,
+            exact_name=name if inspect_exact else None,
+        )
         if m.name == name
     ]
     if failures:
         detail = "; ".join(f"fleet '{k}': {v}" for k, v in sorted(failures.items()))
         raise RuntimeError(f"Runtime driver for '{name}' is unavailable ({detail})")
     if len(matches) != 1:
+        if inspect_exact and matches:
+            raise RuntimeError(f"'{name}' identifies members of more than one runtime driver")
         return True, None
     member = matches[0]
     docker_id = _docker_id_for_name(name)
@@ -835,7 +873,7 @@ def discover(
     if not selected:
         return
     failures: dict[str, str] = {}
-    _enumerate(config, selected, timeout=timeout, failures=failures)
+    _query_fleets(config, selected, timeout=timeout, failures=failures)
     # An unavailable owning driver is not evidence of absence: fail explicitly.
     # (A name outside every namespace queries all fleets best-effort.)
     owning = {

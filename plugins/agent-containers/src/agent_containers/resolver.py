@@ -616,6 +616,7 @@ def resolve_live_exec_target(
 
 def _lookup(
     config: ContainersConfig, name: str, inventory: Callable[[ContainersConfig, str], Any],
+    *, inspect_exact: bool = False,
 ) -> tuple[bool, Any]:
     """``(scoped, member)``: a driver member from its own fleet, else ``inventory``.
 
@@ -627,7 +628,7 @@ def _lookup(
     if any(getattr(f, "driver", None) for f in (getattr(config, "fleets", None) or {}).values()):
         from . import runtime_drivers
 
-        scoped, info = runtime_drivers.scoped_member(config, name)
+        scoped, info = runtime_drivers.scoped_member(config, name, inspect_exact=inspect_exact)
         if scoped:
             return True, info
     return False, inventory(config, name)
@@ -694,7 +695,9 @@ class ContainerResolver:
         if parse(name) is not None:
             return await asyncio.to_thread(resolve, name)
         config = load_config()
-        scoped, info = await asyncio.to_thread(_lookup, config, name, get_container)
+        scoped, info = await asyncio.to_thread(
+            _lookup, config, name, get_container, inspect_exact=True,
+        )
         if info is None and scoped:
             # The owning driver fleet already established absence; never wait
             # on unrelated fleets just to describe it.

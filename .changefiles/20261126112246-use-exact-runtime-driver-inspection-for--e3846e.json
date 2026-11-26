@@ -1,0 +1,9 @@
+{
+  "comment": "Use exact runtime-driver inspection for scoped namespace resolution without listing unrelated fleet members.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

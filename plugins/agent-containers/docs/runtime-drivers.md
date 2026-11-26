@@ -20,6 +20,13 @@ operation:
 The agent-bridge resolver's spawn command stays
 `agent-containers exec --stdio <name>`; that wrapper routes through the driver.
 
+For a deterministic `<prefix>-<n>` name, the namespace resolver uses the
+driver's exact `inspect` instead of listing every member. It checks every
+driver fleet that can own the name and refuses conflicting answers or a
+distinct Docker container with that name. Inventory and lookup by bare
+instance ID still use `list`. An exact lookup does not prove a bare ID is
+unique across members.
+
 ## Fleet configuration
 
 ```yaml
