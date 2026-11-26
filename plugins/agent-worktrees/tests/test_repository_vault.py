@@ -1,6 +1,7 @@
 """Installed-owner selection does not guess another Vault or provision one."""
 
 from contextvars import ContextVar
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -268,6 +269,105 @@ def test_legacy_vault_uses_selected_completed_retained_runtime(
         selected.verify()
 
 
+@pytest.mark.parametrize("use_pool", [False, True])
+@pytest.mark.parametrize("failure", [
+    None, "owner", "peer", "governance", "all",
+    "owner-drift", "peer-drift", "governance-drift", "drift-and-error",
+])
+def test_final_peer_readbacks_share_only_source_workers_and_settle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_pool: bool, failure: str | None,
+) -> None:
+    from agent_worktrees import repository_setup
+
+    root = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-worktrees"
+    own = {"pluginRoot": str(root), "installReceipt": str(root / "install.json"),
+           "cellRoot": str(root.parent.parent)}
+    peer = {"pluginRoot": str(root.parent / "agent-vault")}
+    python = tmp_path / "python"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", own["installReceipt"])
+    monkeypatch.delenv("COPILOT_EXTENSIONS_READONLY_PROBE", raising=False)
+    monkeypatch.setattr(peer_launch_adapter, "context_reference", lambda: (root, own["installReceipt"]))
+    monkeypatch.setattr(_peer_launch, "_packaged_primitive", lambda: SimpleNamespace())
+    monkeypatch.setattr(_peer_launch, "_peer_context_primitive", lambda _peer: SimpleNamespace())
+    monkeypatch.setattr(_peer_launch, "peer_environment", lambda *_args: {})
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *_args: "original-build")
+    monkeypatch.setattr(_peer_launch, "retained_peer_prefix", lambda *_args, **_kwargs: ["peer-python"])
+    calls = {"owner": 0, "peer": 0, "governance": 0, "runtime": 0}
+    settled: list[str] = []
+    threads: set[threading.Thread] = set()
+    barrier = threading.Barrier(3, timeout=3)
+    caller_context = ContextVar("peer-readback-caller", default=-1)
+    token = caller_context.set(17)
+
+    def readback(name: str) -> None:
+        threads.add(threading.current_thread())
+        try:
+            assert caller_context.get() == 17
+            if use_pool:
+                barrier.wait()
+            if failure in (name, "all") or (failure == "drift-and-error" and name == "peer"):
+                raise ValueError(name + " readback rejected")
+        finally:
+            settled.append(name)
+
+    def owner(*_args: Any) -> dict[str, str]:
+        calls["owner"] += 1
+        if calls["owner"] % 2 == 0:
+            readback("owner")
+            if failure in ("owner-drift", "drift-and-error"):
+                return {**own, "installReceipt": "changed"}
+        return dict(own)
+
+    def active(*_args: Any) -> dict[str, str]:
+        calls["peer"] += 1
+        if calls["peer"] % 3 == 0:
+            readback("peer")
+            if failure == "peer-drift":
+                return {**peer, "pluginRoot": "changed"}
+        return dict(peer)
+
+    def governance(*_args: Any) -> dict[str, str]:
+        calls["governance"] += 1
+        if calls["governance"] % 2 == 0:
+            readback("governance")
+            if failure == "governance-drift":
+                return {"status": "changed"}
+        return {"status": "ready"}
+
+    def runtime(*_args: Any) -> Path:
+        calls["runtime"] += 1
+        if calls["runtime"] % 2 == 0:
+            assert settled[-3:].count("owner") == settled[-3:].count("peer") == settled[-3:].count("governance") == 1
+        return python
+
+    monkeypatch.setattr(_peer_launch, "validate_owner", owner)
+    monkeypatch.setattr(_peer_launch, "_active_context", active)
+    monkeypatch.setattr(_peer_launch, "_governance", governance)
+    monkeypatch.setattr(_peer_launch, "_peer_python_inprocess", runtime)
+    try:
+        with repository_setup._source_verification_scope() if use_pool else nullcontext():
+            if failure:
+                with pytest.raises(SetupError) as error:
+                    vault.selected()
+                if "drift" in failure:
+                    assert str(error.value.__cause__) == "Installation governance changed during peer resolution"
+                else:
+                    expected = "owner" if failure == "all" else failure
+                    assert str(error.value.__cause__) == expected + " readback rejected"
+            else:
+                invocation = vault.selected()
+                invocation.verify()
+            if use_pool or failure is None:
+                observations = 1 if failure else 2
+                assert sorted(settled) == sorted(["owner", "peer", "governance"] * observations)
+                assert calls == {"owner": 2 * observations, "peer": 3 * observations,
+                                 "governance": 2 * observations, "runtime": 1 if failure else 4}
+        assert len(threads) <= (4 if use_pool else 1)
+        assert all(not thread.is_alive() for thread in threads if thread is not threading.main_thread())
+    finally:
+        caller_context.reset(token)
+
+
 @pytest.mark.parametrize("failure", [None, "empty", "foreign", "missing-peer", "no-runtime", "no-retention"])
 def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
@@ -284,11 +384,13 @@ def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(
 
     def resolve(
         owner_id: str, root: Path, receipt: str, plugin: str, *, allow_native: bool,
+        workers: Any = None,
     ) -> tuple[dict[str, str], dict[str, str], dict[str, str], Path | None]:
         assert (owner_id, root, receipt, plugin) == (
             "agent-worktrees", reference_root, own["installReceipt"], "agent-vault",
         )
         assert allow_native is False
+        assert workers is None
         resolutions.append(plugin)
         if failure == "foreign":
             raise _peer_launch.ContextRefused("foreign owner")

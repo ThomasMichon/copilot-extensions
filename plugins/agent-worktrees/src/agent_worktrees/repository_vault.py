@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from . import _peer_launch, peer_launch_adapter, reconcile
-from .repository_setup import SetupError, _environment
+from .repository_setup import SetupError, _environment, _source_workers
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def selected() -> VaultInvocation:
             root, context = reference
             own, peer, _peer_environment, python = _peer_launch._resolve_peer_observation(
                 "agent-worktrees", root, context, "agent-vault",
-                allow_native=False,
+                allow_native=False, workers=_source_workers.get(),
             )
             if python is None:
                 raise ValueError("Vault has no completed observable runtime")
