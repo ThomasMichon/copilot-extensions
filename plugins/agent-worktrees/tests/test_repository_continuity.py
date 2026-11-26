@@ -517,7 +517,10 @@ def test_versioned_vault_selector_is_strict_and_inspection_is_data_only(
         "configuration_root": str(tmp_path / "absent-config"), "entry": "-SSH/node-a",
         "directory": str(tmp_path / "absent-keys"), "fingerprint": "SHA256:" + "A" * 43,
     }
-    key.update({"argv": [sys.executable]} if version == 4 else {"owner": "agent-vault"})
+    selector: dict[str, Any] = (
+        {"argv": [sys.executable]} if version == 4 else {"owner": "agent-vault"}
+    )
+    key.update(selector)
     declaration = json.loads((source / setup.DECLARATION).read_text())
     declaration.update(version=version, contexts={"harness-a": {
         "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
@@ -548,7 +551,10 @@ def test_vault_key_versions_do_not_accept_each_others_selector(
     }
     if invalid == "other-selector":
         key.pop("owner" if installed else "argv")
-        key.update({"argv": [sys.executable]} if installed else {"owner": "agent-vault"})
+        selector: dict[str, Any] = (
+            {"argv": [sys.executable]} if installed else {"owner": "agent-vault"}
+        )
+        key.update(selector)
     elif invalid == "unknown-owner":
         key["owner"] = "other-vault"
     elif invalid == "mixed":
