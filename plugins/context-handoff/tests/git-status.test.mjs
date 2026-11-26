@@ -12,11 +12,15 @@ function fixture(run) {
     assert.equal(command, "git");
     assert.deepEqual(args, ["status", "--porcelain", "--ignored", "--untracked-files=all"]);
     assert.equal(options.windowsHide, true);
+    assert.equal(options.env.GIT_OPTIONAL_LOCKS, "0");
     assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
     queueMicrotask(() => run(child));
     return child;
   };
-  return gitStatusHasOutput("fixture", {}, launch);
+  const env = { GIT_OPTIONAL_LOCKS: "1" };
+  return gitStatusHasOutput("fixture", env, launch).finally(() => {
+    assert.equal(env.GIT_OPTIONAL_LOCKS, "1", "the read-only setting is child-scoped");
+  });
 }
 
 test("status drains output beyond the buffered exec limit and waits for exit", async () => {

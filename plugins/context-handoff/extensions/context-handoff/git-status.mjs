@@ -7,7 +7,10 @@ export function gitStatusHasOutput(cwd, env, launch = spawn, timeoutMs = 5000) {
     let timedOut = false;
     const child = launch(
       "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
-      { cwd, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+      {
+        cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0" }, windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
     const disposePipes = () => {
       child.stdout.destroy();
