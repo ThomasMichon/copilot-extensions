@@ -36,12 +36,19 @@ MIDDLE = "# Needle\n\ntemporary first document\n"
 LAST = "# Needle\n\nlatest second document\n"
 
 
+def _fixture_environment() -> dict[str, str]:
+    return {
+        **{name: value for name, value in os.environ.items() if not name.startswith("GIT_")},
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+    }
+
+
 def _git(repo: Path, *args: str) -> str:
     executable = shutil.which("git")
     assert executable is not None
     result: subprocess.CompletedProcess[str] = subprocess.run(
         [executable, "-C", str(repo), *args], capture_output=True, text=True,
-        timeout=10, check=True, **no_window_kwargs(),
+        timeout=10, check=True, env=_fixture_environment(), **no_window_kwargs(),
     )
     return result.stdout.strip()
 
@@ -60,7 +67,7 @@ def _child(data: Path, repo: Path, alias: str, mode: str) -> None:
         "AGENT_INDEX_STORE_LAYOUT": LAYOUT, "AGENT_INDEX_DATA_DIR": str(data),
         "AGENT_INDEX_HOME": str(data.parent / "home"), "AGENT_INDEX_SOURCE_MODE": "explicit",
         "AGENT_INDEX_INDEX_ENSURE_ENGINES": "0", "AGENT_INDEX_INDEXER_NICE": "0",
-        "AGENT_INDEX_CLUSTER_ENABLED": "0", "AGENT_INDEX_GIT_FETCH": "0",
+        "AGENT_INDEX_GIT_FETCH": "0",
         "AGENT_INDEX_CONFIG_DATA_B64": base64.urlsafe_b64encode(
             json.dumps(inline).encode(),
         ).decode(),
@@ -87,7 +94,7 @@ def _child(data: Path, repo: Path, alias: str, mode: str) -> None:
                 "discover", "list_paths", "current_commit",
             ):
                 stack.enter_context(patch.object(GitRepoConnector, name, forbidden, create=True))
-        config = IndexConfig()
+        config = IndexConfig(cluster_enabled=False)
         queue = TaskStore(data / "tasks.db")
         task = queue.enqueue(alias, full=mode == "full", trigger_source="fixture")
         claimed = queue.dequeue_next()
@@ -96,6 +103,8 @@ def _child(data: Path, repo: Path, alias: str, mode: str) -> None:
         finished = queue.get_task(task.id)
         assert finished is not None
         assert finished.result_stats is not None
+        counts = finished.result_stats.get("work_counts")
+        assert isinstance(counts, dict) and counts["cluster_pass_attempts"] == 0
         print("ALIAS-RESULT " + json.dumps({
             "status": finished.status, "failures": finished.result_stats.get("sources_failed", []),
         }), flush=True)
@@ -105,7 +114,8 @@ def _worker(data: Path, repo: Path, alias: str, mode: str) -> dict[str, Any]:
     result: subprocess.CompletedProcess[str] = subprocess.run(
         [sys.executable, "-I", str(Path(__file__).resolve()), "--worker",
          str(data), str(repo), alias, mode],
-        capture_output=True, text=True, timeout=30, check=False, **no_window_kwargs(),
+        capture_output=True, text=True, timeout=30, check=False,
+        env=_fixture_environment(), **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     lines = [line.removeprefix("ALIAS-RESULT ") for line in result.stdout.splitlines()
@@ -121,6 +131,14 @@ def test_native_stale_alias_refuses_reverted_file_omission_then_repairs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    redirected = {
+        "GIT_DIR": tmp_path / "unrelated.git",
+        "GIT_WORK_TREE": tmp_path / "unrelated-worktree",
+        "GIT_INDEX_FILE": tmp_path / "unrelated-index",
+    }
+    for name, target in redirected.items():
+        monkeypatch.setenv(name, str(target))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "invalid-inherited-configuration")
     repo, data = tmp_path / "repo", tmp_path / "data"
     repo.mkdir()
     _git(repo, "init", "--quiet")
@@ -134,7 +152,7 @@ def test_native_stale_alias_refuses_reverted_file_omission_then_repairs(
     a = _git(repo, "rev-parse", "HEAD")
     assert _worker(data, repo, "git:left", "full")["status"] == "complete"
     assert _worker(data, repo, "git:right", "full")["status"] == "complete"
-    config = IndexConfig(data_dir=data)
+    config = IndexConfig(data_dir=data, cluster_enabled=False)
     state = IndexState.load(config.state_file)
     assert state.sources["git:left"].last_commit == state.sources["git:right"].last_commit == a
 
@@ -197,6 +215,7 @@ def test_native_stale_alias_refuses_reverted_file_omission_then_repairs(
     state = IndexState.load(config.state_file)
     assert state.sources["git:right"].last_commit == state.completed_family_cursors[FAMILY] == c
     assert state.sources["git:left"].last_commit == b
+    assert not any(target.exists() for target in redirected.values())
 
 
 if __name__ == "__main__":

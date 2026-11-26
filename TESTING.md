@@ -9334,6 +9334,10 @@ filesystem/process control for the canonical-alias A/B/C revert case. Run
 `tools/run-tests agent-index --test-file tests/test_source_alias_recovery_native.py
 --allow-explicit-tiers`. Five contained workers use one synthetic Git repository
 and native store, with inference substituted and engine startup/fetch disabled.
+Git and worker launches remove inherited `GIT_*` overrides and ignore global/
+system Git configuration; deliberately poisoned fixture overrides cannot create
+their redirected paths. Clustering is disabled explicitly, with zero measured
+clustering attempts required from every worker.
 Both aliases reach A; one stores B; C reverts a file omitted by net A..C.
 The stale alias must refuse before acquisition without changing native table
 versions, vectors, path checkpoints or source-state bytes. Explicit synthetic
