@@ -221,11 +221,12 @@ def _check_receipt_judgment(source: Path) -> None:
             "installer_run": SimpleNamespace(run_installer=owned), "subprocess": process,
             "output": output, "powershell_file_target": lambda _argv: None,
         })
-        execute = _function(source / "update_runtime.py", "_execute_runtime_step", {
+        execute = _function(source / "update_runtime.py", "_execute_runtime_installer_step", {
             "__package__": package_name, "update_runtime_plan": SimpleNamespace(RuntimeUpdateStep=object),
             "functools": functools, "_run_human_installer": adapter, "output": output,
             "subprocess": process, "cast": cast, "_DiagnosticOptions": dict,
         })
+        execute = _function(source / "update_runtime.py", "_execute_runtime_step", execute.__globals__)
         step = SimpleNamespace(
             status="", name="agent-example", source=None, runtime_root=root, project_root=None,
             payload=Path("receipt-contract-payload"), source_target=None, artifact=Path("receipt-contract-payload"),
@@ -311,6 +312,7 @@ def _check_machine_gate(source: Path) -> None:
             "update_runtime_plan": planner,
             "functools": functools, "cast": cast, "_DiagnosticOptions": dict,
         }
+        _function(source / "update_runtime.py", "_execute_runtime_installer_step", namespace)
         execute = _function(source / "update_runtime.py", "_execute_runtime_step", namespace)
         name = "agent-example"
         reconcile.__dict__.update(

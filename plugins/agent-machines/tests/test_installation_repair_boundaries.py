@@ -8,9 +8,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
-from installer_readiness.model import Invocation, Platform
+from installer_readiness.model import Invocation, Module, Platform
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 from agent_machines import installation_repair as repair_api
@@ -25,7 +26,9 @@ pytestmark = pytest.mark.guard
 repair_fixture = fixture_support.repair_fixture
 
 
-def test_transitive_identity_bound_refuses_before_probe_or_restart_state(repair_fixture, monkeypatch):
+def test_transitive_identity_bound_refuses_before_probe_or_restart_state(
+    repair_fixture: fixture_support.RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home, _, payload, _, identity = repair_fixture
     declaration = payload / "installer-readiness.json"
     value = json.loads(declaration.read_text())
@@ -45,8 +48,9 @@ def test_transitive_identity_bound_refuses_before_probe_or_restart_state(repair_
 
 @pytest.mark.parametrize("failure", ["oversized", "unreadable"])
 def test_unavailable_executable_never_launches_a_probe_or_installer(
-    repair_fixture, tmp_path, monkeypatch, failure,
-):
+    repair_fixture: fixture_support.RepairFixture, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     executable = tmp_path / "unavailable-interpreter"
     if failure == "oversized":
         with executable.open("wb") as stream:
@@ -55,15 +59,15 @@ def test_unavailable_executable_never_launches_a_probe_or_installer(
         executable.write_bytes(b"unreadable")
         original_open = Path.open
 
-        def unreadable(path, *args, **kwargs):
+        def unreadable(path: Path, *args: Any, **kwargs: Any) -> Any:
             if path == executable:
                 raise PermissionError("synthetic denied executable read")
             return original_open(path, *args, **kwargs)
 
         monkeypatch.setattr(Path, "open", unreadable)
-    original_which = repair_api.shutil.which
+    original_which = repair_api.path_interpreter
     monkeypatch.setattr(
-        repair_api.shutil, "which",
+        repair_api, "path_interpreter",
         lambda name: str(executable) if name in {"bash", "pwsh", "powershell"}
         else original_which(name),
     )
@@ -75,16 +79,22 @@ def test_unavailable_executable_never_launches_a_probe_or_installer(
             stream.truncate(64 * 1024 * 1024 + 2)
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "incomplete" and not result["requiredSatisfied"]
-    assert result["outcomes"][0]["installer"]["status"] == "invocation-refused"
+    installer = result["outcomes"][0]["installer"]
+    assert installer is not None and installer["status"] == "invocation-refused"
 
 
-def test_initially_ready_probe_cannot_skip_changed_owner_binding(repair_fixture, monkeypatch):
+def test_initially_ready_probe_cannot_skip_changed_owner_binding(
+    repair_fixture: fixture_support.RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     _, _, payload, _, _ = repair_fixture
     plan = invoke(repair_fixture)
 
-    def changed(module, owner, platform, *, readonly, timeout):
+    def changed(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform,
+        *, readonly: bool, timeout: float,
+    ) -> process_api.ActionResult:
         assert readonly, "installer executed"
         (payload / "changed-during-ready-probe").write_text("changed", encoding="utf-8")
         return ActionResult("exited", 0, json.dumps({
@@ -96,20 +106,24 @@ def test_initially_ready_probe_cannot_skip_changed_owner_binding(repair_fixture,
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     assert result["status"] == "incomplete" and not result["requiredSatisfied"]
     assert result["outcomes"][0]["observedBefore"]["state"] == "ready"
-    assert result["outcomes"][0]["installer"]["reason"] == "owner-binding-changed"
+    installer = result["outcomes"][0]["installer"]
+    assert installer is not None and installer["reason"] == "owner-binding-changed"
     assert not any(row["attempted"] for row in result["outcomes"])
 
 
 def test_binding_refusal_propagates_optional_prerequisite_blockers(
-    repair_fixture, monkeypatch,
-):
+    repair_fixture: fixture_support.RepairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_machines.installation_repair_process import ActionResult
 
     _, _, payload, configure, _ = repair_fixture
     configure(classification="optional", dependencies=("agent-example/base",))
     plan = invoke(repair_fixture)
 
-    def changed(module, owner, platform, *, readonly, timeout):
+    def changed(
+        module: Module, owner: repair_api.OwnerBinding, platform: Platform,
+        *, readonly: bool, timeout: float,
+    ) -> process_api.ActionResult:
         assert readonly, "installer executed"
         (payload / "changed-during-observation").write_text("changed", encoding="utf-8")
         return ActionResult("exited", 0, json.dumps({
@@ -121,7 +135,8 @@ def test_binding_refusal_propagates_optional_prerequisite_blockers(
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
     base, child = result["outcomes"]
     assert base["classification"] == "optional" and child["classification"] == "required"
-    assert base["installer"]["reason"] == "owner-binding-changed"
+    installer = base["installer"]
+    assert installer is not None and installer["reason"] == "owner-binding-changed"
     assert child["observedBefore"]["state"] == "ready"
     assert child["blockedBy"] == [base["module"]]
     assert not any(row["attempted"] for row in result["outcomes"])
@@ -130,22 +145,23 @@ def test_binding_refusal_propagates_optional_prerequisite_blockers(
 
 @pytest.mark.parametrize("initially_unavailable", [False, True])
 def test_executable_changed_after_binding_cannot_run_a_probe(
-    repair_fixture, tmp_path, monkeypatch, initially_unavailable,
-):
+    repair_fixture: fixture_support.RepairFixture, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, initially_unavailable: bool,
+) -> None:
     executable = tmp_path / "changed-interpreter"
     executable.write_bytes(b"first")
     if initially_unavailable:
         with executable.open("wb") as stream:
             stream.truncate(64 * 1024 * 1024 + 1)
-    original_which = repair_api.shutil.which
+    original_which = repair_api.path_interpreter
     monkeypatch.setattr(
-        repair_api.shutil, "which",
+        repair_api, "path_interpreter",
         lambda name: str(executable) if name in {"bash", "pwsh", "powershell"}
         else original_which(name),
     )
     original_binding = repair_api._binding_inputs
 
-    def changed(*args, **kwargs):
+    def changed(*args: Any, **kwargs: Any) -> Any:
         bound = original_binding(*args, **kwargs)
         executable.write_bytes(b"second")
         return bound
@@ -158,7 +174,9 @@ def test_executable_changed_after_binding_cannot_run_a_probe(
 
 
 @pytest.mark.parametrize("platform", [Platform.WINDOWS, Platform.LINUX])
-def test_admitted_executable_argv_is_absolute(tmp_path, monkeypatch, platform):
+def test_admitted_executable_argv_is_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: Platform,
+) -> None:
     conductor = tmp_path / "conductor"
     executable = conductor / "relative-bin" / "interpreter"
     executable.parent.mkdir(parents=True)
@@ -176,8 +194,9 @@ def test_admitted_executable_argv_is_absolute(tmp_path, monkeypatch, platform):
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX relative PATH execution")
 def test_relative_path_executes_admitted_interpreter_not_payload_twin(
-    repair_fixture, tmp_path, monkeypatch,
-):
+    repair_fixture: fixture_support.RepairFixture, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home, _, payload, _, _ = repair_fixture
     interpreter = shutil.which("bash")
     assert interpreter
@@ -193,20 +212,24 @@ def test_relative_path_executes_admitted_interpreter_not_payload_twin(
     monkeypatch.chdir(conductor)
     monkeypatch.setenv("PATH", "relative-bin")
     assert shutil.which("bash") == str(Path("relative-bin") / "bash")
+    monkeypatch.setattr(repair_api, "path_interpreter",
+                        lambda name: str(admitted.relative_to(conductor)))
     plan = invoke(repair_fixture, selection=("base",))
     assert plan["outcomes"][0]["observedBefore"]["state"] == "not-ready"
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"], selection=("base",))
     assert result["status"] == "ready" and result["requiredSatisfied"]
     assert result["outcomes"][0]["installer"] == {"status": "exited", "exitCode": 0}
-    assert result["outcomes"][0]["observedAfter"]["state"] == "ready"
+    after = result["outcomes"][0]["observedAfter"]
+    assert after is not None and after["state"] == "ready"
     assert (home / "agent-example-base.ready").read_text() == "ready"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX command interpreter execution")
 @pytest.mark.parametrize("shebang", ["#!/usr/bin/env sh", "#!/usr/bin/env bash"])
 def test_payload_command_binds_interpreter_before_changing_cwd(
-    repair_fixture, tmp_path, monkeypatch, shebang,
-):
+    repair_fixture: fixture_support.RepairFixture, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, shebang: str,
+) -> None:
     home, _, payload, _, _ = repair_fixture
     name = shebang.rsplit(" ", 1)[1]
     interpreter = shutil.which(name)
@@ -240,6 +263,8 @@ def test_payload_command_binds_interpreter_before_changing_cwd(
     write_json(declaration, value)
     monkeypatch.chdir(conductor)
     monkeypatch.setenv("PATH", "relative-bin")
+    monkeypatch.setattr(repair_api, "path_interpreter",
+                        lambda name: str(admitted.relative_to(conductor)))
     plan = invoke(repair_fixture, selection=("base",))
     assert plan["outcomes"][0]["observedBefore"]["state"] == "not-ready"
     result = invoke(repair_fixture, apply=True, digest=plan["planDigest"], selection=("base",))
@@ -252,7 +277,9 @@ def test_payload_command_binds_interpreter_before_changing_cwd(
     "#!/usr/bin/env sh -e", "#!/usr/bin/env -S bash", "#!relative/sh",
     "#!/usr/bin/python3", "not a script",
 ])
-def test_payload_command_refuses_unsupported_interpreter_forms(tmp_path, shebang):
+def test_payload_command_refuses_unsupported_interpreter_forms(
+    tmp_path: Path, shebang: str,
+) -> None:
     target = tmp_path / "agent-example"
     target.write_text(shebang + "\n", encoding="utf-8")
     action = Invocation(kind="payload-command", target=target, arguments=())
@@ -261,7 +288,9 @@ def test_payload_command_refuses_unsupported_interpreter_forms(tmp_path, shebang
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX interpreter symlink semantics")
-def test_declared_sh_symlink_preserves_bash_sh_invocation_semantics(tmp_path, monkeypatch):
+def test_declared_sh_symlink_preserves_bash_sh_invocation_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     bash = shutil.which("bash")
     assert bash
     shell = tmp_path / "sh"
@@ -282,8 +311,8 @@ def test_declared_sh_symlink_preserves_bash_sh_invocation_semantics(tmp_path, mo
 
 @pytest.mark.parametrize("tree", ["__pycache__", ".pytest_cache", ".ruff_cache", ".git"])
 def test_declared_action_in_excluded_tree_still_has_content_binding(
-    repair_fixture, monkeypatch, tree,
-):
+    repair_fixture: fixture_support.RepairFixture, monkeypatch: pytest.MonkeyPatch, tree: str,
+) -> None:
     _, _, payload, _, _ = repair_fixture
     scripts = payload / "scripts"
     excluded = scripts / tree
@@ -306,7 +335,9 @@ def test_declared_action_in_excluded_tree_still_has_content_binding(
 
 
 @pytest.mark.parametrize("size", [8 * 1024 * 1024, 8 * 1024 * 1024 + 1])
-def test_action_content_binding_enforces_exact_byte_bound(tmp_path, monkeypatch, size):
+def test_action_content_binding_enforces_exact_byte_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, size: int,
+) -> None:
     target = tmp_path / "action"
     with target.open("wb") as stream:
         stream.truncate(size)
@@ -321,8 +352,10 @@ def test_action_content_binding_enforces_exact_byte_bound(tmp_path, monkeypatch,
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX descendant resource lifetime")
 def test_posix_exited_installer_releases_redirected_descendant_lock_before_unlock(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("native POSIX descendant resource lifetime")
     import fcntl
 
     resource = tmp_path / "descendant.lock"
@@ -354,31 +387,34 @@ def test_posix_exited_installer_releases_redirected_descendant_lock_before_unloc
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX group cleanup deadline")
-def test_unconfirmed_posix_group_cleanup_never_returns_success(tmp_path, monkeypatch):
-    import types
+def test_unconfirmed_posix_group_cleanup_never_returns_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _caller_owned
+    from agent_procutil.owned_process import OwnedCleanupError
 
-    elapsed = 0
-    real_clock = time.monotonic
+    def unconfirmed(*args: Any, **kwargs: Any) -> None:
+        raise TimeoutError("synthetic unconfirmed native group")
 
-    def alive(pgid):
-        nonlocal elapsed
-        elapsed += 6
-        return True
-
-    monkeypatch.setattr(process_api, "_posix_group_alive", alive)
-    monkeypatch.setattr(process_api, "time", types.SimpleNamespace(
-        monotonic=lambda: real_clock() + elapsed, sleep=time.sleep,
-    ))
-    with pytest.raises(TimeoutError, match="transient process group did not exit"):
-        run_action(
-            [sys.executable, "-c", "pass"], cwd=tmp_path, environment=os.environ,
-            timeout=10, readonly=True,
-        )
+    with RestartJournal(tmp_path).locked():
+        with monkeypatch.context() as patch:
+            patch.setattr(_caller_owned, "_confirm_group", unconfirmed)
+            with pytest.raises(OwnedCleanupError) as failure:
+                run_action(
+                    [sys.executable, "-c", "pass"], cwd=tmp_path, environment=os.environ,
+                    timeout=10, readonly=True,
+                )
+        with pytest.raises(RepairAdmissionError, match="already active"):
+            with RestartJournal(tmp_path).locked():
+                pytest.fail("unconfirmed cleanup released the repair lock")
+        failure.value.retry_cleanup(deadline=time.monotonic() + 10)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows CMD contract")
 @pytest.mark.parametrize("readonly", [True, False])
-def test_native_cmd_preserves_payload_path_and_argument_spaces(tmp_path, readonly):
+def test_native_cmd_preserves_payload_path_and_argument_spaces(
+    tmp_path: Path, readonly: bool,
+) -> None:
     target = tmp_path / "payload with spaces" / "command with spaces.cmd"
     target.parent.mkdir()
     target.write_bytes(b"@echo off\r\necho [%~1]\r\necho [%~2]\r\nexit /b 0\r\n")
@@ -393,8 +429,10 @@ def test_native_cmd_preserves_payload_path_and_argument_spaces(tmp_path, readonl
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job teardown and lock ordering")
 def test_windows_exited_installer_reaps_redirected_descendant_before_unlock(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform != "win32":
+        pytest.skip("native Windows Job teardown")
     import ctypes
     from ctypes import wintypes
     from agent_procutil import JobHandle
@@ -421,15 +459,15 @@ def test_windows_exited_installer_reaps_redirected_descendant_before_unlock(
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     original = JobHandle.terminate_and_wait
     original_spawn = process_api.spawn_sync_in_kill_on_close_job
-    parents = []
-    confirmed = []
+    parents: list[subprocess.Popen[Any]] = []
+    confirmed: list[bool] = []
 
-    def capture_spawn(*args, **kwargs):
+    def capture_spawn(*args: Any, **kwargs: Any) -> Any:
         process, job = original_spawn(*args, **kwargs)
         parents.append(process)
         return process, job
 
-    def confirm_before_unlock(job, timeout_seconds):
+    def confirm_before_unlock(job: JobHandle, timeout_seconds: float) -> None:
         assert parents[0].poll() == 0
         handle = kernel.OpenProcess(0x100000, False, int(pid_file.read_text()))
         assert handle, ctypes.get_last_error()
@@ -462,19 +500,20 @@ def test_windows_exited_installer_reaps_redirected_descendant_before_unlock(
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX signal cleanup")
 @pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
 def test_signal_during_admission_restores_handler_and_releases_apply_lock(
-    repair_fixture, monkeypatch, signal_name,
-):
+    repair_fixture: fixture_support.RepairFixture, monkeypatch: pytest.MonkeyPatch,
+    signal_name: str,
+) -> None:
     home, _, _, _, _ = repair_fixture
     plan = invoke(repair_fixture)
     signum = getattr(signal, signal_name)
     original = signal.getsignal(signum)
 
-    def caller_handler(*args):
+    def caller_handler(*args: Any) -> None:
         pytest.fail("caller handler was not protected during repair")
 
     signal.signal(signum, caller_handler)
 
-    def terminated(*args, **kwargs):
+    def terminated(*args: Any, **kwargs: Any) -> None:
         assert signal.getsignal(signum) is not caller_handler
         os.kill(os.getpid(), signum)
         pytest.fail("termination was ignored")
@@ -490,7 +529,7 @@ def test_signal_during_admission_restores_handler_and_releases_apply_lock(
         pass
 
 
-def _wait_for(path: Path, process, timeout=8):
+def _wait_for(path: Path, process: subprocess.Popen[Any], timeout: float = 8) -> None:
     deadline = time.monotonic() + timeout
     while not path.exists() and process.poll() is None and time.monotonic() < deadline:
         time.sleep(0.02)
@@ -498,7 +537,7 @@ def _wait_for(path: Path, process, timeout=8):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX signal inheritance")
-def test_owner_action_does_not_inherit_a_blocked_termination_signal(tmp_path):
+def test_owner_action_does_not_inherit_a_blocked_termination_signal(tmp_path: Path) -> None:
     result = run_action(
         [sys.executable, "-c", "import signal; "
          "print(bool({signal.SIGINT,signal.SIGTERM} & "
@@ -510,7 +549,7 @@ def test_owner_action_does_not_inherit_a_blocked_termination_signal(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX ignored signal inheritance")
-def test_owner_action_retains_caller_ignored_signal_dispositions(tmp_path):
+def test_owner_action_retains_caller_ignored_signal_dispositions(tmp_path: Path) -> None:
     previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
     try:
         for signum in previous:
@@ -529,22 +568,25 @@ def test_owner_action_retains_caller_ignored_signal_dispositions(tmp_path):
 
 @pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
 def test_signal_during_spawn_defers_until_process_ownership_is_available(
-    tmp_path, monkeypatch, signal_name,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signal_name: str,
+) -> None:
     if os.name == "nt" and signal_name == "SIGTERM":
         pytest.skip("Windows cancellation uses SIGINT, not POSIX SIGTERM")
+    from agent_procutil import owned_process
+
+    owner = process_api if os.name == "nt" else owned_process
     signum = getattr(signal, signal_name)
-    original = process_api.spawn_sync_in_kill_on_close_job
-    children = []
+    original = owner.spawn_sync_in_kill_on_close_job
+    children: list[subprocess.Popen[Any]] = []
     previous = signal.getsignal(signum)
 
-    def interrupted_spawn(*args, **kwargs):
+    def interrupted_spawn(*args: Any, **kwargs: Any) -> Any:
         process, job = original(*args, **kwargs)
         children.append(process)
         signal.raise_signal(signum)
         return process, job
 
-    monkeypatch.setattr(process_api, "spawn_sync_in_kill_on_close_job", interrupted_spawn)
+    monkeypatch.setattr(owner, "spawn_sync_in_kill_on_close_job", interrupted_spawn)
     with pytest.raises(KeyboardInterrupt):
         run_action(
             [sys.executable, "-c", "import time; time.sleep(60)"],
@@ -558,8 +600,10 @@ def test_signal_during_spawn_defers_until_process_ownership_is_available(
 @pytest.mark.parametrize("stage", ["action", "spawn", "cleanup"])
 @pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
 def test_terminated_conductor_reaps_installer_before_unlocking(
-    repair_fixture, tmp_path, stage, signal_name,
-):
+    repair_fixture: fixture_support.RepairFixture, tmp_path: Path, stage: str, signal_name: str,
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("native POSIX signal cleanup")
     signum = getattr(signal, signal_name)
     home, project, payload, _, identity = repair_fixture
     descendant = tmp_path / "descendant.pid"
@@ -585,31 +629,32 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
     ), encoding="utf-8")
     plan = invoke(repair_fixture, selection=("base",))
     spawn_hook = "" if stage != "spawn" else (
-        "original_spawn=runner.spawn_sync_in_kill_on_close_job\n"
+        "original_spawn=native.spawn_sync_in_kill_on_close_job\n"
         "def paused_spawn(*args, **kwargs):\n"
         "    process,job=original_spawn(*args,**kwargs)\n"
-        "    if kwargs.get('allow_breakaway'):\n"
-        f"        Path({str(spawning)!r}).touch()\n"
+        "    if kwargs.get('env',{}).get('AGENT_EXAMPLE_NO_SELFPROVISION') != '1':\n"
+        f"        Path({str(spawning)!r}).write_text(str(process.pid))\n"
         "        deadline=time.monotonic()+8\n"
         f"        while not Path({str(release_spawn)!r}).exists() and time.monotonic()<deadline:\n"
         "            time.sleep(.02)\n"
         "    return process,job\n"
-        "runner.spawn_sync_in_kill_on_close_job=paused_spawn\n"
+        "native.spawn_sync_in_kill_on_close_job=paused_spawn\n"
     )
     conductor = tmp_path / "conductor.py"
     conductor.write_text(
         "import json,time\nfrom pathlib import Path\n"
         "from agent_machines.installation_repair import repair\n"
         "from agent_machines import installation_repair_process as runner\n"
-        "original=runner.os.killpg\n"
-        "def paused_cleanup(pid, sig):\n"
-        f"    if Path({str(descendant)!r}).exists():\n"
+        "from agent_procutil import owned_process as native\n"
+        "original=native._retire_posix_group\n"
+        "def paused_cleanup(process, *args, **kwargs):\n"
+        f"    if Path({str(descendant)!r}).exists() or Path({str(spawning)!r}).exists():\n"
         f"        Path({str(cleanup)!r}).touch()\n"
         "        deadline=time.monotonic()+8\n"
         f"        while not Path({str(release)!r}).exists() and time.monotonic()<deadline:\n"
         "            time.sleep(.02)\n"
-        "    original(pid,sig)\n"
-        "runner.os.killpg=paused_cleanup\n"
+        "    return original(process,*args,**kwargs)\n"
+        "native._retire_posix_group=paused_cleanup\n"
         + spawn_hook +
         f"result=repair(Path({str(project)!r}),home=Path({str(home)!r}),"
         f"modules={[identity + '::agent-example/base']!r},apply=True,"
@@ -622,16 +667,16 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
         **no_window_kwargs(),
     )
     try:
-        _wait_for(descendant, process)
+        _wait_for(spawning if stage == "spawn" else descendant, process)
         if stage != "cleanup":
             if stage == "spawn":
-                _wait_for(spawning, process)
+                assert not descendant.exists(), "application ran before spawn handoff"
             os.kill(process.pid, signum)
             if stage == "spawn":
                 with pytest.raises(RepairAdmissionError, match="already active"):
                     with RestartJournal(home).locked():
                         pytest.fail("lock released during spawn ownership handoff")
-                os.kill(int(descendant.read_text()), 0)
+                os.kill(int(spawning.read_text()), 0)
                 release_spawn.touch()
         _wait_for(cleanup, process)
         if stage == "cleanup":
@@ -639,7 +684,10 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
         with pytest.raises(RepairAdmissionError, match="already active"):
             with RestartJournal(home).locked():
                 pytest.fail("lock released while the installer was still alive")
-        os.kill(int(descendant.read_text()), 0)
+        if stage != "cleanup":
+            os.kill(int((spawning if stage == "spawn" else descendant).read_text()), 0)
+        else:
+            fixture_support._assert_process_stopped(int(descendant.read_text()))
         os.kill(process.pid, signum)
         release.touch()
         release_spawn.touch()
@@ -648,8 +696,8 @@ def test_terminated_conductor_reaps_installer_before_unlocking(
         assert json.loads(stdout)["interrupted"]
         with RestartJournal(home).locked():
             pass
-        stat = Path("/proc") / descendant.read_text() / "stat"
-        assert not stat.exists() or stat.read_text().split()[2] == "Z"
+        observed = spawning if stage == "spawn" else descendant
+        fixture_support._assert_process_stopped(int(observed.read_text()))
     finally:
         release.touch()
         release_spawn.touch()

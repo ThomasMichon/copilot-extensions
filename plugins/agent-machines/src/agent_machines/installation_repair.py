@@ -55,6 +55,8 @@ class RestartEvidence(TypedDict):
 
 class RepairReport(TypedDict, total=False):
     schema: str
+    actionFence: dict[str, object]
+    confirmedCleanup: dict[str, object]
     version: int
     status: str
     interrupted: bool
@@ -72,6 +74,7 @@ class RepairReport(TypedDict, total=False):
     available: list[str]
     refusedOwners: dict[str, str]
     discoveryFindings: list[str]
+    callerOwnedReadiness: bool
     outcomes: list[OutcomeEvidence]
 
 
@@ -434,21 +437,44 @@ def _readmit(
 def repair(
     project_root: Path, *, modules: Sequence[str] = (), apply: bool = False,
     required: bool = False,
+    refresh: bool = False,
     expected_plan_digest: str | None = None, home: Path | None = None,
     readiness_timeout: float = 15, installer_timeout: float = 300,
     confirm_restart: str | None = None,
+    confirm_cleanup: str | None = None,
     on_observation: Callable[[list[dict[str, object]]], None] | None = None,
     readiness_only: bool = False,
 ) -> RepairReport:
     """Serialize apply and explicit restart confirmation against durable obligations."""
     if type(readiness_only) is not bool or (
-        readiness_only and (apply or not required or modules or expected_plan_digest or confirm_restart)
+        readiness_only and (
+            apply or refresh or not required or modules or expected_plan_digest
+            or confirm_restart or confirm_cleanup
+        )
     ):
         raise RepairAdmissionError("readiness-only observation requires read-only required selection")
     journal = RestartJournal(home if home is not None else Path.home())
     try:
+        if confirm_cleanup is not None:
+            if (
+                apply or refresh or modules or required or expected_plan_digest
+                or confirm_restart is not None
+                or not isinstance(confirm_cleanup, str)
+            ):
+                raise RepairAdmissionError("cleanup confirmation cannot also plan or apply repair")
+            with journal.locked(confirm_cleanup=True):
+                confirmed_cleanup = journal.action_fence()
+                journal.confirm_action_cleanup(confirm_cleanup)
+            return {
+                "schema": "copilot-extensions.installation-repair", "version": 1,
+                "status": "cleanup-confirmed", "interrupted": False,
+                "confirmation": "operator-attestation",
+                "confirmedCleanup": confirmed_cleanup,
+                "actionFence": journal.action_fence(),
+                "restarts": cast(RestartEvidence, journal.evidence()),
+            }
         if confirm_restart is not None:
-            if apply or modules or required or expected_plan_digest or not isinstance(confirm_restart, str):
+            if apply or refresh or modules or required or expected_plan_digest or not isinstance(confirm_restart, str):
                 raise RepairAdmissionError("restart confirmation cannot also plan or apply repair")
             with journal.locked():
                 confirmed = journal.evidence()
@@ -465,6 +491,7 @@ def repair(
                 return _repair(
                     project_root, modules=modules, apply=apply,
                     required=required,
+                    refresh=refresh,
                     expected_plan_digest=expected_plan_digest, home=home,
                     readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
                     journal=journal,
@@ -472,9 +499,20 @@ def repair(
                     readiness_only=readiness_only,
                 )
         journal.load()
+        action_fence = journal.action_fence()
+        if action_fence["pending"] is not None:
+            return {
+                "schema": "copilot-extensions.installation-repair", "version": 1,
+                "status": "cleanup-required", "interrupted": False,
+                "actionFence": action_fence, "requiredSatisfied": False,
+                "requiredSelection": required, "selectionRefusal": "cleanup-not-confirmed",
+                "outcomes": [], "available": [], "selected": [],
+                "restarts": cast(RestartEvidence, journal.evidence()),
+            }
         return _repair(
             project_root, modules=modules, apply=apply,
             required=required,
+            refresh=refresh,
             expected_plan_digest=expected_plan_digest, home=home,
             readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
             journal=journal,
@@ -488,6 +526,7 @@ def repair(
 def _repair(
     project_root: Path, *, modules: Sequence[str], apply: bool,
     required: bool,
+    refresh: bool,
     expected_plan_digest: str | None, home: Path | None,
     readiness_timeout: float, installer_timeout: float, journal: RestartJournal,
     on_observation: Callable[[list[dict[str, object]]], None] | None = None,
@@ -495,7 +534,7 @@ def _repair(
 ) -> RepairReport:
     """Reconstruct host admission and invoke only the explicit selected closure."""
     if (
-        type(apply) is not bool or type(required) is not bool
+        type(apply) is not bool or type(required) is not bool or type(refresh) is not bool
         or isinstance(modules, str) or len(modules) > 256
         or required and modules
         or any(not isinstance(item, str) or not 1 <= len(item) <= 256 for item in modules)
@@ -565,7 +604,7 @@ def _repair(
                 project_root, modules, platform, plan_digest, home, required,
                 readiness_only=readiness_only,
             )[module.owner.owner_id]
-            if not refresh_readiness and _satisfies(module, observation):
+            if not refresh and not refresh_readiness and _satisfies(module, observation):
                 continue
             if refresh_readiness:
                 observation = _observe(module, fresh_owner, platform, readiness_timeout)
@@ -577,7 +616,7 @@ def _repair(
                     project_root, modules, platform, plan_digest, home, required,
                     readiness_only=readiness_only,
                 )[module.owner.owner_id]
-                if _satisfies(module, observation):
+                if not refresh and _satisfies(module, observation):
                     continue
         except KeyboardInterrupt:
             outcome.after = Observation("unknown", "owner-revalidation-interrupted")
@@ -595,13 +634,16 @@ def _repair(
             if module.restart is not Restart.NONE:
                 journal.require(module.qualified_id, module.restart.value, plan_digest)
                 outcome.restart_required = True
+            journal.begin_action(module.qualified_id, plan_digest)
             outcome.attempted = True
             if on_observation is not None:
                 on_observation([outcome.evidence()])
             result = _invoke(
                 module, fresh_owner, platform, readonly=False, timeout=installer_timeout,
             )
+            journal.finish_action()
         except KeyboardInterrupt:
+            journal.finish_action()
             outcome.installer = {"status": "interrupted", "exitCode": None}
             interrupted = True
             continue

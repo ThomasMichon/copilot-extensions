@@ -369,33 +369,9 @@ def _cmd_installer_readiness(args: argparse.Namespace) -> int:
 
 
 def _cmd_installation_repair(args: argparse.Namespace) -> int:
-    from .installation_repair import repair
-    from .installation_repair_admission import RepairAdmissionError
-    from .installation_repair_process import caller_owned_readiness
+    from .installation_repair_cli import command
 
-    try:
-        enclosing = getattr(args, "caller_owned_readiness", False)
-        if enclosing and (
-            not args.required or args.apply or args.confirm_restart or args.expected_plan_digest
-        ):
-            raise RepairAdmissionError("caller-owned readiness requires read-only required selection")
-        with caller_owned_readiness(enclosing):
-            result = repair(
-                args.project_root, modules=args.module, apply=args.apply,
-                required=args.required,
-                expected_plan_digest=args.expected_plan_digest,
-                readiness_timeout=args.readiness_timeout, installer_timeout=args.installer_timeout,
-                confirm_restart=args.confirm_restart,
-                readiness_only=enclosing,
-            )
-        result["callerOwnedReadiness"] = enclosing
-    except (RepairAdmissionError, ValueError) as error:
-        print(f"agent-machines: {error}", file=sys.stderr)
-        return 1
-    print(json.dumps(result, sort_keys=True))
-    if result["interrupted"]:
-        return 130
-    return 0 if result["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
+    return command(args)
 
 
 def _cmd_installation_configuration(args: argparse.Namespace) -> int:
@@ -861,6 +837,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     installation_repair.add_argument("--apply", action="store_true")
     installation_repair.add_argument(
+        "--refresh", action="store_true",
+        help="on apply, run selected manifest installers even when readiness passes",
+    )
+    installation_repair.add_argument(
         "--caller-owned-readiness", action="store_true",
         help="read required modules inside the explicit caller's native containment",
     )
@@ -868,6 +848,10 @@ def _build_parser() -> argparse.ArgumentParser:
     installation_repair.add_argument(
         "--confirm-restart", metavar="PENDING_DIGEST",
         help="operator attestation that every restart in the exact pending batch completed",
+    )
+    installation_repair.add_argument(
+        "--confirm-cleanup", metavar="FENCE_DIGEST",
+        help="operator attestation that all transient actions in the exact fence are retired; never stops processes",
     )
     installation_repair.add_argument("--readiness-timeout", type=float, default=15)
     installation_repair.add_argument("--installer-timeout", type=float, default=300)

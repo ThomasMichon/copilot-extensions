@@ -34,6 +34,7 @@ copy	libs/agent-procutil/src/agent_procutil/_output_relay.py	libs/agent-procutil
 copy	libs/agent-procutil/src/agent_procutil/_retirement_channel.py	libs/agent-procutil/src/agent_procutil/_retirement_channel.py
 copy	libs/agent-procutil/src/agent_procutil/_retirement_custodian.py	libs/agent-procutil/src/agent_procutil/_retirement_custodian.py
 copy	libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py	libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py
+copy	libs/agent-procutil/src/agent_procutil/_spawn_signals.py	libs/agent-procutil/src/agent_procutil/_spawn_signals.py
 copy	libs/agent-procutil/src/agent_procutil/_suspended_handoff.py	libs/agent-procutil/src/agent_procutil/_suspended_handoff.py
 copy	libs/agent-procutil/src/agent_procutil/_terminal_offer.py	libs/agent-procutil/src/agent_procutil/_terminal_offer.py
 copy	libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py	libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py
@@ -200,6 +201,7 @@ copy	libs/agent-procutil/tests/test_spawn_daemon_log_header.py	libs/agent-procut
 copy	libs/agent-procutil/tests/test_spawn_daemon_log_mode.py	libs/agent-procutil/tests/test_spawn_daemon_log_mode.py
 copy	libs/agent-procutil/tests/test_spawn_daemon_stderr_log.py	libs/agent-procutil/tests/test_spawn_daemon_stderr_log.py
 copy	libs/agent-procutil/tests/test_spawn_daemon_windows_integration.py	libs/agent-procutil/tests/test_spawn_daemon_windows_integration.py
+copy	libs/agent-procutil/tests/test_spawn_signals.py	libs/agent-procutil/tests/test_spawn_signals.py
 copy	libs/agent-procutil/tests/test_standalone_import.py	libs/agent-procutil/tests/test_standalone_import.py
 copy	libs/agent-procutil/tests/test_startup.py	libs/agent-procutil/tests/test_startup.py
 copy	libs/agent-procutil/tests/test_stream_activity.py	libs/agent-procutil/tests/test_stream_activity.py
