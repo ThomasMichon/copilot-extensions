@@ -559,6 +559,12 @@ $UpdateDriverDir = Join-Path $PluginDir 'libs\update-driver'
 if (-not (Test-Path (Join-Path $UpdateDriverDir 'pyproject.toml'))) {
     $UpdateDriverDir = Join-Path $RepoRoot 'libs\update-driver'
 }
+# process-telemetry dir (optional consumer-telemetry command route): plugin-
+# vendored in a materialized release payload, repo-root in a dev checkout.
+$ProcessTelemetryDir = Join-Path $PluginDir 'libs\process-telemetry'
+if (-not (Test-Path (Join-Path $ProcessTelemetryDir 'pyproject.toml'))) {
+    $ProcessTelemetryDir = Join-Path $RepoRoot 'libs\process-telemetry'
+}
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
 $InstallerRelPath  = 'plugins/agent-codespaces/scripts/install.ps1'
@@ -879,6 +885,10 @@ function Install-PackageInto {
         Write-ServiceErr "update-driver source not found at $UpdateDriverDir"
         return $false
     }
+    if (-not (Test-Path (Join-Path $ProcessTelemetryDir 'pyproject.toml'))) {
+        Write-ServiceErr "process-telemetry source not found at $ProcessTelemetryDir"
+        return $false
+    }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
     # a fresh one (Windows denies overwriting an in-use .exe -- os error 5; the
     # stale binstub or a live `agent-codespaces ssh` session may hold it open).
@@ -893,6 +903,7 @@ function Install-PackageInto {
         'agent-single-instance-lease' = $SingleInstanceLeaseDir
         'agent-remote-login-shell' = $RemoteLoginShellDir
         'agent-update-driver' = $UpdateDriverDir
+        'agent-process-telemetry' = $ProcessTelemetryDir
         'agent-codespaces' = $PluginDir
     }
     $installArguments = @('--python', $Python)
@@ -1813,6 +1824,7 @@ function Materialize-SnapshotDependencies {
         'agent-repository-policy' = 'repository-policy'
         'agent-configuration-layers' = 'configuration-layers'
         'agent-update-driver' = 'update-driver'
+        'agent-process-telemetry' = 'process-telemetry'
         'agent-ssh-manager' = 'ssh-manager'
         'agent-credential-relay' = 'credential-relay'
         'agent-config-migrate' = 'config-migrate'

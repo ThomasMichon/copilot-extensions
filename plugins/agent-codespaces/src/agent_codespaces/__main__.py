@@ -198,7 +198,13 @@ def _normalize_remote_cmd_file(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point."""
+    """CLI entry point; noted lifecycle stages are offered once it returns."""
+    from . import consumer_telemetry
+
+    return consumer_telemetry.instrument(_main)(argv)
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="agent-codespaces",
         description="GitHub Codespaces lifecycle, SSH, and credential relay",
@@ -1296,7 +1302,10 @@ def _ssh_session(
     # be duplicated/bypassed per-verb again).
     from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
 
+    from . import consumer_telemetry as ct
+
     fence_holder_ref = None
+    claim_started = ct.clock()
     try:
         fence_holder_ref = claim_for_connect(
             args.name,
@@ -1305,6 +1314,7 @@ def _ssh_session(
             session_id=getattr(args, "session_id", None),
         )
     except ClaimConflict as exc:
+        ct.note("claim", "failure", "claim_busy", started=claim_started)
         print(
             f"[BUSY] {exc}\n"
             f"       A CodeSpace is fronted by a single bridge, so a second "
@@ -1317,6 +1327,9 @@ def _ssh_session(
         )
         return _BUSY_EXIT
     except (CoordinationRejected, ContextRefused) as exc:
+        ct.note("claim", "failure",
+                "lease_conflict" if isinstance(exc, CoordinationRejected) else "other",
+                started=claim_started)
         print(
             f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
             file=sys.stderr,
@@ -1324,7 +1337,12 @@ def _ssh_session(
         return _COORDINATION_EXIT
     except RuntimeError as exc:
         # Never let a claim-bookkeeping error block a connect.
+        ct.note("claim", "failure", "other", started=claim_started)
         print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
+    else:
+        ct.note("claim", "success",
+                "force_claimed" if getattr(args, "force_claim", False) else "none",
+                started=claim_started)
 
     # Reusing a box clears any prune-lifecycle marker only after coordination
     # has allowed the operation to proceed.
@@ -1347,6 +1365,7 @@ def _ssh_session(
     if not args.no_relay:
         # Host TCP is advisory; the far-side protocol gate below controls admission.
         if not _relay_listening(relay_port):
+            ct.note("credential_relay", "failure", "relay_not_listening")
             log.warning(
                 "Credential relay not listening on 127.0.0.1:%d before connecting "
                 "to %s -- git auth over the relay will fail (#122)",
@@ -1441,15 +1460,23 @@ def _ssh_session(
         tracker.started(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
         deadline = time.monotonic() + _SSH_BOOT_TIMEOUT
         backoff = 3.0
+        connect_attempt = 0
         while True:
+            connect_attempt += 1
+            attempt_started = ct.clock()
             try:
                 connection = await manager.ensure_connected(
                     args.name, source, port_forwards,
                 )
                 tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
+                ct.note("codespace_connect", "success", "none",
+                        started=attempt_started, attempt=connect_attempt)
                 break
             except (ConnectionError, TimeoutError) as exc:
                 if time.monotonic() + backoff >= deadline:
+                    ct.note("codespace_connect", "timeout", "transport_failed",
+                            started=attempt_started, attempt=connect_attempt,
+                            limit_ms=int(_SSH_BOOT_TIMEOUT * 1000))
                     tracker.failed(
                         ConnectStage.SSH_TO_TARGET,
                         f"Failed to reach CodeSpace {args.name}: {exc}",
@@ -1462,6 +1489,8 @@ def _ssh_session(
                         file=sys.stderr,
                     )
                     return 1
+                ct.note("codespace_connect", "retry", "transport_retry",
+                        started=attempt_started, attempt=connect_attempt)
                 log.info(
                     "CodeSpace %s not ready (booting?): %s -- retry in %.0fs",
                     args.name, exc, backoff,
@@ -1486,6 +1515,9 @@ def _ssh_session(
                 relay_ready = await relay_launch.ssh_relay_serving(
                     manager, args.name, relay_port, timeout=overall_timeout,
                 )
+            ct.note("credential_relay", *(
+                ("success", "none") if relay_ready else ("failure", "relay_not_listening")
+            ))
             if not relay_ready:
                 message = (
                     f"Required credential relay for CodeSpace '{args.name}' did not "
@@ -1513,6 +1545,7 @@ def _ssh_session(
             manager, args.name, fence_holder_ref,
             force=getattr(args, "force_claim", False),
         ):
+            ct.note("claim", "failure", "lease_conflict")
             await manager.disconnect(args.name)
             return _BUSY_EXIT
 
@@ -2084,15 +2117,24 @@ async def _register_codespace_plugins(
     repo = repo or host_repository
     if not workspace:
         raise RuntimeError("Plugin preparation requires the execution checkout")
-    return await prepare_plugins(
-        manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
-        repo_roots=repo_roots,
-        prelude=prelude, relay_port=relay_port,
-        live_attachment=live_attachment,
-        hosting_required=hosting_required,
-        **({"receiving_context": receiving_context} if receiving_context is not None else {}),
-        **({"prepared_context": prepared_context} if prepared_context is not None else {}),
-    )
+    from . import consumer_telemetry as ct
+
+    started = ct.clock()
+    try:
+        prepared = await prepare_plugins(
+            manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
+            repo_roots=repo_roots,
+            prelude=prelude, relay_port=relay_port,
+            live_attachment=live_attachment,
+            hosting_required=hosting_required,
+            **({"receiving_context": receiving_context} if receiving_context is not None else {}),
+            **({"prepared_context": prepared_context} if prepared_context is not None else {}),
+        )
+    except BaseException as exc:
+        ct.note("plugin_preparation", "failure", ct.preparation_reason(exc), started=started)
+        raise
+    ct.note("plugin_preparation", "success", "none", started=started)
+    return prepared
 
 
 async def _verify_remote_auth(

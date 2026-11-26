@@ -61,20 +61,19 @@ def test_capture_hold_reason_defers_on_local_lease(monkeypatch):
 
 
 def test_capture_hold_reason_fails_closed_on_corrupt_lease_file(monkeypatch, tmp_path):
-    """`lease.get_lease()`/`_read_leases()` intentionally degrade a corrupt
-    ``leases.json`` to ``{}`` for pool.py's display-only purposes -- exactly
-    the "no lease" outcome this gate must never silently accept. A direct,
-    strict read of the raw file must catch this BEFORE ever calling the
-    degrade-safe helper, even though `get_lease()` itself (left real/
-    unmocked here) would otherwise happily return `None`."""
+    """`_read_leases()` degrades a corrupt ``leases.json`` to ``{}`` for
+    pool.py's display-only purposes -- exactly the "no lease" outcome this
+    gate must never silently accept. A direct, strict read of the raw file
+    must catch this regardless of what the lease helpers do with it."""
     import agent_codespaces.lease as lease_mod
     corrupt = tmp_path / "leases.json"
     corrupt.write_text("{not valid json", encoding="utf-8")
     monkeypatch.setattr(lease_mod, "LEASE_FILE", corrupt)
 
-    # Confirm get_lease() itself would silently swallow this (the exact
-    # blind spot the direct read closes).
-    assert lease_mod.get_lease("cs") is None
+    # The lease helpers now also fail closed on an unreadable file (the
+    # pending-return read during pruning); the gate must still refuse.
+    with pytest.raises(lease_mod.ProviderAdmissionError):
+        lease_mod.get_lease("cs")
 
     reason = sessions._capture_hold_reason("cs", account=None)
     assert reason is not None

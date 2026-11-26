@@ -1,0 +1,240 @@
+"""Optional `codespaces.lifecycle.v1` records for finite CLI runs."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from agent_codespaces import config, consumer_telemetry as ct, copilot_detach, copilot_venue
+from process_telemetry.finite_owner import capability
+
+_RECEIVER = """\
+import json, sys
+from pathlib import Path
+with Path("readback.jsonl").open("a", encoding="utf-8") as output:
+    for line in sys.stdin:
+        output.write(json.dumps(json.loads(line)) + "\\n")
+"""
+
+
+@pytest.fixture(autouse=True)
+def _clean_recorder() -> Any:
+    ct.reset()
+    yield
+    ct.reset()
+
+
+def _admit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "harness root"
+    root.mkdir()
+    (root / "receiver.py").write_text(_RECEIVER, encoding="utf-8")
+    (root / ".agent-telemetry").mkdir()
+    (root / ".agent-telemetry" / "config.json").write_text(json.dumps({
+        "schema_version": 1, "mode": "command",
+        "command": {"argv": [sys.executable, "-I", "receiver.py"]},
+    }), encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "consumer-telemetry.json").write_text(json.dumps({
+        "schema_version": 1, "root": str(root),
+    }), encoding="utf-8")
+    monkeypatch.setattr(config, "RUNTIME_DIR", runtime)
+    return root
+
+
+def _events(root: Path) -> list[dict[str, Any]]:
+    path = root / "readback.jsonl"
+    if not path.exists():
+        return []
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for record in records:
+        assert (record["source"], record["source_schema"]) == (
+            "agent-codespaces", "codespaces.lifecycle.v1",
+        )
+    return [record["event"] for record in records]
+
+
+def _shape(event: dict[str, Any]) -> tuple[Any, ...]:
+    return (event["stage"], event["outcome"], event["reason"], event["attempt"])
+
+
+def test_a_failed_detached_launch_reaches_a_real_receiver_without_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _admit(tmp_path, monkeypatch)
+
+    def launch() -> int:
+        ct.start_launch()
+        ct.begin("codespace_lookup")
+        ct.begin("ssh")
+        ct.retry("transport_retry")
+        ct.begin("remote_embody")
+        ct.fail(copilot_detach.embody_reason(
+            "", "bash: agent-worktrees: command not found in secret-codespace",
+        ))
+        return 1
+
+    assert ct.instrument(launch)() == 1
+    events = _events(root)
+    assert [_shape(e) for e in events] == [
+        ("codespace_lookup", "success", "none", 1),
+        ("ssh", "retry", "transport_retry", 1),
+        ("ssh", "success", "none", 2),
+        ("remote_embody", "failure", "installer_unavailable", 1),
+        ("launch", "failure", "installer_unavailable", 1),
+    ]
+    assert all(type(e["duration_ms"]) is int for e in events)
+    text = json.dumps(events)
+    assert "secret" not in text and str(tmp_path) not in text
+
+
+def test_legacy_runtime_offers_nothing_and_starts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "RUNTIME_DIR", tmp_path)
+
+    def launch() -> int:
+        ct.note("seed_validation", "failure", "seed_too_long")
+        return 2
+
+    assert ct.instrument(launch)() == 2
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_run_without_stages_never_reads_the_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ct, "_offer", lambda events: pytest.fail("offered an empty run"))
+    assert ct.instrument(lambda: 0)() == 0
+
+
+def test_receiver_failure_and_interrupts_keep_the_product_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _admit(tmp_path, monkeypatch)
+    (root / ".agent-telemetry" / "config.json").write_text(json.dumps({
+        "schema_version": 1, "mode": "command",
+        "command": {"argv": [str(tmp_path / "missing-receiver")]},
+    }), encoding="utf-8")
+
+    def interrupted() -> int:
+        ct.begin("bridge_registration")
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        ct.instrument(interrupted)()
+
+    def exits() -> int:
+        ct.note("claim", "failure", "claim_busy")
+        raise SystemExit(4)
+
+    with pytest.raises(SystemExit) as raised:
+        ct.instrument(exits)()
+    assert raised.value.code == 4
+
+
+@pytest.mark.parametrize("message, expected", [
+    ("Credential relay is not ready on the host", "relay_not_listening"),
+    ("fatal: Authentication failed for 'https://example.invalid/secret'", "clone_auth_failed"),
+    ("fatal: could not read Username for 'https://example.invalid'", "clone_auth_failed"),
+    ("plugin marketplace add failed: exit 1", "marketplace_add_failed"),
+    ("Required target plugin preparation failed: secret-plugin", "plugin_install_failed"),
+    ("something unexpected", "other"),
+])
+def test_plugin_preparation_reasons_are_closed(message: str, expected: str) -> None:
+    assert ct.preparation_reason(RuntimeError(message)) == expected
+
+
+def test_preparation_and_embody_classifiers_cover_interrupts_and_python() -> None:
+    assert ct.preparation_reason(KeyboardInterrupt()) == "interrupted"
+    assert ct.preparation_reason(ValueError("x")) == "other"
+    assert copilot_detach.embody_reason("", "bash: python3: command not found") == (
+        "bootstrap_python_unavailable"
+    )
+    assert copilot_detach.embody_reason("boom", "") == "other"
+
+
+def test_relay_reason_maps_preflight_codes() -> None:
+    assert ct.relay_reason("github-credential-unavailable") == "credential_fill_failed"
+    assert ct.relay_reason(None) == "credential_fill_failed"
+
+
+def test_note_bounds_attempt_and_limit() -> None:
+    ct.note("account_resolution", "timeout", "snapshot_timeout",
+            started=ct.clock(), attempt=10**9, limit_ms=30000)
+    ct.note("not_a_stage", "failure", "other")
+    (event,) = ct.finish(1)
+    assert event["attempt"] == 2**16 and event["limit_ms"] == 30000
+    assert "duration_ms" in event
+
+
+def _claim(monkeypatch: pytest.MonkeyPatch, effect: Any, *, force: bool = False) -> Any:
+    from agent_codespaces import lease
+
+    def claim_for_connect(*args: Any, **kwargs: Any) -> None:
+        if effect is not None:
+            raise effect
+
+    monkeypatch.setattr(lease, "claim_for_connect", claim_for_connect)
+    args = argparse.Namespace(name="secret-codespace", force_claim=force, effort=None)
+    result = copilot_venue.claim_or_exit_code(args, launch_policy=False)
+    return result, [_shape(e)[:3] for e in ct.finish(0 if result is None else 1)]
+
+
+def test_claim_outcomes_are_noted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_codespaces.lease import ClaimConflict, CoordinationRejected
+
+    busy, events = _claim(monkeypatch, ClaimConflict("cs", "holder", "host", 1))
+    assert busy is not None and events == [("claim", "failure", "claim_busy")]
+    ct.reset()
+    _, events = _claim(monkeypatch, CoordinationRejected("no state"))
+    assert events == [("claim", "failure", "lease_conflict")]
+    ct.reset()
+    assert _claim(monkeypatch, None, force=True) == (None, [("claim", "success", "force_claimed")])
+    ct.reset()
+    assert _claim(monkeypatch, None) == (None, [("claim", "success", "none")])
+
+
+def test_account_snapshot_timeout_is_noted_with_its_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_codespaces import gh_account, worktrees
+
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        raise subprocess.TimeoutExpired("agent-worktrees", kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(worktrees, "explicit_context", lambda: True)
+    monkeypatch.setattr(worktrees, "run", slow)
+    with pytest.raises(gh_account.AccountInventoryError):
+        gh_account._lookup("repos", "list", strict=True)
+    (event,) = ct.finish(1)
+    assert (event["stage"], event["outcome"], event["reason"]) == (
+        "account_resolution", "timeout", "snapshot_timeout",
+    )
+    assert event["limit_ms"] == gh_account._SNAPSHOT_TIMEOUT_SECONDS * 1000
+
+
+def test_console_entry_is_instrumented(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_codespaces import __main__ as cli
+
+    seen: list[Any] = []
+
+    def inner(argv: Any = None) -> int:
+        ct.note("seed_validation", "failure", "seed_invalid")
+        seen.append(argv)
+        return 0
+
+    offered: list[Any] = []
+    monkeypatch.setattr(cli, "_main", inner)
+    monkeypatch.setattr(ct, "_offer", offered.append)
+    assert cli.main(["status"]) == 0
+    assert seen == [["status"]] and offered[0][0]["reason"] == "seed_invalid"
+
+
+def test_packaged_descriptor_names_only_the_codespaces_schema() -> None:
+    path = Path(ct.__file__).parent / "metadata" / "consumer-telemetry-contract.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == capability([ct.SOURCE_SCHEMA])

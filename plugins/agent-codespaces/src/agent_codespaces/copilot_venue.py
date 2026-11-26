@@ -247,8 +247,11 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
     """
     import asyncio
 
+    from . import consumer_telemetry as ct
     from . import venue_check
     from .lifecycle import account_for_codespace
+
+    started = ct.clock()
 
     async def _probe_and_fix() -> None:
         from ssh_manager import ConnectionManager
@@ -282,8 +285,10 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                     manager.exec_command, name, readiness,
                 )
                 if "install agent-bridge plugin" in remediation.succeeded:
+                    ct.note("bridge_payload", "success", "none", started=started)
                     print("[PREP] agent-bridge plugin installed.", file=sys.stderr)
                 else:
+                    ct.note("bridge_payload", "failure", "payload_install_failed", started=started)
                     print(
                         "[PREP] Could not install agent-bridge plugin "
                         f"automatically -- CLI-mode registration may not "
@@ -302,8 +307,10 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                     manager.exec_command, name, readiness, bridge_version=host_version,
                 )
                 if "update agent-bridge plugin" in remediation.succeeded:
+                    ct.note("bridge_payload", "success", "none", started=started)
                     print("[PREP] agent-bridge plugin updated.", file=sys.stderr)
                 else:
+                    ct.note("bridge_payload", "failure", "payload_install_failed", started=started)
                     print(
                         "[PREP] Could not update the agent-bridge plugin -- an old "
                         "venue CLI can strand this session's registration. Run "
@@ -335,6 +342,7 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
     try:
         asyncio.run(_probe_and_fix())
     except Exception as exc:  # noqa: BLE001 -- best-effort, never fatal
+        ct.note("bridge_payload", "failure", "other", started=started)
         print(
             f"[PREP] agent-bridge preflight probe failed ({exc}) -- "
             "continuing anyway.",
@@ -352,6 +360,7 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
     is for a rejoin of a running worker, which launches nothing; its caller
     asks the policy itself should the rejoin create a session after all.
     """
+    from . import consumer_telemetry as ct
     from .lease import ClaimConflict, CoordinationRejected, claim_for_connect
     from .launch_policy import refused_exit_code
     from .worktrees import ContextRefused
@@ -360,13 +369,16 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
     refused = refused_exit_code(args.name) if launch_policy else None
     if refused is not None:
         return refused
+    started = ct.clock()
+    forced = bool(getattr(args, "force_claim", False))
     try:
         claim_for_connect(
             args.name,
-            force=getattr(args, "force_claim", False),
+            force=forced,
             effort=getattr(args, "effort", None),
         )
     except ClaimConflict as exc:
+        ct.note("claim", "failure", "claim_busy", started=started)
         print(
             f"[BUSY] {exc}\n"
             f"       A CodeSpace is fronted by a single bridge, so a second "
@@ -379,6 +391,9 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
         )
         return _BUSY_EXIT
     except (CoordinationRejected, ContextRefused) as exc:
+        ct.note("claim", "failure",
+                "lease_conflict" if isinstance(exc, CoordinationRejected) else "other",
+                started=started)
         print(
             f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
             file=sys.stderr,
@@ -386,7 +401,10 @@ def claim_or_exit_code(args: argparse.Namespace, *, launch_policy: bool = True) 
         return _COORDINATION_EXIT
     except RuntimeError as exc:
         # Never let a claim-bookkeeping error block a connect.
+        ct.note("claim", "failure", "other", started=started)
         print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
+        return None
+    ct.note("claim", "success", "force_claimed" if forced else "none", started=started)
     return None
 
 

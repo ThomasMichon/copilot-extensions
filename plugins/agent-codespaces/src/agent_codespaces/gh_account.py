@@ -323,20 +323,34 @@ _SNAPSHOT_TIMEOUT_SECONDS = 30
 
 
 def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str] | None:
+    from . import consumer_telemetry as ct
+
     explicit = worktrees.explicit_context()
     timeout = _SNAPSHOT_TIMEOUT_SECONDS if strict else _LOOKUP_TIMEOUT_SECONDS
+    started = ct.clock()
     try:
         if explicit:
-            return worktrees.run(*args, timeout=timeout)
-        aw = _agent_worktrees_bin()
-        if not aw:
-            return None
-        return subprocess.run(
-            [aw, *args], capture_output=True, text=True, timeout=timeout,
-            creationflags=_creation_flags(),
-        )
+            result = worktrees.run(*args, timeout=timeout)
+        else:
+            aw = _agent_worktrees_bin()
+            if not aw:
+                return None
+            result = subprocess.run(
+                [aw, *args], capture_output=True, text=True, timeout=timeout,
+                creationflags=_creation_flags(),
+            )
+        if strict:
+            ct.note("account_resolution", *(
+                ("success", "none") if getattr(result, "returncode", 1) == 0
+                else ("failure", "account_unresolved")
+            ), started=started, limit_ms=timeout * 1000)
+        return result
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
+            ct.note("account_resolution", *(
+                ("timeout", "snapshot_timeout") if isinstance(exc, subprocess.TimeoutExpired)
+                else ("failure", "account_unresolved")
+            ), started=started, limit_ms=timeout * 1000)
             if isinstance(exc, subprocess.TimeoutExpired):
                 reason = f"invocation timed out after {exc.timeout:g} seconds"
             elif isinstance(exc, UnicodeError):

@@ -104,6 +104,7 @@ def test_stage_only_preserves_provider_selectors_and_live_records(tmp_path, monk
         REPO / "libs" / "installer-engine" / "runtime_application_install.py",
     )
     installer = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, installer)
     spec.loader.exec_module(installer)
     slot = tmp_path / "runtime" / "versions" / SOURCE
     prefix = slot / ".venv"
@@ -131,7 +132,7 @@ def installed_application(tmp_path_factory):
     root = tmp_path_factory.mktemp("copied-app")
     project = root / "source"
     project.mkdir()
-    for name in ("pyproject.toml", "README.md"):
+    for name in ("pyproject.toml", "README.md", "readiness-isolation.json"):
         shutil.copyfile(PLUGIN / name, project / name)
     shutil.copytree(PLUGIN / "src", project / "src",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
