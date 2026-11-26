@@ -59,7 +59,8 @@ try {
         metadata: { snapshot: async () => ({ sessionId, workingDirectory: process.cwd() }) },
         plugins: { list: () => assert.fail("Installer records cannot establish executing origins") },
         extensions: mode === "missing-observer" ? {} : { list: async () => ({ extensions: [
-          { id: connectorId, name: "copilot-driver-headed",
+          { id: connectorId,
+            name: mode === "discovery-name" ? "runtime-discovery-label" : "copilot-driver-headed",
             source: "plugin", status: "running",
             pid: mode === "missing-origin" ? undefined : mode === "wrong-loadout" ? process.pid + 1 : process.pid,
             ...(mode === "identity-observation" ? {

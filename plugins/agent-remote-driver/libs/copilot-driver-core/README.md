@@ -64,6 +64,10 @@ live session extension registry: its source-qualified plugin identity must
 name its actual running PID, with no duplicate connector or running/starting
 Bridge or Driver extension. A same-named global installation record is not
 proof of another executing sender. Missing or unknown live observations refuse.
+The source-qualified ID is the identity key. Discovery-name metadata must be a
+non-empty string, but its spelling need not equal the ID's extension component.
+A matching or different display spelling cannot compensate for a different ID,
+source, running state, process or executing module.
 The common adapter repeats that observation before both native-send and ACP
 prompt effects, retaining its input reservation across asynchronous validation
 and rechecking takeover before dispatch.
@@ -102,9 +106,9 @@ comparison. It contains only a fixed vocabulary, not actual IDs, names, PIDs,
 paths or raw registry records. Incomplete, extra or unrecognized diagnostic
 fields are omitted. These are comparisons from the refused observation, not
 proof that another field passed its later admission check or that startup
-completed. Every existing identity, running-state, PID and competing-sender
-predicate remains unchanged; the diagnostic cannot authorize retry or clear
-the adapter's hold.
+completed. The diagnostic does not participate in identity, running-state, PID
+or competing-sender admission and cannot authorize retry or clear the adapter's
+hold.
 
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older

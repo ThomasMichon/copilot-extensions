@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.30.25-dev1"
+    "version": "1.30.26-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.30.25-dev1",
+      "version": "1.30.26-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,13 +25,13 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.571-dev1",
+      "version": "0.9.572-dev1",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-remote-driver",
       "description": "User-global SDK extension giving baseline drivability (attach to the live event stream, send/steer, abort) to any copilot CLI session present at launch time - independent of agent-bridge, agent-worktrees, or any other coordination plugin being installed in that venue",
-      "version": "0.1.100-dev1",
+      "version": "0.1.101-dev1",
       "source": "plugins/agent-remote-driver",
       "defaultEnabled": false
     },
@@ -50,7 +50,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.363-dev1",
+      "version": "0.2.364-dev1",
       "source": "plugins/agent-mcp"
     },
     {
@@ -68,7 +68,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; soft/hard usage warnings fire under the default manual-only mode too, but the force tier's automatic trigger and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
-      "version": "0.6.8-dev1",
+      "version": "0.6.9-dev1",
       "source": "plugins/context-handoff"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.21.65-dev1",
+      "version": "0.21.66-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -129,7 +129,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.3.232-dev1",
+      "version": "0.3.233-dev1",
       "source": "plugins/agent-machines"
     },
     {

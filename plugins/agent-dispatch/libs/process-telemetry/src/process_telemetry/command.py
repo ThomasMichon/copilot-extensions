@@ -16,7 +16,35 @@ from .buffer import BufferedSink, _Counter
 from .command_config import Selection, select
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .emission import SinkSlot
+
+# Each producer owner pairs with exactly one schema; a source may own several
+# owners (for example, a finite hook owner beside its ordinary command owner).
+SOURCES: dict[str, tuple[str, ...]] = {
+    "agent-bridge": ("bridge.lifecycle.v1",),
+    "agent-dispatch": ("dispatch.lifecycle.v1",),
+    "agent-worktrees": ("worktrees.lifecycle.v1", "hook.lifecycle.v1"),
+    "agent-codespaces": ("codespaces.lifecycle.v1",),
+    "agent-containers": ("containers.lifecycle.v1",),
+}
+
+
+def _projection(schema: str) -> tuple[
+    Callable[[dict[str, Any]], dict[str, Any]], Callable[[dict[str, Any]], dict[str, Any]],
+]:
+    if schema == "bridge.lifecycle.v1":
+        from . import bridge_projection
+        return bridge_projection.offered_fields, bridge_projection.project
+    if schema == "dispatch.lifecycle.v1":
+        from . import dispatch_projection
+        return dispatch_projection.offered_fields, dispatch_projection.project
+    from . import stage_projection
+
+    return stage_projection.for_schema(schema)
+
+
 @dataclass(eq=False)
 class Binding:
     """Unserialized, same-owner admission; configuration never comes from events."""
@@ -39,15 +67,16 @@ class Binding:
 class CommandRoutes:
     """One source lifetime, one existing writer, at most four receiver generations."""
 
-    def __init__(self, slot: SinkSlot, *, source: str = "agent-bridge") -> None:
-        if source == "agent-bridge":
-            from .bridge_projection import offered_fields, project
-            schema = "bridge.lifecycle.v1"
-        elif source == "agent-dispatch":
-            from .dispatch_projection import offered_fields, project
-            schema = "dispatch.lifecycle.v1"
-        else:
+    def __init__(
+        self, slot: SinkSlot, *, source: str = "agent-bridge", source_schema: str | None = None,
+    ) -> None:
+        schemas = SOURCES.get(source)
+        if schemas is None:
             raise ValueError("unregistered telemetry source")
+        schema = schemas[0] if source_schema is None else source_schema
+        if schema not in schemas:
+            raise ValueError("unregistered source schema")
+        offered_fields, project = _projection(schema)
         self.source = source
         self.source_schema = schema
         self._offered_fields = offered_fields

@@ -1228,7 +1228,7 @@ async function attemptWorktreeSyncLocked(cwd) {
     return {
       attempted: false,
       synced: false,
-      reason: `could not inspect worktree status: ${describeSyncError(error)}`,
+      reason: `could not inspect worktree status; automatic sync was skipped: ${describeSyncError(error)}`,
     };
   }
   if (dirty) {

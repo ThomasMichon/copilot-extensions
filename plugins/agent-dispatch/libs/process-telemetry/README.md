@@ -96,6 +96,34 @@ separate off-path, at-most-250-ms seal/wait. `close()` remains nonflushing.
 The command route reuses that one writer and the native process owner.
 It does not enroll other record families or import a receiver package.
 
+`process_telemetry.command.SOURCES` is the closed registry pairing each source
+with its schemas: Bridge and Dispatch as above, `agent-worktrees`
+(`worktrees.lifecycle.v1`, `hook.lifecycle.v1`), `agent-codespaces`
+(`codespaces.lifecycle.v1`) and `agent-containers` (`containers.lifecycle.v1`).
+`configure_commands(source=..., source_schema=...)` defaults to a source's first
+schema and refuses an unregistered pair. `stage_projection` owns the closed
+stage, PR-activity and hook projections. `finite_owner.FiniteOwner` gives a
+short CLI one route lifetime admitted by an owner-local
+`consumer-telemetry.json` (`{"schema_version":1,"root":"<absolute>"}`); absence
+is legacy and nothing starts. `hook_journal.HookRun.begin()/finish()` lets a
+latency-sensitive hook record a bounded, content-free observation without
+launching a receiver, and `hook_journal.drain()` hands it to a finite owner.
+Registration is not adoption: each provider ships its own descriptor.
+
+```python
+from process_telemetry import hook_journal
+from process_telemetry.finite_owner import FiniteOwner
+
+run = hook_journal.HookRun.begin(journal_dir, "agent-worktrees", "sessionStart")
+# ... hook work ...
+run.finish(outcome="success")
+
+with FiniteOwner.from_directory(install_dir, source="agent-worktrees",
+                                source_schema="hook.lifecycle.v1") as owner:
+    for event in hook_journal.drain(journal_dir):
+        owner.emit(event)
+```
+
 ## Composed telemetry policy
 
 The optional policy reader composes a harness-owned sink catalog with
@@ -397,6 +425,9 @@ sync failures are injected, not real disk exhaustion. Actual shared-volume,
 crash/interrupted-driver, storage-failure and other-platform qualification remain
 separate integration work; this API does not automatically wire or admit a
 reproducer case. Neither file expands the required unit-only CI packet.
+The separately selected `tests/native_hook_journal_processes.py` races real,
+independent processes on one hook journal: simultaneous starts against the
+marker cap, writers against a drainer, and a killed lock holder.
 
 Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
 writer, not another collector or service. Its producer copies bounded primitives
