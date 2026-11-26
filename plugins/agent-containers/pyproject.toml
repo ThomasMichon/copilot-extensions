@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-containers"
-version = "0.2.352-dev1"
+version = "0.2.353-dev1"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -30,6 +30,7 @@ dependencies = [
     "agent-plugin-activation",
     "agent-dropin-registry",
     "agent-single-instance-lease",
+    "agent-process-telemetry",
 ]
 
 [tool.uv.sources]
@@ -95,12 +96,18 @@ agent-zdd = { path = "libs/zdd" }
 # to keep manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-session-liveness-probe = { path = "libs/session-liveness-probe" }
+# Optional, content-free consumer-telemetry command route for finite CLI
+# runs (module ``process_telemetry``); inert without the local admission file.
+agent-process-telemetry = { path = "libs/process-telemetry" }
 
 [project.scripts]
 agent-containers = "agent_containers.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agent_containers = ["metadata/*.json"]
 
 [tool.setuptools.data-files]
 "share/copilot-extensions/agent_containers" = ["readiness-isolation.json"]

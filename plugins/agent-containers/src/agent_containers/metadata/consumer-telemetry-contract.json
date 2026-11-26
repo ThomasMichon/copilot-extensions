@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "contract": "consumer-telemetry-command",
+  "versions": [1],
+  "transports": ["command-jsonl-v1"],
+  "source_schemas": ["containers.lifecycle.v1"]
+}

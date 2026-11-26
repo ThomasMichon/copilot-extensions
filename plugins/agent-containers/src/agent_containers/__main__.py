@@ -32,15 +32,10 @@ from typing import Any, cast
 
 from agent_procutil import no_window_flags as _creation_flags
 
-from . import claim_provider_cli, hosting_policy, plugin_config, rescue_capture_cli
+from . import claim_provider_cli, consumer_telemetry, hosting_policy, plugin_config, rescue_capture_cli
 from . import copilot_process_auth as process_auth
 from .application_provider import add_install_parsers
-from .config import (
-    RESTRICTED_PROFILE,
-    ContainersConfig,
-    FleetConfig,
-    load_config,
-)
+from .config import RESTRICTED_PROFILE, ContainersConfig, FleetConfig, load_config
 from .resolver import (
     _append_copilot_args,
     build_restricted_acp_spawn_command,
@@ -70,6 +65,11 @@ def _runtime_drivers() -> Any:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Console entry; offers opt-in, content-free lifecycle records after the run."""
+    return cast(int, consumer_telemetry.instrument(_main)(argv))
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="agent-containers",
         description="Local Docker dev-container fleet + lease broker",
