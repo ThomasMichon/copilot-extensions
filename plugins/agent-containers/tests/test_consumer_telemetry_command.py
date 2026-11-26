@@ -467,32 +467,82 @@ def test_console_entry_stop_stays_uninstrumented(monkeypatch: pytest.MonkeyPatch
     assert offered == []
 
 
-def test_an_attached_preparation_failure_is_noted_after_the_session(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("status", [1, 86])
+def test_an_attached_session_status_never_claims_a_preparation_outcome(
+    monkeypatch: pytest.MonkeyPatch, status: int,
 ) -> None:
-    from agent_containers.copilot_venue import _ATTACHED_PREPARATION_EXIT as ATTACHED_PREPARATION_EXIT
-
     rc, _ = _venue_tests._call(
         _venue_tests._args(no_relay=True), target=_venue_tests._target(),
         monkeypatch=monkeypatch,
-        subprocess_run=lambda *a, **k: types.SimpleNamespace(returncode=ATTACHED_PREPARATION_EXIT),
+        subprocess_run=lambda *a, **k: types.SimpleNamespace(returncode=status),
     )
+    assert rc == status
     shapes = _shapes(rc)
-    assert ("plugin_preparation", "failure", "plugin_install_failed") in shapes
-    assert ("plugin_preparation", "success", "none") not in shapes
+    assert [s for s in shapes if s[0] == "plugin_preparation"] == []
     assert ("container_connect", "success", "none") in shapes
 
 
-def test_the_attached_command_keeps_the_session_status_apart_from_preparation() -> None:
-    import shutil
+def test_an_interrupted_delivery_keeps_the_product_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
 
-    from agent_containers.copilot_venue import _ATTACHED_PREPARATION_EXIT, _after_preparation
+    def interrupted_offer(events: Any) -> None:
+        raise KeyboardInterrupt
 
-    bash = shutil.which("bash")
-    if bash is None or sys.platform == "win32":
-        pytest.skip("needs a POSIX shell")
-    for prepared, session, expected in (
-        ("true", "exit 3", 3), ("true", "true", 0), ("false", "exit 3", _ATTACHED_PREPARATION_EXIT),
-    ):
-        command = _after_preparation(f"{prepared} && ", session)
-        assert subprocess.run([bash, "-c", command], check=False).returncode == expected
+    monkeypatch.setattr(ct, "_offer", interrupted_offer)
+
+    def fails() -> int:
+        ct.note("exec", "failure", "transport_failed")
+        return 7
+
+    assert ct.instrument(fails)() == 7
+
+    def cancelled_offer(events: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(ct, "_offer", cancelled_offer)
+
+    def exits() -> int:
+        ct.note("claim", "failure", "claim_busy")
+        raise SystemExit(4)
+
+    with pytest.raises(SystemExit) as raised:
+        ct.instrument(exits)()
+    assert raised.value.code == 4
+
+
+def test_a_refused_cli_context_is_a_preparation_failure(
+    seams: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import venue_copilot.refs as venue_refs
+
+    def refuse(context: Any) -> Any:
+        raise ValueError("malformed compiled plugin metadata")
+
+    _embody_run(seams, monkeypatch, code=0, stdout=_EMBODIED)
+    monkeypatch.setattr(venue_refs, "require_cli_context", refuse)
+    rc = _detach()
+    assert rc != 0
+    shapes = _shapes(rc)
+    assert [s for s in shapes if s[0] == "plugin_preparation"] == [
+        ("plugin_preparation", "failure", "other"),
+    ]
+
+
+def test_a_failure_after_the_claim_settled_is_not_a_registration_failure(
+    seams: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_containers import forward_keeper
+
+    def unwritable(name: str, hold_id: str, value: Any) -> None:
+        if value is not None:
+            raise OSError("pending delivery journal not persisted")
+
+    _embody_run(seams, monkeypatch, code=0, stdout=_EMBODIED)
+    monkeypatch.setattr(forward_keeper, "record_pending_delivery", unwritable)
+    rc = _detach()
+    assert rc == 1
+    shapes = _shapes(rc)
+    assert [s for s in shapes if s[0] == "bridge_registration"] == [
+        ("bridge_registration", "success", "none"),
+    ]
+    assert shapes[-1][:2] == ("launch", "failure")

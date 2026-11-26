@@ -284,6 +284,10 @@ class _ContainerAdapter:
         self, plan: dict[str, Any], pending: dict[str, Any] | None,
     ) -> None:
         from . import forward_keeper
+        # Delivery bookkeeping starts only after the claim settled, so a
+        # failure from here on is not a bridge-registration failure.
+        if ct.is_open("bridge_registration"):
+            ct.succeed()
         if pending is not None:
             pending = {
                 **pending, "remote_env": self.remote_env,
@@ -302,12 +306,13 @@ class _ContainerAdapter:
                 self.plugin_args, self.target, run_input=self.run_input,
                 remote_env=self.remote_env, relay_port=self.relay_port, prepared_context=context,
             )
+            prepared = require_cli_context(cast(dict[str, Any], context.get("plugin_context")))
         except BaseException as exc:
             ct.note("plugin_preparation", "failure", ct.preparation_reason(exc), started=started)
             raise
         ct.note("plugin_preparation", "success", "none", started=started)
         self._plugins_prepared = True
-        return require_cli_context(cast(dict[str, Any], context.get("plugin_context")))
+        return prepared
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)

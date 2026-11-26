@@ -17,22 +17,6 @@ from plugin_resolve.reflection import selection_spec, selection_json
 
 from . import consumer_telemetry as ct
 
-# Reserved status of an attached launch whose staged preparation failed, so it
-# is told apart from the interactive session's own exit status.
-_ATTACHED_PREPARATION_EXIT = 86
-
-
-def _after_preparation(prefix: str, command: str) -> str:
-    """Run ``command`` after the staged preparation, which exits reserved on failure.
-
-    The session's own status is kept by ``exit`` inside the group; only a
-    preparation that stopped the ``&&`` chain reaches the reserved exit.
-    """
-    if not prefix.rstrip().endswith("&&"):
-        return prefix + command
-    return f"{prefix}{{ {command}\nexit\n}}; exit {_ATTACHED_PREPARATION_EXIT}"
-
-
 def add_plugin_selection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--stage-plugin-spec", dest="stage_plugins", action="append", type=selection_json, default=[],
@@ -360,7 +344,7 @@ def cmd_copilot(
                 elif remote_env:
                     from .ssh_transport import build_remote_command
                     remote_command = build_remote_command(remote_command, remote_env)
-                remote_command = _after_preparation(preparation, remote_command)
+                remote_command = preparation + remote_command
                 spawn_cmd = build_ssh_command(
                     ssh_config, remote_command,
                     reverse_forwards=reverse_forwards, pty=True,
@@ -373,16 +357,11 @@ def cmd_copilot(
                 ).returncode
                 # The interactive session's own exit status is not a connect
                 # failure; only OpenSSH's reserved transport status is. The
-                # staged preparation runs inside that channel, so its outcome
-                # is known only from its own reserved status.
+                # staged preparation runs inside that interactive channel and
+                # shares its status, so its remote outcome is not observed.
                 if rc == ct.SSH_TRANSPORT_EXIT:
                     ct.note("container_connect", "failure", "connect_failed", started=connect_started)
                 else:
-                    ct.note(
-                        "plugin_preparation",
-                        *(("failure", "plugin_install_failed") if rc == _ATTACHED_PREPARATION_EXIT
-                          else ("success", "none")),
-                    )
                     ct.note("container_connect", "success", "none", started=connect_started)
                 if auth_env:
                     if auth.attached_created_child(args.name, user, auth_env):

@@ -45,10 +45,10 @@ output or exit status, and the original error is always reported unchanged.
 | `account_resolution` | both paths, only when the fleet forwards a GitHub token | `account_unresolved` |
 | `bridge_payload` | detached | `payload_install_failed` (the agent-worktrees launch payload could not be installed in the container) |
 | `credential_relay` | both paths, only when the relay is enabled | `relay_not_listening` (no live published relay port, or its ping probe failed) |
-| `plugin_preparation` | both paths | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening`; the attached path runs the staged script inside the interactive channel, so it records the outcome after that session ends, as `plugin_install_failed` when the script fails and nothing when the transport itself failed |
+| `plugin_preparation` | both paths | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening`; the detached path records success only after the prepared CLI context is admitted. The attached path records only host-side staging failures: the staged script runs inside the interactive channel and shares its exit status, so its remote outcome is not observed |
 | `exec` | detached | `timeout`/`transport_failed` with `limit_ms`, `transport_failed` (OpenSSH exit 255) |
 | `remote_embody` | detached | `installer_unavailable`, `bootstrap_python_unavailable` |
-| `bridge_registration` | detached | `session_unregistered`, `session_unrepresented` |
+| `bridge_registration` | detached | `session_unregistered`, `session_unrepresented`; closes as success once the claim settles, so a later seed-delivery bookkeeping failure is a `launch` failure, not a registration one |
 | `container_connect` | attached | `connect_failed` (OpenSSH exit 255; any other exit is the interactive session's own status and records success) |
 | `launch` | detached | the overall detached launch |
 
