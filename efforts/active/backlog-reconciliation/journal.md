@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-26 - Strict-import completion and thirteen further installed-TTY cases](journal/2026/11.26-strict-import-completion-and-thirteen-tty-cases.md)
+- [2026-11-26 - One strict-import completion, thirteen tracking retirements and 714 whole open](journal/2026/11.26-strict-import-completion-and-thirteen-tty-cases.md)
 
 - [2026-11-25 - Four audited publication tracking handoffs, six whole keepers and 784 whole open](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
 
