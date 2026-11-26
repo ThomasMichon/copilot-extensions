@@ -1806,14 +1806,13 @@ jobs:
           and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else 2)
           and all(v>0 for v in r['samples_seconds']) for r in reports);
           print(json.dumps({'machines_command_admission':reports},sort_keys=True))"
-      - name: Retain Bash health capability and rollback assertions
-        if: env.MACHINES_QUALIFICATION_SHELL == 'bash'
+      - name: Retain native health capability and rollback assertions
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_machines_health_source.py --allow-explicit-tiers
-          -k bash --junit-dir qualification-evidence/machines-health
-      - name: Require the retained Bash health control without skips
-        if: env.MACHINES_QUALIFICATION_SHELL == 'bash'
+          -k "${{ env.MACHINES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/machines-health
+      - name: Require the retained native health control without skips
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/machines-health').rglob('*.xml')

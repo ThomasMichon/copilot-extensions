@@ -11,6 +11,7 @@ _package = ModuleType("_machines_health_source")
 _package.__path__ = [str(_tests)]
 sys.modules[_package.__name__] = _package
 _source = importlib.import_module(_package.__name__ + ".test_health_job_payload")
+pytestmark = _source.pytestmark
 packaged_command = _source.packaged_command
 prepared_python = _source.prepared_python
 test_fresh_payload_selection_checks_capability_before_new_syntax_and_rechecks_rollback = (

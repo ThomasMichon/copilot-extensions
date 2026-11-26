@@ -31,8 +31,9 @@ configuration/health refusal without installer execution.
 streaming, failure/retry and warm-launch controls through the same lightweight
 suite. Both Windows jobs require their three cases without skips, using the
 real prepared application and admission support rather than `PYTHONPATH`.
-The Bash jobs additionally require the real capability-refusal/rollback control
-through `test_machines_health_source.py`, including Windows Git Bash path forms.
+Every native job additionally requires the real capability-refusal/rollback
+control through `test_machines_health_source.py`. PowerShell fixtures use native
+Windows addresses; Git Bash also exercises Windows/POSIX path forms.
 The opt-in Windows scheduler fixture prepares canonical admission support and a
 managed runtime with command-local UV access. Its original scheduler, host-state,
 network, observation and cleanup gates remain separate; this inert packet does

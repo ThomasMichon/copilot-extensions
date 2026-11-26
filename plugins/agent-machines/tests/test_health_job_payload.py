@@ -17,18 +17,18 @@ from .managed_command_fixture import (
 __all__ = ["packaged_command", "prepared_python"]
 
 PLUGIN = Path(__file__).resolve().parents[1]
-HOSTS = [path for name in ("powershell.exe", "pwsh.exe") if (path := shutil.which(name))]
+HOSTS = {name: path for name in ("powershell", "pwsh") if (path := shutil.which(name + ".exe"))}
 pytestmark = [
     pytest.mark.portfolio_tier("T2"), pytest.mark.effect("process"),
     pytest.mark.contract("agent_machines.health_job_payload"),
 ]
 
 
-@pytest.mark.parametrize("kind", ["powershell", "bash"])
+@pytest.mark.parametrize("kind", ["powershell", "pwsh", "bash"])
 def test_fresh_payload_selection_checks_capability_before_new_syntax_and_rechecks_rollback(
     tmp_path: Path, kind: str, prepared_python: tuple[Path, Path, Path], packaged_command: Path,
 ) -> None:
-    if kind == "powershell" and (os.name != "nt" or not HOSTS):
+    if kind != "bash" and (os.name != "nt" or kind not in HOSTS):
         pytest.skip("native Windows PowerShell required")
     if kind == "bash" and not _bash():
         pytest.skip("Bash unavailable")
@@ -61,13 +61,13 @@ def test_fresh_payload_selection_checks_capability_before_new_syntax_and_recheck
     home.mkdir()
     (payload / "plugin.json").write_text('{"name":"agent-machines"}', encoding="utf-8")
     shutil.copyfile(PLUGIN / "scripts" / "health-collection-entry.py", scripts / "health-collection-entry.py")
-    extension = "ps1" if kind == "powershell" else "sh"
+    extension = "sh" if kind == "bash" else "ps1"
     for relative in (
         Path("scripts") / f"invoke-payload-runtime.{extension}",
-        Path("bin") / ("agent-machines.ps1" if kind == "powershell" else "agent-machines"),
+        Path("bin") / ("agent-machines" if kind == "bash" else "agent-machines.ps1"),
     ):
         shutil.copyfile(PLUGIN / relative, payload / relative)
-    if kind == "powershell":
+    if kind != "bash":
         (scripts / "installation-context" / "installation-context.ps1").write_text(
             "[Console]::Out.WriteLine($env:FIXTURE_RESOLUTION)\nexit 0\n", encoding="utf-8",
         )
@@ -78,7 +78,7 @@ def test_fresh_payload_selection_checks_capability_before_new_syntax_and_recheck
             encoding="utf-8",
         )
         command = [
-            HOSTS[0], "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            HOSTS[kind], "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
             "-File", str(payload / "bin" / "agent-machines.ps1"),
         ]
     else:
@@ -105,7 +105,8 @@ def test_fresh_payload_selection_checks_capability_before_new_syntax_and_recheck
     canary = tmp_path / "provider-called"
     environment.update(
         HOME=str(home), USERPROFILE=str(home), FIXTURE_HOME=home.as_posix(),
-        FIXTURE_PYTHON=python.as_posix(), FIXTURE_CANARY=str(canary),
+        FIXTURE_PYTHON=python.as_posix() if kind == "bash" else str(python),
+        FIXTURE_CANARY=str(canary),
         FIXTURE_RESOLUTION=json.dumps({
             "status": "ready", "reason": "policy-default-false",
             "actualMode": "legacy", "desiredMode": "legacy",
