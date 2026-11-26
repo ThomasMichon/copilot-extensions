@@ -484,11 +484,14 @@ the non-public approval conversation.
 
 ## Plan
 
-The [six further occurrence proposal](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
+The [six further occurrence outcome](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
 retains four additional independent reuse cases under existing #7872 and two
-publication cases under existing #7378. Its four local delivery gates are
-open; no technical completion, current tracker effect or prospective count
-credit is claimed. Explicit diagnostic keepers, source-correspondence gaps
+publication cases under existing #7378 after reviewed #14672 and whole actual
+accepted receiving. Six independently audited leaf tokens retired
+`NOT_PLANNED`; 39 reuse and 36 publisher technical cases remain OPEN.
+Two equal complete censuses measure 778 whole OPEN: 293 original-cohort and
+485 inflow, still 49 above fixed 729. Only this slice's four local tracker
+gates are resolved; explicit diagnostic keepers, source-correspondence gaps
 and every incumbent Plan/Validation state remain unchanged.
 
 The [publication-guard and explicit-keeper outcome](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
