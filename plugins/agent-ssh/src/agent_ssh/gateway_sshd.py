@@ -248,25 +248,58 @@ def validate_bindings(config: Document, value: Document) -> tuple[str, str]:
     return account, principal
 
 
+def _retained_state(
+    config: Document, value: Document, account: str, principal: str,
+) -> tuple[Path, Document, str]:
+    root = _absolute(str(config["state_dir"]))
+    owner = {
+        "schema": "agent-ssh.gateway-native-ingress", "version": 1,
+        "target": value["target"], "controller": value["controller"], "user": account,
+        "host_key": value["host_key"], "principal": principal,
+    }
+    content = _native_config(config, principal, root / "authorization" / "authorized_keys.gateway")
+    if not os.path.lexists(root):
+        return root, owner, content
+    authorization._private(root, directory=True)
+    allowed = {"owner.json", "ingress.lock", "authorization", "sshd_config"}
+    if any(entry.name not in allowed for entry in root.iterdir()):
+        raise ValueError("Select a dedicated native ingress directory; preserve existing service state")
+    for entry in root.iterdir():
+        authorization._private(entry, directory=entry.name == "authorization")
+    binding, target = root / "owner.json", root / "sshd_config"
+    if binding.exists():
+        if json.loads(authorization._read(binding)) != owner:
+            raise ValueError("Native ingress directory belongs to another target or host key")
+    elif any(entry.name != "ingress.lock" for entry in root.iterdir()):
+        raise ValueError("Native ingress directory has no owner binding; preserve it")
+    if os.path.lexists(target) and authorization._read(target) != content:
+        raise ValueError("Native sshd configuration differs from its owner; preserve it")
+    authorization.validate_state(
+        root / "authorization", target=value["target"], controller=value["controller"],
+    )
+    authorized_owner = root / "authorization" / "owner.json"
+    if authorized_owner.exists() and json.loads(authorization._read(authorized_owner)) != {
+        name: value[name] for name in authorization._BINDING
+    }:
+        raise ValueError("Authorization state belongs to another target/controller")
+    return root, owner, content
+
+
+def validate_preparation(config: Document, value: Document) -> None:
+    """Refuse incompatible retained state without creating files or probing the bind."""
+    account, principal = validate_bindings(config, value)
+    _retained_state(config, value, account, principal)
+
+
 def _prepare(config: Document, value: Document) -> Path:
     account, principal = validate_bindings(config, value)
-    root = _absolute(str(config["state_dir"]))
+    root, owner, content = _retained_state(config, value, account, principal)
     if not root.exists():
         if os.name == "nt":
             authorization._windows_create_directory(root)
         else:
             root.mkdir(mode=0o700)
     authorization._private(root, directory=True)
-    owner = {
-        "schema": "agent-ssh.gateway-native-ingress", "version": 1,
-        "target": value["target"], "controller": value["controller"], "user": account,
-        "host_key": value["host_key"], "principal": principal,
-    }
-    allowed = {"owner.json", "ingress.lock", "authorization", "sshd_config"}
-    if any(entry.name not in allowed for entry in root.iterdir()):
-        raise ValueError("Select a dedicated native ingress directory; preserve existing service state")
-    for entry in root.iterdir():
-        authorization._private(entry, directory=entry.name == "authorization")
     binding, target = root / "owner.json", root / "sshd_config"
     with exclusive_file_lock(root / "ingress.lock"):
         if os.name != "nt":
@@ -278,8 +311,6 @@ def _prepare(config: Document, value: Document) -> Path:
             raise ValueError("Native ingress directory has no owner binding; preserve it")
         else:
             atomic_write_text(binding, gateway_profile._json(owner))
-        authorized = root / "authorization" / "authorized_keys.gateway"
-        content = _native_config(config, principal, authorized)
         if os.path.lexists(target):
             if authorization._read(target) != content:
                 raise ValueError("Native sshd configuration differs from its owner; preserve it")

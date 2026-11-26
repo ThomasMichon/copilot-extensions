@@ -124,6 +124,54 @@ def test_native_inbound_update_catches_up_without_profiles_or_directory_staging(
     assert not (tmp_path / ".agent-ssh-sources").exists()
 
 
+@pytest.mark.parametrize("change", ["compatible", "port", "owner", "unowned-config"])
+def test_preparation_validates_retained_state_without_mutation(
+    tmp_path: Path, native_preparation: None, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    fixture_files(tmp_path, outbound=False)
+    selected = config(tmp_path)
+    value = authorization.projection(
+        selected["policy"], selected["directory"], machine=selected["machine"],
+        environment=selected["environment"], public_key_file=selected["public_key_file"],
+    )
+    target = ingress.prepare(selected)
+    if change == "port":
+        selected["port"] += 1
+    elif change == "owner":
+        owner = selected["state_dir"] / "owner.json"
+        document = json.loads(owner.read_text())
+        document["principal"] = "foreign"
+        atomic_write_text(owner, json.dumps(document))
+    elif change == "unowned-config":
+        atomic_write_text(target, target.read_text() + "# foreign edit\n")
+    root = selected["state_dir"]
+    before = {path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in root.rglob("*") if path.is_file()}
+    endpoint = Mock(side_effect=AssertionError("preflight must not bind an occupied endpoint"))
+    monkeypatch.setattr(ingress, "_check_endpoint", endpoint)
+    if change == "compatible":
+        ingress.validate_preparation(selected, value)
+    else:
+        with pytest.raises(ValueError):
+            ingress.validate_preparation(selected, value)
+    assert {path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in root.rglob("*") if path.is_file()} == before
+    endpoint.assert_not_called()
+
+
+def test_preparation_does_not_create_fresh_ingress_state(
+    tmp_path: Path, native_preparation: None,
+) -> None:
+    fixture_files(tmp_path, outbound=False)
+    selected = config(tmp_path)
+    value = authorization.projection(
+        selected["policy"], selected["directory"], machine=selected["machine"],
+        environment=selected["environment"], public_key_file=selected["public_key_file"],
+    )
+    ingress.validate_preparation(selected, value)
+    assert not selected["state_dir"].exists()
+
+
 def test_native_unversioned_ingress_uses_the_same_listener_and_authorization_owners(
     tmp_path: Path, native_preparation: None, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

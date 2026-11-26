@@ -332,7 +332,7 @@ def preflight(config: NativeReceiverConfig) -> None:
         environment=ingress["environment"],
         public_key_file=ingress["public_key_file"],
     )
-    gateway_sshd.validate_bindings(ingress, projection)
+    gateway_sshd.validate_preparation(ingress, projection)
 
 
 async def run(config: NativeReceiverConfig, *, lifecycle: Any = None,

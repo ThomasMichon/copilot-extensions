@@ -250,8 +250,10 @@ An addressed predecessor is stopped through authenticated native control only
 after the new local bindings and read-only public access pass preflight;
 cleanup and native exit precede the replacement listener. Failed preflight
 preserves the predecessor. Preflight checks foreground platform support, the
-incoming listener executable, host private key and admitted login account
-without probing the still-occupied listener endpoint. Lost replies remain
+incoming listener executable, host private key, admitted login account and
+compatibility with the retained ingress owner, generated configuration and
+authorization receipts. It neither creates/changes retained state nor probes
+the still-occupied listener endpoint. Lost replies remain
 uncertain, and native cleanup
 refusal retains the original owner and lease for reconciliation. This is a
 cold replacement, not a claim of seamless listener transfer or arbitrary

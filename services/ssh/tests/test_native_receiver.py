@@ -301,6 +301,72 @@ def test_unsupported_foreground_preserves_addressed_incumbent(
     ingress.assert_not_called()
 
 
+def test_changed_retained_listener_config_preserves_incumbent_and_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_ssh import gateway_authorization, gateway_profile, gateway_sshd
+    from agent_ssh_service import local_service
+    from dropin_registry import atomic_write_text
+
+    selected, source = policy(tmp_path), binding(tmp_path)
+    source.root.mkdir(parents=True)
+    root = tmp_path / "state" / "native-ingress"
+    private_directory(root.parent)
+    if os.name == "nt":
+        gateway_authorization._windows_create_directory(root)
+    else:
+        root.mkdir(mode=0o700)
+    projection = {
+        "target": {"machine": "receiver", "environment": "windows"},
+        "controller": "gateway-a", "user": "receiver", "host_key": key(7),
+    }
+    ingress: dict[str, Any] = {
+        "state_dir": root, "port": 24107, "host_key_file": tmp_path / "host",
+        "sshd": tmp_path / "sshd", "ssh_keygen": tmp_path / "keygen",
+        "native_gateway": {}, "machine": "receiver", "environment": "windows",
+        "public_key_file": tmp_path / "identity.pub",
+    }
+    owner = {
+        "schema": "agent-ssh.gateway-native-ingress", "version": 1,
+        "target": projection["target"], "controller": projection["controller"],
+        "user": "receiver", "host_key": projection["host_key"], "principal": "receiver",
+    }
+    for path, content in (
+        (root / "owner.json", gateway_profile._json(owner)),
+        (root / "sshd_config", gateway_sshd._native_config(
+            ingress, "receiver", root / "authorization" / "authorized_keys.gateway",
+        )),
+    ):
+        atomic_write_text(path, content)
+    before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in root.iterdir()}
+    ingress["port"] += 1
+    monkeypatch.setattr(type(selected), "ingress", lambda _: ingress)
+    monkeypatch.setattr(native_receiver, "_transport", lambda *a: object())
+
+    async def observe(*args: Any) -> object:
+        return object()
+
+    monkeypatch.setattr(native_receiver.PublicObserver, "__call__", observe)
+    monkeypatch.setattr(gateway_authorization, "projection_from_native", lambda *a, **k: projection)
+    monkeypatch.setattr(gateway_sshd, "require_foreground_support", lambda: None)
+    monkeypatch.setattr(gateway_sshd, "_account", lambda: "receiver")
+    monkeypatch.setattr(gateway_sshd, "_principal", lambda _: "receiver")
+    monkeypatch.setattr(gateway_sshd, "_executable", lambda _: None)
+    monkeypatch.setattr(gateway_sshd, "_host_key", lambda *a: None)
+    monkeypatch.setattr(source_start, "ensure_selected", lambda _: None)
+    monkeypatch.setattr(local_service, "_matching", lambda *a: [])
+    incumbent = {"root": str(source.root), "peer": {"pid": os.getpid() + 1}}
+    monkeypatch.setattr(local_service, "records", lambda _: [incumbent])
+    stop, spawn = Mock(), Mock()
+    monkeypatch.setattr(local_service, "request", stop)
+    monkeypatch.setattr(local_service, "spawn_daemon", spawn)
+    with pytest.raises(ValueError, match="configuration differs"):
+        local_service.start(source, tmp_path / "policy.json", selected)
+    stop.assert_not_called()
+    spawn.assert_not_called()
+    assert {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in root.iterdir()} == before
+
+
 def test_service_owns_receiver_lease_through_cleanup_reconciliation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
