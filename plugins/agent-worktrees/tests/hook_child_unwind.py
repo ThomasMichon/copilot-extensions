@@ -77,12 +77,14 @@ class Amd64Unwinder:
         count, frame = header[2], header[3] & 15
         if frame and frame not in NONVOLATILE or not frame and header[3] >> 4:
             raise CodeSampleUnavailable("unsupported-frame-register")
+        prolog_offset = pc - base - begin
+        if frame and prolog_offset < header[1]:
+            raise CodeSampleUnavailable("partial-frame-register-prolog")
         if instruction_frame:
             epilog = self.epilog(base, pc, base + end, registers, frame)
             if epilog is not None:
                 return epilog
         codes = self.image(base, base + unwind + 4, count * 2) if count else b""
-        prolog_offset = pc - base - begin
         fixed_rsp = registers[frame] - (header[3] >> 4) * 16 if frame else registers[4]
         index, previous_offset = 0, 256
         while index < count:

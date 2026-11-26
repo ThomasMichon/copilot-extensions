@@ -1,5 +1,5 @@
 {
-  "comment": "Bound native pre-tool reads, reuse decoded events, avoid expected connect exceptions and retain opt-in bootstrap phases, code-only attribution and bounded post-tool notification diagnostics",
+  "comment": "Bound native pre-tool reads, reuse decoded events, avoid expected connect exceptions and retain opt-in bootstrap phases, bounded notification diagnostics and code-only attribution with conservative frame-prolog refusal",
   "changes": [
     {
       "plugin": "agent-worktrees",

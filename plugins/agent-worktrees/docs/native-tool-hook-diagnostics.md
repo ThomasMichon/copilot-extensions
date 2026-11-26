@@ -201,7 +201,12 @@ verifies PID/birth and AMD64 architecture, and reuses the bounded PSS thread
 enumeration. Each of at most sixteen threads is pinned to its original owner
 and birth before a brief suspend/context/read/resume operation. It walks at
 most sixteen frames per thread using a restricted PE/AMD64 version-one unwind
-interpreter. Supported partial prologs and epilog suffixes are interpreted;
+interpreter. Supported non-frame partial prologs and epilog suffixes are interpreted.
+Frame-register partial prologs report `partial-frame-register-prolog` before
+any stack-slot read until the declared prolog is complete. Completed frame
+prologs still use the fixed frame base when RSP includes a dynamic allocation.
+This conservative refusal avoids using a caller's frame register before
+`UWOP_SET_FPREG` establishes the current frame;
 unsupported versions, chained records, machine frames, dynamic code, ranges
 and operations stop explicitly rather than scanning for plausible addresses.
 Absent static entries are accepted as leaf frames only in the named Windows
