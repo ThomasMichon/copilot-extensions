@@ -1700,12 +1700,23 @@ def _ssh_session(
                     exec_started()
                 except Exception:
                     pass
-            result = await manager.exec_command(
-                args.name, remote_cmd, timeout=args.timeout,
-                **cast(
-                    "dict[str, Any]",
-                    {"input_bytes": remote_input_builder()} if remote_input_builder is not None else {},
-                ),
+            from . import consumer_telemetry as ct
+
+            transport_started = ct.clock()
+            try:
+                result = await manager.exec_command(
+                    args.name, remote_cmd, timeout=args.timeout,
+                    **cast(
+                        "dict[str, Any]",
+                        {"input_bytes": remote_input_builder()} if remote_input_builder is not None else {},
+                    ),
+                )
+            except Exception:
+                ct.ssh_executed(transport_started, raised=True)
+                raise
+            ct.ssh_executed(
+                transport_started, timed_out=bool(getattr(result, "timed_out", False)),
+                exit_code=getattr(result, "exit_code", None), limit_s=args.timeout,
             )
             tracker.reached(ConnectStage.LAUNCH_ACP)
             if result_sink is not None:

@@ -48,7 +48,7 @@ failure or refusal never changes the command's output or exit status.
 | `plugin_preparation` | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening` |
 | `bridge_payload` | `payload_install_failed` |
 | `codespace_connect` | `retry`/`transport_retry` per transient attempt, `timeout`/`transport_failed` with `limit_ms`, `connect_failed` |
-| `ssh` | `retry`/`transport_retry` with the attempt number, `timeout`/`transport_failed` with `limit_ms` (the operation's overall deadline, including after a successful connect), `transport_failed`, `connect_failed` |
+| `ssh` | `retry`/`transport_retry` with the attempt number, `timeout`/`transport_failed` with `limit_ms` (the operation's overall deadline, including after a successful connect), `transport_failed`, `connect_failed`. A standalone remote command (`ssh --remote-cmd`, or a launch path that does not own an `ssh` stage) records its own execution: `transport_failed` for SSH exit 255 or a raised transport error, `timeout` with `limit_ms` for the command timeout, and success for any other exit code |
 | `remote_embody` | `installer_unavailable`, `bootstrap_python_unavailable` |
 | `bridge_registration` | `session_unregistered`, `session_unrepresented` |
 | `launch` | the overall detached launch |

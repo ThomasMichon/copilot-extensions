@@ -521,3 +521,29 @@ def test_a_standalone_ssh_deadline_is_its_own_timeout() -> None:
     ct.ssh_timed_out(30)
     (event,) = ct.finish(124)
     assert (event["stage"], event["outcome"], event["limit_ms"]) == ("ssh", "timeout", 30000)
+
+
+@pytest.mark.parametrize(("kwargs", "expected"), [
+    ({"exit_code": 255}, ("ssh", "failure", "transport_failed")),
+    ({"raised": True}, ("ssh", "failure", "transport_failed")),
+    ({"timed_out": True, "exit_code": -1, "limit_s": 30}, ("ssh", "timeout", "transport_failed")),
+    ({"exit_code": 1}, ("ssh", "success", "none")),
+])
+def test_a_standalone_remote_command_records_its_transport_outcome(
+    kwargs: dict[str, Any], expected: tuple[str, str, str],
+) -> None:
+    ct.note("codespace_connect", "success", "none")
+    ct.ssh_executed(ct.clock(), **kwargs)
+    events = [e for e in ct.finish(1) if e["stage"] == "ssh"]
+    assert [(e["stage"], e["outcome"], e["reason"]) for e in events] == [expected]
+    assert "duration_ms" in events[0]
+    if kwargs.get("timed_out"):
+        assert events[0]["limit_ms"] == 30000
+
+
+def test_a_launch_owned_ssh_stage_is_not_recorded_twice() -> None:
+    ct.begin("ssh")
+    ct.ssh_executed(ct.clock(), exit_code=255)
+    ct.fail_with_cause("transport_failed")
+    events = [e for e in ct.finish(1) if e["stage"] == "ssh"]
+    assert [(e["outcome"], e["reason"]) for e in events] == [("failure", "transport_failed")]

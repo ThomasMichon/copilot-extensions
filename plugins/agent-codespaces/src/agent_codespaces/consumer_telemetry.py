@@ -147,6 +147,29 @@ def ssh_timed_out(limit_s: float | None) -> None:
         pass
 
 
+def ssh_executed(
+    started: float, *, timed_out: bool = False, exit_code: int | None = None,
+    limit_s: float | None = None, raised: bool = False,
+) -> None:
+    """Record a remote command's transport outcome when no caller owns `ssh`.
+
+    Exit 255 is the SSH client's own transport failure; any other exit code is
+    the remote command's result, so the transport succeeded.
+    """
+    try:
+        if _open is not None and _open["stage"] == "ssh":
+            return
+        if timed_out:
+            limit_ms = int(limit_s * 1000) if limit_s else None
+            note("ssh", "timeout", "transport_failed", started=started, limit_ms=limit_ms)
+        elif raised or exit_code == 255:
+            note("ssh", "failure", "transport_failed", started=started)
+        else:
+            note("ssh", "success", "none", started=started)
+    except Exception:
+        pass
+
+
 def retry(reason: str = "transport_retry") -> None:
     """Record a retry of the open stage and reopen it as the next attempt."""
     try:
