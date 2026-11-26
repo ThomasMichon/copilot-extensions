@@ -239,6 +239,7 @@ def test_ready_command_admits_exact_prepared_application(
         assert not Path(env["AMBIENT_MARKER"]).exists()
         assert "installer should not run" not in result.stderr, result.stdout + result.stderr
         assert _snapshot(slot) == original_slot and _snapshot(payload) == original_payload
+        assert result.returncode == (126 if refused else 37), result.stdout + result.stderr
         calls = uv_log.read_text(encoding="utf-8").splitlines() if uv_log.exists() else []
         assert calls == ([] if refused else [expected_lookup] * (cycle + 1)), result.stdout + result.stderr
         if refused:

@@ -44,12 +44,17 @@ json_get() {
 }
 
 resolve_runtime() {
+    local result
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    # Bash 3.2 does not reliably extend the caller's conditional through source.
+    set +e
     # shellcheck source=/dev/null
-    # Slot misses belong to the resolver's fallback policy, not gate errexit.
-    . "$RUNTIME_RESOLVER" || return
+    . "$RUNTIME_RESOLVER"
+    result=$?
+    set -e
+    return "$result"
 }
 
 admit_runtime_python() (

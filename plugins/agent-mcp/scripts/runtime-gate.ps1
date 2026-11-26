@@ -242,13 +242,21 @@ function Invoke-Runtime {
     if ($readinessProbe) {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
     }
+    $nativeArgs = @('-m', 'agent_mcp') + $forwardArgs
+    if ($readinessProbe) {
+        $nativeArgs = @(
+            (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),
+            '--plugin', 'agent-mcp', '--module', 'agent_mcp', '--'
+        ) + $forwardArgs
+    }
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+        $nativeArgs = @($nativeArgs | ForEach-Object {
+            '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+        })
+    }
     try {
-        if ($pythonOptions.Count) {
-            $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
-            & $Python @pythonOptions $probeEntry --plugin agent-mcp --module agent_mcp -- @forwardArgs
-        } else {
-            & $Python -m agent_mcp @forwardArgs
-        }
+        & $Python @pythonOptions @nativeArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }
