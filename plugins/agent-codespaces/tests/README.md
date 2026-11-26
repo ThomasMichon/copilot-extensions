@@ -18,3 +18,12 @@ The path-gated Ubuntu/macOS/Windows jobs require every applicable case and repor
 without skips within eight-minute deadlines. Inert context decisions and modules
 do not access Codespaces, backends, credentials or services; these are not
 installed-host adoption or full command-latency measurements.
+
+The same native jobs retain eight existing healthy publication-policy controls.
+Both Windows hosts additionally require ten existing evaluator/transport cases:
+legacy/namespaced reads, native-path handling, missing user-profile fallback,
+relative SDK arguments and empty/numeric/quoted forwarding. Their shared adopter
+fixture materializes canonical admission support, addresses real prepared UV,
+and creates its application slot from a separately prepared managed interpreter.
+The evaluator's intentional context/guard doubles do not bypass application
+admission. These fixtures never acquire a missing interpreter.

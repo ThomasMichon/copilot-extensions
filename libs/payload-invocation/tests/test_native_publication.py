@@ -161,7 +161,16 @@ def _old_lib_copy(fixture: dict[str, Any]) -> Path:
 
 def _completed_slot(fixture: dict[str, Any]) -> Path:
     slot = fixture["legacy"] / "versions/1.0.0"
-    venv.EnvBuilder(with_pip=False).create(slot)
+    if fixture.get("managed_runtime_python"):
+        created = subprocess.run(
+            [fixture["admission_uv"], "venv", "--no-project", "--no-python-downloads",
+             "--python", fixture["managed_runtime_python"], str(slot)],
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert created.returncode == 0, created.stdout + created.stderr
+    else:
+        venv.EnvBuilder(with_pip=False).create(slot)
     _write(slot / ".install-complete.json", {
         "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
     })
