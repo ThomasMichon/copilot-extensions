@@ -1810,6 +1810,12 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [strict-import completion and thirteen-case continuation](journal/2026/11.26-strict-import-completion-and-thirteen-tty-cases.md)
+records #11506's independently audited finite `COMPLETED` disposition and
+proposes thirteen further independently OPEN installed-TTY cases in existing
+#11966 before any tracking-only retirements. All incumbent diagnostics,
+custodians, held discussions and parent Plan/Validation states remain.
+
 The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
 credits #4619's newly accepted observation/task-closeout lanes before selecting
 its independent BOTH-store arm boundary, owners and finite exit. Its
