@@ -486,8 +486,9 @@ try {
             raise UninstallRefused("Worktrees native request changed during inspection")
         return {row["pid"] for row in chain[1:]}
 
-    def _native_plugin_controllers(rows: list[dict[str, Any]], payload: Path, root: Path, shell: str, custody: Any) -> set[int]:
-        """Recognize only Vault's authenticated native uninstall ancestry."""
+    def _native_plugin_controllers(rows: list[dict[str, Any]], payload: Path, root: Path, shell: str, custody: Any,
+                                   plugin: str = "agent-vault") -> set[int]:
+        """Recognize only the plugin's authenticated native uninstall ancestry."""
         engine = sys.modules.get("installer_engine")
         core = sys.modules.get("update_driver.core")
         participant = sys.modules.get("update_driver.participant")
@@ -495,7 +496,7 @@ try {
                 or Path(cast(str, engine.__file__)) != payload / "scripts/installer_engine.py"):
             raise UninstallRefused("Native Vault removal source is unavailable")
         packages = {engine._package_name(path): path for path in engine._package_roots(payload)}
-        if not {"agent-vault", "agent-update-driver", "agent-procutil"} <= packages.keys():
+        if not {plugin, "agent-update-driver", "agent-procutil"} <= packages.keys():
             raise UninstallRefused("Native Vault removal source closure is incomplete")
         driver = packages["agent-update-driver"] / "src/update_driver"
         for module, name in ((core, "core.py"), (participant, "participant.py")):
@@ -542,7 +543,7 @@ try {
                 index += 1
             source = Path(cast(str, options.pop("--payload", "")))
             expected: dict[str, str | bool] = {
-                "--root": str(root), "--shell": shell, "--plugin": "agent-vault", "--action": "uninstall",
+                "--root": str(root), "--shell": shell, "--plugin": plugin, "--action": "uninstall",
             }
             if role:
                 expected["--" + role] = True
@@ -595,7 +596,7 @@ try {
             if (arguments[1:3] != ["-I", "-B"]
                     or Path(arguments[3]) != payload / "scripts/installer_engine_uninstall.py"
                     or Path(sys.argv[0]) != Path(arguments[3])
-                    or flags.get("--payload-root") != str(payload) or flags.get("--plugin-id") != "agent-vault"
+                    or flags.get("--payload-root") != str(payload) or flags.get("--plugin-id") != plugin
                     or flags.get("--root") != str(root) or flags.get("--shell") != shell
                     or not (flags.get("--remove-runtime") or flags.get("--check-consumers"))):
                 raise UninstallRefused("Native Vault finite removal callback changed")
@@ -625,8 +626,8 @@ try {
         native_shell(take(), payload)
         if payload != original:
             parent = take()
-            if (payload.name != "agent-vault"
-                    or payload.parent.parent != Path.home() / ".agent-vault/.install-stage"
+            if (payload.name != plugin
+                    or payload.parent.parent != Path.home() / f".{plugin}" / ".install-stage"
                     or re.fullmatch(r"[0-9]{8}T[0-9]{9}-" + str(parent["pid"]), payload.parent.name) is None):
                 raise UninstallRefused("Native Vault source is not its owned stage")
             native_shell(parent, original)

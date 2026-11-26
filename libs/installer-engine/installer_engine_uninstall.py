@@ -789,12 +789,10 @@ def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile
             controllers.update(_controller_proofs(payload).worktrees_controllers(
                 rows, payload, root, shell, controller_custody, lifecycle_lease,
             ))
-        elif plugin == "agent-vault":
-            controllers.update(_controller_proofs(payload).native_plugin_controllers(
-                rows, payload, root, shell, controller_custody,
-            ))
         else:
-            raise UninstallRefused("Driver controller qualification is unavailable for this plugin")
+            controllers.update(_controller_proofs(payload).native_plugin_controllers(
+                rows, payload, root, shell, controller_custody, plugin,
+            ))
     gates: set[int] = set()
     for _ in range(2):
         gates.update(row["pid"] for row in rows

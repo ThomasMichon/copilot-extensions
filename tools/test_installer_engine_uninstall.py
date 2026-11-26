@@ -413,12 +413,13 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     "late-source", "late-request", "missing-native-check", "missing-isolation",
     "default-original", "relative-original", "command-original", "interactive-original", "foreign-original",
 ))
-def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize("plugin", ("agent-vault", "agent-dispatch"))
+def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation, plugin):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
-    root = home / ".agent-vault"
-    original = home / "source/agent-vault"
+    root = home / f".{plugin}"
+    original = home / "source" / plugin
     scripts = original / "scripts"
     scripts.mkdir(parents=True)
     shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
@@ -436,7 +437,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
             (folder / name).write_text("# ordinary library fixture\n", encoding="utf-8")
     payload = original
     if mutation == "self-stage":
-        payload = root / ".install-stage/20261110T100000000-64202/agent-vault"
+        payload = root / ".install-stage/20261110T100000000-64202" / plugin
         shutil.copytree(original, payload)
 
     def packages(source):
@@ -452,7 +453,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     engine.__file__ = str(payload / "scripts/installer_engine.py")
     engine._package_roots, engine._source_files = packages, files
     engine._package_name = lambda path: {
-        "agent-vault": "agent-vault", "update-driver": "agent-update-driver", "procutil": "agent-procutil",
+        plugin: plugin, "update-driver": "agent-update-driver", "procutil": "agent-procutil",
     }[path.name]
     engine.runtime = SimpleNamespace(fingerprint_source=fingerprint)
     participant = ModuleType("update_driver.participant")
@@ -479,7 +480,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
         return [
             sys.executable, "-I", "-S", "-B", "-X", "utf8", str(source / "scripts/installer_driver.py"),
             "--payload", str(source), "--root", str(root), "--shell", shell,
-            "--plugin", "agent-vault", "--action", "uninstall",
+            "--plugin", plugin, "--action", "uninstall",
             *(["--check-native"] if role == "remove-broker" else []),
             *(["--" + role] if role else []),
         ]
@@ -502,7 +503,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     if mutation == "finite-callback":
         inspector = [
             sys.executable, "-I", "-B", str(payload / "scripts/installer_engine_uninstall.py"),
-            "--payload-root", str(payload), "--plugin-id", "agent-vault",
+            "--payload-root", str(payload), "--plugin-id", plugin,
             "--root", str(root), "--shell", shell, "--remove-runtime",
         ]
     actors = [(os.getpid(), inspector), (64201, powershell(payload))]
@@ -528,7 +529,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     elif mutation == "witness-mismatch":
         shim[-2] = "not-the-scoped-fixture"
     elif mutation == "foreign-controller":
-        actors[2][1][:] = [sys.executable, "-m", "agent_vault"]
+        actors[2][1][:] = [sys.executable, "-m", plugin.replace("-", "_")]
     elif mutation == "missing-native-check":
         inspector.remove("--check-native")
     elif mutation == "missing-isolation":
@@ -536,7 +537,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     elif mutation == "default-original":
         del actors[-1][1][-2:]
     elif mutation == "relative-original":
-        actors[-1][1][actors[-1][1].index("-File") + 1] = r"source\agent-vault\scripts\install.ps1"
+        actors[-1][1][actors[-1][1].index("-File") + 1] = rf"source\{plugin}\scripts\install.ps1"
     elif mutation == "command-original":
         actors[-1][1][:] = [shell, "-NoProfile", "-Command", "& './scripts/install.ps1' uninstall"]
     elif mutation == "interactive-original":
@@ -551,7 +552,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     ]
     if mutation == "additional-consumer":
         rows.append({"pid": 64207, "ppid": 0, "image": sys.executable,
-                     "command": f"python -m agent_vault --root {root}"})
+                     "command": f"python -m {plugin.replace('-', '_')} --root {root}"})
     native_rows = [dict(row) for row in rows]
     if mutation == "sparse-census":
         rows = [row for row in rows if row["pid"] != 64204]
@@ -575,16 +576,16 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     monkeypatch.setattr(MODULE.os, "getppid", lambda: 64201)
     monkeypatch.setattr(sys, "argv", [inspector[6] if mutation != "finite-callback" else inspector[3]])
     custody = object() if mutation == "forged-owner" else Custody()
-    profile = MODULE.Profile((), (), (), (), "agent_vault")
+    profile = MODULE.Profile((), (), (), (), plugin.replace("-", "_"))
     if mutation in {
         "none", "finite-callback", "self-stage", "sparse-census", "cache",
         "default-original", "relative-original", "command-original", "interactive-original",
     }:
-        MODULE.refuse_consumers(payload, "agent-vault", root, shell, profile, controller_custody=custody)
+        MODULE.refuse_consumers(payload, plugin, root, shell, profile, controller_custody=custody)
         assert checks == ["owner", "owner"]
     else:
         with pytest.raises(MODULE.UninstallRefused):
-            MODULE.refuse_consumers(payload, "agent-vault", root, shell, profile, controller_custody=custody)
+            MODULE.refuse_consumers(payload, plugin, root, shell, profile, controller_custody=custody)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Vault removal custody adapter")
@@ -638,7 +639,7 @@ def test_native_vault_removal_authenticates_before_import_and_never_falls_back(t
 
 
 @pytest.mark.parametrize("plugin", ("agent-vault", "agent-bridge"))
-def test_native_broker_admission_passes_custody_only_to_the_scoped_receiver(tmp_path, monkeypatch, plugin):
+def test_native_broker_admission_passes_custody_to_the_scoped_receiver(tmp_path, monkeypatch, plugin):
     observed = {}
     owner = object()
 
@@ -656,10 +657,7 @@ def test_native_broker_admission_passes_custody_only_to_the_scoped_receiver(tmp_
         sys.path[:] = previous
     assert observed["arguments"] == (args.payload, plugin, args.root, str(args.shell))
     assert observed["options"]["check_consumers"] is True
-    if plugin == "agent-vault":
-        assert observed["options"]["controller_custody"] is owner
-    else:
-        assert "controller_custody" not in observed["options"]
+    assert observed["options"]["controller_custody"] is owner
 
 
 @pytest.mark.parametrize("mutation", ("missing", "shared"))
