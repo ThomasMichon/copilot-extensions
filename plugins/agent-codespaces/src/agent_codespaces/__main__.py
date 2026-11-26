@@ -1767,6 +1767,9 @@ def _ssh_session(
                 return await asyncio.wait_for(_run(), timeout=overall_timeout)
             return await _run()
         except (TimeoutError, asyncio.TimeoutError):
+            from . import consumer_telemetry as ct
+
+            ct.ssh_timed_out(overall_timeout)
             print(
                 f"[FAIL] SSH operation for CodeSpace '{args.name}' exceeded "
                 f"{overall_timeout:g}s; disconnected and cleaned up.",

@@ -481,3 +481,43 @@ def test_an_interrupted_delivery_keeps_the_product_result(monkeypatch: pytest.Mo
     with pytest.raises(SystemExit) as raised:
         ct.instrument(exits)()
     assert raised.value.code == 4
+
+
+def test_an_adapter_wrapped_snapshot_timeout_is_noted_with_its_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_codespaces import gh_account, worktrees
+    from agent_codespaces._peer_launch import ContextRefused
+
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        try:
+            raise subprocess.TimeoutExpired("agent-worktrees", kwargs.get("timeout", 0))
+        except subprocess.TimeoutExpired as error:
+            raise ContextRefused("Same-cell worktrees invocation failed") from error
+
+    monkeypatch.setattr(worktrees, "explicit_context", lambda: True)
+    monkeypatch.setattr(worktrees, "run", slow)
+    with pytest.raises(ContextRefused):
+        gh_account._lookup("repos", "list", strict=True)
+    (event,) = ct.finish(1)
+    assert (event["stage"], event["outcome"], event["reason"]) == (
+        "account_resolution", "timeout", "snapshot_timeout",
+    )
+    assert event["limit_ms"] == gh_account._SNAPSHOT_TIMEOUT_SECONDS * 1000
+
+
+def test_an_ssh_deadline_after_connect_closes_the_launch_as_a_timeout() -> None:
+    ct.note("codespace_connect", "success", "none")
+    ct.begin("ssh")
+    ct.ssh_timed_out(120.0)
+    ct.fail_with_cause("connect_failed")
+    events = [e for e in ct.finish(124) if e["stage"] == "ssh"]
+    assert [(e["outcome"], e["reason"], e.get("limit_ms")) for e in events] == [
+        ("timeout", "transport_failed", 120000),
+    ]
+
+
+def test_a_standalone_ssh_deadline_is_its_own_timeout() -> None:
+    ct.ssh_timed_out(30)
+    (event,) = ct.finish(124)
+    assert (event["stage"], event["outcome"], event["limit_ms"]) == ("ssh", "timeout", 30000)

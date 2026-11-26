@@ -131,6 +131,22 @@ def fail_with_cause(default: str = "other") -> None:
         pass
 
 
+def ssh_timed_out(limit_s: float | None) -> None:
+    """Record an SSH operation that exceeded its overall deadline.
+
+    The launch's open `ssh` stage closes as that timeout; a standalone SSH
+    operation records its own `ssh` timeout.
+    """
+    try:
+        limit_ms = int(limit_s * 1000) if limit_s else None
+        if _open is not None and _open["stage"] == "ssh":
+            fail("transport_failed", outcome="timeout", limit_ms=limit_ms)
+        else:
+            note("ssh", "timeout", "transport_failed", limit_ms=limit_ms)
+    except Exception:
+        pass
+
+
 def retry(reason: str = "transport_retry") -> None:
     """Record a retry of the open stage and reopen it as the next attempt."""
     try:

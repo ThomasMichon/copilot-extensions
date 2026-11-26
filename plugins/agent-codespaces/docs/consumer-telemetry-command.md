@@ -44,11 +44,11 @@ failure or refusal never changes the command's output or exit status.
 | `seed_validation` | `seed_too_long`, `seed_invalid` |
 | `credential_relay` | `relay_not_listening`, `credential_fill_failed` |
 | `claim` | `claim_busy`, `lease_conflict`, `other`; success with `force_claimed` when `--force-claim` was used |
-| `account_resolution` | `timeout`/`snapshot_timeout` with `limit_ms`, `account_unresolved` |
+| `account_resolution` | `timeout`/`snapshot_timeout` with `limit_ms` (including a timeout the same-cell adapter wraps), `account_unresolved` |
 | `plugin_preparation` | `marketplace_add_failed`, `plugin_install_failed`, `clone_auth_failed`, `relay_not_listening` |
 | `bridge_payload` | `payload_install_failed` |
 | `codespace_connect` | `retry`/`transport_retry` per transient attempt, `timeout`/`transport_failed` with `limit_ms`, `connect_failed` |
-| `ssh` | `retry`/`transport_retry` with the attempt number, `transport_failed`, `connect_failed` |
+| `ssh` | `retry`/`transport_retry` with the attempt number, `timeout`/`transport_failed` with `limit_ms` (the operation's overall deadline, including after a successful connect), `transport_failed`, `connect_failed` |
 | `remote_embody` | `installer_unavailable`, `bootstrap_python_unavailable` |
 | `bridge_registration` | `session_unregistered`, `session_unrepresented` |
 | `launch` | the overall detached launch |

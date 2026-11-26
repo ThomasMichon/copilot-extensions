@@ -345,6 +345,16 @@ def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str
                 started=started, limit_ms=timeout * 1000,
             )
         return result
+    except ContextRefused as exc:
+        # The same-cell adapter wraps its own spawn failure or timeout; observe
+        # the underlying cause, then let the refusal propagate unchanged.
+        if strict:
+            ct.note("account_resolution", *(
+                ("timeout", "snapshot_timeout")
+                if isinstance(exc.__cause__, subprocess.TimeoutExpired)
+                else ("failure", "account_unresolved")
+            ), started=started, limit_ms=timeout * 1000)
+        raise
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
             ct.note("account_resolution", *(
