@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original pure control-plane and explicit topology identity unit controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

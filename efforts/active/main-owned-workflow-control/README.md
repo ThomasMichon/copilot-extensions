@@ -487,7 +487,47 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify adjacent pure registry policy and alias controls as one coherent
+- [ ] Qualify the adjacent original control-plane parsing and explicit-data
+  topology identity controls as one coherent source PR. Export all five
+  pure parsing functions with every parameter row and the first five complete
+  identity-resolution functions. Exclude all file/YAML loaders, OS/platform
+  patch matrices and cross-file AST scans before execution.
+  Preserve original function objects, code/global origins, fixtures,
+  parameter types/values, marks, IDs and order. Complete metadata comparison
+  precedes each unchanged guarded trial; require actual owner call lines
+  per case. Add only exact nodes and two adapter bindings after proof; both
+  originals and targets are already bound. Retain every current hash, helper,
+  limit and refusal. No host observation, environment patch or native/guest
+  process is authorized. Review/full CI/merge/persistence precede completion.
+  Complete parser metadata confirms 29 original / 23 selected cases.
+  The first trial refuses before test execution: the repository wrapper's
+  checkout-local dependency environment makes a pytest framework import an
+  unadmitted repository source read. No case is admitted and the manifest
+  remains unchanged. The explicit `correct-environment-and-requalify`
+  decision permits a bounded environment correction and one fresh trial per
+  module with identical selections and unchanged guards; it does not permit
+  replay of the refused environment, preload or source/guard exceptions.
+  Corrected qualification uses the canonical seasoned dependency preparer's
+  explicit external-cache argument, launched by the repository-pinned wrapper.
+  It passes 23 parser cases in 1.36 pytest / 18.875 observation seconds
+  and five identity cases in 1.07 pytest / 13.265 observation seconds.
+  Complete identity metadata compares all fourteen original cases;
+  all nine excluded OS/platform/AST cases remain excluded.
+  All 84 phases pass, zero prohibited effects occur, each trial has
+  25 bound reads, and every case has actual owner call-phase coverage.
+  Complete phase/input/per-case witnesses are read before admission.
+  Only 28 nodes and two adapter bindings are added: 10,604 nodes,
+  1,510 sources, the same 549 targets, 92 helpers, 300 seconds
+  and 713,469 bytes. All old ordered inventory and hashes remain;
+  fatal Ruff and strict Linux/Windows whole-file typing pass. All 1,510
+  bindings, 92 helpers and 27 observed input hashes verify without replay.
+  Exact-head review, full CI, normal merge and persistence remain.
+  Dev advances before publication. Reconciliation preserves one peer-added
+  source binding and eight existing binding refreshes, with no peer node,
+  target, helper or limit change. All 27 actually observed inputs remain
+  exact without replay. The final union is 10,604 nodes, 1,511 bindings,
+  549 targets and 713,595 bytes; fresh complete CI must qualify this union.
+- [x] Qualify adjacent pure registry policy and alias controls as one coherent
   source PR: all three original consumer-default functions (five cases), and
   twelve complete original alias-matrix functions with every parameter row.
   Exclude both whole observed-local/standalone-host identity functions before
@@ -518,6 +558,12 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   without trial replay. Final inventory is 10,576 nodes, 1,508 sources,
   549 targets and 712,076 bytes, with the same helpers/deadline. Fresh
   current-head review and complete hosted CI must qualify this union.
+  Source #14683 merges after fresh exact-head approval and required checks.
+  Natural CI executes all 10,576 cases in 183.036 packet seconds; this is
+  fresh execution, not reuse. Independent merged state, full-tree equality,
+  supported pull-forward, all seven reviewed/merged/working blobs, exact
+  reconciled candidate, 1,508 bindings, 92 helpers and all 27 observed
+  input hashes verify without replay. Only this 128-case leaf is Done.
 - [x] Qualify original pure registry projections through eleven complete
   functions and the entire `TestMachineName` and `TestFindMachineEntry`
   classes. Preserve original classes/methods, code/global origins, fixtures,
