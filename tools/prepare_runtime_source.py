@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+import io
 import json
 import math
 import os
@@ -18,11 +19,12 @@ import subprocess
 import sys
 import tarfile
 import time
-from typing import BinaryIO
+from typing import IO, BinaryIO, Callable, Iterator, TypedDict, cast
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import materialize_main as materializer
+import uv_editable_ref
 
 _TOOL_DIRECTORY = Path(__file__).resolve().parent
 _RUNTIME_LIBRARY = (
@@ -51,6 +53,12 @@ _PLUGIN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 class SourcePreparationError(RuntimeError):
     """Source admission or materialization refused the selected input."""
+
+
+class _GitStreams(TypedDict, total=False):
+    capture_output: bool
+    stdout: BinaryIO
+    stderr: int
 
 
 @dataclass(frozen=True)
@@ -93,8 +101,8 @@ def _git(
     environment["GIT_CONFIG_NOSYSTEM"] = "1"
     environment["GIT_CONFIG_GLOBAL"] = os.devnull
     environment["GIT_OPTIONAL_LOCKS"] = "0"
-    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    streams = {"capture_output": True} if output is None else {
+    creationflags = cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0
+    streams: _GitStreams = {"capture_output": True} if output is None else {
         "stdout": output, "stderr": subprocess.PIPE,
     }
     run = subprocess.run
@@ -149,7 +157,7 @@ def _archive(source: Path, commit: str, archive: Path, *, deadline: float | None
 
 
 @contextmanager
-def _private_work_directory(parent: Path, prefix: str):
+def _private_work_directory(parent: Path, prefix: str) -> Iterator[Path]:
     from source_preparation_process import procutil_module
 
     work = parent / (prefix + secrets.token_hex(16))
@@ -186,7 +194,7 @@ def _admit(source: Path, commit: str, branch: str, *, deadline: float | None = N
     return head, git_command(source, "rev-parse", "--verify", f"{commit}^{{tree}}")
 
 
-def _copy(source, destination, *, deadline: float | None = None) -> None:
+def _copy(source: IO[bytes], destination: IO[bytes], *, deadline: float | None = None) -> None:
     while True:
         _remaining(deadline)
         block = source.read(1 << 20)
@@ -199,8 +207,9 @@ def _extract_archive(
     archive: Path, destination: Path, *, deadline: float | None = None,
     file_pointer_candidates: list[Path] | None = None,
     include_paths: tuple[str, ...] | None = None,
+    archive_stream: tarfile.TarFile | None = None,
 ) -> None:
-    selected: list[tuple[str, ...]] | None = None
+    selected: set[tuple[str, ...]] | None = None
     files: set[Path] = set()
     directories: set[Path] = set()
     if include_paths is not None:
@@ -208,16 +217,16 @@ def _extract_archive(
             raise SourcePreparationError("Source archive selection requires portable relative paths")
         if not include_paths or any(destination.iterdir()):
             raise SourcePreparationError("Scoped source extraction requires paths and an empty destination")
-        selected = []
+        selected = set()
         for value in include_paths:
             if not isinstance(value, str) or not value:
                 raise SourcePreparationError("Source extraction selection requires relative paths")
             path = PurePosixPath(value)
             if path.is_absolute() or ".." in path.parts or "\\" in value or ":" in value:
                 raise SourcePreparationError("Source extraction selection contains an unsafe path")
-            selected.append(path.parts)
+            selected.add(path.parts)
     previous_parent: Path | None = None
-    with tarfile.open(archive, "r:") as source:
+    with nullcontext(archive_stream) if archive_stream is not None else tarfile.open(archive, "r:") as source:
         for member in source:
             _remaining(deadline)
             name = PurePosixPath(member.name)
@@ -241,7 +250,7 @@ def _extract_archive(
                     raise SourcePreparationError("Source archive contains colliding paths")
                 directories.update(parents)
                 (directories if member.isdir() else files).add(target)
-                if not any(name.parts[:len(prefix)] == prefix for prefix in selected):
+                if not any(name.parts[:length] in selected for length in range(len(name.parts) + 1)):
                     continue
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -256,7 +265,7 @@ def _extract_archive(
                     # The anchored file-pointer grammar starts with "<". Inspect
                     # the buffered archive bytes before copying, not thousands
                     # of freshly extracted files through another filesystem open.
-                    if file_pointer_candidates is not None and content.peek(1).startswith(b"<"):
+                    if file_pointer_candidates is not None and cast(io.BufferedReader, content).peek(1).startswith(b"<"):
                         file_pointer_candidates.append(target)
                     _copy(content, output, deadline=deadline)
                 # Windows chmod only changes read-only status; new files are writable.
@@ -271,7 +280,7 @@ def _materialize(
     source = snapshot / plugin if plugin == "worktree-manager" else snapshot / "plugins" / plugin
     if not (source / "pyproject.toml").is_file():
         raise SourcePreparationError(f"No Python runtime consumer at {source.relative_to(snapshot)}")
-    def copy_file(source, destination):
+    def copy_file(source: str, destination: str) -> str:
         with open(source, "rb") as incoming, open(destination, "wb") as output:
             _copy(incoming, output, deadline=deadline)
         shutil.copystat(source, destination)
@@ -314,7 +323,7 @@ def materialize_consumer(
     ))
     log.extend(
         f"SKIP {problem}"
-        for problem in materializer.uer.materialized_local_source_problems(destination)
+        for problem in uv_editable_ref.materialized_local_source_problems(destination)
     )
     refusals = [entry for entry in log if entry.startswith("SKIP ")]
     _remaining(deadline)
@@ -340,10 +349,12 @@ def prepare(
     head, tree = _admit(source, commit, branch, deadline=deadline)
     if os.name == "nt":
         # Prefix the existing volume root before creating a long missing path.
-        output = Path(os.path._getfinalpathname(output.anchor)).joinpath(*output.parts[1:])
+        native_path = cast(Callable[[str], str], getattr(os.path, "_getfinalpathname"))
+        output = Path(native_path(output.anchor)).joinpath(*output.parts[1:])
     _private_output_directory(output)
     if os.name == "nt":
-        output = Path(os.path._getfinalpathname(output))
+        native_path = cast(Callable[[str], str], getattr(os.path, "_getfinalpathname"))
+        output = Path(native_path(str(output)))
     prefix = f".prepare-{plugin}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-"
     with _private_work_directory(output, prefix) as work:
         archive = work / "source.tar"

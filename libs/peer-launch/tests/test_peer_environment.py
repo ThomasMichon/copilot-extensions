@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -173,9 +174,9 @@ def test_vault_rebinds_native_owner_without_caller_credential_selection(
 def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(peer_launch.os, "name", "posix")
-    monkeypatch.setattr(peer_launch.sys, "platform", "linux")
-    monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(peer_launch, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(peer_launch, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(peer_launch, "shutil", SimpleNamespace(which=lambda _name: None))
     with pytest.raises(ValueError, match="SHA-256 suffix support"):
         peer_launch._vault_service_suffix("/example/Vault")
 
@@ -183,9 +184,11 @@ def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(
 def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(peer_launch.os, "name", "posix")
-    monkeypatch.setattr(peer_launch.sys, "platform", "darwin")
-    monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: pytest.fail("unqualified owner lookup"))
+    monkeypatch.setattr(peer_launch, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(peer_launch, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(peer_launch, "shutil", SimpleNamespace(
+        which=lambda _name: pytest.fail("unqualified owner lookup"),
+    ))
     with pytest.raises(ValueError, match="native Windows and Linux only"):
         peer_launch._vault_service_suffix("/example/Vault")
 
@@ -272,6 +275,77 @@ def test_peer_primitive_loader_does_not_convert_nested_unknown_to_configuration_
     )
     with pytest.raises(ProbeContractError, match="nested contract gap"):
         peer_launch._load_primitive(path, "_probe_nested_primitive")
+
+
+def test_retained_peer_validator_still_observes_each_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = tmp_path / "payload"
+    primitive = payload / "scripts" / "installation-context" / "installation_context.py"
+    primitive.parent.mkdir(parents=True)
+    loaded = tmp_path / "loads"
+    primitive.write_text(
+        f"from pathlib import Path\np=Path({str(loaded)!r})\n"
+        "p.write_text((p.read_text() if p.exists() else '') + 'x')\n", encoding="utf-8",
+    )
+    root = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-worktrees"
+    own = {"cellRoot": str(root.parent.parent)}
+    peer = {
+        **_context("agent-vault"), "payloadRoot": str(payload),
+        "pluginRoot": str(root.with_name("agent-vault")), "marketplaceId": "example",
+        "generation": 1,
+    }
+    owners, receipts = [], []
+
+    def active(*args: object) -> dict[str, Any]:
+        receipts.append(peer["generation"])
+        return dict(peer)
+
+    def owner(*args: object) -> dict[str, Any]:
+        owners.append(True)
+        return dict(own)
+
+    monkeypatch.setattr(peer_launch, "validate_owner", owner)
+    monkeypatch.setattr(peer_launch, "_packaged_primitive", lambda: object())
+    monkeypatch.setattr(peer_launch, "_active_context", active)
+    monkeypatch.setattr(peer_launch, "_governance", lambda *args: {})
+    monkeypatch.setattr(peer_launch, "_peer_python_inprocess", lambda *args: None)
+    monkeypatch.delenv(PROBE_ENV, raising=False)
+    first = peer_launch._resolve_peer_observation(
+        "agent-worktrees", root, "receipt", "agent-vault", allow_native=False,
+    )
+    peer["generation"] = 2
+    second = peer_launch._resolve_peer_observation(
+        "agent-worktrees", root, "receipt", "agent-vault", allow_native=False,
+    )
+    assert first[1]["generation"] == 1 and second[1]["generation"] == 2
+    assert loaded.read_text() == "x"
+    assert len(owners) == 4 and receipts == [1, 1, 1, 2, 2, 2]
+
+
+@pytest.mark.parametrize("change", ["entry", "fragment", "same-metadata", "added"])
+def test_retained_peer_validator_refuses_changed_code(
+    tmp_path: Path, change: str,
+) -> None:
+    primitive = tmp_path / "scripts" / "installation-context" / "installation_context.py"
+    primitive.parent.mkdir(parents=True)
+    primitive.write_text("VALUE = 1\n", encoding="utf-8")
+    fragment = primitive.with_name("_installation_context_test.py")
+    fragment.write_text("VALUE = 1\n", encoding="utf-8")
+    context = {"payloadRoot": str(tmp_path)}
+    retained = peer_launch._peer_context_primitive(context)
+    assert retained.VALUE == 1
+    target = fragment if change == "fragment" else primitive
+    before = target.stat()
+    if change == "added":
+        primitive.with_name("_installation_context_added.py").write_text("VALUE = 2\n", encoding="utf-8")
+    else:
+        target.write_text("VALUE = 2\n", encoding="utf-8")
+        if change == "same-metadata":
+            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+    with pytest.raises(ValueError, match="code changed"):
+        peer_launch._peer_context_primitive(context)
+    assert retained.VALUE == 1
 
 
 @pytest.mark.parametrize("qualification", ["qualified", "payload-missing", "runtime-missing", "unsupported"])
@@ -362,6 +436,32 @@ print(json.dumps({"selected": str(selected), "probe": environment["COPILOT_EXTEN
     assert not list(tmp_path.rglob("*.pyc"))
 
 
+@pytest.mark.parametrize("failure", ["unpinned", "site-enabled", "foreign-python"])
+def test_inprocess_peer_refuses_unretained_interpreter_before_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str,
+) -> None:
+    python = Path(sys.executable)
+    monkeypatch.setattr(peer_launch, "_resolve_peer", lambda *a, **k: (
+        {"pluginRoot": str(tmp_path)}, {}, python,
+    ))
+    monkeypatch.setattr(peer_launch, "sys", SimpleNamespace(
+        executable=str(tmp_path / "foreign-python") if failure == "foreign-python" else str(python),
+        flags=SimpleNamespace(
+            isolated=True, no_site=failure != "site-enabled", dont_write_bytecode=True,
+        ),
+    ))
+    monkeypatch.setattr(
+        peer_launch, "_retention_launcher",
+        lambda *a: pytest.fail("unretained execution reached the runtime bootstrap"),
+    )
+    with pytest.raises((ValueError, OSError), match="retained|isolated|No such file|cannot find"):
+        peer_launch.launch(
+            "agent-worktrees", tmp_path, "owner", "agent-vault", ["probe"],
+            pinned_python=None if failure == "unpinned" else python,
+            runtime_identity="original-build", inprocess=True,
+        )
+
+
 @pytest.mark.parametrize("pinned", [False, True], ids=["dynamic", "pinned"])
 @pytest.mark.parametrize(("selected", "executable"), [
     (r"C:\runtime\python.exe", r"C:\runtime\python.exe"),
@@ -411,3 +511,11 @@ def test_windows_peer_launch_binds_executable_without_rewriting_argv(
     )
     assert kwargs["creationflags"] == 0x08000000
     assert "shell" not in kwargs
+    inprocess = peer_launch.retained_peer_prefix(
+        "agent-dispatch", tmp_path, "validated-owner", "agent-worktrees", python,
+        runtime_identity="original-build",
+    )
+    assert inprocess[0] == executable
+    assert inprocess[8:12] == [
+        "--pinned-runtime", str(python), "--runtime-identity", "original-build",
+    ]

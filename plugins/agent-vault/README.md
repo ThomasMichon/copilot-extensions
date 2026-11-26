@@ -1120,6 +1120,7 @@ Set `VAULT_SUDO_ENTRY`; there is no default.
 - Plugin architecture: [`docs/architecture.md`](docs/architecture.md)
 - Usage skill: [`skills/agent-vault/SKILL.md`](skills/agent-vault/SKILL.md)
 - Setup skill: [`skills/agent-vault-setup/SKILL.md`](skills/agent-vault-setup/SKILL.md)
+- Native crypto qualification: [opt-in long-prefix recipe](tests/native/README.md), excluded from default test discovery.
 - Patterns referenced by the implementation: [`service-lifecycle-supervision`](../../docs/patterns/service-lifecycle-supervision.md), [`graceful-daemon-cutover`](../../docs/patterns/graceful-daemon-cutover.md), [`local-endpoint-discovery`](../../docs/patterns/local-endpoint-discovery.md), and [`service-transport`](../../docs/patterns/service-transport.md)
 
 ## Not in scope

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import argparse
+from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
+import platform
 import runpy
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -22,10 +27,11 @@ pytestmark = pytest.mark.timeout(180)
 
 
 def git(path: Path, *args: str) -> str:
-    return subprocess.run(
+    completed: subprocess.CompletedProcess[str] = subprocess.run(
         ["git", "-C", str(path), *args], capture_output=True, text=True, check=True,
         **no_window_kwargs(),
-    ).stdout.strip()
+    )
+    return completed.stdout.strip()
 
 
 def commit(path: Path) -> None:
@@ -88,6 +94,162 @@ def test_inspect_is_read_only_and_revision_bound(source: Path) -> None:
         selected.verify()
 
 
+def test_source_queries_overlap_and_settle_before_head(
+    source: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queries = {
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        ("ls-files", "-v"),
+    }
+    rendezvous = threading.Barrier(len(queries), timeout=10)
+    completed: set[tuple[str, ...]] = set()
+    lock = threading.Lock()
+    original = setup._git
+
+    def observed(path: Path, *arguments: str) -> str:
+        if arguments in queries:
+            rendezvous.wait()
+            result = original(path, *arguments)
+            with lock:
+                completed.add(arguments)
+            return result
+        assert arguments == ("rev-parse", "--verify", "HEAD^{commit}")
+        assert completed == queries
+        return original(path, *arguments)
+
+    monkeypatch.setattr(setup, "_git", observed)
+    selected = setup.qualify(source, URL)
+    assert selected.commit == git(source, "rev-parse", "HEAD")
+    assert completed == queries
+
+
+@pytest.mark.parametrize("failure", ["modified", "query"])
+def test_source_scope_reuses_workers_with_fresh_context_and_source(
+    source: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    caller_context = ContextVar("source-verification-caller", default=-1)
+    original = setup._git
+    queries = {
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        ("ls-files", "-v"),
+    }
+    rendezvous = threading.Barrier(len(queries), timeout=10)
+    observations: list[tuple[int, tuple[str, ...]]] = []
+    workers: set[threading.Thread] = set()
+    settled: list[tuple[int, tuple[str, ...]]] = []
+
+    def observed(path: Path, *arguments: str) -> str:
+        value = caller_context.get()
+        observations.append((value, arguments))
+        if arguments not in queries:
+            return original(path, *arguments)
+        workers.add(threading.current_thread())
+        try:
+            rendezvous.wait()
+            if value == 2 and failure == "query" and arguments == ("ls-files", "-v"):
+                raise setup.SetupError("query failed")
+            return original(path, *arguments)
+        finally:
+            settled.append((value, arguments))
+
+    monkeypatch.setattr(setup, "_git", observed)
+    try:
+        with setup._source_verification_scope():
+            caller_context.set(0)
+            selected = setup.inspect(source, URL)
+            caller_context.set(1)
+            selected.verify()
+            assert [value for value, _ in observations] == [0] * 9 + [1] * 9
+            assert len(workers) == 4
+            caller_context.set(2)
+            if failure == "modified":
+                (source / "setup.ps1").write_text("preserve", encoding="utf-8")
+            with pytest.raises(setup.SetupError, match="source changes|query failed"):
+                selected.verify()
+            assert {arguments for value, arguments in settled if value == 2} == queries
+            assert all(worker.is_alive() for worker in workers)
+    finally:
+        assert all(not worker.is_alive() for worker in workers)
+
+
+@pytest.mark.parametrize("failure", [None, setup.DECLARATION, "setup.ps1"])
+def test_inspect_overlaps_and_joins_every_tracked_query(
+    source: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    original = setup._git
+    rendezvous = threading.Barrier(4, timeout=3)
+    caller_context = ContextVar("tracked-query-caller", default=-1)
+    token = caller_context.set(7)
+    observed: list[str] = []
+    settled: list[str] = []
+    workers: set[threading.Thread] = set()
+    head_complete = False
+
+    def tracked(path: Path, *arguments: str) -> str:
+        nonlocal head_complete
+        if arguments[:3] != ("--literal-pathspecs", "ls-files", "--stage"):
+            result = original(path, *arguments)
+            if arguments == ("rev-parse", "--verify", "HEAD^{commit}"):
+                head_complete = True
+            return result
+        assert head_complete
+        relative = arguments[-1]
+        observed.append(relative)
+        workers.add(threading.current_thread())
+        assert caller_context.get() == 7
+        try:
+            rendezvous.wait()
+            if relative == failure:
+                raise setup.SetupError("tracked query failed")
+            return original(path, *arguments)
+        finally:
+            settled.append(relative)
+
+    monkeypatch.setattr(setup, "_git", tracked)
+    try:
+        with setup._source_verification_scope():
+            if failure is None:
+                assert setup.inspect(source, URL).source.commit == git(source, "rev-parse", "HEAD")
+            else:
+                with pytest.raises(setup.SetupError, match="tracked query failed"):
+                    setup.inspect(source, URL)
+            selected = "setup.ps1" if sys.platform == "win32" else "setup.sh"
+            assert sorted(observed) == sorted([setup.DECLARATION, "setup.ps1", "setup.sh", selected])
+            assert sorted(settled) == sorted(observed)
+            assert len(workers) == 4
+            assert all(worker.is_alive() for worker in workers)
+    finally:
+        caller_context.reset(token)
+    assert all(not worker.is_alive() for worker in workers)
+
+
+def test_inspect_preserves_tracked_failure_before_malformed_data(
+    source: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (source / setup.DECLARATION).write_text("not json", encoding="utf-8")
+    commit(source)
+    original = setup._git
+    settled = threading.Event()
+
+    def tracked(path: Path, *arguments: str) -> str:
+        if arguments == ("--literal-pathspecs", "ls-files", "--stage", "--", setup.DECLARATION):
+            try:
+                raise setup.SetupError("earlier membership failure")
+            finally:
+                settled.set()
+        return original(path, *arguments)
+
+    monkeypatch.setattr(setup, "_git", tracked)
+    with setup._source_verification_scope():
+        with pytest.raises(setup.SetupError, match="earlier membership failure"):
+            setup.inspect(source, URL)
+        assert settled.is_set()
+
+
 @pytest.mark.parametrize("kind", ["foreign", "transport-path", "untracked", "modified", "linked", "nested"])
 def test_preserves_unqualified_source(source: Path, kind: str) -> None:
     selected = source
@@ -137,7 +299,7 @@ def test_never_executes_without_trust(source: Path, monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.parametrize("refusal", ["apply", "commit", "abbreviation", "remote", "home"])
 def test_native_configuration_trust_refuses_unqualified_effects(
-    source: Path, monkeypatch, capsys, refusal,
+    source: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refusal: str,
 ) -> None:
     from agent_worktrees import permissions
 
@@ -165,11 +327,11 @@ def test_native_configuration_trust_refuses_unqualified_effects(
 
 @pytest.mark.parametrize("home_lookup", [False, True])
 def test_native_configuration_trust_preserves_config_and_is_idempotent(
-    source: Path, tmp_path, monkeypatch, capsys, home_lookup,
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], home_lookup: bool,
 ) -> None:
     if home_lookup:
-        from agent_worktrees import permissions
-        monkeypatch.setattr(permissions.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(platform, "system", lambda: "Linux")
     home = tmp_path / "home"
     copilot = home / ".copilot"
     copilot.mkdir(parents=True)
@@ -193,7 +355,8 @@ def test_native_configuration_trust_preserves_config_and_is_idempotent(
 
 @pytest.mark.parametrize("phase", ["before", "after"])
 def test_configuration_trust_git_timeout_retains_structured_effect_state(
-    source: Path, tmp_path, monkeypatch, capsys, phase,
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], phase: str,
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -207,7 +370,7 @@ def test_configuration_trust_git_timeout_retains_structured_effect_state(
     real_qualify = setup.qualify
     calls = 0
 
-    def qualify(path, url):
+    def qualify(path: Path, url: str) -> setup.Source:
         nonlocal calls
         calls += 1
         if calls == (1 if phase == "before" else 2):
@@ -256,7 +419,9 @@ def test_tracked_glob_characters_are_literal_entries(source: Path) -> None:
 
 
 @pytest.mark.parametrize("control", ["\x00", "\x1b", "\t", "\n", "\r", "\x7f", "\u009b", "\u009d"])
-def test_control_characters_refuse_before_path_lookup(tmp_path, monkeypatch, control) -> None:
+def test_control_characters_refuse_before_path_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, control: str,
+) -> None:
     monkeypatch.setattr(setup, "_git", lambda *a: pytest.fail("untrusted control path inspected"))
     with pytest.raises(setup.SetupError, match="repository-relative regular file"):
         setup._tracked(tmp_path, f"setup{control}.sh")
@@ -284,7 +449,7 @@ def consumer(source: Path, body: str) -> setup.Setup:
 
 
 def test_real_setup_child_uses_selected_engine_for_native_trust_and_payload_observation(
-    source: Path, tmp_path, monkeypatch,
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     home = tmp_path / "selected-home"
     home.mkdir()
@@ -350,7 +515,7 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
 
 @pytest.mark.parametrize("dont_write_bytecode", [False, True])
 def test_selected_engine_callback_preserves_caller_bytecode_policy(
-    source: Path, tmp_path: Path, monkeypatch, dont_write_bytecode: bool,
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dont_write_bytecode: bool,
 ) -> None:
     probe = tmp_path / "cold callback"
     probe.mkdir()
@@ -399,7 +564,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Callback failed' }
     assert git(source, "status", "--porcelain") == ""
 
 
-def test_redirected_consumer_cannot_inherit_attended_git_prompt(source: Path, monkeypatch) -> None:
+def test_redirected_consumer_cannot_inherit_attended_git_prompt(
+    source: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     selected = consumer(source, """
 if ($env:GIT_TERMINAL_PROMPT -ne '0') { throw 'Redirected caller enabled a terminal prompt' }
 if ($env:GCM_INTERACTIVE -ne '0' -or $env:GCM_GUI_PROMPT -ne '0') {
@@ -421,7 +588,7 @@ if ($env:GIT_ASKPASS -or $env:SSH_ASKPASS) { throw 'Redirected caller inherited 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows PowerShell fallback")
 def test_trusted_windows_powershell_uses_only_process_policy(
-    source: Path, tmp_path: Path, monkeypatch,
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     powershell = shutil.which("powershell")
     assert powershell is not None
@@ -457,7 +624,9 @@ if ((Get-ExecutionPolicy -Scope Process) -ne 'Bypass') { throw 'Wrong process po
     assert os.environ["PSExecutionPolicyPreference"] == "Restricted"
 
 
-def test_real_consumer_accepts_caller_scratch_linked_ancestor(source: Path, monkeypatch) -> None:
+def test_real_consumer_accepts_caller_scratch_linked_ancestor(
+    source: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     selected = consumer(source, """
 [IO.File]::WriteAllText($r.result_file, '{"version":1,"status":"ready","message":"Owner checked"}')
 """)
@@ -467,10 +636,10 @@ def test_real_consumer_accepts_caller_scratch_linked_ancestor(source: Path, monk
     if os.name == "nt":
         import _winapi
 
-        _winapi.CreateJunction(str(physical), str(logical))
+        cast(Any, _winapi).CreateJunction(str(physical), str(logical))
     else:
         logical.symlink_to(physical, target_is_directory=True)
-    monkeypatch.setattr(setup.tempfile, "tempdir", str(logical))
+    monkeypatch.setattr(tempfile, "tempdir", str(logical))
     assert setup.run(selected, apply=False, trusted=True).status == "ready"
     assert not list(physical.iterdir())
 
@@ -536,9 +705,10 @@ result.write_text(json.dumps({'console': cp, 'clone': True, 'setup': True}))
     result = tmp_path / "attended.json"
     paths = tmp_path / "paths.json"
     paths.write_text(json.dumps(sys.path), encoding="utf-8")
-    startup = subprocess.STARTUPINFO()
-    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startup.wShowWindow = subprocess.SW_HIDE
+    windows_process = cast(Any, subprocess)
+    startup = windows_process.STARTUPINFO()
+    startup.dwFlags |= windows_process.STARTF_USESHOWWINDOW
+    startup.wShowWindow = windows_process.SW_HIDE
     observer = runpy.run_path(str(
         Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
         / "test_spawn_daemon_windows_integration.py"
@@ -547,7 +717,7 @@ result.write_text(json.dumps({'console': cp, 'clone': True, 'setup': True}))
         process = subprocess.run(
             [sys.executable, str(driver), str(paths), str(source), str(result)],
             capture_output=True, text=True, timeout=120, startupinfo=startup,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            creationflags=windows_process.CREATE_NEW_CONSOLE,
         )
     assert windows.surfaced == {} and windows.focus_changes == {}
     error = result.with_suffix(".error")
@@ -558,7 +728,7 @@ result.write_text(json.dumps({'console': cp, 'clone': True, 'setup': True}))
     assert evidence["console"] and evidence["clone"] and evidence["setup"]
 
 
-def test_redirected_launch_remains_headless(monkeypatch) -> None:
+def test_redirected_launch_remains_headless(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(setup, "_terminal", lambda: False)
     expected = no_window_kwargs()
     if os.name == "nt":
@@ -634,7 +804,9 @@ if ($r.mode -eq 'apply') { exit 9 }
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Native POSIX subprocess contract")
-def test_real_posix_consumer_check_apply_final_check(source: Path, monkeypatch) -> None:
+def test_real_posix_consumer_check_apply_final_check(
+    source: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("COPILOT_HOME", str(Path.home() / ".copilot"))
     monkeypatch.setenv(setup.ENGINE_CONTEXT, "unqualified inherited invocation")
     (source / "new-admission-v1.json").write_text(

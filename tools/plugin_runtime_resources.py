@@ -136,10 +136,16 @@ def build_inputs(source: Path, *, root: Path | None) -> tuple[dict[str, object],
     return data, resources
 
 
+def build_owner_roots(source: Path, *, root: Path) -> set[Path]:
+    """Canonical owners needed before validating resource-bearing applications."""
+    if any(source.absolute() == (root / "plugins" / name).absolute() for name in APPLICATIONS):
+        return {root / "libs" / "versioned-runtime"}
+    return set()
+
+
 def build_resource_roots(source: Path, *, root: Path) -> set[Path]:
     """Retain the admitted build owner as well as the bytes it places in wheels."""
     _data, injected = build_inputs(source, root=root)
     roots = {path.parent for path in injected.values()}
-    if any(source.absolute() == (root / "plugins" / name).absolute() for name in APPLICATIONS):
-        roots.add(root / "libs" / "versioned-runtime")
+    roots.update(build_owner_roots(source, root=root))
     return roots

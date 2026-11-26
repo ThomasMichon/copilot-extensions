@@ -10,8 +10,12 @@ bootstrap imports a validator through an unvalidated payload pointer.
 Repeated in-process owner observations retain the packaged validator by its
 canonical source path, with serialized first load and a fork-reset load lock.
 Only code is retained: every observation still revalidates current installation,
-namespace and governance receipts. Peer validators selected from independently
-updated payloads are loaded fresh.
+namespace and governance receipts. Successfully loaded peer validators are also
+retained by canonical payload path and the identities and content hashes of
+their Python source files. Every observation rereads that code signature and
+revalidates current receipts and governance; no accepted selection is retained.
+A different payload path loads its own validator. Changed code at a retained
+path refuses until a fresh caller loads it, including same-metadata rewrites.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
 `agent-containers`, `agent-dispatch`, `agent-ssh`, `agent-machines`, and
 `agent-pull-requests`, plus `agent-vault` -- each a canonical
@@ -72,6 +76,16 @@ the operation. Dynamic `launch_prefix` and native-only legacy execution remain
 unchanged; older bootstraps and missing or malformed generation evidence refuse
 only this optional route. No ordinary caller opts into pinning automatically.
 
+`retained_peer_prefix` is an explicit single-interpreter variant for an already
+observed peer and build identity. The selected peer Python starts isolated,
+without site imports or bytecode, validates the same current owner/peer receipts
+and governance, then runs the existing slot-local retention bootstrap in that
+process. That bootstrap still owns completion, retention leasing, exact build
+identity, site initialization and module execution. Missing pins, a different
+interpreter or pre-enabled site imports refuse before execution. Repository
+Vault calls use this variant while retaining their fresh parent-side before/after
+selection checks; legacy calls and other prefix consumers are unchanged.
+
 Bridge's `_agent_worktrees_pinned_selection()` retains the prefix, installation
 root and interpreter for an explicit caller. It also supports its existing
 legacy owner boundary, retaining tombstone checks without a PATH fallback.
@@ -98,6 +112,16 @@ the source still requires a fresh caller. Ordinary load/selection exceptions
 are normalized to context refusal; interruption exceptions still propagate.
 The same refusal normalization covers installation-context primitive and
 fragment initialization, before owner or peer validation can consume that code.
+
+An in-process caller may lend an existing finite executor to a peer observation.
+Only the final independent owner, shipped-peer receipt and peer-governance
+readbacks overlap, each under a fresh copied context. All started work settles
+before results are consumed in their original priority, followed by the final
+runtime-selection check. Initial checks, observation boundaries and refusal
+semantics remain unchanged. The observer neither creates an executor nor retains
+accepted results. Repository Vault selection uses its operation's existing
+Source executor; callers without one and standalone children stay serial and
+do not import executor machinery on that route.
 
 Normal POSIX venv
 interpreter symlinks remain supported. This boundary does not provision,

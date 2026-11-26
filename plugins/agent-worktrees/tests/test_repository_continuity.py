@@ -11,6 +11,8 @@ import sys
 import shutil
 from contextlib import contextmanager
 from types import SimpleNamespace
+from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
 
@@ -19,7 +21,7 @@ from test_repository_setup import URL, commit, git
 from test_repository_setup import source as source
 
 
-def context_source(path: Path, value: dict) -> setup.Setup:
+def context_source(path: Path, value: dict[str, Any]) -> setup.Setup:
     declaration = json.loads((path / setup.DECLARATION).read_text())
     declaration.update(version=2, contexts={"harness-a": value})
     (path / setup.DECLARATION).write_text(json.dumps(declaration))
@@ -48,13 +50,15 @@ def test_context_is_revision_bound_and_source_is_not_opened_on_inspection(source
     {"provider": "local-projection-v1", "source": 1},
     {"provider": "local-projection-v1", "source": "/selected", "extra": True},
 ])
-def test_context_cannot_invent_provider_or_source_defaults(source: Path, value: dict) -> None:
+def test_context_cannot_invent_provider_or_source_defaults(source: Path, value: dict[str, Any]) -> None:
     with pytest.raises(setup.SetupError):
         context_source(source, value)
 
 
 @pytest.mark.parametrize("version", [3, 4, 5])
-def test_selected_ssh_setup_is_explicit_revision_bound_and_old_forms_stay_outbound(source, tmp_path, version):
+def test_selected_ssh_setup_is_explicit_revision_bound_and_old_forms_stay_outbound(
+    source: Path, tmp_path: Path, version: int,
+) -> None:
     context = {"provider": "local-projection-v1", "source": str(tmp_path / "projection.json")}
     legacy = context_source(source, context)
     assert continuity.selected(legacy, "harness-a").ssh_setup is None
@@ -77,7 +81,9 @@ def test_selected_ssh_setup_is_explicit_revision_bound_and_old_forms_stay_outbou
         setup.inspect(source, URL)
 
 
-def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(source, tmp_path, monkeypatch):
+def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     context_source(source, {
         "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
     })
@@ -89,7 +95,7 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     commit(source)
     calls = []
 
-    def runtime(arguments):
+    def runtime(arguments: list[str]) -> dict[str, Any]:
         calls.append(arguments)
         assert arguments == ["capabilities"]
         return {"schema": "fleet-manager.capabilities", "version": 1,
@@ -112,8 +118,8 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     "vault-v5-owner-before-config", "vault-v5-owner-before-install",
 ])
 def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
-    source, tmp_path, monkeypatch, failure,
-):
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Any,
+) -> None:
     from agent_worktrees import repository_ssh_setup as ssh_setup
     owner_changed = False
     data_only = isinstance(failure, str) and failure.startswith("vault-v5-")
@@ -121,7 +127,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         failure = failure.replace("vault-v5-", "vault-")
         from agent_worktrees import repository_vault
 
-        def verify_owner():
+        def verify_owner() -> None:
             if owner_changed:
                 raise setup.SetupError("Installed Vault selection changed")
 
@@ -140,8 +146,11 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
     if vault:
         declaration["version"] = 5 if data_only else 4
+        key_selector: dict[str, Any] = (
+            {"owner": "agent-vault"} if data_only else {"argv": [sys.executable]}
+        )
         declaration["contexts"]["harness-a"]["ssh_key"] = {
-            **({"owner": "agent-vault"} if data_only else {"argv": [sys.executable]}),
+            **key_selector,
             "configuration_root": str(tmp_path),
             "entry": "SSH/node-a", "directory": str(tmp_path / "key"),
             "fingerprint": fingerprint,
@@ -155,7 +164,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         "source_commit": identity.source_commit, "source_tree": identity.source_tree,
         "runtime_version": "0.1.0.profile.abc", "payload_hash": "c" * 64,
     }
-    description = {
+    description: dict[str, Any] = {
         "schema": "fleet-manager.continuity-ssh-setup", "version": 1,
         "snapshot": str(tmp_path / "snapshot"), "root": str(tmp_path / "installation"),
         "selection": selection, "request_digest": "d" * 64, "host": {},
@@ -169,9 +178,9 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "tools"))
     import runtime_application_project as application
-    try:
+    if sys.version_info >= (3, 11):
         import tomllib
-    except ImportError:
+    else:
         import tomli as tomllib
     metadata = tomllib.loads((root / "fleet-manager" / "pyproject.toml").read_text())["project"]
     archive = tmp_path / "fleet_manager-0.1.0-py3-none-any.whl"
@@ -185,11 +194,11 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     )
 
     @contextmanager
-    def inputs(*_args):
+    def inputs(*_args: Any) -> Iterator[tuple[SimpleNamespace, object]]:
         events.append("source-admission")
         yield project, object()
 
-    def install(*_args, **options):
+    def install(*_args: Any, **options: Any) -> dict[str, Any]:
         assert options["expected_version"] == selection["runtime_version"]
         assert options["expected_hash"] == selection["payload_hash"]
         events.append("install")
@@ -209,7 +218,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         install_application=install,
     )
     monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
-    def status(*_args, **_kwargs):
+    def status(*_args: Any, **_kwargs: Any) -> bool:
         nonlocal owner_changed
         if failure == "vault-owner-before-config" and "enroll" in events:
             owner_changed = True
@@ -220,9 +229,22 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         ) or "install" in events
 
     monkeypatch.setattr(ssh_setup, "status", status)
-    monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
+    monkeypatch.setattr(shutil, "which", lambda *_args: sys.executable)
 
-    def vault_runtime(selection, arguments, *, timeout, invocation=None):
+    def vault_runtime(
+        selection: Any, arguments: list[str], *, timeout: int, invocation: Any = None,
+        source: Any = None, verify_source_after: bool = False, workers: Any = None,
+    ) -> tuple[int, dict[str, Any]]:
+        if source is not None:
+            source.verify()
+        result = vault_outcome(selection, arguments, timeout=timeout, invocation=invocation)
+        if source is not None and verify_source_after:
+            source.verify()
+        return result
+
+    def vault_outcome(
+        selection: Any, arguments: list[str], *, timeout: int, invocation: Any = None,
+    ) -> tuple[int, dict[str, Any]]:
         assert timeout <= 120
         assert (invocation is not None) == data_only
         assert selection.entry == "SSH/node-a" and selection.configuration_root == str(tmp_path)
@@ -244,7 +266,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             assert arguments[arguments.index("--directory") + 1] == str(tmp_path / "key")
             if failure == "vault-install-unknown":
                 return 1, {"version": 1, "error": "local_install_failed", "message": "private key path"}
-        result = {"version": 1, "status": "reused", "public_key": public, "fingerprint": fingerprint}
+        result: dict[str, Any] = {"version": 1, "status": "reused", "public_key": public, "fingerprint": fingerprint}
         if failure == "vault-pin":
             result["fingerprint"] = "SHA256:" + "A" * 43
         if operation == "install":
@@ -256,7 +278,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
 
     monkeypatch.setattr(ssh_setup, "_vault_call", vault_runtime)
 
-    def runtime(arguments):
+    def runtime(arguments: list[str]) -> dict[str, Any]:
         nonlocal owner_changed
         if arguments == ["capabilities"]:
             return {"schema": "fleet-manager.capabilities", "version": 1, "capabilities": [
@@ -354,9 +376,11 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert events.count("install") == 1
 
 
-def test_consumer_selects_its_engine_interpreter_with_bounded_native_custody(monkeypatch) -> None:
-    calls = []
-    def run(argv, **kwargs):
+def test_consumer_selects_its_engine_interpreter_with_bounded_native_custody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, '{"status":"ready","stage":"connected"}', "")
     monkeypatch.setattr(continuity, "run_caller_owned", run)
@@ -367,13 +391,13 @@ def test_consumer_selects_its_engine_interpreter_with_bounded_native_custody(mon
     assert options["timeout"] == 30
 
 
-def test_vault_selection_refuses_implicit_launchers_and_ambiguous_key_identity(tmp_path):
-    valid = {
+def test_vault_selection_refuses_implicit_launchers_and_ambiguous_key_identity(tmp_path: Path) -> None:
+    valid: dict[str, Any] = {
         "argv": [sys.executable], "configuration_root": str(tmp_path),
         "entry": "SSH/node-a", "directory": str(tmp_path / "key"),
         "fingerprint": "SHA256:" + "A" * 43,
     }
-    assert setup._ssh_key(valid).argv == (sys.executable,)
+    assert cast(setup.SSHKeySelection, setup._ssh_key(valid)).argv == (sys.executable,)
     for replacement in (
         {"argv": ["agent-vault"]}, {"argv": [str(tmp_path / "agent-vault.ps1")]},
         {"argv": [sys.executable, "line\nbreak"]}, {"configuration_root": "relative"},
@@ -387,8 +411,8 @@ def test_vault_selection_refuses_implicit_launchers_and_ambiguous_key_identity(t
 @pytest.mark.parametrize("installed", [False, True])
 @pytest.mark.parametrize("failure", [None, "needs_unlock", "local_install_failed", "invalid-json", "unsupported"])
 def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(
-    tmp_path, monkeypatch, failure, installed,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None, installed: bool,
+) -> None:
     from agent_worktrees import repository_ssh_setup as ssh_setup
 
     script = tmp_path / "selected-vault.py"
@@ -462,9 +486,11 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(
         assert "private" not in str(refused.value)
     else:
         result = ssh_setup.prepare_key(selected, context, {"key_files": references})
-        assert result is None if failure is None else result.status == (
-            "refused" if failure == "unsupported" else "waiting"
-        )
+        if failure is None:
+            assert result is None
+        else:
+            assert result is not None
+            assert result.status == ("refused" if failure == "unsupported" else "waiting")
         if result is not None:
             assert "private" not in result.message
             assert ("Unlock" in result.message) == (failure == "needs_unlock")
@@ -482,16 +508,19 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(
 
 @pytest.mark.parametrize("version", [4, 5])
 def test_versioned_vault_selector_is_strict_and_inspection_is_data_only(
-    source, tmp_path, monkeypatch, version,
-):
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int,
+) -> None:
     from agent_worktrees import repository_vault
 
     monkeypatch.setattr(repository_vault, "selected", lambda: pytest.fail("inspection resolved Vault"))
-    key = {
+    key: dict[str, Any] = {
         "configuration_root": str(tmp_path / "absent-config"), "entry": "-SSH/node-a",
         "directory": str(tmp_path / "absent-keys"), "fingerprint": "SHA256:" + "A" * 43,
     }
-    key.update({"argv": [sys.executable]} if version == 4 else {"owner": "agent-vault"})
+    selector: dict[str, Any] = (
+        {"argv": [sys.executable]} if version == 4 else {"owner": "agent-vault"}
+    )
+    key.update(selector)
     declaration = json.loads((source / setup.DECLARATION).read_text())
     declaration.update(version=version, contexts={"harness-a": {
         "provider": "local-projection-v1", "source": str(tmp_path / "projection.json"),
@@ -501,7 +530,7 @@ def test_versioned_vault_selector_is_strict_and_inspection_is_data_only(
     commit(source)
     selected = setup.inspect(source, URL)
     selected.verify()
-    bound = continuity.selected(selected, "harness-a").ssh_key
+    bound = cast(setup.SSHKeySelection, continuity.selected(selected, "harness-a").ssh_key)
     assert bound.owner == ("agent-vault" if version == 5 else None)
     assert bound.argv == (() if version == 5 else (sys.executable,))
     declaration["contexts"]["harness-a"]["ssh_key"]["entry"] = "SSH/changed"
@@ -512,15 +541,20 @@ def test_versioned_vault_selector_is_strict_and_inspection_is_data_only(
 
 @pytest.mark.parametrize("installed", [False, True])
 @pytest.mark.parametrize("invalid", ["other-selector", "unknown-owner", "mixed", "missing"])
-def test_vault_key_versions_do_not_accept_each_others_selector(tmp_path, installed, invalid):
-    key = {
+def test_vault_key_versions_do_not_accept_each_others_selector(
+    tmp_path: Path, installed: bool, invalid: str,
+) -> None:
+    key: dict[str, Any] = {
         "configuration_root": str(tmp_path), "entry": "SSH/node-a",
         "directory": str(tmp_path / "key"), "fingerprint": "SHA256:" + "A" * 43,
         **({"owner": "agent-vault"} if installed else {"argv": [sys.executable]}),
     }
     if invalid == "other-selector":
         key.pop("owner" if installed else "argv")
-        key.update({"argv": [sys.executable]} if installed else {"owner": "agent-vault"})
+        selector: dict[str, Any] = (
+            {"argv": [sys.executable]} if installed else {"owner": "agent-vault"}
+        )
+        key.update(selector)
     elif invalid == "unknown-owner":
         key["owner"] = "other-vault"
     elif invalid == "mixed":
@@ -531,7 +565,9 @@ def test_vault_key_versions_do_not_accept_each_others_selector(tmp_path, install
         setup._ssh_key(key, installed=installed)
 
 
-def test_installed_vault_change_refuses_before_next_credential_child(tmp_path, monkeypatch):
+def test_installed_vault_change_refuses_before_next_credential_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import repository_ssh_setup as ssh_setup, repository_vault
 
     original = repository_vault.VaultInvocation((sys.executable,), "original", {})
@@ -546,17 +582,19 @@ def test_installed_vault_change_refuses_before_next_credential_child(tmp_path, m
         ssh_setup._vault_call(selection, ["ssh-key", "prepare"], timeout=30, invocation=original)
 
 @pytest.mark.parametrize("missing", ["continuity-ssh-key-reference-v1", "continuity-ssh-key-pin-v1"])
-def test_selected_vault_refuses_old_fleet_before_request_or_credential_access(tmp_path, monkeypatch, missing):
+def test_selected_vault_refuses_old_fleet_before_request_or_credential_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str,
+) -> None:
     from agent_worktrees import repository_ssh_setup as ssh_setup
 
     key = setup.SSHKeySelection((sys.executable,), str(tmp_path), "SSH/node-a", str(tmp_path / "key"),
                                 "SHA256:" + "A" * 43)
     context = setup.ContinuityContext("harness-a", "local-projection-v1", str(tmp_path / "source"),
                                       str(tmp_path / "absent-request"), key)
-    selected = SimpleNamespace(contexts=(context,), verify=lambda: None)
+    selected: Any = SimpleNamespace(contexts=(context,), verify=lambda: None)
     calls = []
 
-    def runtime(arguments):
+    def runtime(arguments: list[str]) -> dict[str, Any]:
         calls.append(arguments)
         return {"schema": "fleet-manager.capabilities", "version": 1, "capabilities": [
             item for item in (
@@ -571,7 +609,9 @@ def test_selected_vault_refuses_old_fleet_before_request_or_credential_access(tm
     assert calls == [["capabilities"]]
 
 
-def test_vault_gate_requalifies_source_before_credential_operation(tmp_path, monkeypatch):
+def test_vault_gate_requalifies_source_before_credential_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import repository_ssh_setup as ssh_setup
 
     selection = setup.SSHKeySelection((sys.executable,), str(tmp_path), "SSH/node-a", str(tmp_path / "key"),
@@ -579,12 +619,14 @@ def test_vault_gate_requalifies_source_before_credential_operation(tmp_path, mon
     context = SimpleNamespace(ssh_key=selection)
     checks, calls = [], []
 
-    def verify():
+    def verify() -> None:
         checks.append("check")
         if len(checks) == 2:
             raise setup.SetupError("source changed")
 
-    def runtime(_selection, arguments, **kwargs):
+    def runtime(
+        _selection: Any, arguments: list[str], **kwargs: Any,
+    ) -> tuple[int, dict[str, Any]]:
         calls.append(arguments)
         return 0, {"schema": "agent-vault.invocation", "version": 1,
                    "capabilities": ["configuration-root-v1", "ssh-key-install-pin-v1"]}
@@ -602,8 +644,8 @@ def test_vault_gate_requalifies_source_before_credential_operation(tmp_path, mon
     (True, True, None), (False, True, "not-running"), (True, False, "incomplete-construction"),
 ])
 def test_setup_status_requires_live_convergence_after_installed_receipt(
-    tmp_path, monkeypatch, ready, complete, stage,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ready: bool, complete: bool, stage: str | None,
+) -> None:
     from agent_worktrees import repository_ssh_setup as ssh_setup
 
     root = tmp_path / "installation"
@@ -616,9 +658,10 @@ def test_setup_status_requires_live_convergence_after_installed_receipt(
         current_version=lambda *_args: "0.1.0",
         is_complete=lambda *_args, **_kwargs: complete,
     )))
-    monkeypatch.setattr(continuity, "_invoke", lambda *_args, **_kwargs: (
-        {"ready": True, "selected": True, "revision": 7} if ready else {"state": "not-running"}
-    ))
+    def runtime_status(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"ready": True, "selected": True, "revision": 7} if ready else {"state": "not-running"}
+
+    monkeypatch.setattr(continuity, "_invoke", runtime_status)
     if stage is None:
         assert ssh_setup.status(description, owner, require_ready=True)
     else:
@@ -646,7 +689,7 @@ def test_two_repositories_with_same_context_keep_separate_stable_machine_state(
     second = setup.inspect(other, other_url)
     operations = []
 
-    def runtime(arguments: list[str]) -> dict:
+    def runtime(arguments: list[str]) -> dict[str, Any]:
         if arguments == ["capabilities"]:
             return {"schema": "fleet-manager.capabilities", "version": 1,
                     "capabilities": [continuity.CAPABILITY, "local-projection-v1"]}

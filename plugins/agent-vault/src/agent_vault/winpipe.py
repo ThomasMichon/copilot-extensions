@@ -18,11 +18,14 @@ Everything here is a no-op / unavailable off Windows (guarded on
 
 from __future__ import annotations
 
-import asyncio
 import ctypes
 import json
 import sys
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import asyncio
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -34,14 +37,14 @@ _ERROR_PIPE_BUSY = 231
 _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
 
-def _kernel32():
+def _kernel32() -> Any:
     """Return kernel32 with the handful of signatures this module uses set.
 
     Setting ``restype``/``argtypes`` matters on 64-bit Windows: a HANDLE is a
     pointer, and the default ``c_int`` restype would *truncate* it and corrupt
     the comparison against ``INVALID_HANDLE_VALUE``.
     """
-    k32 = ctypes.windll.kernel32
+    k32 = cast(Any, ctypes).windll.kernel32
     k32.CreateFileW.restype = ctypes.c_void_p
     k32.CreateFileW.argtypes = [
         ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
@@ -71,10 +74,12 @@ def pipe_absent(pipe_path: str) -> bool:
     kernel = _kernel32()
     if kernel.WaitNamedPipeW(pipe_path, 1):
         return False
-    return kernel.GetLastError() == 2
+    return bool(kernel.GetLastError() == 2)
 
 
-def pipe_send(pipe_path: str, request: dict, timeout: float | None = 5.0) -> dict | None:
+def pipe_send(
+    pipe_path: str, request: dict[str, Any], timeout: float | None = 5.0,
+) -> dict[str, Any] | None:
     """Send a newline-framed JSON request over a Windows named pipe; parse reply.
 
     Returns the decoded response dict, or ``None`` on any failure (unreachable
@@ -115,7 +120,7 @@ def pipe_send(pipe_path: str, request: dict, timeout: float | None = 5.0) -> dic
             out += buf.raw[: read.value]
         if not out:
             return None
-        return json.loads(out.decode().strip())
+        return cast(dict[str, Any], json.loads(out.decode().strip()))
     except Exception:
         return None
     finally:
@@ -126,7 +131,7 @@ def pipe_send(pipe_path: str, request: dict, timeout: float | None = 5.0) -> dic
 async def start_pipe_server(
     pipe_path: str,
     connected_cb: Callable[[asyncio.StreamReader, asyncio.StreamWriter], object],
-) -> list:
+) -> list[Any]:
     """Start an asyncio named-pipe server, bridging each client to ``connected_cb``.
 
     ``connected_cb(reader, writer)`` mirrors the ``asyncio.start_server`` callback
@@ -136,6 +141,8 @@ async def start_pipe_server(
     """
     if not IS_WINDOWS:
         raise RuntimeError("named pipes are Windows-only")
+    import asyncio
+
     loop = asyncio.get_event_loop()
     serve = getattr(loop, "start_serving_pipe", None)
     if serve is None:
@@ -143,7 +150,7 @@ async def start_pipe_server(
 
     # Retain references to in-flight handler tasks so they aren't GC'd mid-run
     # (the server closures keep this set alive for the server's lifetime).
-    pending: set = set()
+    pending: set[asyncio.Future[Any]] = set()
 
     def factory() -> asyncio.Protocol:
         reader = asyncio.StreamReader()
@@ -157,4 +164,4 @@ async def start_pipe_server(
 
         return asyncio.StreamReaderProtocol(reader, _on_connect)
 
-    return await serve(factory, pipe_path)
+    return cast(list[Any], await serve(factory, pipe_path))

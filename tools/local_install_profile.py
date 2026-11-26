@@ -34,6 +34,7 @@ import install_source as install_source
 source_inputs = install_source
 from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
 from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs as retain_wheel_inputs
+from installer_source_build import frozen_procutil
 
 from build_toolchain_lock import _query_marker_environment
 from application_sources import application_sources
@@ -281,6 +282,7 @@ def complete_profile(
 def _write_snapshot(
     selected: source_inputs.ProjectSource, output: Path, profile: RuntimeProfile,
     retained: WheelSnapshot, *, deadline: float, uv: str | None = None,
+    source_in_place: bool = False,
 ) -> Path:
     prepared = output / "snapshot"
     if prepared.exists() or prepared.is_symlink():
@@ -291,17 +293,46 @@ def _write_snapshot(
     packages = engine._package_roots(
         selected.payload, **({"closed_wheels": True} if selected.closed_wheel_source else {}),
     )
-    common = Path(os.path.commonpath(packages))
-    layout = selected.payload.relative_to(common)
-    payload_destination = payload.parents[len(layout.parts) - 1] if layout.parts else payload
-    frozen = engine.freeze_inputs(
-        selected.payload, payload_destination, deadline=deadline,
-        closed_wheel_source=selected.closed_wheel_source,
-    )
-    if frozen.plugin != payload:
+    source_files: tuple[Path, ...] = ()
+    source_hash: str | None = None
+
+    def check_time() -> None:
+        _check_deadline(deadline)
+
+    if source_in_place:
+        original_source = output / "source"
+        if (
+            not selected.closed_wheel_source
+            or selected.payload != source_inputs._member(output, relative)
+            or not selected.payload.is_relative_to(original_source)
+        ):
+            raise ProfileError("in-place snapshot requires its freshly composed closed-wheel Source")
+        source_files = engine._source_input_files(
+            packages, closed_wheel_source=True, on_progress=check_time,
+        )
+        source_hash = engine._construction_hash(
+            source_files, (), on_progress=check_time,
+        )
+        prepared.mkdir()
+        original_source.rename(prepared / "source")
+        (output / source_inputs.MANIFEST).rename(prepared / source_inputs.MANIFEST)
+        packages = tuple(prepared / "source" / root.relative_to(original_source) for root in packages)
+        source_files = tuple(
+            prepared / "source" / path.relative_to(original_source) for path in source_files
+        )
+        frozen_plugin = payload
+    else:
+        common = Path(os.path.commonpath(packages))
+        layout = selected.payload.relative_to(common)
+        payload_destination = payload.parents[len(layout.parts) - 1] if layout.parts else payload
+        frozen_plugin = engine.freeze_inputs(
+            selected.payload, payload_destination, deadline=deadline,
+            closed_wheel_source=selected.closed_wheel_source,
+        ).plugin
+    if frozen_plugin != payload:
         raise ProfileError("prepared project payload does not match its selected layout")
     if sources.read_source_identity(
-        frozen.plugin, selected.identity.package_version, plugin=component,
+        frozen_plugin, selected.identity.package_version, plugin=component,
     ) != selected.identity:
         raise ProfileError("prepared project source differs from its selected identity")
     wheels = prepared / "wheels" / component
@@ -318,7 +349,7 @@ def _write_snapshot(
     record["projects"] = {selected.project_key: record["projects"][selected.project_key]}
     project = record["projects"][selected.project_key]
     project.update({
-        "payload": frozen.plugin.relative_to(prepared).as_posix(),
+        "payload": frozen_plugin.relative_to(prepared).as_posix(),
         "wheels": wheels.relative_to(prepared).as_posix(),
         "wheel_inputs": wheels.relative_to(prepared).as_posix(),
         "profile": profile_path.relative_to(prepared).as_posix(),
@@ -326,55 +357,87 @@ def _write_snapshot(
     (prepared / source_inputs.MANIFEST).write_text(
         json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
     )
-    if uv is not None:
-        from runtime_application_project import emit, install_callbacks
-
-        project_metadata = dependencies._toml(frozen.plugin / "pyproject.toml")
-        metadata = project_metadata["project"]
-        profile_record = profile.record()
-        environment = profile_record["target"]["environment"]
-        major, minor = environment["python_full_version"].split(".")[:2]
-        application = prepared / "applications" / component
-        commands = metadata.get("scripts", {})
-        primary = metadata["name"] if metadata["name"] in commands else next(iter(commands), "")
-        roots = profile_record["roots"]
-        root_names = {
-            canonicalize_name(_requirement(requirement, deadline).name) for requirement in roots
-        }
-        with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
-            construction = source_inputs.application_inputs(observed, inputs)
-        setup, start = install_callbacks(
-            primary, extras=tuple(construction["extras"]), metadata=project_metadata,
-        )
-        emit(
-            application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
-            requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
-            commands=commands, primary=primary, setup=setup, start=start,
-            remove=project_metadata.get("tool", {}).get(
-                "copilot-extensions", {},
-            ).get("application", {}).get("remove"),
-            callback_timeout_seconds=project_metadata.get("tool", {}).get(
-                "copilot-extensions", {},
-            ).get("application", {}).get("callback_timeout_seconds"),
-            wheels={row["name"]: wheels / row["filename"] for row in profile_record["wheels"]},
-            runtime_source=selected.identity.document(), target_environment=environment,
-            target_tags=profile_record["target"]["tags"],
-            construction=construction,
-            requirements=[
-                *roots,
-                *(row["name"] + "==" + row["version"] for row in profile_record["wheels"]
-                  if row["name"] not in root_names),
-            ],
-        )
-        _lock_application(application, uv=uv, deadline=deadline)
-        project["application"] = application.relative_to(prepared).as_posix()
-    (prepared / source_inputs.MANIFEST).write_text(
-        json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
-    )
+    emitted_wheel_directories = [(project["wheel_inputs"], retained.digests)]
     with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
         if observed.identity != selected.identity:
             raise ProfileError("prepared snapshot source changed during readback")
+        if uv is not None:
+            from runtime_application_project import emit, install_callbacks
+
+            project_metadata = dependencies._toml(frozen_plugin / "pyproject.toml")
+            metadata = project_metadata["project"]
+            profile_record = profile.record()
+            environment = profile_record["target"]["environment"]
+            major, minor = environment["python_full_version"].split(".")[:2]
+            application = prepared / "applications" / component
+            commands = metadata.get("scripts", {})
+            primary = metadata["name"] if metadata["name"] in commands else next(iter(commands), "")
+            roots = profile_record["roots"]
+            root_names = {
+                canonicalize_name(_requirement(requirement, deadline).name) for requirement in roots
+            }
+            construction = source_inputs.application_inputs(observed, inputs)
+            setup, start = install_callbacks(
+                primary, extras=tuple(construction["extras"]), metadata=project_metadata,
+            )
+            emit(
+                application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
+                requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
+                commands=commands, primary=primary, setup=setup, start=start,
+                remove=project_metadata.get("tool", {}).get(
+                    "copilot-extensions", {},
+                ).get("application", {}).get("remove"),
+                callback_timeout_seconds=project_metadata.get("tool", {}).get(
+                    "copilot-extensions", {},
+                ).get("application", {}).get("callback_timeout_seconds"),
+                wheels={row["name"]: wheels / row["filename"] for row in profile_record["wheels"]},
+                runtime_source=selected.identity.document(), target_environment=environment,
+                target_tags=profile_record["target"]["tags"],
+                construction=construction,
+                requirements=[
+                    *roots,
+                    *(row["name"] + "==" + row["version"] for row in profile_record["wheels"]
+                      if row["name"] not in root_names),
+                ],
+            )
+            emitted_wheel_directories.append((
+                application.relative_to(prepared).as_posix() + "/wheels",
+                {row["filename"]: retained.digests[row["filename"]] for row in profile_record["wheels"]},
+            ))
+            _lock_application(application, uv=uv, deadline=deadline)
+            project["application"] = application.relative_to(prepared).as_posix()
+        (prepared / source_inputs.MANIFEST).write_text(
+            json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
+        )
+        readback = source_inputs.select_project(prepared, component)
+        if readback.identity != selected.identity or readback.record != record:
+            raise ProfileError("prepared snapshot source changed during readback")
+        if profile_path.read_bytes() != profile.canonical:
+            raise ProfileError("prepared snapshot profile changed during emission")
+        # The inspected scope owns private copies, not these emitted files.
+        for directory, digests in emitted_wheel_directories:
+            with retain_wheel_inputs(
+                {
+                    name: source_inputs._member(prepared, directory + "/" + name)
+                    for name in digests
+                },
+                digests, max_wheels=256, max_archive_bytes=128 << 20,
+                max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
+            ) as emitted:
+                emitted.verify()
         inputs.verify()
+    if source_in_place:
+        if (
+            engine._package_roots(frozen_plugin, closed_wheels=True) != packages
+            or engine._source_input_files(
+                packages, closed_wheel_source=True, on_progress=check_time,
+            ) != source_files
+            or engine._construction_hash(
+                source_files, (), on_progress=check_time,
+            ) != source_hash
+        ):
+            raise ProfileError("prepared source inputs changed during snapshot emission")
+    _check_deadline(deadline)
     return prepared
 
 
@@ -474,7 +537,7 @@ def _prepare_profile(
         record["files"], feeds=feed.feeds, download_origins=feed.download_origins,
         cutoffs=feed.cutoffs, policy_id=feed.policy_id, limits=limits, deadline=deadline,
         ssl_context=feed.context, proxies=feed.proxies,
-        procutil=engine._procutil(engine.FrozenInputs(
+        procutil=frozen_procutil(engine.FrozenInputs(
             selected.payload, tuple(sorted(packages)),
             selected.identity.assembly_hash,
         )),

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from . import _peer_launch, peer_launch_adapter, reconcile
-from .repository_setup import SetupError, _environment
+from .repository_setup import SetupError, _environment, _source_workers
 
 
 @dataclass(frozen=True)
@@ -27,16 +27,21 @@ def selected() -> VaultInvocation:
     try:
         environment = _environment(attended=False)
         if "COPILOT_EXTENSIONS_CONTEXT" in os.environ:
-            own = peer_launch_adapter.validate_context()
-            if own is None:
+            reference = peer_launch_adapter.context_reference()
+            if reference is None:
                 raise ValueError("An explicit installation context is required")
-            root = Path(own["pluginRoot"])
-            prefix, python = _peer_launch.pinned_launch_prefix(
-                "agent-worktrees", root, own["installReceipt"], "agent-vault",
+            root, context = reference
+            own, peer, _peer_environment, python = _peer_launch._resolve_peer_observation(
+                "agent-worktrees", root, context, "agent-vault",
+                allow_native=False, workers=_source_workers.get(),
             )
-            peer, _peer_environment, _python = _peer_launch._resolve_peer(
-                "agent-worktrees", root, own["installReceipt"], "agent-vault",
-                allow_native=False, pinned_python=python,
+            if python is None:
+                raise ValueError("Vault has no completed observable runtime")
+            root = Path(own["pluginRoot"])
+            identity = _peer_launch.retained_runtime_identity(Path(peer["pluginRoot"]), python, "agent_vault")
+            prefix = _peer_launch.retained_peer_prefix(
+                "agent-worktrees", root, own["installReceipt"], "agent-vault", python,
+                runtime_identity=identity,
             )
             binding = json.dumps([own, peer], sort_keys=True)
         else:

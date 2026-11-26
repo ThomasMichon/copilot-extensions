@@ -1,7 +1,8 @@
 """Contained Source preparation controls; no backend, environment or application runs."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -14,11 +15,13 @@ import zipfile
 
 from packaging.markers import default_environment
 from packaging.tags import sys_tags
+from packaging.utils import canonicalize_name
 import pytest
 
 import local_install_closed_wheels as closed
 import local_install_profile as profiles
 import local_install_source as source
+from installer_wheel_inputs import inspect_archive
 from wheel_input_fixture import wheel_bytes as _wheel_bytes
 
 wheel_bytes = cast(Callable[..., bytes], _wheel_bytes)
@@ -145,6 +148,148 @@ def test_closed_wheels_preserve_development_source_and_real_application_lock(
         profiles.engine._package_roots(selected.payload)
     with pytest.raises(ValueError, match="already exists"):
         closed.prepare(**application)
+
+
+def test_snapshot_retains_one_inspected_wheel_scope_through_real_lock(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_inputs = profiles.source_inputs.project_inputs
+    original_lock = profiles._lock_application
+    entered = 0
+    active = 0
+
+    @contextmanager
+    def project_inputs(*args: Any, **kwargs: Any) -> Iterator[Any]:
+        nonlocal entered, active
+        entered += 1
+        with original_inputs(*args, **kwargs) as selected:
+            active += 1
+            try:
+                yield selected
+            finally:
+                active -= 1
+
+    def lock(*args: Any, **kwargs: Any) -> None:
+        assert active == 1, "application emission must retain its inspected wheel custody"
+        original_lock(*args, **kwargs)
+
+    monkeypatch.setattr(profiles.source_inputs, "project_inputs", project_inputs)
+    monkeypatch.setattr(profiles, "_lock_application", lock)
+    prepared = closed.prepare(**application)
+    assert entered == 1 and active == 0
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    assert (prepared / selected.project["application"] / "uv.lock").is_file()
+
+
+def test_closed_source_reaches_final_snapshot_without_another_copy(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = source._source_projects
+    sources: list[tuple[int, int]] = []
+
+    def selected_source(directory: Path, *args: Any, **kwargs: Any) -> Any:
+        result = original(directory, *args, **kwargs)
+        identity = (directory / "app/src/demo_app/__init__.py").stat()
+        sources.append((identity.st_dev, identity.st_ino))
+        return result
+
+    monkeypatch.setattr(source, "_source_projects", selected_source)
+    prepared = closed.prepare(**application)
+    identity = (prepared / "source/app/src/demo_app/__init__.py").stat()
+    assert sources == [(identity.st_dev, identity.st_ino)]
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    assert (prepared / selected.project["application"] / "uv.lock").is_file()
+
+
+@pytest.mark.parametrize("application", ["dist/legacy.whl"], indirect=True)
+@pytest.mark.parametrize("changed", ["content", "file-set"])
+def test_in_place_snapshot_refuses_changed_generated_source_inputs(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    original_lock = profiles._lock_application
+
+    def lock(directory: Path, *, uv: str, deadline: float) -> None:
+        original_lock(directory, uv=uv, deadline=deadline)
+        generated = directory.parent.parent / "source/app/dist"
+        if changed == "file-set":
+            (generated / "added.bin").write_bytes(b"added during emission")
+        else:
+            path = generated / "legacy.whl"
+            before = path.stat()
+            content = path.read_bytes()
+            path.write_bytes(bytes((content[0] ^ 1,)) + content[1:])
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    monkeypatch.setattr(profiles, "_lock_application", lock)
+    with pytest.raises((ValueError, RuntimeError), match="changed|differs|identity"):
+        closed.prepare(**application)
+
+
+@pytest.mark.parametrize("changed", ["profile", "wheel", "application-wheel", "source"])
+def test_snapshot_retained_scope_refuses_changes_during_real_lock(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    original_lock = profiles._lock_application
+
+    def lock(directory: Path, *, uv: str, deadline: float) -> None:
+        original_lock(directory, uv=uv, deadline=deadline)
+        prepared = directory.parent.parent
+        if changed == "profile":
+            path = prepared / "profiles" / "demo-app.json"
+            record = json.loads(path.read_bytes())
+            record["approval_source"] += "-changed"
+            path.write_text(json.dumps(record))
+        else:
+            path = (
+                prepared / "wheels" / "demo-app" / "helper-1.0.0-py3-none-any.whl"
+                if changed == "wheel"
+                else directory / "wheels" / "helper-1.0.0-py3-none-any.whl"
+                if changed == "application-wheel"
+                else prepared / "source" / "app" / "src" / "demo_app" / "__init__.py"
+            )
+            before = path.stat()
+            content = path.read_bytes()
+            path.write_bytes(bytes((content[0] ^ 1,)) + content[1:])
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    monkeypatch.setattr(profiles, "_lock_application", lock)
+    with pytest.raises((ValueError, RuntimeError), match="changed|differs|identity|digest"):
+        closed.prepare(**application)
+
+
+@pytest.mark.parametrize("invalid_dependency", [False, True])
+def test_application_lookup_hints_do_not_replace_complete_wheel_inspection(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, invalid_dependency: bool,
+) -> None:
+    original_association = original_profile = inspect_archive
+    associated: list[str] = []
+    inspected: list[str] = []
+
+    def association(*args: Any, **kwargs: Any) -> Any:
+        facts = original_association(*args, **kwargs)
+        associated.append(canonicalize_name(facts.name))
+        return facts
+
+    def profile(*args: Any, **kwargs: Any) -> Any:
+        inspected.append(str(args[0].name))
+        return original_profile(*args, **kwargs)
+
+    monkeypatch.setattr(closed, "inspect_archive", association)
+    monkeypatch.setattr(profiles, "inspect_archive", profile)
+    if invalid_dependency:
+        path = application["archives"]["helper-1.0.0-py3-none-any.whl"]
+        path.write_bytes(b"not a wheel archive")
+        application["digests"][path.name] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        monkeypatch.setattr(
+            profiles, "_lock_application",
+            lambda *_args, **_kwargs: pytest.fail("invalid dependency reached application lock"),
+        )
+        with pytest.raises((ValueError, RuntimeError), match="archive|wheel|ZIP"):
+            closed.prepare(**application)
+    else:
+        closed.prepare(**application)
+    assert associated == ["demo-app"]
+    assert len(inspected) == 2
 
 
 @pytest.mark.parametrize("isolated_preparation", [False, True])
@@ -454,7 +599,7 @@ def test_original_flat_package_discovery_is_bound_to_the_actual_wheel(
 
 @pytest.mark.parametrize("layout", ["runtime-input-provider", "runtime-source-tools"])
 def test_packaged_provider_completes_preparation_without_checkout_imports(
-    application: dict[str, Any], tmp_path: Path, layout: str,
+    tmp_path: Path, layout: str, request: pytest.FixtureRequest,
 ) -> None:
     import materialize_launch_wrapper_assets as wrappers
 
@@ -467,6 +612,8 @@ def test_packaged_provider_completes_preparation_without_checkout_imports(
     )
     assert report and all(line.startswith("OK") for line in report), report
     tools = destination / "scripts" / layout / "tools"
+    # Packaging is test setup, not part of the preparation invocation's budget.
+    application = cast(dict[str, Any], request.getfixturevalue("application"))
     options = dict(application)
     options["repository"] = str(options["repository"])
     options["output"] = str(options["output"])
@@ -490,4 +637,4 @@ def test_packaged_provider_completes_preparation_without_checkout_imports(
         cwd=tmp_path, capture_output=True, text=True, deadline=application["deadline"],
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert Path(result.stdout.strip()) == application["output"] / "snapshot"
+    assert Path(result.stdout.strip()).samefile(application["output"] / "snapshot")

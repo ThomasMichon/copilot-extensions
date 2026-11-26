@@ -1,0 +1,41 @@
+{
+  "comment": "Derive application constructor facts from one fresh Source observation and share invocation-owned closed-wheel Source preparation without caching accepted state.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

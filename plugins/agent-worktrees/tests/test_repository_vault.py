@@ -1,26 +1,227 @@
 """Installed-owner selection does not guess another Vault or provision one."""
 
+from contextvars import ContextVar
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 import json
 import os
 import shutil
+import subprocess
 import sys
+import threading
 import venv
 
 import pytest
 
+from agent_procutil.owned_process import run_caller_owned
+from agent_procutil import no_window_kwargs
 from agent_worktrees import repository_vault as vault
+from agent_worktrees import _peer_launch, peer_launch_adapter, reconcile
 from agent_worktrees.repository_setup import SetupError
 
 
+@pytest.mark.parametrize("failure", [None, "source", "selection", "both"])
+def test_initial_source_and_vault_selection_overlap_and_settle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    from agent_worktrees import repository_setup, repository_ssh_setup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    arguments: tuple[str, ...]
+    for arguments in (
+        ("init", "-q"), ("config", "core.autocrlf", "false"),
+        ("remote", "add", "origin", "https://example.invalid/team/sample.git"),
+    ):
+        subprocess.run(["git", "-C", str(source), *arguments], check=True,
+                       capture_output=True, **no_window_kwargs())
+    (source / ".agent-worktrees").mkdir()
+    (source / repository_setup.DECLARATION).write_text(json.dumps({
+        "version": 1, "entrypoints": {
+            "windows": {"runtime": "powershell", "script": "setup.ps1"},
+            "posix": {"runtime": "bash", "script": "setup.sh"},
+        },
+    }), encoding="utf-8")
+    for script in ("setup.ps1", "setup.sh"):
+        (source / script).write_text("", encoding="utf-8")
+    for arguments in (
+        ("add", "."),
+        ("-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture", "--no-verify"),
+    ):
+        subprocess.run(["git", "-C", str(source), *arguments], check=True,
+                       capture_output=True, **no_window_kwargs())
+    selected = repository_setup.inspect(source, "https://example.invalid/team/sample.git")
+    directory = tmp_path / "key"
+    selection = repository_setup.SSHKeySelection(
+        (), str(tmp_path), "SSH/node", str(directory), "unused", owner="agent-vault",
+    )
+    description = {"key_files": {
+        "identity_file": str(directory / "id_ed25519"),
+        "public_key_file": str(directory / "id_ed25519.pub"),
+    }}
+    rendezvous = threading.Barrier(2, timeout=3)
+    caller_context = ContextVar("initial-vault-caller", default=-1)
+    token = caller_context.set(9)
+    settled: set[str] = set()
+    workers: set[threading.Thread] = set()
+    original_verify = repository_setup.Setup.verify
+    calls: list[list[str]] = []
+
+    def observe(name: str) -> None:
+        workers.add(threading.current_thread())
+        assert caller_context.get() == 9
+        rendezvous.wait()
+        if failure in (name, "both"):
+            raise SetupError(name + " failed")
+
+    def verify(value: repository_setup.Setup) -> None:
+        try:
+            observe("source")
+            original_verify(value)
+        finally:
+            settled.add("source")
+
+    def choose() -> Any:
+        try:
+            observe("selection")
+            return SimpleNamespace(argv=("peer-python",), environment={}, verify=lambda: None)
+        finally:
+            settled.add("selection")
+
+    def child(argv: list[str], **_kwargs: Any) -> SimpleNamespace:
+        assert settled == {"source", "selection"}
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}")
+
+    monkeypatch.setattr(repository_setup.Setup, "verify", verify)
+    monkeypatch.setattr(vault, "selected", choose)
+    monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
+    try:
+        if failure:
+            expected = "source" if failure == "both" else failure
+            with pytest.raises(SetupError, match=expected + " failed"):
+                repository_ssh_setup.prepare_key(selected, SimpleNamespace(ssh_key=selection), description)
+        else:
+            result = repository_ssh_setup.prepare_key(selected, SimpleNamespace(ssh_key=selection), description)
+            assert result is not None and result.status == "refused"
+        assert settled == {"source", "selection"}
+        assert len(calls) == (0 if failure else 1)
+        assert len(workers) == 2
+        assert all(not worker.is_alive() for worker in workers)
+    finally:
+        caller_context.reset(token)
+
+
+@pytest.mark.parametrize("failure", [None, "source-before", "owner-before", "source-after", "owner-after"])
+def test_key_application_joins_all_fresh_source_and_owner_barriers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
+    import base64
+    import hashlib
+
+    from agent_worktrees import repository_setup, repository_ssh_setup
+
+    public = "ssh-ed25519 " + base64.b64encode(
+        b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"k" * 32,
+    ).decode("ascii")
+    fingerprint = "SHA256:" + base64.b64encode(
+        hashlib.sha256(base64.b64decode(public.split()[1])).digest(),
+    ).decode("ascii").rstrip("=")
+    directory = tmp_path / "key"
+    selection = repository_setup.SSHKeySelection(
+        (), str(tmp_path), "SSH/node", str(directory), fingerprint, owner="agent-vault",
+    )
+    description = {"key_files": {
+        "identity_file": str(directory / "id_ed25519"),
+        "public_key_file": str(directory / "id_ed25519.pub"),
+    }}
+    barriers = [threading.Barrier(2) for _ in range(4)]
+    source_checks: list[int] = []
+    owner_checks: list[int] = []
+    settled: list[tuple[str, int]] = []
+    calls: list[list[str]] = []
+    caller_context = ContextVar("key-preparation-caller", default=-1)
+    caller_context.set(0)
+    observations: list[tuple[int, int]] = []
+    workers: set[threading.Thread] = set()
+
+    def source_verify() -> None:
+        index = len(source_checks)
+        source_checks.append(index)
+        observations.append((caller_context.get(), index))
+        workers.add(threading.current_thread())
+        try:
+            barriers[index].wait(timeout=3)
+            if failure == ("source-after" if index == 3 else "source-before") and index in (0, 3):
+                raise SetupError("source changed")
+        finally:
+            settled.append(("source", index))
+
+    def owner_verify() -> None:
+        index = len(owner_checks)
+        owner_checks.append(index)
+        observations.append((caller_context.get(), (0, 1, 1, 2, 2, 3)[index]))
+        if threading.current_thread() is not threading.main_thread():
+            workers.add(threading.current_thread())
+        try:
+            if index in (0, 2, 4, 5):
+                barriers[(0, 2, 4, 5).index(index)].wait(timeout=3)
+            if failure == ("owner-after" if index == 5 else "owner-before") and index in (0, 5):
+                raise SetupError("owner changed")
+        finally:
+            settled.append(("owner", index))
+
+    def child(argv: list[str], **_kwargs: Any) -> SimpleNamespace:
+        arguments = argv[3:]
+        calls.append(arguments)
+        assert len(source_checks) == len(calls)
+        assert len(owner_checks) == 2 * len(calls) - 1
+        assert ("source", len(calls) - 1) in settled
+        assert ("owner", 2 * len(calls) - 2) in settled
+        value: dict[str, Any]
+        if arguments == ["invocation-contract", "--json"]:
+            value = {"schema": "agent-vault.invocation", "version": 1,
+                     "capabilities": ["configuration-root-v1", "ssh-key-install-pin-v1"]}
+        else:
+            value = {"version": 1, "status": "reused", "public_key": public, "fingerprint": fingerprint}
+            if arguments[1] == "install":
+                value.update(private_key_path=description["key_files"]["identity_file"],
+                             public_key_path=description["key_files"]["public_key_file"])
+        caller_context.set(len(calls))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(value))
+
+    monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
+    invocation: Any = SimpleNamespace(argv=("peer-python",), environment={}, verify=owner_verify)
+    arguments = (
+        SimpleNamespace(verify=source_verify), SimpleNamespace(ssh_key=selection), description,
+    )
+    if failure:
+        with pytest.raises(SetupError, match="changed"):
+            repository_ssh_setup.prepare_key(*arguments, invocation=invocation)
+    else:
+        assert repository_ssh_setup.prepare_key(*arguments, invocation=invocation) is None
+    before_failure = failure is not None and failure.endswith("-before")
+    assert len(calls) == (0 if before_failure else 3)
+    assert len(source_checks) == (1 if before_failure else 4)
+    assert len(owner_checks) == (1 if before_failure else 6)
+    assert len(settled) == len(source_checks) + len(owner_checks)
+    assert all(actual == expected for actual, expected in observations)
+    assert len(workers) <= 2
+    assert all(not worker.is_alive() for worker in workers)
+
+
 @pytest.mark.parametrize("failure", [None, "missing", "foreign", "migration", "no-runtime", "no-retention"])
-def test_legacy_vault_uses_selected_completed_retained_runtime(tmp_path, monkeypatch, failure):
+def test_legacy_vault_uses_selected_completed_retained_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     payload, root = tmp_path / "payload", tmp_path / "runtime"
     python = root / "versions" / "1.0" / "Scripts" / "python.exe"
     monkeypatch.setattr(
-        vault.reconcile, "core_installed_payload_dir",
+        reconcile, "core_installed_payload_dir",
         lambda name: None if failure == "missing" else payload,
     )
     installation = SimpleNamespace(
@@ -28,19 +229,19 @@ def test_legacy_vault_uses_selected_completed_retained_runtime(tmp_path, monkeyp
         desired_mode="namespaced" if failure == "migration" else "legacy",
         status="ready", context=None, runtime_root=root,
     )
-    monkeypatch.setattr(vault.reconcile, "resolve_runtime_installation", lambda *_: installation)
+    monkeypatch.setattr(reconcile, "resolve_runtime_installation", lambda *_: installation)
     monkeypatch.setattr(
-        vault._peer_launch, "_peer_python_inprocess", lambda _: None if failure == "no-runtime" else python,
+        _peer_launch, "_peer_python_inprocess", lambda _: None if failure == "no-runtime" else python,
     )
 
-    def identity(*_):
+    def identity(*_: object) -> str:
         if failure == "no-retention":
             raise ValueError("No immutable build")
         return "original-build"
 
-    monkeypatch.setattr(vault._peer_launch, "retained_runtime_identity", identity)
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", identity)
     monkeypatch.setattr(
-        vault._peer_launch, "retained_runtime_prefix",
+        _peer_launch, "retained_runtime_prefix",
         lambda selected_root, selected_python, module, **kw: [
             str(selected_python), "-I", module, kw["runtime_identity"],
         ],
@@ -68,48 +269,208 @@ def test_legacy_vault_uses_selected_completed_retained_runtime(tmp_path, monkeyp
         selected.verify()
 
 
-@pytest.mark.parametrize("failure", [None, "empty", "foreign", "missing-peer"])
-def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("use_pool", [False, True])
+@pytest.mark.parametrize("failure", [
+    None, "owner", "peer", "governance", "all",
+    "owner-drift", "peer-drift", "governance-drift", "drift-and-error",
+])
+def test_final_peer_readbacks_share_only_source_workers_and_settle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_pool: bool, failure: str | None,
+) -> None:
+    from agent_worktrees import repository_setup
+
+    root = tmp_path / "marketplaces" / "cell" / "plugins" / "agent-worktrees"
+    own = {"pluginRoot": str(root), "installReceipt": str(root / "install.json"),
+           "cellRoot": str(root.parent.parent)}
+    peer = {"pluginRoot": str(root.parent / "agent-vault")}
+    python = tmp_path / "python"
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", own["installReceipt"])
+    monkeypatch.delenv("COPILOT_EXTENSIONS_READONLY_PROBE", raising=False)
+    monkeypatch.setattr(peer_launch_adapter, "context_reference", lambda: (root, own["installReceipt"]))
+    monkeypatch.setattr(_peer_launch, "_packaged_primitive", lambda: SimpleNamespace())
+    monkeypatch.setattr(_peer_launch, "_peer_context_primitive", lambda _peer: SimpleNamespace())
+    monkeypatch.setattr(_peer_launch, "peer_environment", lambda *_args: {})
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *_args: "original-build")
+    monkeypatch.setattr(_peer_launch, "retained_peer_prefix", lambda *_args, **_kwargs: ["peer-python"])
+    calls = {"owner": 0, "peer": 0, "governance": 0, "runtime": 0}
+    settled: list[str] = []
+    threads: set[threading.Thread] = set()
+    barrier = threading.Barrier(3, timeout=3)
+    caller_context = ContextVar("peer-readback-caller", default=-1)
+    token = caller_context.set(17)
+
+    def readback(name: str) -> None:
+        threads.add(threading.current_thread())
+        try:
+            assert caller_context.get() == 17
+            if use_pool:
+                barrier.wait()
+            if failure in (name, "all") or (failure == "drift-and-error" and name == "peer"):
+                raise ValueError(name + " readback rejected")
+        finally:
+            settled.append(name)
+
+    def owner(*_args: Any) -> dict[str, str]:
+        calls["owner"] += 1
+        if calls["owner"] % 2 == 0:
+            readback("owner")
+            if failure in ("owner-drift", "drift-and-error"):
+                return {**own, "installReceipt": "changed"}
+        return dict(own)
+
+    def active(*_args: Any) -> dict[str, str]:
+        calls["peer"] += 1
+        if calls["peer"] % 3 == 0:
+            readback("peer")
+            if failure == "peer-drift":
+                return {**peer, "pluginRoot": "changed"}
+        return dict(peer)
+
+    def governance(*_args: Any) -> dict[str, str]:
+        calls["governance"] += 1
+        if calls["governance"] % 2 == 0:
+            readback("governance")
+            if failure == "governance-drift":
+                return {"status": "changed"}
+        return {"status": "ready"}
+
+    def runtime(*_args: Any) -> Path:
+        calls["runtime"] += 1
+        if calls["runtime"] % 2 == 0:
+            assert settled[-3:].count("owner") == settled[-3:].count("peer") == settled[-3:].count("governance") == 1
+        return python
+
+    monkeypatch.setattr(_peer_launch, "validate_owner", owner)
+    monkeypatch.setattr(_peer_launch, "_active_context", active)
+    monkeypatch.setattr(_peer_launch, "_governance", governance)
+    monkeypatch.setattr(_peer_launch, "_peer_python_inprocess", runtime)
+    try:
+        with repository_setup._source_verification_scope() if use_pool else nullcontext():
+            if failure:
+                with pytest.raises(SetupError) as error:
+                    vault.selected()
+                if "drift" in failure:
+                    assert str(error.value.__cause__) == "Installation governance changed during peer resolution"
+                else:
+                    expected = "owner" if failure == "all" else failure
+                    assert str(error.value.__cause__) == expected + " readback rejected"
+            else:
+                invocation = vault.selected()
+                invocation.verify()
+            if use_pool or failure is None:
+                observations = 1 if failure else 2
+                assert sorted(settled) == sorted(["owner", "peer", "governance"] * observations)
+                assert calls == {"owner": 2 * observations, "peer": 3 * observations,
+                                 "governance": 2 * observations, "runtime": 1 if failure else 4}
+        assert len(threads) <= (4 if use_pool else 1)
+        assert all(not thread.is_alive() for thread in threads if thread is not threading.main_thread())
+    finally:
+        caller_context.reset(token)
+
+
+@pytest.mark.parametrize("failure", [None, "empty", "foreign", "missing-peer", "no-runtime", "no-retention"])
+def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "" if failure == "empty" else "owner-receipt")
     own = {"pluginRoot": str(tmp_path / "agent-worktrees"), "installReceipt": "owner-receipt"}
+    reference_root = tmp_path / "reference" / "agent-worktrees"
     peer = {"pluginRoot": str(tmp_path / "agent-vault"), "installReceipt": "peer-receipt"}
     python = tmp_path / "python"
+    resolutions: list[str] = []
 
-    def owner():
-        if failure == "foreign":
-            raise vault._peer_launch.ContextRefused("foreign owner")
-        return None if failure == "empty" else own
+    def reference() -> tuple[Path, str] | None:
+        return None if failure == "empty" else (reference_root, own["installReceipt"])
 
-    def prefix(owner_id, root, receipt, plugin):
+    def resolve(
+        owner_id: str, root: Path, receipt: str, plugin: str, *, allow_native: bool,
+        workers: Any = None,
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str], Path | None]:
         assert (owner_id, root, receipt, plugin) == (
-            "agent-worktrees", Path(own["pluginRoot"]), own["installReceipt"], "agent-vault",
+            "agent-worktrees", reference_root, own["installReceipt"], "agent-vault",
         )
+        assert allow_native is False
+        assert workers is None
+        resolutions.append(plugin)
+        if failure == "foreign":
+            raise _peer_launch.ContextRefused("foreign owner")
         if failure == "missing-peer":
             raise ValueError("No peer")
-        return [str(python), "retained-build"], python
+        return own, peer, {}, None if failure == "no-runtime" else python
 
-    monkeypatch.setattr(vault.peer_launch_adapter, "validate_context", owner)
-    monkeypatch.setattr(vault._peer_launch, "pinned_launch_prefix", prefix)
-    monkeypatch.setattr(vault._peer_launch, "_resolve_peer", lambda *_a, **_kw: (peer, {}, python))
+    def identity(root: Path, selected_python: Path, module: str) -> str:
+        assert (root, selected_python, module) == (Path(peer["pluginRoot"]), python, "agent_vault")
+        if failure == "no-retention":
+            raise ValueError("No immutable build")
+        return "retained-build"
+
+    monkeypatch.setattr(peer_launch_adapter, "context_reference", reference)
     monkeypatch.setattr(
-        vault.reconcile, "core_installed_payload_dir", lambda *_: pytest.fail("legacy fallback"),
+        peer_launch_adapter, "validate_context", lambda: pytest.fail("redundant owner validation"),
+    )
+    monkeypatch.setattr(_peer_launch, "_resolve_peer_observation", resolve)
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", identity)
+    monkeypatch.setattr(
+        reconcile, "core_installed_payload_dir", lambda *_: pytest.fail("legacy fallback"),
     )
     if failure:
         with pytest.raises(SetupError, match="owner is unavailable or refused"):
             vault.selected()
         return
     selected = vault.selected()
+    assert resolutions == ["agent-vault"]
+    assert selected.argv[8:12] == ("--pinned-runtime", str(python), "--runtime-identity", "retained-build")
+    assert selected.argv[13:15] == (own["pluginRoot"], own["installReceipt"])
     selected.verify()
+    assert resolutions == ["agent-vault", "agent-vault"]
     peer["installReceipt"] = "changed"
     with pytest.raises(SetupError, match="selection changed"):
         selected.verify()
+
+
+@pytest.mark.parametrize("boundary", ["before", "after"])
+def test_namespaced_runtime_change_is_refused_at_both_child_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    from agent_worktrees import repository_ssh_setup
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "owner-receipt")
+    own = {"pluginRoot": str(tmp_path / "agent-worktrees"), "installReceipt": "owner-receipt"}
+    peer = {"pluginRoot": str(tmp_path / "agent-vault"), "installReceipt": "peer-receipt"}
+    python = tmp_path / "python"
+    generation = ["original"]
+    launched: list[bool] = []
+    monkeypatch.setattr(
+        peer_launch_adapter, "context_reference", lambda: (Path(own["pluginRoot"]), own["installReceipt"]),
+    )
+    monkeypatch.setattr(_peer_launch, "_resolve_peer_observation", lambda *_a, **_kw: (own, peer, {}, python))
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *_: generation[0])
+    invocation = vault.selected()
+
+    def child(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        launched.append(True)
+        generation[0] = "changed"
+        return SimpleNamespace(returncode=0, stdout='{"version":1}')
+
+    monkeypatch.setattr(repository_ssh_setup, "run_caller_owned", child)
+    if boundary == "before":
+        generation[0] = "changed"
+    with pytest.raises(SetupError):
+        repository_ssh_setup._vault_call(
+            SimpleNamespace(configuration_root=str(tmp_path), argv=()),
+            ["invocation-contract", "--json"], timeout=20, invocation=invocation,
+        )
+    assert launched == ([True] if boundary == "after" else [])
 
 
 @pytest.mark.skipif(
     sys.platform != "win32" and not sys.platform.startswith("linux"),
     reason="Native Vault peer invocation supports Windows and Linux only",
 )
-def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed_owner", ["agent-worktrees", "agent-vault"])
+def test_native_installed_vault_binding_rechecks_receipt_before_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed_owner: str,
+) -> None:
     from agent_worktrees import _installation_context as primitive, repository_ssh_setup, repository_setup
 
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -125,7 +486,7 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, 
             "fingerprint": "sha256:9caa0da95f327099983348a3d2353fa93e57ef6428b69f354cc3bdc76ada0894",
         }, "locators": [], "generation": 1, "state": "active",
     }))
-    environment, _ = primitive._current_environment(
+    environment, _ = getattr(primitive, "_current_environment")(
         environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
     )
     for plugin in ("agent-worktrees", "agent-vault"):
@@ -192,7 +553,19 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, 
     )
     monkeypatch.setenv("KPDB", str(tmp_path / "foreign.kdbx"))
     monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "foreign")
+    owner_observations: list[dict[str, Any]] = []
+    validate_owner = _peer_launch.validate_owner
+
+    def observe_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, Any]:
+        value = validate_owner(owner, own_root, raw_context)
+        owner_observations.append(value)
+        return value
+
+    monkeypatch.setattr(_peer_launch, "validate_owner", observe_owner)
+    monkeypatch.setattr(peer_launch_adapter, "validate_owner", observe_owner)
     invocation = vault.selected()
+    assert len(owner_observations) == 2
+    assert Path(invocation.argv[0]).samefile(python)
     selection = repository_setup.SSHKeySelection(
         (), str(tmp_path), "-SSH/example", str(tmp_path / "keys"), "SHA256:" + "A" * 43,
         owner="agent-vault",
@@ -206,12 +579,24 @@ def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, 
     assert observed["env"]["AGENT_VAULT_HOME"] == str(root)
     assert observed["env"]["AGENT_VAULT_NO_SELFPROVISION"] == "1"
     assert "KPDB" not in observed["env"] and "AGENT_VAULT_ENDPOINT" not in observed["env"]
-    receipt = root / "install.json"
+    for path in (bootstrap / "runtime-generation", slot / ".install-complete.json"):
+        original = path.read_bytes()
+        try:
+            path.write_bytes(b"2" * 32 if path.name == "runtime-generation" else original + b"\n")
+            refused = run_caller_owned(
+                [*invocation.argv, "probe"], env=invocation.environment, timeout=20,
+                max_stdout_bytes=16384, max_stderr_bytes=16384,
+            )
+            assert refused.returncode != 0 and not refused.stdout
+        finally:
+            path.write_bytes(original)
+    changed_root = cell / "plugins" / changed_owner
+    receipt = changed_root / "install.json"
     original_receipt = receipt.read_text()
     changed = json.loads(original_receipt)
     changed["generation"] = 2
     receipt.write_text(json.dumps(changed))
-    activation = root / "installation-activation.json"
+    activation = changed_root / "installation-activation.json"
     original_activation = activation.read_text()
     changed = json.loads(original_activation)
     changed.update(installGeneration=2, generation=2)

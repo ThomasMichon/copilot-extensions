@@ -11,13 +11,17 @@ import hashlib
 import importlib.util
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
 import threading
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future, ThreadPoolExecutor
 
 CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 PEERS = {
@@ -37,6 +41,7 @@ OWNERS = {
     "agent-ssh", "agent-mcp", "agent-vault",
 }
 _packaged_primitives: dict[Path, ModuleType] = {}
+_peer_primitives: dict[Path, tuple[tuple[tuple[str, int, int, str], ...], ModuleType]] = {}
 _peer_runtimes: dict[Path, tuple[tuple[tuple[str, int, int, int, int], ...], ModuleType | None]] = {}
 _primitive_lock = threading.Lock()
 
@@ -80,6 +85,25 @@ def launch_prefix(owner: str, own_root: Path, raw_context: str, peer: str) -> li
         bootstrap = bootstrap.with_name("python.exe")
     return [
         str(bootstrap), "-I", "-B", "-X", "utf8", str(Path(__file__).resolve()),
+        owner, str(own_root), raw_context, peer,
+    ]
+
+
+def retained_peer_prefix(
+    owner: str, own_root: Path, raw_context: str, peer: str, python: Path, *,
+    runtime_identity: str,
+) -> list[str]:
+    """Run peer checks and its existing retention bootstrap in the selected Python."""
+    executable = str(python)
+    if os.name == "nt" and len(executable.encode("utf-16-le", errors="surrogatepass")) // 2 >= 260:
+        if not executable.startswith("\\\\?\\"):
+            executable = (
+                "\\\\?\\UNC\\" + executable[2:] if executable.startswith("\\\\")
+                else "\\\\?\\" + executable
+            )
+    return [
+        executable, "-I", "-S", "-B", "-X", "utf8", str(Path(__file__).resolve()),
+        "--inprocess", "--pinned-runtime", str(python), "--runtime-identity", runtime_identity,
         owner, str(own_root), raw_context, peer,
     ]
 
@@ -168,6 +192,32 @@ def _readiness_support(own: dict[str, Any]) -> ModuleType:
             path = Path(own["payloadRoot"]) / "scripts" / "versioned_runtime_probe.py"
             support = _load_primitive(path, "configuration_context.readiness")
         return support
+
+
+def _peer_context_primitive(context: dict[str, Any]) -> ModuleType:
+    """Retain unchanged validator code, never its receipt or governance results."""
+    path = (Path(context["payloadRoot"]) / "scripts" / "installation-context" / "installation_context.py").resolve()
+
+    def signature() -> tuple[tuple[str, int, int, str], ...]:
+        return tuple(
+            (source.name, info.st_dev, info.st_ino, hashlib.sha256(source.read_bytes()).hexdigest())
+            for source in sorted(path.parent.glob("*.py"))
+            for info in (source.stat(),)
+        )
+
+    with _primitive_lock:
+        current = signature()
+        retained = _peer_primitives.get(path)
+        if retained is not None:
+            original, module = retained
+            if current != original:
+                raise ValueError("Peer installation-context code changed; restart the observing caller")
+            return module
+        module = _load_primitive(path, "_peer_installation_context_" + str(len(_peer_primitives)))
+        if signature() != current:
+            raise ValueError("Peer installation-context code changed during loading")
+        _peer_primitives[path] = (current, module)
+        return module
 
 
 def _active_context(
@@ -493,10 +543,12 @@ def validate_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, An
     return own
 
 
-def _resolve_peer(
+def _resolve_peer_observation(
     owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
     pinned_python: Path | None = None,
-) -> tuple[dict[str, Any], dict[str, str], Path | None]:
+    workers: ThreadPoolExecutor | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str], Path | None]:
+    """Return both owners from one fresh before/after peer observation."""
     if plugin not in PEERS:
         raise ValueError(f"Unsupported peer: {plugin}")
     own = validate_owner(owner, own_root, raw_context)
@@ -513,10 +565,7 @@ def _resolve_peer(
             payload = support.payload_contract(Path(peer["payloadRoot"]), plugin)
             if payload.module != PEERS[plugin]:
                 raise support.ProbeContractError("Peer probe module differs from its payload contract.")
-    peer_primitive = _load_primitive(
-        Path(peer["payloadRoot"]) / "scripts" / "installation-context"
-        / "installation_context.py", "_peer_installation_context",
-    )
+    peer_primitive = _peer_context_primitive(peer)
     # Use the peer's shipped contract too: a peer may update independently.
     validated = _active_context(
         peer_primitive, peer_receipt, durable, plugin, cell, environment,
@@ -531,15 +580,41 @@ def _resolve_peer(
         if python is None:
             raise support.ProbeContractError("Peer probe requires a qualified installed interpreter.")
         support.runtime_contract(python, PEERS[plugin], plugin=plugin)
-    if (
-        validate_owner(owner, own_root, raw_context) != own
-        or _active_context(peer_primitive, peer_receipt, durable, plugin,
-                           cell, environment) != peer
-        or _governance(peer_primitive, peer, durable, environment) != before
-    ):
+    if workers is None:
+        unchanged = (
+            validate_owner(owner, own_root, raw_context) == own
+            and _active_context(peer_primitive, peer_receipt, durable, plugin,
+                                cell, environment) == peer
+            and _governance(peer_primitive, peer, durable, environment) == before
+        )
+    else:
+        from concurrent.futures import wait
+        from contextvars import copy_context
+
+        checks: list[Future[dict[str, Any]]] = []
+        try:
+            checks.append(workers.submit(copy_context().run, validate_owner, owner, own_root, raw_context))
+            checks.append(workers.submit(copy_context().run, _active_context, peer_primitive,
+                                         peer_receipt, durable, plugin, cell, environment))
+            checks.append(workers.submit(copy_context().run, _governance, peer_primitive, peer, durable, environment))
+        finally:
+            wait(checks)
+        unchanged = checks[0].result() == own and checks[1].result() == peer and checks[2].result() == before
+    if not unchanged:
         raise ValueError("Installation governance changed during peer resolution")
     if pinned_python is None and not allow_native and _peer_python_inprocess(peer) != python:
         raise ValueError("Peer runtime selection changed during observation")
+    return own, peer, environment, python
+
+
+def _resolve_peer(
+    owner: str, own_root: Path, raw_context: str, plugin: str, *, allow_native: bool,
+    pinned_python: Path | None = None,
+) -> tuple[dict[str, Any], dict[str, str], Path | None]:
+    _own, peer, environment, python = _resolve_peer_observation(
+        owner, own_root, raw_context, plugin,
+        allow_native=allow_native, pinned_python=pinned_python,
+    )
     return peer, environment, python
 
 
@@ -553,13 +628,36 @@ def observe_peer_python(
 def launch(
     owner: str, own_root: Path, raw_context: str, plugin: str, argv: list[str],
     *, pinned_python: Path | None = None, runtime_identity: str | None = None,
+    inprocess: bool = False,
 ) -> int:
     """Validate both owners, delegate peer governance/resolution, then launch."""
+    if inprocess and (
+        pinned_python is None or runtime_identity is None
+        or not (sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode)
+        or not Path(sys.executable).samefile(pinned_python)
+    ):
+        raise ValueError("In-process peer execution requires its isolated retained interpreter")
     peer, environment, python = _resolve_peer(
         owner, own_root, raw_context, plugin, allow_native=True, pinned_python=pinned_python,
     )
     if python is None:
         raise ValueError(f"{plugin}: no completed runtime resolved")
+    if inprocess:
+        launcher = _retention_launcher(Path(peer["pluginRoot"]), python, PEERS[plugin])
+        original_environment, original_argv = dict(os.environ), sys.argv
+        try:
+            os.environ.clear()
+            os.environ.update(environment)
+            sys.argv = [
+                str(launcher), "--runtime-identity", runtime_identity or "",
+                "-m", PEERS[plugin], *argv,
+            ]
+            runpy.run_path(str(launcher), run_name="__main__")
+        finally:
+            os.environ.clear()
+            os.environ.update(original_environment)
+            sys.argv = original_argv
+        return 0
     prefix = (
         retained_runtime_prefix(
             Path(peer["pluginRoot"]), python, PEERS[plugin],
@@ -589,6 +687,9 @@ def launch(
 def main() -> int:
     try:
         arguments = sys.argv[1:]
+        inprocess = arguments[:1] == ["--inprocess"]
+        if inprocess:
+            arguments = arguments[1:]
         pinned_python = None
         runtime_identity = None
         if arguments[:1] == ["--pinned-runtime"]:
@@ -602,6 +703,7 @@ def main() -> int:
         return launch(
             arguments[0], Path(arguments[1]), arguments[2], arguments[3], arguments[4:],
             pinned_python=pinned_python, runtime_identity=runtime_identity,
+            inprocess=inprocess,
         )
     except Exception as error:
         support = _probe_failure(error)

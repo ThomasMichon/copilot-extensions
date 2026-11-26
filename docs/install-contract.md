@@ -6243,14 +6243,52 @@ Static setuptools association supports the existing src layout and an explicit
 flat package-discovery root with nonempty include selectors; selected package
 Python members must match the wheel exactly. Unsupported discovery forms still
 refuse rather than executing a backend to discover their meaning.
+Wheel filenames may hint which archive needs that application association;
+they never admit its bytes or exempt any dependency from the complete closure
+and emitted-input inspection before application locking.
 
 Preparation preserves the application's original bytes, including development
 `tool.uv.sources` mappings and local artifacts. A recorded `input_mode` of
 `closed-wheels` selects only the application as local source while the existing
 freezer, retained-input and construction owners use the independently inspected
 runtime wheels. No rewritten manifest or handwritten lock is involved.
+Source extraction prefetches metadata and canonical dependency/resource hints,
+then exports only the unchanged canonical validator's complete application
+closure. Hints never admit inputs or execute candidate code. Prefix lookup is
+bounded by each member's path depth, not the number of selected roots.
+All archive entries,
+including excluded ones, retain path/type/collision checks; archive identity and
+bytes stay bound across passes under the original absolute deadline. Development
+metadata outside that build-export contract retains the original full, data-only
+extraction under the same deadline, never a fallback around archive refusal.
+Metadata discovery and selected extraction use sequential digesting archive
+passes instead of header seeks followed by another full read. Moderate stream
+buffers avoid repeated large tail copies between small members. Each pass binds
+all bytes, including excluded payloads and trailing padding, while the same
+entry validator retains its path/type/collision checks. Final archive identity
+and full-byte rechecks still precede publication and completion; parsing,
+draining and rechecks share the original deadline. No accepted Source cache or
+metadata-only substitute for byte validation is introduced.
+Fresh closed-wheel Git Source reaches the final snapshot without copying that
+same payload again. Closure refusals retain the original Source layout and do
+not start snapshot emission. After admission, only that invocation's fresh
+Source and its record are moved into the final snapshot. The preparer retains the canonical
+closed-source file inventory and complete byte fingerprint before emission,
+then compares the package graph, full file set and bytes after the real lock
+and readback. Generated development data remains included. Source identity,
+complete wheel inspection and all final emitted-input checks still apply;
+this is not reuse of an earlier Source or installed runtime.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
+One inspected-wheel scope remains open through emission, offline locking and
+final readback. The emitted profile and Source record must stay exact, and
+the emitted snapshot wheel files and separate application-lock wheel copies
+are independently recaptured against the inspected digests before completion.
+Retained private copies never stand in for that
+final emitted-byte check; all checks share the original absolute deadline.
+One constructor-fact call derives its Source hash and wheel-qualified payload
+hash from the same fresh file read. Later calls and the enclosing Source and
+retained-wheel scope checks still independently observe the actual inputs.
 Generated projects carrying a complete admitted construction profile omit the
 relative resolver-age cutoff: their retained local-wheel lock must remain usable
 when configuration discovery changes or installation happens later.
@@ -6985,9 +7023,13 @@ data under the same owned, isolated candidate interpreter. It runs only for
 fresh construction, before the installed-origin/full-surface health gate and
 immutable completion publication; exact reuse never reruns it. It receives
 the `frozen_plugin` field as a pristine, verified source snapshot held by the
-candidate owner through preparation and health. It is separate from UV's
+candidate owner through preparation and health. Ordinary source keeps it
+separate from UV's
 retained build projection, whose dependency metadata may be rewritten to
-disable editable installation. Payload preparation must not copy that build
+disable editable installation. Explicit closed-wheel Source does not rewrite
+that metadata, so its invocation-owned retained copy also serves as the original
+snapshot; content, graph and Source-pin checks still surround the callback.
+Payload preparation must not copy a rewritten build
 projection into an identity-qualified payload or return to live source inputs.
 Both snapshot content and selected source identity are revalidated around the
 callback; installed-origin checks continue to attest the actual UV build inputs.

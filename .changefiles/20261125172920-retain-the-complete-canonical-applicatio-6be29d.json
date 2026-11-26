@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the complete canonical application Source closure and inspected wheel custody through offline snapshot emission, indexing archive prefixes and bounding stream-tail copy work while preserving complete source/file/byte closure and final byte checks of both snapshot and application-lock wheel copies.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

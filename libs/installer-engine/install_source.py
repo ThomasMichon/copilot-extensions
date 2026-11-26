@@ -294,9 +294,9 @@ def manager_inputs(
         yield inputs
 
 
-def _wheel_selection(
+def _wheel_selection_facts(
     payload: Path, version: str, inputs: WheelInstallInputs, *, closed_wheel_source: bool = False,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str, tuple[Path, ...]]:
     inputs.verify()
     receipt = inputs.receipt()
     packages = engine._package_roots(payload, **({"closed_wheels": True} if closed_wheel_source else {}))
@@ -315,16 +315,24 @@ def _wheel_selection(
     extras = engine._selected_extras(payload, extras)
     from installer_provider_roots import from_profile
 
+    source_hash = engine._construction_hash(engine._source_input_files(
+        packages, closed_wheel_source=closed_wheel_source,
+    ), extras, local)
     return {
         "runtime_version": version + ".profile." + receipt["lock_id"][7:23],
-        "payload_hash": engine._wheel_construction_hash(
-            engine._construction_hash(engine._source_input_files(
-                packages, closed_wheel_source=closed_wheel_source,
-            ), extras, local), inputs,
-        ),
+        "payload_hash": engine._wheel_construction_hash(source_hash, inputs),
         "extras": list(extras), "local_packages": list(local),
         "provider_roots": from_profile(profile, core=name),
-    }
+    }, source_hash, packages
+
+
+def _wheel_selection(
+    payload: Path, version: str, inputs: WheelInstallInputs, *, closed_wheel_source: bool = False,
+) -> dict[str, Any]:
+    selection, _source_hash, _packages = _wheel_selection_facts(
+        payload, version, inputs, closed_wheel_source=closed_wheel_source,
+    )
+    return selection
 
 
 def wheel_selection(payload: Path, component: str, inputs: WheelInstallInputs) -> dict[str, Any]:
@@ -413,9 +421,10 @@ def native_current(root: Path, payload: Path, component: str) -> bool:
         return False
 
 
-def native_selection(selected: ProjectSource, inputs: WheelInstallInputs) -> dict[str, Any]:
-    """Use the constructor's existing source/profile identity before native setup."""
-    selection = _wheel_selection(
+def _native_selection_facts(
+    selected: ProjectSource, inputs: WheelInstallInputs,
+) -> tuple[dict[str, Any], str, tuple[Path, ...]]:
+    selection, source_hash, packages = _wheel_selection_facts(
         selected.payload, selected.identity.runtime_version, inputs,
         **({"closed_wheel_source": True} if selected.closed_wheel_source else {}),
     )
@@ -452,24 +461,24 @@ def native_selection(selected: ProjectSource, inputs: WheelInstallInputs) -> dic
         "identity": sources.manifest_fields(selected.identity),
         "source_descriptor": selected.source_descriptor,
         **selection,
-    }
+    }, source_hash, packages
+
+
+def native_selection(selected: ProjectSource, inputs: WheelInstallInputs) -> dict[str, Any]:
+    """Use the constructor's existing source/profile identity before native setup."""
+    selection, _source_hash, _packages = _native_selection_facts(selected, inputs)
+    return selection
 
 
 def application_inputs(selected: ProjectSource, inputs: WheelInstallInputs) -> dict[str, Any]:
     """Carry the actual Source constructor's facts into a copyable application."""
-    selection = native_selection(selected, inputs)
-    packages = engine._package_roots(
-        selected.payload, **({"closed_wheels": True} if selected.closed_wheel_source else {}),
-    )
-    extras = tuple(selection["extras"])
+    selection, source_hash, packages = _native_selection_facts(selected, inputs)
     local = tuple(selection["local_packages"])
     return {
         **{key: selection[key] for key in (
             "identity", "runtime_version", "payload_hash", "extras", "local_packages",
         )},
-        "source_hash": engine._construction_hash(engine._source_input_files(
-            packages, closed_wheel_source=selected.closed_wheel_source,
-        ), extras, local),
+        "source_hash": source_hash,
         "wheel_inputs": inputs.receipt(),
         "excluded_packages": sorted(
             {engine._package_name(package) for package in packages} - set(local),

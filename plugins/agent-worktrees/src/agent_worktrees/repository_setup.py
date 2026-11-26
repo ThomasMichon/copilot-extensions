@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from contextlib import contextmanager
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -14,17 +18,22 @@ import stat
 import subprocess
 import sys
 import tempfile
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from agent_procutil import no_window_kwargs
 
 from .git_ops import repository_identity_env
 
+if TYPE_CHECKING:
+    import argparse
+
 DECLARATION = ".agent-worktrees/repository-setup.json"
 ENGINE_CONTEXT = "AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE"
 ENGINE_PYTHON = "AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON"
 LIMIT = 16 * 1024
 STATUSES = frozenset({"ready", "needed", "waiting", "refused", "failed"})
+_source_workers: ContextVar[ThreadPoolExecutor | None] = ContextVar("repository_source_workers", default=None)
 
 
 class SetupError(ValueError):
@@ -58,8 +67,8 @@ def https_url(value: str) -> str:
     return urlunsplit(("https", authority, path, "", ""))
 
 
-def _object(pairs: list[tuple[str, object]]) -> dict:
-    result: dict = {}
+def _object(pairs: list[tuple[str, object]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise SetupError("Setup JSON contains duplicate fields.")
@@ -67,7 +76,7 @@ def _object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def _json(path: Path) -> dict:
+def _json(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         raw = stream.read(LIMIT + 1)
     if len(raw) > LIMIT:
@@ -81,13 +90,13 @@ def _json(path: Path) -> dict:
     return value
 
 
-def _fields(value: object, expected: set[str]) -> dict:
+def _fields(value: object, expected: set[str]) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise SetupError("Setup JSON has missing or unknown fields.")
     return value
 
 
-def _version(value: dict) -> None:
+def _version(value: dict[str, Any]) -> None:
     if type(value["version"]) is not int or value["version"] != 1:
         raise SetupError("Unsupported repository setup version.")
 
@@ -108,10 +117,10 @@ def _git(path: Path, *args: str) -> str:
     )
     if result.returncode:
         raise SetupError("Repository source could not be qualified by Git.")
-    return result.stdout.strip()
+    return cast(str, result.stdout.strip())
 
 
-def _tracked(path: Path, relative: str) -> Path:
+def _tracked_path(path: Path, relative: str) -> Path:
     if (
         not isinstance(relative, str) or not relative or "\\" in relative
         or ":" in relative or relative.startswith("/")
@@ -126,6 +135,11 @@ def _tracked(path: Path, relative: str) -> Path:
     _plain(file)
     if not file.is_file():
         raise SetupError("Setup entry must be a regular file.")
+    return file
+
+
+def _tracked(path: Path, relative: str) -> Path:
+    file = _tracked_path(path, relative)
     entry = _git(path, "--literal-pathspecs", "ls-files", "--stage", "--", relative)
     if not entry.startswith(("100644 ", "100755 ")) or "\n" in entry:
         raise SetupError("Setup entry must be tracked as a regular file.")
@@ -147,6 +161,20 @@ class Source:
     commit: str
 
 
+@contextmanager
+def _source_verification_scope() -> Iterator[ThreadPoolExecutor]:
+    existing = _source_workers.get()
+    if existing is not None:
+        yield existing
+        return
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        token = _source_workers.set(workers)
+        try:
+            yield workers
+        finally:
+            _source_workers.reset(token)
+
+
 def qualify(path: Path, url: str) -> Source:
     """Read-only qualification; never convert, repair, fetch or reset a checkout."""
     canonical = https_url(url)
@@ -157,14 +185,24 @@ def qualify(path: Path, url: str) -> Source:
     if not (path / ".git").is_dir():
         raise SetupError("Repository setup requires an ordinary checkout, not a linked/bare anchor.")
     _plain(path / ".git")
-    if Path(_git(path, "rev-parse", "--show-toplevel")).resolve() != path:
+    queries = (
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain=v1", "--untracked-files=all"),
+        ("ls-files", "-v"),
+    )
+    with _source_verification_scope() as workers:
+        pending = [workers.submit(copy_context().run, _git, path, *arguments) for arguments in queries]
+        wait(pending)
+        top, origin, status, flags = [query.result() for query in pending]
+    if Path(top).resolve() != path:
         raise SetupError("Repository target is not the checkout root.")
-    if https_url(_git(path, "remote", "get-url", "origin")) != canonical:
+    if https_url(origin) != canonical:
         raise SetupError("Existing checkout has a different repository identity.")
-    if _git(path, "status", "--porcelain=v1", "--untracked-files=all"):
+    if status:
         raise SetupError("Repository contains source changes; preserve them and reconcile first.")
     if any(line and (line[0].islower() or line[0] == "S")
-           for line in _git(path, "ls-files", "-v").splitlines()):
+           for line in flags.splitlines()):
         raise SetupError("Repository index hides tracked source changes; reconcile its flags first.")
     commit = _git(path, "rev-parse", "--verify", "HEAD^{commit}")
     return Source(path, canonical, commit)
@@ -243,8 +281,20 @@ class Setup:
 
 
 def inspect(path: Path, url: str) -> Setup:
-    source = qualify(path, url)
-    declaration = _tracked(source.path, DECLARATION)
+    with _source_verification_scope() as workers:
+        source = qualify(path, url)
+        checks: list[Future[Path]] = []
+        try:
+            return _inspect(source, workers, checks)
+        finally:
+            wait(checks)
+            for check in checks:
+                check.result()
+
+
+def _inspect(source: Source, workers: ThreadPoolExecutor, checks: list[Future[Path]]) -> Setup:
+    declaration = _tracked_path(source.path, DECLARATION)
+    checks.append(workers.submit(copy_context().run, _tracked, source.path, DECLARATION))
     value = _json(declaration)
     version = value.get("version")
     if type(version) is not int or version not in (1, 2, 3, 4, 5):
@@ -286,12 +336,14 @@ def inspect(path: Path, url: str) -> Setup:
         expected = "powershell" if platform == "windows" else "bash"
         if entry["runtime"] != expected or not isinstance(entry["script"], str):
             raise SetupError("Unsupported repository setup runtime or script.")
-        _tracked(source.path, entry["script"])
+        checks.append(workers.submit(copy_context().run, _tracked, source.path, entry["script"]))
     platform = "windows" if sys.platform == "win32" else "posix"
     if platform not in entries:
         raise SetupError("Repository does not declare setup for this platform.")
     entry = entries[platform]
-    script = _tracked(source.path, entry["script"])
+    selected = workers.submit(copy_context().run, _tracked, source.path, entry["script"])
+    checks.append(selected)
+    script = selected.result()
     return Setup(source, script, entry["runtime"], _digest(declaration), _digest(script),
                  tuple(contexts))
 
@@ -320,12 +372,12 @@ def _terminal() -> bool:
         import ctypes
 
         # NUL can report isatty() without a console to inherit.
-        if ctypes.windll.kernel32.GetConsoleCP():
+        if cast(Any, ctypes).windll.kernel32.GetConsoleCP():
             return True
     return False
 
 
-def _stdio_kwargs() -> dict:
+def _stdio_kwargs() -> dict[str, Any]:
     options = {} if _terminal() else no_window_kwargs()
     if os.name == "nt":
         # Headless Windows children otherwise receive new console handles, not caller pipes.
@@ -419,7 +471,7 @@ def run(setup: Setup, *, apply: bool, trusted: bool) -> Outcome:
     return _call(setup, "check")
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = sub.add_parser(
         "trust-repository-configuration", allow_abbrev=False,
         help="Explicitly trust native Copilot configuration for a qualified repository revision",
@@ -430,7 +482,7 @@ def add_parsers(sub) -> None:
     parser.add_argument("--apply", action="store_true")
 
 
-def cmd_trust_configuration(args) -> int:
+def cmd_trust_configuration(args: argparse.Namespace) -> int:
     from . import permissions
 
     changed = None

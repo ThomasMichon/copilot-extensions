@@ -86,6 +86,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "native"]
 markers = [
     "guard: fast structural and contract checks",
 ]

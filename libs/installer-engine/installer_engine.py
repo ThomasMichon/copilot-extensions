@@ -855,7 +855,8 @@ def _candidate(
                     slot = runtime.slot(root, version)
                     environment = slot / ".venv" if application is not None or nested_environment else slot
                     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-                    if construction_callable is not None:
+                    payload = inputs
+                    if construction_callable is not None and not inputs.closed_wheel_source:
                         # UV's non-editable metadata projection is a build input,
                         # not the selected source payload copied by preparation.
                         temporary = retained.enter_context(_temporary_inputs(None))
@@ -874,6 +875,11 @@ def _candidate(
                     inputs = retained.enter_context(_retained_inputs(
                         inputs, uv, python, refresh=False, timeout=child_timeout,
                     ))
+                    if construction_callable is not None and inputs.closed_wheel_source:
+                        # Closed-wheel retention preserves the original Source metadata.
+                        payload = inputs
+                        _revalidate_input_content(payload)
+                        _assert_source_pin(payload.plugin, expected_source_identity)
                     report("retained-uv-inputs-ready")
                     if wheel_inputs is None:
                         def run_source_build(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:

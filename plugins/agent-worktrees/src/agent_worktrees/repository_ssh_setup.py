@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, wait
+from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import copy_context
 import base64
 import binascii
 import hashlib
@@ -14,10 +17,15 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import TYPE_CHECKING, Any
+from types import ModuleType
 
 from agent_procutil.owned_process import run_caller_owned
 
 from . import repository_setup as protocol
+
+if TYPE_CHECKING:
+    from .repository_vault import VaultInvocation
 
 CAPABILITY = "continuity-ssh-setup-v1"
 PIN_CAPABILITY = "continuity-ssh-setup-pin-v1"
@@ -25,7 +33,7 @@ KEY_REFERENCE_CAPABILITY = "continuity-ssh-key-reference-v1"
 KEY_PIN_CAPABILITY = "continuity-ssh-key-pin-v1"
 
 
-def _installer():
+def _installer() -> ModuleType:
     helper = Path(__file__).parent / "_runtime_assets" / "scripts" / "install_source.py"
     protocol._plain(helper)
     if not helper.is_file():
@@ -43,7 +51,7 @@ def _installer():
     return module
 
 
-def _description(value: dict) -> dict:
+def _description(value: dict[str, Any]) -> dict[str, Any]:
     version = value.get("version")
     protocol._fields(value, {
         "schema", "version", "snapshot", "root", "selection", "request_digest", "host",
@@ -65,7 +73,7 @@ def _description(value: dict) -> dict:
     return value
 
 
-def key_binding(context, description: dict) -> None:
+def key_binding(context: Any, description: dict[str, Any]) -> None:
     selection = context.ssh_key
     directory = Path(selection.directory).expanduser()
     if description.get("key_files") != {
@@ -75,9 +83,32 @@ def key_binding(context, description: dict) -> None:
         raise protocol.SetupError("Selected Vault directory differs from the SSH request's exact key references.")
 
 
-def _vault_call(selection, arguments: list[str], *, timeout: int, invocation=None) -> tuple[int, dict]:
-    if invocation is not None:
+def _verify_vault_boundary(
+    source: protocol.Setup | None, invocation: VaultInvocation | None,
+    *, workers: ThreadPoolExecutor | None = None,
+) -> None:
+    if source is not None and invocation is not None:
+        if workers is None:
+            with ThreadPoolExecutor(max_workers=2) as owned:
+                _verify_vault_boundary(source, invocation, workers=owned)
+            return
+        checks = [workers.submit(copy_context().run, source.verify),
+                  workers.submit(copy_context().run, invocation.verify)]
+        wait(checks)
+        for check in checks:
+            check.result()
+    elif source is not None:
+        source.verify()
+    elif invocation is not None:
         invocation.verify()
+
+
+def _vault_call(
+    selection: Any, arguments: list[str], *, timeout: int, invocation: VaultInvocation | None = None,
+    source: protocol.Setup | None = None, verify_source_after: bool = False,
+    workers: ThreadPoolExecutor | None = None,
+) -> tuple[int, dict[str, Any]]:
+    _verify_vault_boundary(source, invocation, workers=workers)
     environment = (
         dict(invocation.environment) if invocation is not None else protocol._environment(attended=False)
     )
@@ -92,12 +123,13 @@ def _vault_call(selection, arguments: list[str], *, timeout: int, invocation=Non
              "--configuration-root", str(Path(selection.configuration_root).expanduser()), *arguments],
             env=environment, timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
         )
-        if invocation is not None:
-            invocation.verify()
+        _verify_vault_boundary(source if verify_source_after else None, invocation, workers=workers)
         value = json.loads(completed.stdout, object_pairs_hook=protocol._object)
         if not isinstance(value, dict):
             raise ValueError
         return completed.returncode, value
+    except protocol.SetupError:
+        raise
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, UnicodeError):
         raise protocol.SetupError(
             "Selected Vault outcome is unconfirmed; preserve the original entry and key location for reconciliation."
@@ -121,8 +153,19 @@ def _key_fingerprint(value: object) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
 
 
-def prepare_key(setup, context, description: dict, *, invocation=None) -> protocol.Outcome | None:
+def prepare_key(
+    setup: Any, context: Any, description: dict[str, Any], *, invocation: VaultInvocation | None = None,
+) -> protocol.Outcome | None:
     """Reuse the selected owning Vault before any new enrollment or installation."""
+    # Boundary checks can await Git workers, so settle them before closing the Source scope.
+    with protocol._source_verification_scope(), ThreadPoolExecutor(max_workers=2) as workers:
+        return _prepare_key(setup, context, description, invocation=invocation, workers=workers)
+
+
+def _prepare_key(
+    setup: Any, context: Any, description: dict[str, Any], *, invocation: VaultInvocation | None,
+    workers: ThreadPoolExecutor,
+) -> protocol.Outcome | None:
     selection = context.ssh_key
     key_binding(context, description)
     root = Path(selection.configuration_root).expanduser()
@@ -132,15 +175,24 @@ def prepare_key(setup, context, description: dict, *, invocation=None) -> protoc
             raise OSError
     except OSError:
         raise protocol.SetupError("Selected Vault configuration root is unavailable.") from None
-    setup.verify()
-    invocation_options = {}
+    invocation_options: dict[str, Any] = {}
     if selection.owner is not None:
         if invocation is None:
             from . import repository_vault
 
-            invocation = repository_vault.selected()
+            source_check = workers.submit(copy_context().run, setup.verify)
+            selection_check = workers.submit(copy_context().run, repository_vault.selected)
+            wait((source_check, selection_check))
+            source_check.result()
+            invocation = selection_check.result()
+        else:
+            invocation_options["source"] = setup
         invocation_options["invocation"] = invocation
-    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30, **invocation_options)
+    else:
+        setup.verify()
+    code, contract = _vault_call(
+        selection, ["invocation-contract", "--json"], timeout=30, workers=workers, **invocation_options,
+    )
     if (
         code != 0 or contract.get("schema") != "agent-vault.invocation"
         or type(contract.get("version")) is not int or contract["version"] != 1
@@ -157,9 +209,13 @@ def prepare_key(setup, context, description: dict, *, invocation=None) -> protoc
                 "--directory", str(Path(selection.directory).expanduser()),
                 "--expected-fingerprint", selection.fingerprint,
             ])
-        setup.verify()
-        code, result = _vault_call(selection, arguments, timeout=120, **invocation_options)
-        if operation == "install":
+        if invocation_options:
+            invocation_options["source"] = setup
+            invocation_options["verify_source_after"] = operation == "install"
+        else:
+            setup.verify()
+        code, result = _vault_call(selection, arguments, timeout=120, workers=workers, **invocation_options)
+        if operation == "install" and not invocation_options:
             setup.verify()
         if code != 0:
             error = result.get("error")
@@ -205,13 +261,13 @@ def prepare_key(setup, context, description: dict, *, invocation=None) -> protoc
     return None
 
 
-def same_description(value: dict, description: dict) -> bool:
+def same_description(value: dict[str, Any], description: dict[str, Any]) -> bool:
     expected = {name: item for name, item in description.items() if name != "key_files"} | {"version": 1}
     return _description(value) == expected
 
 
 @contextmanager
-def selected_inputs(description: dict):
+def selected_inputs(description: dict[str, Any]) -> Iterator[tuple[ModuleType, Any]]:
     try:
         with _selected_inputs(description) as selected:
             yield selected
@@ -224,7 +280,7 @@ def selected_inputs(description: dict):
 
 
 @contextmanager
-def _selected_inputs(description: dict):
+def _selected_inputs(description: dict[str, Any]) -> Iterator[tuple[ModuleType, Any]]:
     """Keep the original complete Source/profile association through installation."""
     module = _installer()
     snapshot = Path(description["snapshot"])
@@ -255,10 +311,10 @@ def _selected_inputs(description: dict):
         yield module, selected
 
 
-def status(description: dict, module, *, require_ready: bool = False) -> bool:
+def status(description: dict[str, Any], module: Any, *, require_ready: bool = False) -> bool:
     from .repository_continuity import _invoke
 
-    def unavailable(stage):
+    def unavailable(stage: str) -> bool:
         if require_ready:
             raise protocol.SetupError("SSH application readiness refused: " + stage + ".")
         return False
@@ -290,7 +346,10 @@ def status(description: dict, module, *, require_ready: bool = False) -> bool:
     return True
 
 
-def run(setup, context, arguments: list[str], description: dict, *, apply: bool, invocation=None):
+def run(
+    setup: Any, context: Any, arguments: list[str], description: dict[str, Any], *,
+    apply: bool, invocation: VaultInvocation | None = None,
+) -> protocol.Outcome:
     from .repository_continuity import _invoke
 
     arguments = [*arguments, "--expected-request-digest", description["request_digest"]]
