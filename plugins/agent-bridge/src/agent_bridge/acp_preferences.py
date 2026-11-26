@@ -95,8 +95,9 @@ class AcpPreferencesMixin:
         against the *select* options the agent advertised in its
         ``session/new`` / ``session/load`` response. Only options the agent
         actually offers (with the desired value among their choices) are set,
-        and only when they differ from the current value. Caller-settings mode
-        retains its degrade-safe fallback. Target-settings mode requires actual
+        and only when they differ from the current value. Both policies confirm
+        RPC results before reporting application. Caller-settings mode retains
+        its degrade-safe fallback. Target-settings mode requires actual
         readback of model/effort and fails startup if that intent is unverified;
         unsupported context is reported without a false effectiveness claim.
         Retained-load reconciliation supplies frozen caller intent and forces
@@ -223,28 +224,22 @@ class AcpPreferencesMixin:
                     session_id=self._acp_session_id,
                     value=value,
                 )
+                readback = _cfg_attr(result, "config_options", "configOptions")
+                if not isinstance(readback, (list, tuple)):
+                    unconfirmed.add(key)
+                    fallbacks.append({"config": config_id, "requested": value,
+                                      "reason": "readback-unavailable"})
+                    continue
                 if target_mode:
-                    readback = _cfg_attr(result, "config_options", "configOptions")
-                    if not isinstance(readback, (list, tuple)):
-                        unconfirmed.add(key)
-                        fallbacks.append({"config": config_id, "requested": value,
-                                          "reason": "readback-unavailable"})
-                        continue
                     self._verified_options = readback
-                    advertised = _config_index(readback, grouped=True)
-                    unconfirmed.clear()
-                    actual = next((
-                        _cfg_attr(option, "current_value", "currentValue")
-                        for option in readback
-                        if _cfg_attr(option, "id", "id") == config_id
-                    ), None)
-                    if actual != value:
-                        fallbacks.append({"config": config_id, "requested": value,
-                                          "reason": "not-confirmed", "actual": actual})
-                        continue
-                    applied[config_id] = actual
-                else:
-                    applied[config_id] = value
+                advertised = _config_index(readback, grouped=True)
+                unconfirmed.clear()
+                actual = (advertised.get(config_id) or (None, set()))[0]
+                if actual != value:
+                    fallbacks.append({"config": config_id, "requested": value,
+                                      "reason": "not-confirmed", "actual": actual})
+                    continue
+                applied[config_id] = actual
                 log.info(
                     "ACP session %s: set %s=%s", self._acp_session_id, config_id, value,
                 )
@@ -256,7 +251,15 @@ class AcpPreferencesMixin:
                      "error": str(exc)}
                 )
 
-        if target_mode:
+        if not target_mode:
+            for key, value in tuple(applied.items()):
+                actual = (advertised.get(key) or (None, set()))[0]
+                if actual != value:
+                    applied.pop(key)
+                    if not any(item["config"] == key for item in fallbacks):
+                        fallbacks.append({"config": key, "requested": value,
+                                          "reason": "not-confirmed", "actual": actual})
+        else:
             effective = self._selected_preferences(self._verified_options)
             final_options = _config_index(self._verified_options, grouped=True)
             for key in unconfirmed:

@@ -177,6 +177,14 @@ readback produce `preference_application` status `unsupported`/`error` and fail
 startup before the session becomes ready. Failed application does not replace
 the prior confirmed selection snapshot with a fallback model.
 
+Caller-settings mode also checks the returned configuration before emitting
+`model_applied` or a model usage label. A successful RPC with missing or
+mismatched readback records `model_fallback`, not the requested value as applied.
+Later option responses cannot leave an earlier reverted selection reported as
+applied. Caller mode remains degrade-safe: these refusals do not fail startup
+or override the native model control. Configuration readback confirms the
+session selection, not the model that executes each provider call.
+
 Confirmed selections are recorded in `preference_selected` events,
 including later ACP configuration notifications. Reattach does not apply
 defaults. Load/recreation reasserts a confirmed selection snapshot instead of
@@ -192,7 +200,8 @@ by ACP do not establish long context.
 
 The event stream exposes `preference_resolution`, `preference_application`
 (status, requested values, actual effective values and failures), `model_applied`,
-`model_fallback` (not-advertised/not-offered/RPC failure), and
+`model_fallback` (not-advertised/not-offered/RPC failure or unavailable/mismatched
+readback), and
 `preference_selected`. A create response can have `status: failed`; its selected
 policy field alone is
 not evidence of inheritance or long-context enforcement.

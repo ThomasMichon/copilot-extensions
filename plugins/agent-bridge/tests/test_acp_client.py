@@ -16,6 +16,7 @@ from acp.schema import (
     AgentMessageChunk,
     ContentToolCallContent,
     ElicitationFormSessionMode,
+    SetSessionConfigOptionResponse,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
@@ -1109,7 +1110,21 @@ def test_apply_model_config_degrade_safe_on_rpc_error(monkeypatch: pytest.Monkey
 def _capture_client(events: list[tuple[str, dict[str, Any]]]) -> AcpClient:
     client = AcpClient(on_event=lambda et, d: events.append((et, d)))
     connection = MagicMock()
-    connection.set_config_option = AsyncMock()
+    options = _model_config_options()
+
+    def configure(
+        *, config_id: str, session_id: str, value: str,
+    ) -> SetSessionConfigOptionResponse:
+        for option in options:
+            if option["id"] == config_id:
+                option["currentValue"] = value
+        return SetSessionConfigOptionResponse.model_validate({"configOptions": [
+            {**option, "name": option["id"], "options": [
+                {**choice, "name": choice["value"]} for choice in option["options"]
+            ]} for option in options
+        ]})
+
+    connection.set_config_option = AsyncMock(side_effect=configure)
     client._connection = connection
     client._acp_session_id = "sess-1"
     return client
@@ -1134,6 +1149,83 @@ def test_apply_model_config_emits_applied_model_for_verification(
     applied = next(d for et, d in events if et == "model_applied")
     assert applied == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
     assert "model_fallback" not in kinds
+
+
+@pytest.mark.parametrize(
+    ("config_id", "requested", "actual"),
+    [("model", "claude-opus-4.8", "gpt-5.6-sol"),
+     ("reasoning_effort", "max", "high")],
+)
+def test_apply_model_config_does_not_claim_unchanged_readback(
+    monkeypatch: pytest.MonkeyPatch, config_id: str, requested: str, actual: str,
+) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {config_id: requested},
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    client = _capture_client(events)
+    _mock_connection(client).set_config_option = AsyncMock(
+        return_value=SimpleNamespace(config_options=_model_config_options()),
+    )
+    _run(client._apply_model_config(_model_config_options()))
+    assert not any(kind in {"usage_update", "model_applied"} for kind, _ in events)
+    fallback = next(data for kind, data in events if kind == "model_fallback")
+    assert fallback["fallbacks"] == [{
+        "config": config_id, "requested": requested,
+        "reason": "not-confirmed", "actual": actual,
+    }]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [None, {}, {"configOptions": None}, {"configOptions": "unavailable"}],
+)
+def test_apply_model_config_requires_readback_before_claiming_success(
+    monkeypatch: pytest.MonkeyPatch, response: Any,
+) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8"},
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    client = _capture_client(events)
+    _mock_connection(client).set_config_option = AsyncMock(return_value=response)
+    _run(client._apply_model_config(_model_config_options()))
+    assert not any(kind in {"usage_update", "model_applied"} for kind, _ in events)
+    fallback = next(data for kind, data in events if kind == "model_fallback")
+    assert fallback["fallbacks"] == [{
+        "config": "model", "requested": "claude-opus-4.8",
+        "reason": "readback-unavailable",
+    }]
+
+
+def test_apply_model_config_rechecks_model_after_effort_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8", "reasoning_effort": "max"},
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    client = _capture_client(events)
+    selected = _model_config_options()
+    selected[0]["currentValue"] = "claude-opus-4.8"
+    reverted = _model_config_options()
+    reverted[1]["currentValue"] = "max"
+    _mock_connection(client).set_config_option = AsyncMock(side_effect=[
+        {"configOptions": selected}, {"configOptions": reverted},
+    ])
+    _run(client._apply_model_config(_model_config_options()))
+    assert not any(kind == "usage_update" for kind, _ in events)
+    assert next(data for kind, data in events if kind == "model_applied") == {
+        "reasoning_effort": "max",
+    }
+    fallback = next(data for kind, data in events if kind == "model_fallback")
+    assert fallback["fallbacks"] == [{
+        "config": "model", "requested": "claude-opus-4.8",
+        "reason": "not-confirmed", "actual": "gpt-5.6-sol",
+    }]
 
 
 def test_apply_model_config_already_current_still_records(monkeypatch: pytest.MonkeyPatch) -> None:
