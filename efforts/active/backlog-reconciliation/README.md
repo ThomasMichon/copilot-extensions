@@ -522,13 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
-The [hosted activation and incomplete-attempt proposal](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
-maps two finite completion candidates and three complete automation-status
-unions into existing OPEN #4783. Its later hosted-execution witness, causal
-limits and owners remain. Reviewed #14796 delivered initial receiving;
-the clarification preserves eight historical attempt records without
-reopening delivered branch preparation or requiring historical reruns.
-Review and complete actual receiving still precede source dispositions.
+The [hosted activation and incomplete-attempt outcomes](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
+record reviewed #14796/#14798, whole accepted receiving and four separately
+audited dispositions: one finite `COMPLETED` and three `NOT_PLANNED`
+status retirements. #4380's spent assessment remains OPEN; #4783 retains
+its original hosted-execution acceptance and eight historical records,
+not eight new rerun tasks. Two equal complete censuses measure 596 whole
+OPEN, with four departures offset by one arrival and no unrelated departure.
+All parent states, existing owners and actual holds remain.
 
 The [Git deadline and optional snapshot-batching correspondence](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
 records reviewed #14787 and two separately consumed final units after actual
