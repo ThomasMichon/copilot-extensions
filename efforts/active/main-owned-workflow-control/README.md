@@ -487,7 +487,33 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the remaining two complete original logical-environment functions:
+- [ ] Qualify the original pure transport-projection controls through the exact
+  ambiguous-profile function and three complete original classes:
+  default shell (three), SSH-target selection (six) and command wrapping (three).
+  Preserve class/method objects, code/global origins, fixtures, parameter rows,
+  marks and class-qualified IDs. Exclude the logical-host profile test, the
+  entire owner-platform-detection function and the entire mixed
+  `TestGetMachineTransport` class before execution. No SSH, hostname/platform
+  observation, environment patch or native/guest process may be introduced.
+  Complete metadata comparison precedes unchanged guarded execution of all
+  thirteen prospective cases, with real transport-owner call coverage per case.
+  Add only the exact adapter/original bindings and already-bound transport
+  target after proof; retain all preceding inventory, helpers and limits.
+  Complete collection confirms 31 original and thirteen adapted cases with
+  unchanged original classes/methods, code/global origins and metadata.
+  Initial unchanged guarding passes all thirteen in 1.62 pytest / 16.906
+  observation seconds, with all 39 phase reports, zero prohibited effects,
+  25 bound reads and actual production-call coverage per case.
+  V3 admission retains all preceding inventory and adds only thirteen nodes,
+  two bindings and one target: 10,395 nodes, 1,501 bindings, 547 targets,
+  92 helper decisions, 300 seconds and 699,500 bytes. Current-head review,
+  full hosted CI, normal merge and persistent readback remain.
+  Publication safely stops on a concurrent manifest conflict. Reconciliation
+  retains all four peer nodes, its new binding/target and both binding
+  refreshes; all 25 observed inputs remain exact without trial replay.
+  Final inventory is 10,399 nodes, 1,502 bindings, 548 targets and 699,981
+  bytes, with unchanged helpers/deadline. Fresh full CI must cover that union.
+- [x] Qualify the remaining two complete original logical-environment functions:
   six invalid/conflicting identities and one native/guest-distinction case.
   Their earlier hold was storage only, not a failed effect observation.
   Preserve the existing eight-row table and original objects, fixtures,
@@ -501,7 +527,10 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   The new seven pass in 1.49 pytest / 21.610 observation seconds with all
   21 phase reports, zero prohibited effects, 25 bound reads and actual owner
   calls per case. V3 admission produces 10,382 nodes, 1,499 bindings,
-  546 targets and 698,148 bytes; review/CI/merge/readback remain.
+  546 targets and 698,148 bytes. Source #14667 merges with all 10,382 cases
+  freshly passing; current-head review, required checks and independent merged
+  bytes, supported pull-forward, all current bindings/helpers and all 25
+  observed input hashes verify. Only this leaf is complete.
 - [x] Qualify the two complete original core-profile early-refusal functions:
   three registered-manifest schema cases and one expired-deadline/explicit-limit
   case. Metadata-only collection measures 22 originals / four selected cases

@@ -5,6 +5,34 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 26 original pure transport projections
+
+The adapter exports the exact ambiguous-profile function and three entire
+original classes: default-shell selection (three), SSH-target selection (six)
+and command wrapping (three). Collection compares 31 original cases with
+thirteen adapted cases, preserving classes/methods, original code/global
+origins, fixtures, parameter types/values, marks and class-qualified IDs.
+The host-profile function, entire owner-platform-detection function and whole
+mixed transport-resolution class remain excluded before execution.
+No hostname/platform probe, SSH process or environment patch is introduced.
+
+The initial unchanged guarded observation passes thirteen cases in 1.62
+pytest / 16.906 observation seconds. All 39 phase reports pass, zero
+prohibited effects occur, 25 reads are bound and every case exercises real
+production call lines. Admission adds exactly thirteen nodes, two bindings
+and one already-bound coverage target: 10,395 nodes, 1,501 bindings,
+547 targets, 92 unchanged helper decisions, 300 seconds and 699,500 bytes.
+Original tests and production code remain unchanged. Current-head review,
+full CI, normal merge and persistent verification remain; this is not parent
+completion, native qualification or a measured whole-flow savings claim.
+
+The initial publication attempt safely refuses a real concurrent manifest
+conflict. Semantic reconciliation preserves all four peer cases, one new
+source/target and both peer hash refreshes. All 25 locally observed inputs
+remain byte-identical; no qualification is replayed. Final inventory is
+10,399 nodes, 1,502 bindings, 548 targets and 699,981 bytes, with the same
+92 helpers and 300 seconds. Fresh hosted CI must execute the complete union.
+
 ## November 26 remaining original logical-environment cases
 
 With the bounded storage phase complete, the existing adapter adds the two
@@ -20,7 +48,13 @@ V3 admission adds seven nodes and refreshes only the existing adapter hash:
 300 seconds and 698,148 bytes. Strict Linux/Windows typing and Ruff pass.
 Original tests and production string/regex/dataclass code are unchanged.
 No OS/native/guest probe or environment-variable change executes.
-Review, full hosted CI, merge and persistent readback remain.
+Source #14667 merges at `de3425bdb1615a7898b9de41e58c944f99cc59b1`
+after current-head clean approval and required checks.
+Natural CI `45737889232` freshly executes all 10,382 cases in 189.507
+packet seconds, with 55 deselected and ten warnings; no reuse hit is claimed.
+Independent merge/readback, supported pull-forward, all eight owned blobs,
+current bindings/helpers and 25 observed input hashes verify without replay.
+This leaf is complete; the parent and native/integration/census gates remain.
 
 ## November 26 separate format-only migration
 
