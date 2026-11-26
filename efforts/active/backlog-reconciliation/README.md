@@ -5605,6 +5605,15 @@ record 837 whole open after three arrivals, a bounded #12487 source keeper
 and two new keepers with an explicit excluded source-read incident. No new
 closure credit, resource release or parent checkbox change follows.
 
+The [next seventeen-case receiving proposal](journal/2026/11.25-seventeen-cases-and-five-existing-receivers.md)
+retains seventeen independently OPEN reuse, publication, projection-freeze,
+native-prerequisite and installed-TTY cases in five existing receivers.
+All complete incumbents, twenty-two human comments, explicit keepers and
+custodians remain. Four new local delivery gates are unresolved; no tracker
+effect, technical completion or parent checkbox change is claimed.
+The preceding six-case outcome is merged in #14676. Its complete census
+remains 778 whole open, 49 above fixed 729; a later 779 hint is not a census.
+
 ### Phase 2b - Vision-linked stabilization roadmap
 
 - [x] _(Agent-recommended)_ Establish the reviewed research method and
