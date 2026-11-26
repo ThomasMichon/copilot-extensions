@@ -16,6 +16,7 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 SOURCE = "agent-worktrees"
@@ -275,59 +276,69 @@ def record(
     return event
 
 
-def _offer(event: dict[str, Any]) -> None:
-    """Admit, offer and close within the contract's bounded shutdown; fail open."""
+def _admitted(root: Path, source_schema: str) -> Any:
+    from process_telemetry.finite_owner import FiniteOwner
+
+    owner = FiniteOwner.from_directory(root, source=SOURCE, source_schema=source_schema)
+    return None if owner.legacy or owner.refusal is not None else owner
+
+
+def _hook_records_pending(directory: Path) -> bool:
     try:
-        from process_telemetry.finite_owner import FiniteOwner
+        return (directory / "pending.jsonl").stat().st_size > 0
+    except OSError:
+        return False
 
-        from .config import install_dir
 
-        owner = FiniteOwner.from_directory(
-            install_dir(), source=SOURCE, source_schema=SOURCE_SCHEMA,
-        )
-        if owner.legacy or owner.refusal is not None:
-            return
-        with owner:
-            owner.emit(event)
-    except Exception:
+def _close_together(owners: list[Any]) -> None:
+    """Close every route concurrently so the command keeps one shutdown budget."""
+    if not owners:
         return
+    import threading
+
+    others = [threading.Thread(target=owner.close, daemon=True) for owner in owners[1:]]
+    for thread in others:
+        thread.start()
+    owners[0].close()
+    for thread in others:
+        thread.join()
 
 
-def _offer_hook_journal() -> None:
-    """Deliver pending sessionStart hook records through their own admitted route.
+def _offer(event: dict[str, Any]) -> None:
+    """Admit, offer and close within the contract's bounded shutdown; fail open.
 
-    Hooks never launch a receiver, so this finite owner drains the journal they
-    wrote.  Admission is checked before draining, so a refused route leaves the
-    records pending; drained records that cannot be offered are lost, never
-    duplicated (consumer-telemetry-command, `hook.lifecycle.v1`).
+    Pending sessionStart hook records ride along on their own admitted
+    `hook.lifecycle.v1` route: hooks never launch a receiver, so the command
+    drains the journal they wrote.  Admission is checked before draining, so a
+    refused route leaves the records pending; drained records that cannot be
+    offered are lost, never duplicated.  Both routes close concurrently, so
+    hook delivery never extends the command's two-second shutdown budget.
     """
+    owners: list[Any] = []
     try:
-        from process_telemetry import hook_journal
-        from process_telemetry.finite_owner import FiniteOwner
-
         from .config import install_dir
 
         root = install_dir()
-        directory = root / HOOK_JOURNAL_DIRECTORY
-        if not directory.is_dir():
-            return
-        owner = FiniteOwner.from_directory(
-            root, source=SOURCE, source_schema=HOOK_SOURCE_SCHEMA,
-        )
-        if owner.legacy or owner.refusal is not None:
-            return
-        try:
-            if (directory / "pending.jsonl").stat().st_size == 0:
-                return
-        except OSError:
-            return
-        with owner:
-            if not owner.active:
-                return
-            for event in hook_journal.drain(directory):
-                owner.emit(event)
+        lifecycle = _admitted(root, SOURCE_SCHEMA)
+        journal = root / HOOK_JOURNAL_DIRECTORY
+        hooks = _admitted(root, HOOK_SOURCE_SCHEMA) if _hook_records_pending(journal) else None
+        if lifecycle is not None:
+            owners.append(lifecycle.start())
+            lifecycle.emit(event)
+        if hooks is not None:
+            from process_telemetry import hook_journal
+
+            owners.append(hooks.start())
+            if hooks.active:
+                for record in hook_journal.drain(journal):
+                    hooks.emit(record)
     except Exception:
-        return
+        pass
+    finally:
+        try:
+            _close_together(owners)
+        except Exception:
+            pass
 
 
 def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
@@ -360,7 +371,6 @@ def instrument(main: Callable[[], Any]) -> Callable[[], Any]:
                     kind, name, code=code, interrupted=interrupted,
                     duration_ms=int((time.monotonic() - started) * 1000),
                 ))
-                _offer_hook_journal()
             except BaseException:
                 # Delivery never replaces the command's own result or exception,
                 # including an interrupt or cancellation raised while offering.

@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,30 @@ def test_finite_command_drains_the_journal_through_its_route(
     assert (counters["offered"], counters["dropped_invalid"]) == (1, 0)
     assert hook_journal.drain(install / "consumer-telemetry-hooks") == []
     assert str(tmp_path) not in json.dumps([e for _, e in offered])
+
+
+def test_hook_delivery_shares_the_command_shutdown_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _admit(tmp_path, monkeypatch)
+    install = tmp_path / "install"
+    hook_telemetry.finish(hook_telemetry.begin(install), None)
+    closed: list[str] = []
+    real_close = FiniteOwner.close
+
+    def slow_close(owner: Any) -> None:
+        real_close(owner)
+        # Stand-in for a receiver that only exits at its close deadline.
+        time.sleep(1.5)
+        closed.append(owner.source_schema)
+
+    monkeypatch.setattr(FiniteOwner, "close", slow_close)
+    started = time.monotonic()
+    assert _run(monkeypatch, ["create"], lambda: 0) == 0
+    elapsed = time.monotonic() - started
+    assert sorted(closed) == ["hook.lifecycle.v1", "worktrees.lifecycle.v1"]
+    # Sequential closes would take at least two slow budgets; concurrent closes take one.
+    assert elapsed < 2.8
 
 
 @pytest.mark.parametrize("refusal", ["policy", "receiver"])
