@@ -1,0 +1,9 @@
+{
+  "comment": "Admit thirty-two original pure registry normalization and lookup cases under unchanged promotion guards",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

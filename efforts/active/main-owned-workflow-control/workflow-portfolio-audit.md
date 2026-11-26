@@ -5,6 +5,35 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 26 original pure registry projections
+
+The adapter exports eleven entire original normalization/selection functions
+and the complete naming and lookup classes: 32 cases, including all parameter
+rows and class-qualified identities. Metadata-only collection compares all
+88 original cases with those 32 exports before execution; class/function
+objects, code/global origins, fixtures, parameter values/types, marks and order
+remain unchanged. The entire file-parser class and entire mixed file/merge
+class, fallback import/file test and backend-identity constant assertion remain
+excluded. No YAML file load, backend replacement, OS probe or native call runs.
+
+Initial unchanged guarding passes all 32 in 1.60 pytest / 21.469 observation
+seconds. All 96 phases pass, zero prohibited effects occur, 25 reads are bound
+and every case has actual registry call-phase coverage. Only 32 nodes, two
+source bindings and one already-bound target are added; all preceding
+inventory, hashes, targets, helper decisions and limits remain.
+Inventory is 10,431 nodes, 1,504 sources, 549 targets, 92 helpers, 300 seconds
+and 702,241 bytes. Fatal Ruff and strict Linux/Windows typing pass.
+Review, full CI, merge and persistence remain. This is not parent completion,
+native qualification or a measured whole-flow savings claim.
+
+The initial head passes clean review and natural CI `45744246823`: all
+10,431 cases pass in 159.96 pytest / 183.315 packet seconds, with fresh
+execution rather than reuse. A subsequent peer merge makes that head
+conflicted. Reconciliation retains both native-connector binding refreshes
+and all ordered inventory; none of the 25 locally observed inputs changes.
+No local trial is replayed. Counts, bytes, helpers and deadline are unchanged;
+fresh current-head review and full CI must qualify the resulting union.
+
 ## November 26 original pure transport projections
 
 The adapter exports the exact ambiguous-profile function and three entire
@@ -32,6 +61,15 @@ source/target and both peer hash refreshes. All 25 locally observed inputs
 remain byte-identical; no qualification is replayed. Final inventory is
 10,399 nodes, 1,502 bindings, 548 targets and 699,981 bytes, with the same
 92 helpers and 300 seconds. Fresh hosted CI must execute the complete union.
+
+Source #14671 merges at `e84c2e1224775a9dac30469ba48d45d641514816`
+after current-head clean approval and all required checks. Natural CI
+`45741957758` freshly executes all 10,399 cases with 55 deselected and ten
+warnings in 194.76 pytest / 218.581 packet seconds; this is not a reuse hit.
+Independent merge/readback, supported pull-forward, all six owned blobs,
+exact reconciled candidate, all current sources/helpers and all 25 observed
+inputs verify. Only this thirteen-case leaf is complete; parent and all
+retained native, integration and ownership boundaries remain.
 
 ## November 26 remaining original logical-environment cases
 
