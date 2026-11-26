@@ -525,7 +525,10 @@ the non-public approval conversation.
 The [hosted activation and incomplete-attempt proposal](journal/2026/11.26-hosted-activation-and-incomplete-attempts.md)
 maps two finite completion candidates and three complete automation-status
 unions into existing OPEN #4783. Its later hosted-execution witness, causal
-limits and owners remain; review and actual receiving precede dispositions.
+limits and owners remain. Reviewed #14796 delivered initial receiving;
+the clarification preserves eight historical attempt records without
+reopening delivered branch preparation or requiring historical reruns.
+Review and complete actual receiving still precede source dispositions.
 
 The [Git deadline and optional snapshot-batching correspondence](journal/2026/11.26-git-deadlines-and-snapshot-batching.md)
 records reviewed #14787 and two separately consumed final units after actual
