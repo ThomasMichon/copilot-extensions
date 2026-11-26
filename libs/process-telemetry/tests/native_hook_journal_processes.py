@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
 import textwrap
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from process_telemetry import hook_journal
@@ -30,6 +32,20 @@ def _wait_all(processes: list[subprocess.Popen[bytes]]) -> None:
         assert process.wait(timeout=TIMEOUT_S) == 0
 
 
+@contextlib.contextmanager
+def _reaped() -> Iterator[list[subprocess.Popen[bytes]]]:
+    """Kill and reap every started child, even when an assertion fails first."""
+    processes: list[subprocess.Popen[bytes]] = []
+    try:
+        yield processes
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=TIMEOUT_S)
+
+
 def test_simultaneous_starts_in_independent_processes_honor_the_marker_cap(
     tmp_path: Path,
 ) -> None:
@@ -45,9 +61,10 @@ def test_simultaneous_starts_in_independent_processes_honor_the_marker_cap(
             time.sleep(0.001)
         hook_journal.HookRun.begin(Path(sys.argv[1]), "agent-vault", "sessionStart")
     """
-    processes = [_python(starter, str(tmp_path), str(gate)) for _ in range(8)]
-    gate.write_bytes(b"")
-    _wait_all(processes)
+    with _reaped() as processes:
+        processes.extend(_python(starter, str(tmp_path), str(gate)) for _ in range(8))
+        gate.write_bytes(b"")
+        _wait_all(processes)
     assert len(list(tmp_path.glob("*.start"))) == 3
 
 
@@ -72,11 +89,14 @@ def test_independent_writers_and_a_drainer_report_each_run_exactly_once(tmp_path
             seen.extend(event["run_sequence"] for event in hook_journal.drain(Path(sys.argv[1])))
         print(json.dumps(seen))
     """
-    writers = [_python(writer, str(tmp_path)) for _ in range(4)]
-    reader = _python(drainer, str(tmp_path), capture=True)
-    _wait_all(writers)
-    output, _ = reader.communicate(timeout=TIMEOUT_S)
-    assert reader.returncode == 0
+    with _reaped() as processes:
+        writers = [_python(writer, str(tmp_path)) for _ in range(4)]
+        processes.extend(writers)
+        reader = _python(drainer, str(tmp_path), capture=True)
+        processes.append(reader)
+        _wait_all(writers)
+        output, _ = reader.communicate(timeout=TIMEOUT_S)
+        assert reader.returncode == 0
     sequences = json.loads(output) + [
         event["run_sequence"] for event in hook_journal.drain(tmp_path)
     ]

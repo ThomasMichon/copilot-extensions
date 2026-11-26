@@ -404,7 +404,9 @@ record into its own marker before appending it, then removes the marker; a
 holder stopped before the append leaves a committed marker that the next start
 reports with its real outcome, and one stopped after the append leaves a
 marker that recovery or the next drain matches to the already-pending record,
-so each run is recorded at most once. Pending records, live markers, abandoned scratch files
+so each run is recorded at most once. Delivery is at most once too: `drain`
+removes the records it returns, so a drainer that then fails to offer them
+loses them rather than risk a duplicate. Pending records, live markers, abandoned scratch files
 and per-start recovery work are all bounded; a start that would exceed a
 bound goes unobserved rather than grow storage. Bounds apply to the whole
 shared journal: markers are capped across every plugin and entry, only the
