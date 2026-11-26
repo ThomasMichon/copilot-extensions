@@ -397,9 +397,14 @@ Hooks are latency-sensitive callbacks and never launch a receiver (section 5).
 `process_telemetry.hook_journal` writes a start marker before any product
 work and replaces it with a completion record on return. The runtime may stop
 a timed-out hook before it reports, so the next run converts a marker older
-than its stale threshold into one `unfinished` record. Completion and
-recovery both claim a marker by rename before reporting, so each run is
-recorded at most once. Pending records, live markers, abandoned scratch files
+than its stale threshold into one `unfinished` record. Every transition --
+the start's capacity check and marker publish, completion, recovery and
+drain -- holds one advisory journal lock. A run commits by writing its final
+record into its own marker before appending it, then removes the marker; a
+holder stopped before the append leaves a committed marker that the next start
+reports with its real outcome, and one stopped after the append leaves a
+marker that recovery or the next drain matches to the already-pending record,
+so each run is recorded at most once. Pending records, live markers, abandoned scratch files
 and per-start recovery work are all bounded; a start that would exceed a
 bound goes unobserved rather than grow storage. The journal is content-free;
 a separate finite owner of the registered

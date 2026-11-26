@@ -278,23 +278,80 @@ def test_a_run_recovered_as_unfinished_is_not_also_reported_complete(tmp_path: P
     assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"]
 
 
-def test_interruption_after_completion_append_is_not_reported_unfinished(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+def _failing_marker_unlink(monkeypatch: pytest.MonkeyPatch) -> Any:
     real_unlink = Path.unlink
 
     def interrupted(self: Path, missing_ok: bool = False) -> None:
-        if self.suffix == ".recovering":
+        if self.suffix == ".start":
             raise OSError("interrupted")
         real_unlink(self, missing_ok)
 
     monkeypatch.setattr(Path, "unlink", interrupted)
+    return real_unlink
+
+
+def test_interruption_after_completion_append_is_not_reported_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    real_unlink = _failing_marker_unlink(monkeypatch)
     run.finish(outcome="success")
     monkeypatch.setattr(Path, "unlink", real_unlink)
-    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert len(list(tmp_path.glob("*.start"))) == 1
+    live = hook_journal.HookRun.begin(
+        tmp_path, "agent-vault", "sessionStart", stale_after_ms=0,
+    )
     assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["success"]
+    assert list(tmp_path.glob("*.start")) == [live.marker]
 
+
+def test_drain_settles_a_committed_marker_left_after_its_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    real_unlink = _failing_marker_unlink(monkeypatch)
+    run.finish(outcome="success")
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["success"]
+    assert not list(tmp_path.glob("*.start"))
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert hook_journal.drain(tmp_path) == []
+
+
+class _Stopped(BaseException):
+    """Stands in for the runtime stopping a hook process mid-commit."""
+
+
+def test_stop_before_completion_append_reports_the_real_outcome_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    real_append = hook_journal._append_held
+
+    def stopped(directory: Path, events: list[dict[str, Any]]) -> bool:
+        raise _Stopped
+
+    monkeypatch.setattr(hook_journal, "_append_held", stopped)
+    with pytest.raises(_Stopped):
+        run.finish(outcome="failure", failure_category="nonzero_exit", exit_code=3)
+    monkeypatch.setattr(hook_journal, "_append_held", real_append)
+    # The committed marker is reported by the next start regardless of its age.
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    (event,) = hook_journal.drain(tmp_path)
+    assert event["outcome"] == "failure" and event["exit_code"] == 3
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"]
+
+
+def test_completion_into_a_full_journal_is_reported_by_a_later_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    monkeypatch.setattr(hook_journal, "PENDING_LIMIT", 0)
+    run.finish(outcome="success")
+    monkeypatch.setattr(hook_journal, "PENDING_LIMIT", 65536)
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["success"]
 
 def test_hook_duration_ignores_wall_clock_adjustments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

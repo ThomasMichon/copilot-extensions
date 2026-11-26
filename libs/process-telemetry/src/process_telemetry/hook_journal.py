@@ -98,31 +98,101 @@ def _stamp(ms: int) -> str:
     ).replace("+00:00", "Z")
 
 
-def _append(directory: Path, event: dict[str, Any]) -> bool:
-    return _append_many(directory, [event])
-
-
-def _append_many(directory: Path, events: list[dict[str, Any]]) -> bool:
-    """Append every admitted record under one lock acquisition, or none."""
+def _encode(events: list[dict[str, Any]]) -> bytes | None:
     try:
-        data = b"".join(
+        return b"".join(
             (json.dumps(_project(event), separators=(",", ":")) + "\n").encode("ascii")
             for event in events
         )
     except ValueError:
+        return None
+
+
+def _append_held(directory: Path, events: list[dict[str, Any]]) -> bool:
+    """Append every admitted record, or none; the caller holds the journal lock."""
+    data = _encode(events)
+    if data is None:
         return False
     path = directory / "pending.jsonl"
-    with _journal_lock(directory) as held:
-        if not held:
-            return False
-        try:
-            size = path.stat().st_size
-        except FileNotFoundError:
-            size = 0
-        if size + len(data) > PENDING_LIMIT:
-            return False
-        append_bytes(path, data, mode=0o600)
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        size = 0
+    if size + len(data) > PENDING_LIMIT:
+        return False
+    append_bytes(path, data, mode=0o600)
     return True
+
+
+def _append(directory: Path, event: dict[str, Any]) -> bool:
+    with _journal_lock(directory) as held:
+        return held and _append_held(directory, [event])
+
+
+def _key(event: dict[str, Any]) -> tuple[Any, ...] | None:
+    """A completed run's identity, from fields its record already carries."""
+    if "run_sequence" not in event or "started_at" not in event:
+        return None
+    return (event.get("plugin"), event.get("entry"), event["run_sequence"], event["started_at"])
+
+
+def _pending_keys(directory: Path) -> set[tuple[Any, ...]]:
+    try:
+        with (directory / "pending.jsonl").open("rb") as stream:
+            data = stream.read(PENDING_LIMIT)
+    except FileNotFoundError:
+        return set()
+    keys: set[tuple[Any, ...]] = set()
+    for line in data.splitlines():
+        try:
+            key = _key(json.loads(line))
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if key is not None:
+            keys.add(key)
+    return keys
+
+
+def _read_marker(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_bytes()[:4096])
+    except FileNotFoundError:
+        raise
+    except (OSError, ValueError):
+        return None
+    return value if type(value) is dict else None
+
+
+def _write_atomic(directory: Path, target: Path, value: dict[str, Any]) -> None:
+    scratch = directory / f".{uuid.uuid4().hex}.tmp"
+    scratch.write_text(json.dumps(value, separators=(",", ":")), "ascii")
+    os.replace(scratch, target)
+
+
+def _finalize(
+    directory: Path, marker: Path, state: dict[str, Any], record: dict[str, Any], *, check: bool,
+) -> bool:
+    """Commit one run's record into its marker, then report it; the lock is held.
+
+    Writing the record into the marker first is the commit point: a holder
+    stopped before the append leaves a marker that still carries its real
+    outcome, and one stopped after the append leaves a marker whose key the
+    pending journal (or a later drain) already accounts for.  Each run is
+    therefore reported exactly once.
+    """
+    if _encode([record]) is None:
+        return False
+    if state.get("record") != record:
+        _write_atomic(directory, marker, {**state, "record": record})
+    key = _key(record)
+    if not (check and key is not None and key in _pending_keys(directory)):
+        if not _append_held(directory, [record]):
+            # Full: the committed marker is reported by a later start.
+            return False
+    with contextlib.suppress(OSError):
+        marker.unlink()
+    return True
+
 
 def _next_sequence(directory: Path, plugin: str, entry: str) -> int:
     path = directory / f"{plugin}.{entry}.seq"
@@ -164,22 +234,22 @@ class HookRun:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.started_ms = _now_ms()
         self.started_mono_ms = _monotonic_ms()
-        markers, scratch, crowded = self._scan()
-        _reclaim(scratch, self.started_ms, stale_after_ms)
-        recovered = self._recover(markers, stale_after_ms)
-        if crowded or len(markers) - recovered >= MARKER_LIMIT:
-            # Storage is bounded: an unobserved run is preferable to an unbounded directory.
-            raise OSError("hook journal marker capacity reached")
+        # Scanning, recovery, the capacity check and publishing the new marker
+        # share one lock acquisition, so simultaneous starts cannot overshoot it.
         with _journal_lock(self.directory) as held:
             if not held:
                 raise OSError("hook journal is busy")
+            markers, scratch, crowded = self._scan()
+            _reclaim(scratch, self.started_ms, stale_after_ms)
+            recovered = self._recover(markers, stale_after_ms)
+            if crowded or len(markers) - recovered >= MARKER_LIMIT:
+                # Storage is bounded: an unobserved run is preferable to an unbounded directory.
+                raise OSError("hook journal marker capacity reached")
             self.sequence = _next_sequence(self.directory, self.plugin, self.entry)
-        marker = self.directory / f"{self.plugin}.{self.entry}.{uuid.uuid4().hex}.start"
-        scratch_path = self.directory / f".{uuid.uuid4().hex}.tmp"
-        scratch_path.write_text(json.dumps({
-            "run_sequence": self.sequence, "started_ms": self.started_ms,
-        }), "ascii")
-        os.replace(scratch_path, marker)
+            marker = self.directory / f"{self.plugin}.{self.entry}.{uuid.uuid4().hex}.start"
+            _write_atomic(self.directory, marker, {
+                "run_sequence": self.sequence, "started_ms": self.started_ms,
+            })
         self.marker = marker
 
     def _scan(self) -> tuple[list[Path], list[Path], bool]:
@@ -199,56 +269,40 @@ class HookRun:
         return markers, scratch, False
 
     def _recover(self, markers: list[Path], stale_after_ms: int) -> int:
-        """Report up to RECOVER_LIMIT stale markers within one time budget; return the count."""
+        """Report up to RECOVER_LIMIT markers within one time budget; the lock is held."""
         deadline = time.monotonic() + RECOVERY_BUDGET_S
-        claims: list[tuple[Path, Path]] = []
-        events: list[dict[str, Any]] = []
-        for stale in markers:
-            if len(claims) >= RECOVER_LIMIT or time.monotonic() > deadline:
+        recovered = 0
+        for marker in markers:
+            if recovered >= RECOVER_LIMIT or time.monotonic() > deadline:
                 break
             try:
-                prior = json.loads(stale.read_text("ascii"))
-                started = prior["started_ms"]
-                sequence = prior["run_sequence"]
-            except FileNotFoundError:
-                continue
-            except (OSError, ValueError, KeyError, TypeError):
-                # A marker being replaced or read concurrently is judged by its age alone.
-                try:
-                    started, sequence = stale.stat().st_mtime_ns // 1_000_000, None
-                except OSError:
-                    continue
-            if type(started) is not int or self.started_ms - started < stale_after_ms:
-                continue
-            # Renaming claims the marker: one concurrent start or the run's own
-            # finish() wins, so each run is reported exactly once.
-            claimed = self.directory / f".{uuid.uuid4().hex}.recovering"
-            try:
-                os.replace(stale, claimed)
+                state = _read_marker(marker)
+                if state is None:
+                    state = {"started_ms": marker.stat().st_mtime_ns // 1_000_000}
             except OSError:
                 continue
-            event: dict[str, Any] = {
-                "kind": "hook", "plugin": self.plugin, "entry": self.entry,
-                "outcome": "unfinished", "failure_category": "unfinished_prior_run",
-            }
-            if type(sequence) is int and sequence > 0:
-                event["run_sequence"] = sequence
-            if started > 0:
-                event["started_at"] = _stamp(started)
-            claims.append((stale, claimed))
-            events.append(event)
-        if not claims:
-            return 0
-        if not _append_many(self.directory, events):
-            # The journal is full or busy: keep the markers for a later start.
-            for stale, claimed in claims:
-                with contextlib.suppress(OSError):
-                    os.replace(claimed, stale)
-            return 0
-        for _, claimed in claims:
-            with contextlib.suppress(OSError):
-                claimed.unlink()
-        return len(claims)
+            record = state.get("record")
+            if type(record) is dict:
+                # A holder stopped after committing its outcome; report that outcome.
+                check = True
+            else:
+                started = state.get("started_ms")
+                if type(started) is not int or self.started_ms - started < stale_after_ms:
+                    continue
+                record = {
+                    "kind": "hook", "plugin": self.plugin, "entry": self.entry,
+                    "outcome": "unfinished", "failure_category": "unfinished_prior_run",
+                }
+                sequence = state.get("run_sequence")
+                if type(sequence) is int and sequence > 0:
+                    record["run_sequence"] = sequence
+                if started > 0:
+                    record["started_at"] = _stamp(started)
+                check = False
+            if not _finalize(self.directory, marker, state, record, check=check):
+                break
+            recovered += 1
+        return recovered
 
     def finish(
         self, *, outcome: str, failure_category: str = "none", exit_code: int | None = None,
@@ -256,26 +310,31 @@ class HookRun:
         marker, self.marker = self.marker, None
         if marker is None:
             return
-        claimed = self.directory / f".{uuid.uuid4().hex}.recovering"
-        try:
-            os.replace(marker, claimed)
-        except OSError:
-            # A later start already reported this run as unfinished.
-            return
-        event: dict[str, Any] = {
+        record: dict[str, Any] = {
             "kind": "hook", "plugin": self.plugin, "entry": self.entry,
             "outcome": outcome, "failure_category": failure_category,
             "duration_ms": max(0, _monotonic_ms() - self.started_mono_ms),
             "run_sequence": self.sequence, "started_at": _stamp(self.started_ms),
         }
         if exit_code is not None:
-            event["exit_code"] = exit_code
+            record["exit_code"] = exit_code
         try:
-            _append(self.directory, event)
+            with _journal_lock(self.directory) as held:
+                if not held:
+                    # Drop the observation rather than delay the hook; recovery
+                    # serializes on the lock, so this cannot double-report.
+                    with contextlib.suppress(OSError):
+                        marker.unlink()
+                    return
+                try:
+                    state = _read_marker(marker)
+                except FileNotFoundError:
+                    return  # A later start already reported this run as unfinished.
+                if state is None or type(state.get("record")) is dict:
+                    return
+                _finalize(self.directory, marker, state, record, check=False)
         except OSError:
             pass
-        with contextlib.suppress(OSError):
-            claimed.unlink()
 
 
 def _reclaim(scratch: list[Path], now_ms: int, stale_after_ms: int) -> None:
@@ -287,6 +346,28 @@ def _reclaim(scratch: list[Path], now_ms: int, stale_after_ms: int) -> None:
         except OSError:
             continue
 
+
+def _settle(directory: Path, keys: set[tuple[Any, ...]]) -> None:
+    """Remove committed markers whose records this drain handed off; the lock is held."""
+    if not keys:
+        return
+    with os.scandir(directory) as entries:
+        for examined, item in enumerate(entries, 1):
+            if examined > SCAN_LIMIT:
+                return
+            if not item.name.endswith(".start"):
+                continue
+            path = directory / item.name
+            try:
+                state = _read_marker(path)
+            except OSError:
+                continue
+            record = state.get("record") if state is not None else None
+            if type(record) is dict and _key(record) in keys:
+                with contextlib.suppress(OSError):
+                    path.unlink()
+
+
 def drain(directory: Path, *, limit: int = DRAIN_LIMIT) -> list[dict[str, Any]]:
     """Remove and return up to `limit` observations; the rest stay pending.
 
@@ -295,6 +376,7 @@ def drain(directory: Path, *, limit: int = DRAIN_LIMIT) -> list[dict[str, Any]]:
     """
     directory = Path(directory)
     source = directory / "pending.jsonl"
+    events: list[dict[str, Any]] = []
     try:
         with _journal_lock(directory) as held:
             if not held:
@@ -314,12 +396,12 @@ def drain(directory: Path, *, limit: int = DRAIN_LIMIT) -> list[dict[str, Any]]:
                 os.replace(scratch, source)
             else:
                 source.unlink()
+            for line in taken:
+                try:
+                    events.append(_project(json.loads(line)))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+            _settle(directory, {key for event in events if (key := _key(event)) is not None})
     except OSError:
-        return []
-    events: list[dict[str, Any]] = []
-    for line in taken:
-        try:
-            events.append(_project(json.loads(line)))
-        except (ValueError, TypeError, AttributeError):
-            continue
+        return events
     return events

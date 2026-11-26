@@ -425,6 +425,9 @@ sync failures are injected, not real disk exhaustion. Actual shared-volume,
 crash/interrupted-driver, storage-failure and other-platform qualification remain
 separate integration work; this API does not automatically wire or admit a
 reproducer case. Neither file expands the required unit-only CI packet.
+The separately selected `tests/native_hook_journal_processes.py` races real,
+independent processes on one hook journal: simultaneous starts against the
+marker cap, writers against a drainer, and a killed lock holder.
 
 Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
 writer, not another collector or service. Its producer copies bounded primitives
