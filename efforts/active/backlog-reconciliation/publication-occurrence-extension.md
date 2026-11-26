@@ -188,3 +188,94 @@ The [actual independent #8626 audit](journal/2026/11.25-coverage-bound-and-furth
 records its disclosed acknowledgment, `NOT_PLANNED` tracking transition,
 preserved original and first-target #7378 readback. Only these four new
 delivery gates are resolved; all thirty publisher cases remain OPEN.
+
+## Four legacy and current publication cases
+
+The preceding thirty registered technical cases and all earlier leaf-token
+retirements are settled. The
+[whole-original/discussion study](journal/2026/11.25-publisher-guards-and-explicit-keepers.md)
+proposes four more independent cases in existing OPEN #7378. Two failed the
+legacy exact-candidate publication guard and two the later qualified-source
+publisher. Do not collapse their different boundaries or infer a shared cause.
+
+Append the following complete block to the immediate qualified whole
+receiver body only after review. Preserve that entire incumbent, all thirty
+earlier rows, original and later acceptance, one disclosure, all five comments,
+labels, assignments and custodians. Independently read the whole actual result
+before any source effect.
+
+<!-- publication-four-boundaries:start -->
+## Publication: four further independent legacy/current cases
+
+The entire incumbent above remains unchanged, including its original
+release/tag and later admission diagnostics, thirty earlier registered cases,
+five human comments and all technical acceptance and custody.
+These four further complete originals have no edits or discussion and were
+qualified through actual author/editor histories and successful
+repository-controlled reporter steps.
+
+| Clause / original | Exact lookup marker | Reported source | Actual failed run / job | Failed boundary | Technical state |
+|---|---|---|---|---|---|
+| P9301 / #9301 | `Signature: a478f59637bf` | `5ed92969a9072907c724dbc630f1fe13c059d292` | [40585209420 / 122476650245](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40585209420/job/122476650245) | Legacy exact-candidate publication | OPEN |
+| P9411 / #9411 | `Signature: 93ec334af3a3` | `e4b86de7d74c46d750bb102b80fc8f8fab8ba02c` | [40724343982 / 122946652828](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40724343982/job/122946652828) | Legacy exact-candidate publication | OPEN |
+| P9480 / #9480 | `Signature: 89b907faab1d` | `c40d36ec866eb208f7c268e40346e30b8b4d2d3d` | [40793952213 / 123191627723](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40793952213/job/123191627723) | Qualified-source publication | OPEN |
+| P9513 / #9513 | `Signature: dfc96d8d4c5f` | `ab157c89dc8a03bd67749e9b99fc8d1caec78882` | [40816309480 / 123260778888](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40816309480/job/123260778888) | Qualified-source publication | OPEN |
+
+#9301 and #9411 failed **Promote dev -> main / Publish and read back
+exact-candidate artifacts before enabling merge**. Each whole excerpt
+literally reports that candidate release/tag creation was not verified.
+Preserve that exact refused condition, source, candidate and failed execution;
+the failed operand and underlying cause remain unestablished. Do not diagnose
+a common permissions, consistency, governance or transport defect from that
+guard alone.
+
+#9480 and #9513 failed **Publish and read back the qualified source release
+before merge / Publish immutable source assets and verify all raw bytes
+before merge**. Their complete excerpts contain cleanup, not their causal
+diagnostics. The legacy release/tag message must not be assigned to these rows.
+
+All thirty-four registered technical cases remain independently OPEN.
+Preserve every original report, literal signature/source string, execution,
+specific remaining gap and still-required attributable diagnosis and
+evidence-backed technical disposition. Existing release-pipeline/component
+custodians remain; unassigned tracker metadata is not absent external custody.
+No later green run, another case's source correction or candidate retirement
+supplies technical completion for these four cases.
+
+Only the separate leaf tokens #9301, #9411, #9480 and #9513 may conditionally
+retire `NOT_PLANNED` after whole actual accepted receiving and their separate
+current eligibility/custody, unchanged-content, exact-signature routing,
+disclosed acknowledgment and independent proper-reason/original-preservation/
+post-route audits. Their technical cases stay OPEN here. No unfinished human
+request is dismissed.
+
+Keep this OPEN receiver's `ci-failure-signature` selector and existing
+issue-level cooldown. Require the producer-equivalent exact-signature lookup
+to find #7378 indexed before any selective source-selector withdrawal while
+that source remains OPEN, select #7378 first before its retirement and select
+it first afterward. Changed evidence, search delay, unexpected selection or
+a hold keeps the affected source OPEN. Unknown effects are reconciled,
+not replayed. No per-signature cadence or multi-case fix-worker claim follows.
+
+Keep #8632/#8634's whole producer-upload/timestamp acceptance, #8660's three
+frozen-binding occurrences, #9317's provider contradiction and retired-candidate
+boundary, and #8985/#9092's canonical/vendor consumer acceptance separate
+and OPEN. This intake does not qualify #9480's linked-source text or any
+actual held copy.
+
+All incumbent candidate/source binding, qualification, signatures, consumer
+authority and exact raw-byte publication requirements remain. No report
+consolidation appoints an investigator, weakens integrity, replays a workflow,
+runs a product test, modifies code or performs an installation, service,
+runtime, rollout or resource operation.
+<!-- publication-four-boundaries:end -->
+
+### Four-case delivery gates
+
+- [ ] The additive proposal passes review and required CI and merges.
+- [ ] Whole actual receiving preserves all incumbent text, five comments,
+  both boundary families, metadata, custody and thirty-four OPEN cases.
+- [ ] Each new source passes its qualification, exact route, disclosed
+  acknowledgment and independent disposition/post-route/original audits.
+- [ ] A complete new census records actual effects and inflow, preserving
+  all six keeper outcomes and all prior local and parent gate states.
