@@ -487,7 +487,28 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify the original pure transport-projection controls through the exact
+- [ ] Qualify original pure registry projections through eleven complete
+  functions and the entire `TestMachineName` and `TestFindMachineEntry`
+  classes. Preserve original classes/methods, code/global origins, fixtures,
+  parameter types/values, marks, class-qualified IDs and order.
+  Exclude the whole file-parser class, entire mixed merge class, fallback
+  import/file test and backend-identity constant-only test before execution.
+  No YAML file load, backend replacement, hostname/platform probe, SSH,
+  environment patch or native/guest process may be introduced.
+  Compare full original/adapted metadata before unchanged guarding; require
+  real registry-call coverage per selected case before exact admission.
+  Retain preceding inventory, hashes, targets, helpers, limits and all holds;
+  review, full CI, normal merge and persistent readback remain required.
+  Complete metadata collection confirms 88 original and 32 adapted cases,
+  retaining all original class/function, fixture, parameter and ID metadata.
+  Initial unchanged guarding passes all 32 in 1.60 pytest / 21.469
+  observation seconds: all 96 phase reports pass, zero prohibited effects,
+  25 bound reads and actual registry-call coverage per case.
+  V3 admission adds only 32 nodes, two bindings and one already-bound target:
+  10,431 nodes, 1,504 bindings, 549 targets, 92 unchanged helper decisions,
+  300 seconds and 702,241 bytes. Ruff and strict Linux/Windows typing pass;
+  review, full hosted CI, merge and persistent readback remain.
+- [x] Qualify the original pure transport-projection controls through the exact
   ambiguous-profile function and three complete original classes:
   default shell (three), SSH-target selection (six) and command wrapping (three).
   Preserve class/method objects, code/global origins, fixtures, parameter rows,
@@ -513,6 +534,11 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   refreshes; all 25 observed inputs remain exact without trial replay.
   Final inventory is 10,399 nodes, 1,502 bindings, 548 targets and 699,981
   bytes, with unchanged helpers/deadline. Fresh full CI must cover that union.
+  Source #14671 merges after current-head clean approval and all required
+  checks; natural CI executes all 10,399 cases in 218.581 packet seconds.
+  Independent merged state, all six reviewed/merged/working blobs, exact
+  reconciled candidate, all current bindings/helpers and all 25 observed
+  inputs verify without trial replay. Only this thirteen-case leaf is Done.
 - [x] Qualify the remaining two complete original logical-environment functions:
   six invalid/conflicting identities and one native/guest-distinction case.
   Their earlier hold was storage only, not a failed effect observation.
