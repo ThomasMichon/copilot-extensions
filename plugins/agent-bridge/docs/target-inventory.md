@@ -120,7 +120,8 @@ returns 503, not a false 404.
 
 No new RPC is introduced. An older executing provider refuses `show` before
 the inventory read; legacy commands remain available on rollback.
-`resume`, `stop` and `end` keep their existing selectors. Ordinary `send`,
+`stop` and `end` keep their existing selectors. Plain `resume` also retains its
+existing selector; the opt-in workspace caller below uses common selection. Ordinary `send`,
 `read` and `wait` use the exact default described below. No existing endpoint
 is deprecated or removed.
 
@@ -131,8 +132,9 @@ The optional `worktree_exact_resume: 1` health capability adds
 body, `{"native_session_id": "<selected native ID>"}`. The explicit
 `BridgeClient.resume_worktree_exact(worktree_id, native_session_id, mode=...)`
 method negotiates that capability from the executing daemon before one POST.
-This is a provider-first expansion within HTTP generation 52. It does not
-migrate the CLI's `resume`, `stop` or `end` selectors.
+This is a provider-first expansion within HTTP generation 52. The CLI's
+opt-in workspace caller is described below; plain lifecycle selectors remain
+unchanged.
 
 The workspace's existing native-resume owner still controls admission, history,
 hosting and launch. The selected ID must match its authoritative head before
@@ -153,6 +155,39 @@ before POST when they lack the capability. A downgrade after negotiation reaches
 an unsupported exact route, not a legacy route that could ignore the identity.
 Existing qualified and unqualified resume routes, their callers and their
 supported behavior remain unchanged. No old form is deprecated by this change.
+
+### Opt-in exact workspace resume
+
+`resume ID --bridge` selects one workspace-backed conversation through
+`bridge_inventory: 2`, then passes both its workspace and native identity to
+the released `worktree_exact_resume: 1` operation. Exact worktree, native and
+managed aliases share `show`'s project/CWD/repository-entry-point scope.
+`--worktree-id ID --bridge` additionally requires that exact workspace ID.
+`--all-projects`, `--machine` and `--namespace` refine common selection and
+require `--bridge`. Selection uses the local serving daemon's inventory;
+it does not federate to another Bridge host. Standalone conversations without
+a workspace owner refuse rather than use managed-only lifecycle endpoints.
+
+The existing hosting choice remains explicit: ACP by default, or `--cli` for
+the native CLI/mux owner. Cached hosting labels never authorize taking over
+a live holder. Both modes retain the selected native identity; pending handoff,
+changed head and unavailable owner remain native-owner refusals. A known
+singleton conversation can resume, but an empty singleton cannot be initialized.
+
+The executing CLI advertises `exact-bridge-workspace-resume` in
+`agent-bridge.resume/v1` through `version --contracts-json`. An older CLI does
+not accept this opt-in syntax. An older daemon lacking either required
+capability refuses before the corresponding operation. There is no automatic
+legacy retry after refusal, rollback or an uncertain result.
+
+This caller never ensures a daemon, selects an agent profile or creates a fresh
+conversation. It makes one exact resume attempt and preserves the complete
+confirmed server response plus `verb: "loaded"` in JSON. Error JSON retains
+the requested target and, once selected, the original workspace/native identity.
+Lost or invalid replies remain unconfirmed, not successful resumes or permission
+to replay. `--force`/`--reclaim`, `--worktree-writer-file` and
+`--retained-recovery-file` are rejected before input files, stdin or discovery.
+Their existing contracts remain available without `--bridge`.
 
 ### Ordinary selector defaults and legacy support
 

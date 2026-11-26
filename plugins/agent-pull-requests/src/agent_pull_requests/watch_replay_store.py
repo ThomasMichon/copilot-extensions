@@ -534,47 +534,26 @@ class ReplayStore:
     def _review_transaction(
         self, operation: Callable[[Document], _T], *, expires_at: int,
         checkpoint: Checkpoint | None = None, persist: bool = True, staged: Literal[False] = False,
+        before_replace: Checkpoint | None = None,
     ) -> _T: ...
 
     @overload
     def _review_transaction(
         self, operation: Callable[[Document, Commit], _T], *, expires_at: int,
         checkpoint: Checkpoint | None = None, persist: bool = True, staged: Literal[True],
+        before_replace: Checkpoint | None = None,
     ) -> _T: ...
 
     def _review_transaction(
         self, operation: Callable[[Document], _T] | Callable[[Document, Commit], _T], *,
         expires_at: int, checkpoint: Checkpoint | None = None, persist: bool = True, staged: bool = False,
+        before_replace: Checkpoint | None = None,
     ) -> _T:
-        if checkpoint is not None and not callable(checkpoint):
-            raise ValueError("invalid request checkpoint")
-        self.check_current(expires_at, checkpoint)
-        with self._review_lock(expires_at, checkpoint) as lock:
-            self.check_current(expires_at, checkpoint)
-            document = self._read_document()
-            if document.get("schema") != OWNER_SCHEMA:
-                raise ReplayStoreInvalid("review operations require explicit owner adoption")
-            self._validate_owner(document)
-
-            def commit() -> None:
-                self._validate_owner(document)
-                lock.assert_owned()
-                self.check_current(expires_at, checkpoint)
-                _atomic_write_json(self.path, document)
-                self.check_current(expires_at, checkpoint)
-
-            # A bounded cache mutation may require a durable owner reservation
-            # before its separate pointer write, without releasing replay custody.
-            result = (
-                cast(Callable[[Document, Commit], _T], operation)(document, commit) if staged
-                else cast(Callable[[Document], _T], operation)(document)
-            )
-            self._validate_owner(document)
-            self.check_current(expires_at, checkpoint)
-            if persist:
-                commit()
-            self.check_current(expires_at, checkpoint)
-            return copy.deepcopy(result)
+        from .watch_owner_transaction import review_transaction
+        return review_transaction(
+            self, operation, expires_at=expires_at, checkpoint=checkpoint,
+            persist=persist, staged=staged, before_replace=before_replace,
+        )
 
     def adopt_prepared_reviews(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
