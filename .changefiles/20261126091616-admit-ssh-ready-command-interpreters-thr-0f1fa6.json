@@ -1,0 +1,13 @@
+{
+  "comment": "Admit SSH READY command interpreters through prepared UV and package native capture support.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

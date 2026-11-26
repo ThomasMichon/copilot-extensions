@@ -1,6 +1,7 @@
 # Testing copilot-extensions
 
-Containers' [command controls](plugins/agent-containers/tests/README.md) are backend-free.
+Backend-free controls: [Containers](plugins/agent-containers/tests/README.md),
+[SSH](plugins/agent-ssh/tests/README.md).
 
 Bridge's `tests/test_installer_watchdog.py` exercises the shared PowerShell
 self-stage block in fresh synthetic homes under both Windows shell hosts.
