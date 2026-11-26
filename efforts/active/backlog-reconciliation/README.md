@@ -523,12 +523,15 @@ the non-public approval conversation.
 ## Plan
 
 The [materialization repair and ten retained cases](journal/2026/11.26-materialization-repair-and-ten-retained-cases.md)
-proposes nine conditional completed-source dispositions against the precise
-merged multi-package emitter repair, seven further independently OPEN
-installed-TTY cases and three independently OPEN source-preparation cases.
-#14310 retains its human-owned parent completion boundary despite the
-subsequently delivered sibling-fallback source correction. No tracker
-effect or parent checkbox completion is claimed by this proposal.
+records reviewed #14764, whole accepted receiving and nineteen separately
+audited dispositions: nine `COMPLETED` against the precise merged
+multi-package source repair and ten `NOT_PLANNED` tracking retirements with
+their technical cases independently OPEN. #14310 retains its explicit
+human-owned parent completion boundary despite the delivered follow-up source.
+Two complete censuses agree on 634 whole OPEN, 293 original-cohort and
+341 inflow: the exact nineteen departures from 653, with no arrival or
+unrelated departure. The factual outcome still owes publication; all parent
+Plan/Validation states remain unchanged.
 
 The [eighteen later TTY-case outcome](journal/2026/11.26-eighteen-later-tty-cases.md)
 retains eighteen separate unresolved execution identities in existing #11966
