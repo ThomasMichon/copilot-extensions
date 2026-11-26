@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [checkout-policy completion and nine-case TTY proposal](journal/2026/11.26-checkout-policy-completion-and-nine-tty-cases.md)
+records independently acknowledged #13264 source completion through #13265,
+without claiming whole installed-TTY qualification. Nine further independent
+TTY rows are proposed for existing #11966; all sixty-nine incumbent technical
+rows and ten human comments remain. Six source-input diagnostic gaps,
+#13263's specifically discussed generation, assigned #13268/#13269 and
+#13260's distinct module-health request remain OPEN. The proposal still owes
+review, whole actual receiving, separate disposition audits, a complete census
+and factual outcome. No parent Plan/Validation item is resolved by this slice.
+
 The [six further occurrence outcome](journal/2026/11.25-six-occurrences-and-retained-diagnostics.md)
 retains four additional independent reuse cases under existing #7872 and two
 publication cases under existing #7378 after reviewed #14672 and whole actual
