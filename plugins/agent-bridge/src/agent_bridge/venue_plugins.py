@@ -21,7 +21,7 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
     """Build a readonly producer plan for the actual allocated checkout."""
     from plugin_resolve.conventions import SETTINGS_RELS
     from plugin_resolve.registration import _settings_document
-    from .related_plugins import control_plane_anchors, is_harness_plugin, related_plugins_for_repo
+    from .related_plugins import control_plane_anchors, declared_related_plugins, is_harness_plugin
 
     if not isinstance(workspace, str) or not workspace.strip():
         raise ValueError("Local plugin preparation requires the allocated execution checkout")
@@ -49,7 +49,7 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
                 _settings_document(root.joinpath(*relative))
         specs = [
             ref.selection()
-            for ref in related_plugins_for_repo(target.project, anchors=roots)
+            for ref in declared_related_plugins(target.project, roots)
             if not is_harness_plugin(ref.source)
         ]
         plan = build_plan(
@@ -290,7 +290,7 @@ async def venue_plugin_plan(
     target: dict, *, caller=None, controller_cwd: str | None = None, codespace: bool = False,
 ) -> dict:
     """Select current-controller plugins independently of the receiver transport."""
-    from .related_plugins import control_plane_anchors, is_harness_plugin, related_plugins_for_repo
+    from .related_plugins import control_plane_anchors, declared_related_plugins, is_harness_plugin
     from .session_host.container_transport import _run_provider
     from .transport import _reresolve_stale_interpreter
 
@@ -312,7 +312,8 @@ async def venue_plugin_plan(
         spec["source"]: spec for spec in specs if not is_harness_plugin(spec["source"])
     }
     if target.get("repo"):
-        for ref in related_plugins_for_repo(target["repo"], anchors=roots):
+        refs = await asyncio.to_thread(declared_related_plugins, target["repo"], roots)
+        for ref in refs:
             spec = ref.selection()
             if not is_harness_plugin(spec["source"]):
                 selected_related.setdefault(spec["source"], spec)

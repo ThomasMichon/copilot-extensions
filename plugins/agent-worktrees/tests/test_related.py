@@ -2482,6 +2482,33 @@ def test_related_list_batches_registry_paths_once(tmp_path, monkeypatch, capfd):
     assert calls == ["read"]
 
 
+def test_related_list_json_carries_layered_plugins(tmp_path, monkeypatch, capfd):
+    """A plugin-contributed layer's plugins survive an empty base ``related: {}``."""
+    from agent_worktrees import related_cli as cli, repos
+
+    contributed = tmp_path / "contributed"
+    base = tmp_path / "base"
+    contributed.mkdir()
+    base.mkdir()
+    related.write_related(contributed, RelatedConfig(related={
+        "product": RelatedEntry(
+            name="product",
+            plugins=[{"source": "dev-locally@synthetic", "enable": True}],
+        ),
+    }))
+    (base / ".agent-worktrees").mkdir()
+    (base / ".agent-worktrees" / "related.yaml").write_text("related: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli.cfg, "active_project", lambda: "consumer")
+    monkeypatch.setattr(
+        cli, "_related_config_source_anchors", lambda _anchor: [str(contributed), str(base)],
+    )
+    monkeypatch.setattr(repos, "read_registry", lambda: repos.ReposRegistry(repos={}))
+    assert cli.cmd_related_dispatch(["list", "--json", "--repo", str(base)]) == 0
+    rows = {row["name"]: row for row in json.loads(capfd.readouterr().out)["related"]}
+    assert rows["product"]["plugins"] == [{"source": "dev-locally@synthetic", "enable": True}]
+
+
 @pytest.mark.parametrize("body", ["related: [\n", "- not-a-mapping\n", "related: []\n"])
 def test_related_acquisition_report_rejects_uncertain_empty(tmp_path, body):
     from dropin_registry import ScanAuthority
