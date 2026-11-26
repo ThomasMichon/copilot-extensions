@@ -270,22 +270,29 @@ Both preserve source failures and never ensure the daemon, hydrate metadata or
 start/resume a conversation. Use `--all-projects` deliberately for cross-project
 lookup, and repeat `--host HOST` for selected remote Bridge hosts. Multiple
 matches refuse rather than guess. Inspection is not lifecycle admission; plain
-lifecycle commands retain their existing selectors during this transition. `show` requires
+stop/end commands retain their existing selectors during this transition. `show` requires
 `bridge_inventory: 2`; version 1 still supports `list` but cannot confirm that a
 managed alias is absent. See the
 [inventory contract](../../docs/target-inventory.md#exact-conversation-inspection).
 
-Use `resume ID --bridge` to select a workspace conversation through that same
+Use `resume ID` to select a workspace conversation through that same
 project scope and pin its native identity during resume. The serving daemon
 must support `bridge_inventory: 2` and `worktree_exact_resume: 1`.
 Hosting retains the existing explicit choice: ACP by default, `--cli` for the
 native CLI/mux owner. The native owner refuses a changed head, pending handoff
-or conflicting live holder. This opt-in caller never ensures a daemon,
+or conflicting live holder. This caller never ensures a daemon,
 initializes an empty singleton or falls back to another selector.
 Use original writer/recovery inputs or takeover controls through their existing
-contracts without `--bridge`; they cannot be combined. Standalone and remote
+contracts without `--bridge`; they cannot be combined. `--bridge` explicitly
+selects the default exact mode; `--legacy-selector` selects the original
+session, singleton or agent/profile contract. Standalone and remote
 Bridge-host lifecycle selection need their own providers. See
-[exact workspace resume](../../docs/target-inventory.md#opt-in-exact-workspace-resume).
+[exact workspace resume](../../docs/target-inventory.md#exact-workspace-resume).
+
+Existing strict and hosting-fenced resume forms keep their original selectors
+by default, including calls from older or still-running producers. Add
+`--bridge` explicitly to combine exact selection with `--strict` or
+`--require-agent-hosting`; the hosting fence remains enforced.
 
 Use `read ID` for one bounded, cursor-neutral result snapshot of an
 exact local conversation, or `wait ID --json` to observe that same

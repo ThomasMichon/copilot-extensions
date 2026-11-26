@@ -1489,12 +1489,15 @@ headlessly by default; `--cli` resumes it in the owner's existing mux launch
 path. It never substitutes a fresh conversation or takes over a live
 conflicting execution leg. See the [resume command contract](skills/agent-bridge/references/cli-commands.md#session-management)
 for protocol compatibility, native identity and uncertain-launch behavior.
-Opt-in `resume ID --bridge` first selects a project-scoped workspace conversation
+Ordinary `resume ID` first selects a project-scoped workspace conversation
 and pins its native identity through the released exact-resume operation.
 It preserves the existing ACP default and explicit `--cli` choice, never ensures
-a daemon and never falls back to another selector. Original writer/recovery and
-takeover controls remain separate. See
-[exact workspace resume](docs/target-inventory.md#opt-in-exact-workspace-resume).
+a daemon and never falls back to another selector. `--bridge` explicitly
+selects this default; `--legacy-selector` selects the original session/profile
+contract. Original strict, hosting-fenced, writer/recovery and takeover controls
+retain their existing specialized paths. Explicit `--bridge` still supports
+the compatible strict and hosting options. See
+[exact workspace resume](docs/target-inventory.md#exact-workspace-resume).
 Retained `complete`, `completed` and `finalized` checkouts may resume the same
 owner-asserted head; those lifecycle labels do not imply a changed directory.
 Exact workspace/head checks and owner-fenced launch admission still apply.

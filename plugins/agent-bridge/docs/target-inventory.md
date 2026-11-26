@@ -156,15 +156,17 @@ an unsupported exact route, not a legacy route that could ignore the identity.
 Existing qualified and unqualified resume routes, their callers and their
 supported behavior remain unchanged. No old form is deprecated by this change.
 
-### Opt-in exact workspace resume
+### Exact workspace resume
 
-`resume ID --bridge` selects one workspace-backed conversation through
+Ordinary `resume ID` selects one workspace-backed conversation through
 `bridge_inventory: 2`, then passes both its workspace and native identity to
 the released `worktree_exact_resume: 1` operation. Exact worktree, native and
 managed aliases share `show`'s project/CWD/repository-entry-point scope.
-`--worktree-id ID --bridge` additionally requires that exact workspace ID.
+`--worktree-id ID` additionally requires that exact workspace ID.
 `--all-projects`, `--machine` and `--namespace` refine common selection and
-require `--bridge`. Selection uses the local serving daemon's inventory;
+use that same selection. `--bridge` remains an explicit alias, while
+`--legacy-selector` selects the original session/agent/profile contract.
+Selection uses the local serving daemon's inventory;
 it does not federate to another Bridge host. Standalone conversations without
 a workspace owner refuse rather than use managed-only lifecycle endpoints.
 
@@ -174,9 +176,11 @@ a live holder. Both modes retain the selected native identity; pending handoff,
 changed head and unavailable owner remain native-owner refusals. A known
 singleton conversation can resume, but an empty singleton cannot be initialized.
 
-The executing CLI advertises `exact-bridge-workspace-resume` in
-`agent-bridge.resume/v1` through `version --contracts-json`. An older CLI does
-not accept this opt-in syntax. An older daemon lacking either required
+The executing CLI advertises `exact-bridge-workspace-resume` and
+`bridge-workspace-resume-default` in `agent-bridge.resume/v1` through
+`version --contracts-json`. A prior CLI without the default capability retains
+its original plain-resume meaning; use the explicit `--bridge` form only when
+that CLI declares its exact capability. An older daemon lacking either required
 capability refuses before the corresponding operation. There is no automatic
 legacy retry after refusal, rollback or an uncertain result.
 
@@ -186,8 +190,24 @@ confirmed server response plus `verb: "loaded"` in JSON. Error JSON retains
 the requested target and, once selected, the original workspace/native identity.
 Lost or invalid replies remain unconfirmed, not successful resumes or permission
 to replay. `--force`/`--reclaim`, `--worktree-writer-file` and
-`--retained-recovery-file` are rejected before input files, stdin or discovery.
-Their existing contracts remain available without `--bridge`.
+`--retained-recovery-file` retain their existing specialized contracts by
+default. Combining them with explicit `--bridge` is rejected before input files,
+stdin or discovery.
+
+Existing `--strict` and `--require-agent-hosting` resume forms retain their
+original selectors by default. This also supports older or still-running
+Dispatch producers that do not supply the child compatibility environment.
+Explicit `--bridge` selects the common exact owner with either compatible
+option; it does not weaken strictness or the hosting fence.
+
+Programmatic retained-resume producers can set
+`AGENT_BRIDGE_LEGACY_RESUME=1` in the child invocation's environment when no
+selector flag is supplied. Explicit `--bridge` overrides that compatibility
+choice. No Dispatch update is required: the retained argument forms above
+already preserve its original selectors. A child-scoped setting does not
+change its parent environment or add syntax that an older CLI would reject.
+This compatibility choice affects
+selection only, not ownership checks, hosting fences or native recovery.
 
 ### Ordinary selector defaults and legacy support
 
