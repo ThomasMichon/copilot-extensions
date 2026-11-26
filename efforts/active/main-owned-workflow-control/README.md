@@ -515,6 +515,14 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   exact without replay; inventory, helpers and limits are unchanged.
   Fresh exact-head review and natural complete hosted CI must qualify
   this union before normal merge and persistence.
+  Published #14718 receives clean exact-head approval and required green CI,
+  but the final live fence detects a later actual manifest conflict before
+  any merge invocation. A second reconciliation preserves #14716's nine
+  Index dependency cases, one adapter binding and refreshed process-helper
+  hash. All 24 observed inputs remain exact without replay. The current
+  union is 11,078 nodes, 1,527 sources, unchanged 555 targets,
+  92 helpers, 300 seconds and 733,523 bytes. Fresh review and complete
+  hosted CI must qualify the replacement head before normal merge.
 - [x] Qualify all forty complete original local-context functions as one
   coherent source slice: 38 context functions against local execution and
   the two registry-only normalization functions against registry.
