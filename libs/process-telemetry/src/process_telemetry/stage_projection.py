@@ -138,12 +138,14 @@ def _copy(result: dict[str, Any], event: dict[str, Any], bounds: dict[str, tuple
 def _project_stage(schema: str, event: dict[str, Any]) -> dict[str, Any]:
     outcome = _enum(event, "outcome", _OUTCOMES, required=True)
     reason = _enum(event, "reason", REASONS[schema], required=True)
-    if (outcome == "success") != (reason == "none") and reason != "force_claimed":
+    stage = _enum(event, "stage", STAGES[schema], required=True)
+    if reason == "force_claimed":
+        if stage != "claim" or outcome != "success":
+            raise ValueError("force_claimed is only a successful claim")
+    elif (outcome == "success") != (reason == "none"):
         raise ValueError("inconsistent outcome")
     result: dict[str, Any] = {
-        "kind": "stage",
-        "stage": _enum(event, "stage", STAGES[schema], required=True),
-        "outcome": outcome, "reason": reason,
+        "kind": "stage", "stage": stage, "outcome": outcome, "reason": reason,
     }
     _copy(result, event, {
         "duration_ms": (0, _MAX), "attempt": (1, 2**16), "limit_ms": (0, _MAX),

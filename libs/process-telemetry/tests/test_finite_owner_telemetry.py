@@ -103,6 +103,10 @@ def test_codespaces_stage_projection_admits_closed_values_only(
                                 "reason": "claim_busy", "attempt": 0}),
     ("worktrees.lifecycle.v1", {"kind": "stage", "stage": "claim", "outcome": "failure",
                                 "reason": "claim_busy", "duration_ms": True}),
+    ("worktrees.lifecycle.v1", {"kind": "stage", "stage": "claim", "outcome": "failure",
+                                "reason": "force_claimed"}),
+    ("codespaces.lifecycle.v1", {"kind": "stage", "stage": "ssh", "outcome": "success",
+                                 "reason": "force_claimed"}),
     ("worktrees.lifecycle.v1", {"kind": "pr", "action": "rebase", "outcome": "success",
                                 "reason": "none"}),
     ("worktrees.lifecycle.v1", {"kind": "pr", "action": "label", "outcome": "success",
@@ -173,6 +177,67 @@ def test_hook_journal_bounds_pending_size(tmp_path: Path, monkeypatch: pytest.Mo
         hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart").finish(outcome="success")
     assert (tmp_path / "pending.jsonl").stat().st_size <= 400
     assert 0 < len(hook_journal.drain(tmp_path)) < 10
+
+
+def _finish_runs(directory: Path, count: int) -> None:
+    for _ in range(count):
+        hook_journal.HookRun.begin(directory, "agent-vault", "sessionStart").finish(outcome="success")
+
+
+def test_limited_drains_keep_the_remainder_pending(tmp_path: Path) -> None:
+    _finish_runs(tmp_path, 3)
+    assert [event["run_sequence"] for event in hook_journal.drain(tmp_path, limit=2)] == [1, 2]
+    assert [event["run_sequence"] for event in hook_journal.drain(tmp_path, limit=2)] == [3]
+    assert hook_journal.drain(tmp_path) == []
+
+
+def test_drain_waits_out_an_in_progress_append_without_losing_it(tmp_path: Path) -> None:
+    _finish_runs(tmp_path, 1)
+    with hook_journal._journal_lock(tmp_path) as held:
+        assert held
+        # An appender holds the lock: the drain neither claims nor deletes the journal.
+        assert hook_journal.drain(tmp_path) == []
+    assert len(hook_journal.drain(tmp_path)) == 1
+
+
+def test_append_during_a_drain_fails_open_and_keeps_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hook_journal, "LOCK_WAIT_S", 0.0)
+    with hook_journal._journal_lock(tmp_path) as held:
+        assert held
+        run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+        run.finish(outcome="success")
+    assert hook_journal.drain(tmp_path) == []
+
+
+def test_concurrent_writers_never_exceed_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    monkeypatch.setattr(hook_journal, "PENDING_LIMIT", 600)
+    monkeypatch.setattr(hook_journal, "LOCK_WAIT_S", 5.0)
+    threads = [threading.Thread(target=_finish_runs, args=(tmp_path, 4)) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert (tmp_path / "pending.jsonl").stat().st_size <= 600
+    assert all(event["outcome"] == "success" for event in hook_journal.drain(tmp_path))
+
+
+def test_hook_duration_ignores_wall_clock_adjustments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wall = iter([1_700_000_000_000, 1_600_000_000_000])
+    monotonic = iter([5_000, 5_040])
+    monkeypatch.setattr(hook_journal, "_now_ms", lambda: next(wall))
+    monkeypatch.setattr(hook_journal, "_monotonic_ms", lambda: next(monotonic))
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart").finish(outcome="success")
+    (event,) = hook_journal.drain(tmp_path)
+    assert event["duration_ms"] == 40
+    assert event["started_at"].startswith("2023-11-14T")
 
 
 def test_absent_policy_is_legacy_and_starts_nothing(tmp_path: Path) -> None:
