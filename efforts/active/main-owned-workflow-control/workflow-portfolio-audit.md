@@ -5,6 +5,37 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 26 original consumer-policy and alias controls
+
+Two adapters export all three original consumer-policy functions (five cases)
+and twelve complete original alias functions (123 cases, including the entire
+96-row contextual grid). Metadata-only collection compares all five and 129
+original cases respectively. Function objects, code/global origins, fixtures,
+parameter types/values, marks, IDs and order agree. The two whole observed-local
+and standalone-host identity functions, six cases, are excluded before trial.
+No original test, production code, guard or selected parameter table changes.
+
+The initial unchanged guarded trials pass five cases in 1.77 pytest / 19.000
+observation seconds and 123 in 2.50 pytest / 27.141 observation seconds.
+All 384 phases pass, zero prohibited effects occur, each trial has 25 bound
+reads and every case has actual registry call-phase coverage. Complete phase,
+input and per-case line witnesses are read before admission.
+Only 128 nodes and four adapter/original bindings are added; all 10,431 prior
+nodes, source hashes, targets, helper decisions and limits remain.
+Inventory is 10,559 nodes, 1,508 sources, 549 targets, 92 helpers,
+300 seconds and 711,753 bytes. Fatal Ruff and whole-file strict Linux/Windows
+typing pass. Current-head review, fresh full CI, normal merge and independent
+persistence remain. This is not parent completion,
+native qualification or a measured whole-flow savings claim.
+
+After #14683 publication, a Bridge merge adds seventeen cases and refreshes
+four existing bindings. Semantic reconciliation preserves the entire peer
+inventory and applies only our qualified 128-case/four-binding delta.
+The complete 27-source observed-input union remains exact without local replay.
+The final union is 10,576 nodes, 1,508 sources, 549 targets, 92 helpers,
+300 seconds and 712,076 bytes. Fresh current-head review, full CI, merge
+and persistent verification remain.
+
 ## November 26 original pure registry projections
 
 The adapter exports eleven entire original normalization/selection functions
@@ -33,6 +64,16 @@ conflicted. Reconciliation retains both native-connector binding refreshes
 and all ordered inventory; none of the 25 locally observed inputs changes.
 No local trial is replayed. Counts, bytes, helpers and deadline are unchanged;
 fresh current-head review and full CI must qualify the resulting union.
+
+Source #14675 merges at `22896ac340254d85e397f6677feedb2d2e03bbb3`
+after fresh clean approval and required checks. Reconciled CI `45745487344`
+executes all 10,431 cases, 55 deselected and ten warnings in 191.18 pytest /
+214.481 packet seconds; this is not a reuse hit.
+Independent merged state, exact full owned-patch equivalence, managed
+pull-forward, all six owned blobs, exact candidate, all current sources,
+92 helpers and 25 observed input hashes verify without replay.
+The intermediate peer point-client source changes remain untouched.
+Only this 32-case leaf is complete; parent and all retained gates remain.
 
 ## November 26 original pure transport projections
 

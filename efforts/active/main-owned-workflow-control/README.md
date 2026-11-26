@@ -487,7 +487,38 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
 
 ## Plan
 
-- [ ] Qualify original pure registry projections through eleven complete
+- [ ] Qualify adjacent pure registry policy and alias controls as one coherent
+  source PR: all three original consumer-default functions (five cases), and
+  twelve complete original alias-matrix functions with every parameter row.
+  Exclude both whole observed-local/standalone-host identity functions before
+  execution. Preserve original objects, code/global origins, fixtures,
+  parameter types/values, marks, IDs and order. Compare complete metadata
+  before each unchanged guarded trial; require actual registry-call coverage
+  per case. Add only exact nodes and four adapter/original bindings, retaining
+  existing targets, hashes, helpers, limits and all retained refusals.
+  No host observation, environment patch, YAML file load or native/guest
+  process is authorized. Review/full CI/merge/persistence precede completion.
+  Complete metadata collection confirms all five consumer cases and 123 of
+  129 alias cases, including all 96 contextual-grid rows. Both whole identity
+  functions (six cases) remain excluded. Original function objects, code/global
+  origins, fixtures, parameter types/values, marks, IDs and order agree.
+  Initial unchanged guarded trials pass five in 1.77 pytest / 19.000
+  observation seconds and 123 in 2.50 pytest / 27.141 observation seconds.
+  All 384 phases pass, zero prohibited effects occur, each trial has 25 bound
+  reads, and every case exercises actual registry call lines. All phase,
+  input and per-case call witnesses are read before admission.
+  Only 128 nodes and four adapter/original bindings are added: 10,559 nodes,
+  1,508 sources, the same 549 targets, 92 unchanged helper decisions,
+  300 seconds and 711,753 bytes. All preceding inventory and hashes remain;
+  fatal Ruff and whole-file strict Linux/Windows typing pass. Current-head
+  review, fresh full CI, normal merge and persistence remain.
+  Publication #14683 conflicts with a subsequent Bridge merge.
+  Reconciliation preserves all seventeen peer cases and four peer binding
+  refreshes; the complete 27-source observed-input union remains unchanged,
+  without trial replay. Final inventory is 10,576 nodes, 1,508 sources,
+  549 targets and 712,076 bytes, with the same helpers/deadline. Fresh
+  current-head review and complete hosted CI must qualify this union.
+- [x] Qualify original pure registry projections through eleven complete
   functions and the entire `TestMachineName` and `TestFindMachineEntry`
   classes. Preserve original classes/methods, code/global origins, fixtures,
   parameter types/values, marks, class-qualified IDs and order.
@@ -513,6 +544,12 @@ eligibility, guards, failed-attempt holds or existing operational ownership.
   binding refreshes and every ordered inventory item; all 25 observed inputs
   remain exact without local replay. Counts/bytes/helpers/deadline are
   unchanged. Fresh current-head review and complete CI remain required.
+  Source #14675 merges after fresh exact-head approval and required checks.
+  Reconciled CI executes all 10,431 cases in 214.481 packet seconds.
+  Independent merged state, exact complete owned-patch equivalence, supported
+  pull-forward, all six reviewed/merged/working blobs, exact candidate,
+  all 1,504 bindings, 92 helpers and 25 observed input hashes verify without
+  replay. Peer changes remain intact; only this 32-case leaf is Done.
 - [x] Qualify the original pure transport-projection controls through the exact
   ambiguous-profile function and three complete original classes:
   default shell (three), SSH-target selection (six) and command wrapping (three).
