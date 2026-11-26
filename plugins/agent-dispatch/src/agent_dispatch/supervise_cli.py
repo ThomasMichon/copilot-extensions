@@ -944,7 +944,10 @@ def _run_supervise(args: argparse.Namespace) -> int:
             dormant_grace_seconds=0.0 if args.once else _dormant_grace_seconds(),
         )
         if args.once:
-            return _emit({"spawned": sup.poll_once()})
+            spawned = sup.poll_once()
+            from .supervisor_relevance_finalize_first import drain as drain_finalize_first
+
+            return _emit({"spawned": spawned, "finalize_first": drain_finalize_first(sup)})
 
         def _on_cycle(spawned: list[str]) -> None:
             if spawned:

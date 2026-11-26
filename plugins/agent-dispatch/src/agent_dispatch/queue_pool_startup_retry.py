@@ -127,8 +127,16 @@ def prepare_mutation(
             and assignment["exhausted_at"] is not None and row["state"] == SpawnState.RELEASING
             and row["release_requested"]
         )
+        # Relevance settlement can abandon this exact incarnation while the
+        # original caller is still outstanding; its return still resolves the slot.
+        from .queue_relevance_owner import relevance_abandoned
+        abandoned = (
+            task.generation == binding["generation"] and row["state"] == SpawnState.RELEASING
+            and row["release_requested"] and relevance_abandoned(conn, task)
+        )
         if (
-            not (current or concluded or late) or task.hold_reason is not None or task.awaiting_steer
+            not (current or concluded or late or abandoned)
+            or task.hold_reason is not None or task.awaiting_steer
             or row["state"] not in {SpawnState.SPAWNED, SpawnState.RELEASING}
         ):
             raise TaskError("pool retry completion task incarnation changed")

@@ -577,6 +577,20 @@ def liveness_verdict(
     return _verdict_from_resolved_data(data, owner_session_id)
 
 
+def local_worktree_occupancy(worktree: str, *, timeout: float = 3.0) -> str:
+    """Whether any session occupies a local worktree, as a tri-state verdict.
+
+    Unlike :func:`liveness_verdict` this needs no captured owner identity, so it
+    also covers an acquisition that never recorded a native session: :data:`LIVE`
+    when Bridge reports any session, :data:`GONE` only when Bridge answered that
+    the worktree is empty, and :data:`UNKNOWN` when the read failed.
+    """
+    data = _resolve_local_owner(worktree, timeout=timeout) if worktree else None
+    if not isinstance(data, dict):
+        return UNKNOWN
+    return LIVE if data else GONE
+
+
 def _verdict_from_resolved_data(
     data: dict[str, Any], owner_session_id: str | None
 ) -> str:

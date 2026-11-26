@@ -7,20 +7,47 @@ import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
-from agent_dispatch.queue import Task, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_relevance import RelevanceScope
 from tests import test_assignment_relationships as relationships
-from tests.test_assignment_relationships import claim, start_managed
 from tests.test_task_relevance import report, request
 
 managed_assignment = relationships.assignment
 Assignment = tuple[TaskQueue, relationships.GroundOwner, AssignmentWorkspace, Task]
+# The shared helpers are untyped; bind them through typed callables.
+claim = cast("Callable[..., object]", relationships.claim)
+start_managed = cast("Callable[..., object]", relationships.start_managed)
+
+
+def _task(queue: TaskQueue, task_id: str) -> Task:
+    found = queue.get(task_id)
+    assert found is not None
+    return found
+
+
+def _relationship(queue: TaskQueue, task_id: str) -> dict[str, Any]:
+    found = queue.task_relationship(task_id)
+    assert found is not None
+    return cast("dict[str, Any]", found["request"])
+
+
+def _closeout(queue: TaskQueue, task_id: str) -> dict[str, Any]:
+    receipt = queue.relevance_receipt(task_id, "closed-source")
+    assert receipt is not None
+    return cast("dict[str, Any]", receipt["closeout"])
+
+
+def _writer_calls(queue: TaskQueue) -> list[Any]:
+    return cast("list[Any]", cast(Any, queue._relationship_writer).calls)
 
 
 @pytest.fixture
@@ -30,16 +57,19 @@ def assignment(managed_assignment: Assignment) -> Assignment:
         conn.execute(
             "UPDATE tasks SET source='emitter', origin_ref='review-source' WHERE id=?", (task.id,),
         )
-    return queue, owner, workspace, queue.get(task.id)
+    return queue, owner, workspace, _task(queue, task.id)
 
 
 def _scope(queue: TaskQueue, task_id: str) -> RelevanceScope:
-    task = queue.get(task_id)
+    task = _task(queue, task_id)
+    assert task.repo is not None and task.source is not None and task.origin_ref is not None
     return RelevanceScope(task.repo, task.source, task.origin_ref)
 
 
-def _binding(queue: TaskQueue, task_id: str) -> dict | None:
-    return queue.relevance_snapshot(task_id)["closeout"]["resource_binding"]
+def _binding(queue: TaskQueue, task_id: str) -> dict[str, Any]:
+    binding = queue.relevance_snapshot(task_id)["closeout"]["resource_binding"]
+    assert isinstance(binding, dict)
+    return binding
 
 
 @pytest.mark.parametrize("pooled", [False, True])
@@ -52,8 +82,8 @@ def test_acceptance_captures_exact_relationship_and_native_reservation(
     else:
         claim(queue, workspace, task)
         queue.start(task.id, workspace.worker_id, owner_session_id="native")
-    relationship = queue.task_relationship(task.id)["request"]
-    before_calls = list(queue._relationship_writer.calls)
+    relationship = _relationship(queue, task.id)
+    before_calls = list(_writer_calls(queue))
     report(queue, task.id, scope=_scope(queue, task.id))
     binding = _binding(queue, task.id)
     reservation = queue.get_reservation(relationship["reservation_key"]) if pooled else None
@@ -66,11 +96,11 @@ def test_acceptance_captures_exact_relationship_and_native_reservation(
         "reservation_key": relationship["reservation_key"],
         "startup_revision": reservation.startup_revision if reservation else None,
     }
-    assert queue._relationship_writer.calls == before_calls
-    closeout = queue.relevance_receipt(task.id, "closed-source")["closeout"]
+    assert _writer_calls(queue) == before_calls
+    closeout = _closeout(queue, task.id)
     assert closeout["resource_binding"] == binding
     assert (closeout["owner"], closeout["owner_session_id"], closeout["generation"]) == (
-        workspace.worker_id, "native", queue.get(task.id).generation,
+        workspace.worker_id, "native", _task(queue, task.id).generation,
     )
 
 
@@ -91,7 +121,7 @@ def test_binding_survives_unassignment_restart_and_duplicate_reports(assignment:
     assert restarted.reconcile_task_relevance(task.id, **original_request) == accepted
     report(restarted, task.id, scope=_scope(restarted, task.id), request_id="later-source-report")
     assert _binding(restarted, task.id) == original
-    assert restarted.get(task.id).owner is None
+    assert _task(restarted, task.id).owner is None
 
 
 def test_resumed_owner_keeps_original_relationship_and_current_generation(
@@ -100,7 +130,7 @@ def test_resumed_owner_keeps_original_relationship_and_current_generation(
     queue, _, workspace, task = assignment
     claim(queue, workspace, task)
     queue.start(task.id, workspace.worker_id, owner_session_id="first-native")
-    original = queue.task_relationship(task.id)["request"]
+    original = _relationship(queue, task.id)
     queue.suspend(task.id, workspace.worker_id, reason="awaiting source")
     resumed = queue.resume(task.id, workspace.worker_id, adopt_owner_session_id="resumed-native")
     assert resumed.generation > original["generation"]
@@ -108,7 +138,7 @@ def test_resumed_owner_keeps_original_relationship_and_current_generation(
     binding = _binding(queue, task.id)
     assert binding["state"] == "captured"
     assert binding["assignment_event_id"] == original["event_id"]
-    closeout = queue.relevance_receipt(task.id, "closed-source")["closeout"]
+    closeout = _closeout(queue, task.id)
     assert closeout["generation"] == resumed.generation
     assert closeout["owner_session_id"] == "resumed-native"
 
@@ -119,7 +149,7 @@ def test_inconsistent_binding_stays_visible_without_blocking_closeout_delivery(
 ) -> None:
     queue, _, workspace, task = assignment
     start_managed(queue, workspace, task)
-    relationship = queue.task_relationship(task.id)["request"]
+    relationship = _relationship(queue, task.id)
     with queue._connect() as conn:
         if change == "native":
             conn.execute(
@@ -153,14 +183,17 @@ def test_inconsistent_binding_stays_visible_without_blocking_closeout_delivery(
     assert "workspace" not in _binding(queue, task.id)
 
 
-def test_legacy_or_preacceptance_unassigned_owner_is_not_guessed(tmp_path: Path) -> None:
+def test_yielded_prior_owner_is_not_guessed_and_task_abandons(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "queue.db")
     task = queue.create("work", repo="example", source="emitter", origin_ref="review-source")
+    assert isinstance(task, Task)
     queue.claim_one("host/worker", task_id=task.id)
     queue.start(task.id, "host/worker", owner_session_id="native")
     queue.yield_task(task.id, "host/worker")
     report(queue, task.id, scope=_scope(queue, task.id))
-    assert _binding(queue, task.id) == {"state": "unconfirmed", "reason": "owner_unavailable"}
+    # Settled history is not live custody, so no closeout owner is guessed.
+    assert queue.relevance_snapshot(task.id)["closeout"] is None
+    assert _task(queue, task.id).status == "abandoned"
     assert queue.list_wakes(task.id) == []
 
 
