@@ -397,8 +397,12 @@ Hooks are latency-sensitive callbacks and never launch a receiver (section 5).
 `process_telemetry.hook_journal` writes a start marker before any product
 work and replaces it with a completion record on return. The runtime may stop
 a timed-out hook before it reports, so the next run converts a marker older
-than its stale threshold into one `unfinished` record. The journal is
-size-bounded and content-free; a separate finite owner of the registered
+than its stale threshold into one `unfinished` record. Completion and
+recovery both claim a marker by rename before reporting, so each run is
+recorded at most once. Pending records, live markers, abandoned scratch files
+and per-start recovery work are all bounded; a start that would exceed a
+bound goes unobserved rather than grow storage. The journal is content-free;
+a separate finite owner of the registered
 source later drains it into its own admitted route. Only the executing
 provider's adopted hooks write the journal; listing a plugin in the enum is
 not evidence that its hook is instrumented.

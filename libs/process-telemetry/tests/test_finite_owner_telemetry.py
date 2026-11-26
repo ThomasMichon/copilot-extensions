@@ -278,6 +278,24 @@ def test_a_run_recovered_as_unfinished_is_not_also_reported_complete(tmp_path: P
     assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"]
 
 
+def test_interruption_after_completion_append_is_not_reported_unfinished(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    real_unlink = Path.unlink
+
+    def interrupted(self: Path, missing_ok: bool = False) -> None:
+        if self.suffix == ".recovering":
+            raise OSError("interrupted")
+        real_unlink(self, missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", interrupted)
+    run.finish(outcome="success")
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["success"]
+
+
 def test_hook_duration_ignores_wall_clock_adjustments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
