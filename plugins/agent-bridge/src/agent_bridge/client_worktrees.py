@@ -38,6 +38,14 @@ class InventoryClientMixin:
         try:
             return select_bridge(report, handle)
         except BridgeSelectionError as error:
+            if not hosts and error.status in (404, 503):
+                from .bridge_exact_managed import resolve
+
+                known = resolve(
+                    self, handle, report, project=project, machine=machine, namespace=namespace,
+                )
+                if known is not None:
+                    return known
             raise BridgeClientError(
                 error.status, {"reason": error.reason, "selector": handle},
             ) from error

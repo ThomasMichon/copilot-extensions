@@ -144,7 +144,9 @@ def _source_complete(value: object) -> bool:
     return bool(value.get("completeness") == "complete" and value.get("freshness") == "fresh")
 
 
-def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, Any] | None:
+def _project(
+    group: list[dict[str, Any]], *, owner_current: bool, include_retained_managed: bool = False,
+) -> dict[str, Any] | None:
     workspace = next((item for item in group if item.get("kind") == "worktree"), None)
     metadata = workspace["worktree"] if workspace else {}
     candidates = [item for item in group if item.get("kind") != "worktree"]
@@ -154,6 +156,11 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         if (item.get("session", item.get("registration", {})).get("status") not in _TERMINAL)
     ]
     managed_items = [item for item in candidates if item.get("kind") == "managed"]
+    retained_input = include_retained_managed and any(
+        _native(item) and item["session"].get("status") != "ended"
+        and not item["session"].get("read_only", False)
+        for item in managed_items
+    )
     managed = [item["session"] for item in managed_items]
     registrations = [
         item["registration"]
@@ -214,6 +221,7 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         not workspace
         and not live
         and not any(_identity(item)[2] and _native(item) for item in managed_items)
+        and not retained_input
     ):
         return None
     project, machine, worktree_id, directory = _identity(workspace or group[0])
@@ -249,10 +257,10 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         and (session.get("status") in _TERMINAL or session.get("session_live") is False)
     )
     is_live = True if positive else False if negative else None
-    if not workspace and worktree_id and owner_current and is_live is not True:
+    if not workspace and worktree_id and owner_current and is_live is not True and not retained_input:
         return None
     anchor = not worktree_id or metadata.get("kind") in {"anchor", "bare"}
-    if anchor and is_live is not True:
+    if anchor and is_live is not True and not retained_input:
         return None
     status = "running" if is_live else "dormant" if is_live is False else "retained"
     mode_session = current or (session if not registration else {})
@@ -351,6 +359,7 @@ def project_bridges(
     namespace: str | None = None,
     status: str | None = None,
     live: bool = False,
+    include_retained_managed: bool = False,
 ) -> dict[str, Any]:
     """Keep assignment, liveness and control separate without hydrating metadata."""
     groups: list[list[dict[str, Any]]] = []
@@ -424,7 +433,9 @@ def project_bridges(
         owner_current = evidence.get("observation_valid") is True or (
             evidence.get("freshness") == "fresh" and evidence.get("completeness") == "complete"
         )
-        row = _project(group, owner_current=owner_current)
+        row = _project(
+            group, owner_current=owner_current, include_retained_managed=include_retained_managed,
+        )
         if row is None:
             continue
         if any(
