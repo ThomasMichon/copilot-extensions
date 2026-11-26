@@ -36,6 +36,9 @@ on:
       - libs/payload-invocation/tests/test_vault_ready_source.py
       - libs/payload-invocation/tests/test_bridge_ready_source.py
       - libs/payload-invocation/tests/test_codespaces_ready_source.py
+      - libs/payload-invocation/tests/test_containers_ready_source.py
+      - libs/payload-invocation/tests/test_containers_first_use_publication.py
+      - libs/payload-invocation/tests/test_containers_review_regressions.py
       - libs/payload-invocation/tests/adopter_admission_fixture.py
       - libs/payload-invocation/tests/test_adopter_publication.py
       - libs/payload-invocation/tests/test_native_publication.py
@@ -47,6 +50,11 @@ on:
       - plugins/agent-codespaces/scripts/bootstrap-python.ps1
       - plugins/agent-codespaces/tests/managed_command_fixture.py
       - plugins/agent-codespaces/tests/test_managed_command_gate.py
+      - plugins/agent-containers/scripts/runtime-gate.sh
+      - plugins/agent-containers/scripts/runtime-gate.ps1
+      - plugins/agent-containers/scripts/bootstrap-python.ps1
+      - plugins/agent-containers/tests/managed_command_fixture.py
+      - plugins/agent-containers/tests/test_managed_command_gate.py
       - plugins/agent-mcp/scripts/runtime-gate.sh
       - plugins/agent-mcp/scripts/runtime-gate.ps1
       - plugins/agent-mcp/tests/test_managed_command_gate.py
@@ -1479,6 +1487,126 @@ jobs:
       CODESPACES_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *codespaces-ready-steps
+
+  containers-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      CONTAINERS_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &containers-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Containers command admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_containers_ready_source.py --allow-explicit-tiers
+          -k "${{ env.CONTAINERS_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/containers-ready
+      - name: Require all Containers command controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.CONTAINERS_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/containers-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==18 and len({c.attrib['name'] for c in cases})==18;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='containers_command_admission'];
+          assert len(reports)==18 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']=='3.11.18'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else
+          2 if r['shell']=='bash' else 6)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'containers_command_admission':reports},sort_keys=True))"
+      - name: Prepare the retained macOS installation-management prerequisite
+        if: runner.os == 'macOS'
+        run: |
+          prefix="$(brew --prefix bash)"
+          if ! test -x "$prefix/bin/bash"; then
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install bash
+          fi
+          test -x "$prefix/bin/bash"
+          printf '%s\n' "$prefix/bin" >> "$GITHUB_PATH"
+          "$prefix/bin/bash" --noprofile --norc -c '
+            ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))) ||
+              { printf "%s\n" "Native installation management requires Bash 4.4+" >&2; exit 1; }
+            printf "Retained management Bash: %s (%s)\n" "$BASH" "$BASH_VERSION"
+          '
+      - name: Retain Containers publication-policy success and state-root forwarding
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: ${{ env.CONTAINERS_QUALIFICATION_SHELL }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_containers_first_use_publication.py --allow-explicit-tiers
+          -k "healthy and not compat and not unavailable and not no-pointer"
+          --junit-dir qualification-evidence/containers-publication
+      - name: Require all twelve retained healthy publication controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-publication').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==12 and len({c.attrib['name'] for c in cases})==12;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Retain independent Windows evaluator and application transport
+        if: runner.os == 'Windows'
+        env:
+          CONTAINERS_EVALUATOR_HOST: ${{ env.CONTAINERS_QUALIFICATION_SHELL }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_evaluator_bootstrap_consumers.py --allow-explicit-tiers
+          -k "agent-containers and
+          (selected_evaluator or native_path_semantics or native_argument_modes
+          or path_lookup or absent_userprofile)"
+          --junit-dir qualification-evidence/containers-evaluator
+      - name: Require all ten retained Windows evaluator controls
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-evaluator').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==10 and len({c.attrib['name'] for c in cases})==10;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
+      - name: Retain Containers installed-readiness and checkout-import isolation
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_readiness_dispatcher_imports.py --allow-explicit-tiers
+          -k "agent-containers and ${{ env.CONTAINERS_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/containers-readiness
+      - name: Require every retained readiness assertion without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.CONTAINERS_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-readiness').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=32 if os.environ['QUALIFIED_SHELL']=='pwsh' else 16;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
+  containers-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      CONTAINERS_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *containers-ready-steps
+
+  containers-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      CONTAINERS_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *containers-ready-steps
 
   bridge-ready-admission-windows:
     runs-on: windows-latest

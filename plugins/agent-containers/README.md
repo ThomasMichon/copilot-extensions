@@ -21,6 +21,16 @@ this plugin and work standalone; without agent-bridge only bridge addressing
 
 ## Application-project qualification
 
+READY-command entry admits the selected application interpreter through the
+shared prepared-only UV resolver before module execution. Missing UV or admission
+support fails with explicit setup guidance, without acquiring prerequisites or
+entering first-use provisioning. The independently declared evaluator, selected
+installation context/generation, runtime and state roots, argument/stdio/exit
+forwarding and readiness isolation remain unchanged. The existing publication
+policy still governs genuinely absent-runtime first use. These checks do not
+establish fleet readiness or migrate every child producer; see the
+[isolated command controls](tests/README.md).
+
 The internal `__source-setup` and `__source-start` callbacks validate
 configuration strictly and repeatably without
 starting Docker, fleet members, relays or Session Hosts. Containers has no
