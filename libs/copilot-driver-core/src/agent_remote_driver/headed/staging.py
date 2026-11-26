@@ -9,12 +9,14 @@ import os
 from pathlib import Path
 import tempfile
 
+from ..native_arguments import VALUE_OPTIONS
+
 CONNECTOR_ENV = "COPILOT_DRIVER_NATIVE_CONNECTOR"
 CONNECTOR_CONTRACT = "driver-native-v1"
 
 
 def connector_selection(
-    env: dict[str, str], *, session_id: str, cwd: str,
+    env: dict[str, str], *, session_id: str, cwd: str, argv: list[str],
 ) -> dict[str, object] | None:
     """Validate an explicit receiving selection before staging or native birth."""
     raw = env.get(CONNECTOR_ENV)
@@ -44,9 +46,54 @@ def connector_selection(
             )
         ):
             raise ValueError("invalid native connector selection")
-    except (ValueError, KeyError, TypeError) as error:
+        _connector_roots(selected, argv)
+    except (ValueError, KeyError, TypeError, OSError) as error:
         raise ValueError("Native connector differs from its explicit receiving launch") from error
     return selected
+
+
+def _connector_roots(selected: dict[str, object], argv: list[str]) -> None:
+    expected = {
+        "agent-bridge": Path(str(selected["bridgePluginRoot"])).resolve(strict=True),
+        "agent-remote-driver": Path(str(selected["driverPluginRoot"])).resolve(strict=True),
+    }
+    found: dict[str, Path] = {}
+    seen: set[Path] = set()
+    index = 1
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            break
+        name, separator, value = argument.partition("=")
+        if not separator and name in VALUE_OPTIONS | {"-C", "--resume"}:
+            index += 1
+            if index >= len(argv):
+                raise ValueError("Missing selected native argument")
+            value = argv[index]
+        if name == "--plugin-dir":
+            path = Path(value)
+            if not path.is_absolute():
+                raise ValueError("Selected native plugin directories must be absolute")
+            path = path.resolve(strict=True)
+            if path in seen:
+                raise ValueError("Duplicate selected native plugin directory")
+            seen.add(path)
+            manifest = path / "plugin.json"
+            if not manifest.is_file():
+                manifest = path / ".github" / "plugin" / "plugin.json"
+            metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            if not isinstance(metadata, dict) or not isinstance(metadata.get("name"), str):
+                raise ValueError("Selected native plugin identity is unavailable")
+            plugin_name = metadata["name"]
+            if plugin_name in expected:
+                if plugin_name in found or path != expected[plugin_name]:
+                    raise ValueError("Selected native plugin root changed or duplicated")
+                found[plugin_name] = path
+            elif plugin_name == "copilot-driver-headed":
+                raise ValueError("The native connector must be staged by its original Host")
+        index += 1
+    if found != expected:
+        raise ValueError("Selected native plugin roots are missing from the original command")
 
 
 def stage_extension(attempt_directory: Path, *, native_connector: bool = False) -> Path:

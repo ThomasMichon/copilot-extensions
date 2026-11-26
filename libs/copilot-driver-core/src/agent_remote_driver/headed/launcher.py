@@ -337,7 +337,7 @@ async def _run_headed_once(
     )
     nonce = nonce or (env or {}).get(_NONCE_ENV) or os.environ.get(_NONCE_ENV) or secrets.token_hex(32)
     child_env = {**os.environ, **(env or {})}
-    connector = connector_selection(child_env, session_id=session_id, cwd=cwd)
+    connector = connector_selection(child_env, session_id=session_id, cwd=cwd, argv=child_argv)
     plugin = stage_extension(
         Path(attempt_directory), **({"native_connector": True} if connector is not None else {}),
     )
