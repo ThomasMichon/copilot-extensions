@@ -61,3 +61,40 @@ printf '%s|%s\n' "$code" "$__native_capture_settlement_reason"
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == f"{code}|{reason}"
     assert directory.exists() is (condition == "directory-retained")
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX native capture diagnostic")
+def test_capture_caller_emits_settlement_reason_after_real_cleanup(tmp_path: Path) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    capture = tmp_path / "capture.sh"
+    text = CAPTURE.read_text(encoding="utf-8")
+    assert text.count("_native_capture_settle() {") == 1
+    capture.write_text(text.replace(
+        "_native_capture_settle() {", "_fixture_capture_settle() {", 1,
+    ) + """
+_native_capture_settle() {
+    _fixture_capture_settle "$@" || return
+    __native_capture_settlement_reason=fixture-unconfirmed
+    return 1
+}
+""", encoding="utf-8")
+    script = r'''
+set -euo pipefail
+. "$1"
+code=0
+capture_native_process 5 /bin/sh -c 'printf captured' || code=$?
+printf '%s\n' "$code"
+'''
+    result = subprocess.run(
+        [bash, "-c", script, "capture-diagnostic-control", str(capture)],
+        env={**os.environ, "TMPDIR": str(tmp_path)},
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "125\n"
+    assert "Native capture cleanup is unconfirmed:" in result.stderr
+    assert "(fixture-unconfirmed)" in result.stderr
+    assert not list(tmp_path.glob("native-capture.*"))

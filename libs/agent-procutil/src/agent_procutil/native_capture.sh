@@ -123,8 +123,7 @@ capture_native_process() {
         exec 5>&- 6<&- 7>&- 8>&- 9<&-
         code=1
         if ! _native_capture_remove_files "$__native_capture_directory"; then
-            printf 'Native capture cleanup is unconfirmed: %s (%s)\n' \
-                "$__native_capture_directory" "$__native_capture_settlement_reason" >&2
+            printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
             code=125
         fi
         _native_capture_restore_traps
@@ -150,7 +149,8 @@ capture_native_process() {
     fi
     exec 7>&-
     if ! _native_capture_settle "$settlement" 2>/dev/null; then
-        printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
+        printf 'Native capture cleanup is unconfirmed: %s (%s)\n' \
+            "$__native_capture_directory" "$__native_capture_settlement_reason" >&2
         exec 9<&-
         _native_capture_restore_traps
         return 125
