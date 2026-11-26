@@ -138,7 +138,7 @@ def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
     for owner in owners:
         names.update(contract.native_files(source / "plugins" / owner, source))
     for name in names:
-        _write(source / "libs/installer-engine" / name, f"# canonical {name}\n")
+        _write(contract.native_source(source / "libs/installer-engine", name), f"# canonical {name}\n")
         for owner in owners:
             for root in (source, candidate):
                 _write(root / "plugins" / owner / "scripts" / name, f"# previous {name}\n")
@@ -152,7 +152,7 @@ def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
             expected_names.update(contract.PYTHON_FILES)
         for name in expected_names:
             assert (candidate / "plugins" / owner / "scripts" / name).read_bytes() == (
-                source / "libs/installer-engine" / name
+                contract.native_source(source / "libs/installer-engine", name)
             ).read_bytes()
         if "runtime_launcher.py" not in expected_names:
             assert (candidate / "plugins" / owner / "scripts/runtime_launcher.py").read_bytes() == (
