@@ -1,0 +1,13 @@
+{
+  "comment": "Admit Logger foreground commands through prepared managed UV selection and package native capture support",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
