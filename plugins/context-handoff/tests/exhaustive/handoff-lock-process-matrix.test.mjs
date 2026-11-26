@@ -172,7 +172,7 @@ test("attemptWorktreeSync reports status failure in a valid checkout with a corr
     assert.equal(result.attempted, false);
     assert.equal(result.synced, false);
     assert.match(result.reason, /could not inspect worktree status/);
-    assert.match(result.reason, /git status exited 128/);
+    assert.match(result.reason, /Git status inspection failed \(exit 128\)/);
     assert.doesNotMatch(result.reason, /not a git checkout or git unavailable/);
     assert.equal(readFileSync(join(dir, index), "utf-8"), "invalid index\n");
   } finally {

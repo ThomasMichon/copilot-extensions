@@ -1,5 +1,5 @@
 {
-  "comment": "Stream worktree status during handoff sync to avoid stdout buffer overflow and report inspection failures accurately.",
+  "comment": "Enforce a bounded deadline for streamed Git status inspection, dispose retained pipes, and cover large-output and corrupt-index failures.",
   "changes": [
     {
       "plugin": "context-handoff",

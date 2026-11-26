@@ -20,7 +20,7 @@ import {
   openSync, closeSync, statSync, readdirSync, linkSync, ftruncateSync, writeSync,
 } from "node:fs";
 import { join, basename, dirname, resolve, posix, win32 } from "node:path";
-import { execFileSync, execFile, spawn } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -1040,52 +1040,8 @@ async function resolveRuntimePythonAsyncNoProvision(resolved, env, cwd, timeout)
 // review finding: checking cleanliness before acquiring the lock left a
 // window where a file could become dirty between the check and the
 // locked sync actually running.
-export async function worktreeIsDirty(cwd, { timeoutMs = 5000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
-      {
-        cwd, env: sanitizedGitEnv(), windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    let dirty = false;
-    let stderr = "";
-    let timedOut = false;
-    const disposePipes = () => {
-      child.stdout.destroy();
-      child.stderr.destroy();
-    };
-    const deadline = setTimeout(() => {
-      timedOut = true;
-      // close can wait on inherited pipes even after Git exits.
-      disposePipes();
-      child.kill("SIGKILL");
-      reject(new Error("git status inspection timed out"));
-    }, timeoutMs);
-    child.stdout.on("data", chunk => {
-      // Only presence matters; ignored dependency trees can exceed execFile's buffer.
-      if (chunk.length) dirty = true;
-    });
-    child.stderr.setEncoding("utf-8");
-    child.stderr.on("data", chunk => {
-      stderr += chunk.slice(0, Math.max(0, 4096 - stderr.length));
-    });
-    child.on("error", error => {
-      clearTimeout(deadline);
-      disposePipes();
-      reject(error);
-    });
-    child.on("close", (code, signal) => {
-      clearTimeout(deadline);
-      if (timedOut) reject(new Error("git status inspection timed out"));
-      else if (code === 0) resolve(dirty);
-      else reject(new Error(
-        signal ? `git status terminated (${signal})`
-          : `git status exited ${code}${stderr.trim() ? `: ${stderr.trim()}` : ""}`,
-      ));
-    });
-  });
+async function worktreeIsDirty(cwd) {
+  return gitStatusHasOutput(cwd, sanitizedGitEnv());
 }
 
 // Fully async (execFile, not execFileSync/runCli) end to end: this is invoked
