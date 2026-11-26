@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in bounded GitHub hinted-item acquisition through the existing durable page journal",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

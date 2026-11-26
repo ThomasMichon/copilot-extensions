@@ -60,7 +60,11 @@ class GitHubConnector:
         min_interval_s: float = _DEFAULT_MIN_INTERVAL_S,
         since: str | None = None,
         token_provider: TokenProvider | None = None,
+        paged_hints: bool = False,
     ) -> None:
+        if type(paged_hints) is not bool:
+            raise ValueError("GitHub paged_hints must be a boolean")
+        self._paged_hints = paged_hints
         self._source = source
         self.owner, self.repo = self._parse_source(source)
         self.api_base = api_base or (
@@ -129,6 +133,18 @@ class GitHubConnector:
         from agent_index.sources.github_hints import acquire_hints
 
         return acquire_hints(self, hints, last_commit, cancel_check=cancel_check)
+
+    @property
+    def discover_hints_page(self) -> Callable[..., AcquisitionPage] | None:
+        return self._discover_hints_page if self._paged_hints else None
+
+    def _discover_hints_page(
+        self, hints: ChangeHints, last_commit: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> AcquisitionPage:
+        from agent_index.sources.github_hints import acquire_page
+
+        return acquire_page(self, hints, last_commit, cursor, cancel_check=cancel_check)
 
     def discover_delta_page(
         self, last_commit: str | None, cursor: str | None,
@@ -444,6 +460,8 @@ class GitHubConnector:
 
 
 setattr(GitHubConnector.discover_hints, "change_hints_versions", (1,))
+setattr(GitHubConnector._discover_hints_page, "change_hints_versions", (1,))
+setattr(GitHubConnector._discover_hints_page, "acquisition_page_versions", (1,))
 setattr(GitHubConnector.discover_delta_page, "acquisition_page_versions", (1,))
 
 

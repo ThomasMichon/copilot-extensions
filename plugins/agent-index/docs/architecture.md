@@ -195,6 +195,23 @@ External providers can opt into this same journal through the negotiated
 bridge below; no production provider is implicitly upgraded. There are no new
 state cursor owners, source locks or automatic full repairs.
 
+The built-in GitHub connector can explicitly opt into the existing hinted-page
+contract with Python `GitHubConnector(..., paged_hints=True)`. Its selected
+`discover_hints_page` callable advertises both v1 capabilities. Each unit reads
+one exact hinted item and one fresh comment page, accepting at most 100 comments.
+A larger declared discussion or a continuation link refuses rather than
+performing unbounded nested work. This limits logical acquisition requests, not
+response bytes, retry attempts or elapsed time. Completed items are retained by
+the existing journal; a reconstructed run reacquires only its interrupted item.
+The continuation binds the entire hint envelope, base polling checkpoint and
+connector recovery identity. Every page preserves that checkpoint and carries
+no tombstones. Empty hints complete without item acquisition.
+The constructor defaults to `paged_hints=False`, preserving default/legacy
+selection and the direct `discover_hints` API, including its multipage comments.
+No configured/ordinary caller is migrated. Durable recovery within larger
+discussions, immutable full coverage and authoritative deletion remain open;
+this is not a new snapshot capability or a complete-reconciliation certificate.
+
 GitHub ordinary polls use a fresh, **single page of at most 100 identities**
 updated since their committed timestamp, replaying the existing 60-second
 overlap. The immutable captured work plan binds repository/account/base/target;
