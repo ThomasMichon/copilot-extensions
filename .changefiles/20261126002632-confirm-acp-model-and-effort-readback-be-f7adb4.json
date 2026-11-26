@@ -1,9 +1,0 @@
-{
-  "comment": "Confirm ACP model and effort readback before publishing caller-settings application or usage labels; preserve degrade-safe fallback.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

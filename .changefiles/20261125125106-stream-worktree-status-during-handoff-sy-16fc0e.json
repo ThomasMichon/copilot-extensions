@@ -1,9 +1,0 @@
-{
-  "comment": "Enforce a bounded deadline for streamed Git status inspection, dispose retained pipes, and cover large-output and corrupt-index failures.",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "patch"
-    }
-  ]
-}

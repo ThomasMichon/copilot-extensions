@@ -1,9 +1,0 @@
-{
-  "comment": "Package the declared Codespaces command-admission capture support.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

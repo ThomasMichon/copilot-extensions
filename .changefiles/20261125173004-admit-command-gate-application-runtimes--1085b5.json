@@ -1,9 +1,0 @@
-{
-  "comment": "Admit command-gate application runtimes through prepared UV and reuse the selected bootstrap for cell validation",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

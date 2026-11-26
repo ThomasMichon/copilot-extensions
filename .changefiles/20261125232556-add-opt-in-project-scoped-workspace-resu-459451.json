@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in project-scoped workspace resume pinned to the selected native conversation.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

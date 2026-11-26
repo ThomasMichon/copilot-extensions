@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit owner-controlled unresolved snapshot query recovery",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

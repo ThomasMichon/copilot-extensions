@@ -1,9 +1,0 @@
-{
-  "comment": "Admit cell-runtime application probes through prepared UV and caller-owned capture",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

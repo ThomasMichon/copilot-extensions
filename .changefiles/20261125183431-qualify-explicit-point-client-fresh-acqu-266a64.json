@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify explicit point-client fresh acquisition and replay beside native corpus history",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Include the whole original invalid-workspace refusal in guarded promotion units",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Accept managed agent input durably before ACP carrier admission, preserving original queue receipts and consumer-side native fences.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

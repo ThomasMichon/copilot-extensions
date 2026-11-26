@@ -1,9 +1,0 @@
-{
-  "comment": "Include original pre-discovery marketplace identity refusals in the guarded promotion inventory",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

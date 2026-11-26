@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original explicit-data claim decisions and injected-callback reaper policy units",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
