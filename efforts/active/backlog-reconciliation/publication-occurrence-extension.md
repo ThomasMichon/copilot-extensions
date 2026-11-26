@@ -142,7 +142,7 @@ acceptance remains open, and incumbent campaign gate states are unchanged.
 The preceding twenty-nine technical cases, twenty-nine leaf-tracking
 retirements and resolved delivery gates are settled, not replayed.
 The [new whole-original study](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
-proposes one additive case in the same existing OPEN #7378 receiver:
+records one additive case in the same existing OPEN #7378 receiver:
 
 | Clause / original | Signature | Reported commit | Actual failed execution | Technical state |
 |---|---|---|---|---|
@@ -154,9 +154,9 @@ bytes before merge**. Its complete excerpt contains cleanup, not a causal
 diagnostic. This is a separate unknown technical case; the evidence-file
 repair #8508 does not establish its fulfillment.
 
-After review, append the row and this complete acceptance to the immediate
-qualified whole receiver body, preserving the original, every earlier row,
-one disclosure, all five incumbent human comments, metadata and custodians.
+After reviewed #14657, the independently read whole actual receiver retained
+the row and this complete acceptance, preserving the original, every earlier
+row, one disclosure, all five incumbent human comments, metadata and custodians.
 All thirty publisher technical cases remain independently OPEN. Preserve
 the literal signature, reported source, execution and still-required
 attributable diagnosis and evidence-backed technical disposition. Keep all
@@ -176,10 +176,15 @@ multi-case worker capability, workflow retry or product effect follows.
 
 ### One-case delivery gates
 
-- [ ] The additive proposal passes review and required CI and merges.
-- [ ] Whole actual receiving preserves all incumbent text, discussion,
+- [x] The additive proposal passes review and required CI and merges.
+- [x] Whole actual receiving preserves all incumbent text, discussion,
   metadata, custody and thirty independently OPEN technical cases.
-- [ ] The new source passes its qualification, exact route, disclosed
+- [x] The new source passes its qualification, exact route, disclosed
   acknowledgment and independent disposition/post-route/original audits.
-- [ ] A complete new census records actual effects and inflow, preserving
+- [x] A complete new census records actual effects and inflow, preserving
   all prior local and parent gate states.
+
+The [actual independent #8626 audit](journal/2026/11.25-coverage-bound-and-further-occurrences.md#actual-receiving-and-seven-tracking-retirements)
+records its disclosed acknowledgment, `NOT_PLANNED` tracking transition,
+preserved original and first-target #7378 readback. Only these four new
+delivery gates are resolved; all thirty publisher cases remain OPEN.

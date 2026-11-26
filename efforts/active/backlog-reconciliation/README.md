@@ -484,13 +484,14 @@ the non-public approval conversation.
 
 ## Plan
 
-The [coverage-bound and further-occurrence study](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
-proposes two literal evidence-file source completions and seven tracking-only
-handoffs to existing receivers. Six further source-reuse cases and one
-publisher case remain technically OPEN; #8596's whole canonical/vendor
-acceptance remains OPEN and unchanged. Reviewed publication and separate
-source/receiving/routing gates precede effects. The 797-open hint is not a new
-complete census or prospective closure credit.
+The [coverage-bound and further-occurrence outcome](journal/2026/11.25-coverage-bound-and-further-occurrences.md)
+records two separately verified evidence-file source completions and seven
+audited tracking-only handoffs to existing receivers. All thirty-five
+source-reuse and thirty publisher technical cases remain OPEN; #8596's whole
+canonical/vendor acceptance remains OPEN and unchanged. Reviewed #14657,
+whole actual receiving, separate final units and routing/acknowledgment/
+disposition audits are settled. The complete census is 788 whole open,
+293 original-cohort and 495 inflow, still 59 above fixed 729.
 
 The [further source-reuse and timeout intake](journal/2026/11.25-source-reuse-timeout-intake.md)
 records accepted receiving of nine more independent OPEN technical cases in
@@ -5714,11 +5715,13 @@ closure credit, resource release or parent checkbox change follows.
 ## Validation Plan
 
 The [new coverage and receiving delivery gates](journal/2026/11.25-coverage-bound-and-further-occurrences.md#delivery-gates)
-remain unresolved. Actual merged #8508 source and current finite packet
-controls support two narrow completion proposals, not a successful historical
-run, hosted release or installed claim. Seven unknown cases require complete
-accepted receiving and separate tracking audits. All incumbent local and
-parent gate states, source/copy/resource holds and fixed whole target remain.
+are settled: two separate one-unit source checks and acknowledged `COMPLETED`
+readbacks, whole accepted receiving and seven independently audited
+`NOT_PLANNED` tracking handoffs. Actual merged #8508 and current finite packet
+controls support those two narrow source judgments, not successful historical
+runs, hosted release or installed acceptance. The complete equal-pass census
+is 788 whole open at 16:58:53 PST on 2026-11-25. All earlier local and parent
+gate states, source/copy/resource holds and fixed whole target remain.
 
 The [three verifier-completion and eleven-case receiving gates](journal/2026/11.25-verifier-availability-and-publisher-extension.md#separate-final-disposition-gates)
 are settled: each completion consumed its recorded final unit and received
