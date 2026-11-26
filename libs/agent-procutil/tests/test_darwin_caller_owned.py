@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn, cast
@@ -516,7 +517,7 @@ def test_native_darwin_caller_death_retires_guard_target_and_descendant(tmp_path
             except (OSError, ValueError):
                 time.sleep(.01)
         assert identities is not None
-        with select.kqueue() as queue:
+        with closing(select.kqueue()) as queue:
             changes = [
                 select.kevent(
                     pid, filter=select.KQ_FILTER_PROC,
