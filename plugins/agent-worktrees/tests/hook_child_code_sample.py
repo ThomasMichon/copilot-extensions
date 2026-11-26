@@ -256,8 +256,9 @@ class WindowsInstructionSample(WindowsChildSample):
         if time.monotonic() >= deadline:
             raise CodeSampleUnavailable("attempt-budget")
         entries = self.thread_entries()
+        selected = sorted(entries, key=lambda entry: (entry[1] <= 0, entry[1]))[:self.MAX_THREADS]
         rows: list[Sample] = []
-        for tid, birth, _ in entries[:self.MAX_THREADS]:
+        for tid, birth, _ in selected:
             if time.monotonic() >= deadline:
                 break
             try:
@@ -272,6 +273,8 @@ class WindowsInstructionSample(WindowsChildSample):
         result: Sample = {
             "pid": self.pid, "birth_filetime": int(self.birth.removeprefix("windows:")),
             "threads": rows, "threads_truncated": len(entries) > self.MAX_THREADS,
+            "thread_entries_enumerated": len(entries),
+            "thread_selection": "oldest-positive-enumerated-birth-first",
             "attempt_expired": captured >= deadline,
             "capture_elapsed_ms": round((captured - self.started) * 1000, 3),
             "unwind": "restricted-amd64-v1", "target_memory_bytes_read": self.memory_bytes,

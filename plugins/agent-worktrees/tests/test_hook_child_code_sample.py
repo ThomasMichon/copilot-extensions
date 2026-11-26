@@ -183,6 +183,41 @@ def test_second_attempt_refuses_before_any_native_access() -> None:
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("entries,expected", [
+    ([(index, 1000 + index, 0) for index in range(16)] + [(99, 900, 0)],
+     [99, *range(15)]),
+    ([(index, 1000, 0) for index in reversed(range(17))], list(reversed(range(1, 17)))),
+    ([(99, 0, 0)] + [(index, 1000 + index, 0) for index in range(16)], list(range(16))),
+])
+def test_code_selection_prioritizes_oldest_positive_birth_within_same_bounded_entries(
+    entries: list[tuple[int, int, int]], expected: list[int], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value = sampler()
+    original = list(entries)
+    queries: list[int] = []
+    enumerations: list[bool] = []
+    monkeypatch.setattr(value, "verify_process", lambda: None)
+
+    def enumerate_threads() -> list[tuple[int, int, int]]:
+        enumerations.append(True)
+        return entries
+
+    def frame(tid: int, birth: int, deadline: float) -> dict[str, object]:
+        assert birth > 0 and deadline == value.deadline
+        queries.append(tid)
+        return {"frames": []}
+
+    monkeypatch.setattr(value, "thread_entries", enumerate_threads)
+    monkeypatch.setattr(value, "thread_frame", frame)
+    result = value.sample()
+    assert enumerations == [True] and entries == original
+    assert queries == expected and len(cast(list[dict[str, object]], result["threads"])) == 16
+    assert result["threads_truncated"] is True
+    assert result["thread_entries_enumerated"] == 17
+    assert result["thread_selection"] == "oldest-positive-enumerated-birth-first"
+
+
+@pytest.mark.guard
 def test_output_cap_counts_the_serialized_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     value = sampler()
     monkeypatch.setattr(value, "verify_process", lambda: None)

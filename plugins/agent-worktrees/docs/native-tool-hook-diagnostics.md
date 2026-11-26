@@ -252,7 +252,14 @@ configuration fails before observation; existing claims never authorize a retry.
 
 The source-only backend retains the original creation-owned process handle,
 verifies PID/birth and AMD64 architecture, and reuses the bounded PSS thread
-enumeration. Each of at most sixteen threads is pinned to its original owner
+enumeration. Within those same at most seventeen entries, the code sampler
+prioritizes positive creation times from oldest to newest, preserving enumeration
+order for ties and putting invalid birth values last. It still attempts at most
+sixteen threads, without extending enumeration or retrying. The summary records
+the selection rule and enumerated count; truncation remains explicit. The oldest
+enumerated thread is not necessarily the process's oldest or main thread, and
+selection does not establish a cause or continuous blocked time.
+Each selected thread is pinned to its original owner
 and birth before a brief suspend/context/read/resume operation. It walks at
 most sixteen frames per thread using a restricted PE/AMD64 version-one unwind
 interpreter. Supported non-frame partial prologs and epilog suffixes are interpreted.
