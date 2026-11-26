@@ -12701,11 +12701,13 @@ admitted identities; old parameter tables, assertions and selection remain.
 The reader-only stage honestly rebinds changed existing code/test hashes while
 keeping the active source profile v2. The subsequent data-only conversion
 freezes that post-reader baseline at
-`7ef2eefee79e64d48e265daefab4ded622de8fbd`: all 10,375 ordered nodes,
+`7006b6fdc0e6de4f0dcf87eb76aa5d1658cc4a46`: all 10,375 ordered nodes,
 1,499 source bindings, 546 targets, 92 helper decisions and the 300-second
 deadline remain identical. Stored bytes fall from 1,048,547 to 697,907.
 Independent expansion and recursive type/order comparison, plus fresh-process
 receipt-file reads, verify equivalence before replacing the source file.
+The final baseline includes thirteen peer-owned binding refreshes after the
+reader merge; migration preserves those exact hashes too.
 The matching v2 inventory at that immutable revision is a supported rollback
 pair with the reader; later admissions must not be discarded to reuse it.
 PR CI selects the head's reader; qualification/publication select helpers and

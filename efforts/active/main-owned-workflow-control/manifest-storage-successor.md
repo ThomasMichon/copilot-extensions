@@ -168,7 +168,9 @@ _Agent-recommended realization within the selected scope; not new authority._
   post-reader v2 baseline. Independently compare every ordered normalized
   value, source binding, target, helper decision and budget before writing.
   Do not combine additional unit enrollment with the format-only conversion.
-  Baseline is the reader merge above. Independent expansion and recursive
+  The initial baseline is the reader merge above; the final reconciled baseline
+  is `7006b6fdc0e6de4f0dcf87eb76aa5d1658cc4a46`, retaining thirteen
+  peer-owned binding refreshes. Independent expansion and recursive
   type/order comparison preserve all 10,375 nodes, 1,499 bindings, 546 targets,
   92 helper decisions and the 300-second limit. Both fresh-process file
   consumers agree; only storage changes from 1,048,547 to 697,907 bytes.
