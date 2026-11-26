@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -248,6 +249,33 @@ def test_full_journal_keeps_stale_markers_for_a_later_start(
     monkeypatch.setattr(hook_journal, "PENDING_LIMIT", 65536)
     hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
     assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"] * 2
+
+
+def test_marker_storage_is_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_journal, "MARKER_LIMIT", 2)
+    runs = [hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart") for _ in range(4)]
+    assert [run.marker is not None for run in runs] == [True, True, False, False]
+    assert len(list(tmp_path.glob("*.start"))) == 2
+
+
+def test_abandoned_scratch_files_are_reclaimed(tmp_path: Path) -> None:
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    old = [tmp_path / f".abandoned{suffix}" for suffix in (".tmp", ".seq", ".pending", ".recovering")]
+    young = tmp_path / ".inflight.tmp"
+    for path in [*old, young]:
+        path.write_bytes(b"x")
+    for path in old:
+        os.utime(path, (1, 1))
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    assert not any(path.exists() for path in old)
+    assert young.exists()
+
+
+def test_a_run_recovered_as_unfinished_is_not_also_reported_complete(tmp_path: Path) -> None:
+    slow = hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart")
+    hook_journal.HookRun.begin(tmp_path, "agent-vault", "sessionStart", stale_after_ms=0)
+    slow.finish(outcome="success")
+    assert [event["outcome"] for event in hook_journal.drain(tmp_path)] == ["unfinished"]
 
 
 def test_hook_duration_ignores_wall_clock_adjustments(

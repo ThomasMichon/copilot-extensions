@@ -36,6 +36,11 @@ LOCK_WAIT_S = 0.25
 # Directory entries and markers one start may examine; the rest wait for later starts.
 SCAN_LIMIT = 256
 RECOVER_LIMIT = 8
+MARKER_LIMIT = 64
+RECLAIM_LIMIT = 16
+# One aggregate wall budget for reading stale markers during a start.
+RECOVERY_BUDGET_S = 0.05
+_SCRATCH_SUFFIXES = (".tmp", ".seq", ".pending", ".recovering")
 
 
 def _now_ms() -> int:
@@ -94,11 +99,18 @@ def _stamp(ms: int) -> str:
 
 
 def _append(directory: Path, event: dict[str, Any]) -> bool:
+    return _append_many(directory, [event])
+
+
+def _append_many(directory: Path, events: list[dict[str, Any]]) -> bool:
+    """Append every admitted record under one lock acquisition, or none."""
     try:
-        record = _project(event)
+        data = b"".join(
+            (json.dumps(_project(event), separators=(",", ":")) + "\n").encode("ascii")
+            for event in events
+        )
     except ValueError:
         return False
-    line = (json.dumps(record, separators=(",", ":")) + "\n").encode("ascii")
     path = directory / "pending.jsonl"
     with _journal_lock(directory) as held:
         if not held:
@@ -107,11 +119,10 @@ def _append(directory: Path, event: dict[str, Any]) -> bool:
             size = path.stat().st_size
         except FileNotFoundError:
             size = 0
-        if size + len(line) > PENDING_LIMIT:
+        if size + len(data) > PENDING_LIMIT:
             return False
-        append_bytes(path, line, mode=0o600)
+        append_bytes(path, data, mode=0o600)
     return True
-
 
 def _next_sequence(directory: Path, plugin: str, entry: str) -> int:
     path = directory / f"{plugin}.{entry}.seq"
@@ -153,28 +164,48 @@ class HookRun:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.started_ms = _now_ms()
         self.started_mono_ms = _monotonic_ms()
+        markers, scratch, crowded = self._scan()
+        _reclaim(scratch, self.started_ms, stale_after_ms)
+        recovered = self._recover(markers, stale_after_ms)
+        if crowded or len(markers) - recovered >= MARKER_LIMIT:
+            # Storage is bounded: an unobserved run is preferable to an unbounded directory.
+            raise OSError("hook journal marker capacity reached")
         with _journal_lock(self.directory) as held:
             if not held:
                 raise OSError("hook journal is busy")
             self.sequence = _next_sequence(self.directory, self.plugin, self.entry)
         marker = self.directory / f"{self.plugin}.{self.entry}.{uuid.uuid4().hex}.start"
-        scratch = self.directory / f".{uuid.uuid4().hex}.tmp"
-        scratch.write_text(json.dumps({
+        scratch_path = self.directory / f".{uuid.uuid4().hex}.tmp"
+        scratch_path.write_text(json.dumps({
             "run_sequence": self.sequence, "started_ms": self.started_ms,
         }), "ascii")
-        os.replace(scratch, marker)
+        os.replace(scratch_path, marker)
         self.marker = marker
-        prefix, examined = f"{self.plugin}.{self.entry}.", 0
+
+    def _scan(self) -> tuple[list[Path], list[Path], bool]:
+        """One bounded enumeration: this entry's markers and abandoned scratch files."""
+        prefix = f"{self.plugin}.{self.entry}."
+        markers: list[Path] = []
+        scratch: list[Path] = []
         with os.scandir(self.directory) as entries:
-            candidates: list[Path] = []
-            for item in entries:
-                examined += 1
-                if examined > SCAN_LIMIT or len(candidates) >= RECOVER_LIMIT:
-                    break
+            for examined, item in enumerate(entries, 1):
+                if examined > SCAN_LIMIT:
+                    return markers, scratch, True
                 name = item.name
-                if name.startswith(prefix) and name.endswith(".start") and name != marker.name:
-                    candidates.append(self.directory / name)
-        for stale in candidates:
+                if name.startswith(prefix) and name.endswith(".start"):
+                    markers.append(self.directory / name)
+                elif name.startswith(".") and name.endswith(_SCRATCH_SUFFIXES):
+                    scratch.append(self.directory / name)
+        return markers, scratch, False
+
+    def _recover(self, markers: list[Path], stale_after_ms: int) -> int:
+        """Report up to RECOVER_LIMIT stale markers within one time budget; return the count."""
+        deadline = time.monotonic() + RECOVERY_BUDGET_S
+        claims: list[tuple[Path, Path]] = []
+        events: list[dict[str, Any]] = []
+        for stale in markers:
+            if len(claims) >= RECOVER_LIMIT or time.monotonic() > deadline:
+                break
             try:
                 prior = json.loads(stale.read_text("ascii"))
                 started = prior["started_ms"]
@@ -189,7 +220,8 @@ class HookRun:
                     continue
             if type(started) is not int or self.started_ms - started < stale_after_ms:
                 continue
-            # Renaming claims the marker, so concurrent starts report it once.
+            # Renaming claims the marker: one concurrent start or the run's own
+            # finish() wins, so each run is reported exactly once.
             claimed = self.directory / f".{uuid.uuid4().hex}.recovering"
             try:
                 os.replace(stale, claimed)
@@ -201,19 +233,34 @@ class HookRun:
             }
             if type(sequence) is int and sequence > 0:
                 event["run_sequence"] = sequence
-            if type(started) is int and started > 0:
+            if started > 0:
                 event["started_at"] = _stamp(started)
-            if not _append(self.directory, event):
-                # The journal is full or busy: keep the marker for a later start.
-                os.replace(claimed, stale)
-                break
-            claimed.unlink()
+            claims.append((stale, claimed))
+            events.append(event)
+        if not claims:
+            return 0
+        if not _append_many(self.directory, events):
+            # The journal is full or busy: keep the markers for a later start.
+            for stale, claimed in claims:
+                with contextlib.suppress(OSError):
+                    os.replace(claimed, stale)
+            return 0
+        for _, claimed in claims:
+            with contextlib.suppress(OSError):
+                claimed.unlink()
+        return len(claims)
 
     def finish(
         self, *, outcome: str, failure_category: str = "none", exit_code: int | None = None,
     ) -> None:
         marker, self.marker = self.marker, None
         if marker is None:
+            return
+        claimed = self.directory / f".{uuid.uuid4().hex}.recovering"
+        try:
+            os.replace(marker, claimed)
+        except OSError:
+            # A later start already reported this run as unfinished.
             return
         event: dict[str, Any] = {
             "kind": "hook", "plugin": self.plugin, "entry": self.entry,
@@ -225,10 +272,20 @@ class HookRun:
             event["exit_code"] = exit_code
         try:
             _append(self.directory, event)
-            marker.unlink()
         except OSError:
             pass
+        with contextlib.suppress(OSError):
+            claimed.unlink()
 
+
+def _reclaim(scratch: list[Path], now_ms: int, stale_after_ms: int) -> None:
+    """Remove a bounded number of abandoned scratch files left by interrupted writers."""
+    for path in scratch[:RECLAIM_LIMIT]:
+        try:
+            if now_ms - path.stat().st_mtime_ns // 1_000_000 >= max(stale_after_ms, 1):
+                path.unlink()
+        except OSError:
+            continue
 
 def drain(directory: Path, *, limit: int = DRAIN_LIMIT) -> list[dict[str, Any]]:
     """Remove and return up to `limit` observations; the rest stay pending.
