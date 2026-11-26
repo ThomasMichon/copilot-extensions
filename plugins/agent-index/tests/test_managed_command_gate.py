@@ -192,8 +192,13 @@ def test_command_gate_retains_prepared_bindings_without_ambient_fallback(
     empty.mkdir()
     git = shutil.which("git")
     assert git
+    command_paths = [str(tools)]
+    if os.name == "nt":
+        command_paths.append(str(Path(git).parent))
+    if host != "bash":
+        command_paths.append(str(Path(executable).parent))
     env.update(
-        PATH=os.pathsep.join((str(tools), str(Path(git).parent))) if os.name == "nt" else str(tools),
+        PATH=os.pathsep.join(command_paths),
         AGENT_INDEX_HOME=str(root), AGENT_INDEX_REPO=str(tmp_path),
         TEST_PYTHON=str(python), TEST_CELL_ROOT=str(root), AGENT_INDEX_ROLE="client",
         ORIGIN_MARKER=str(tmp_path / "origin-ran"), AMBIENT_MARKER=str(tmp_path / "ambient-ran"),
