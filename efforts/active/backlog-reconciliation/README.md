@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [four source deliveries and twelve retained execution cases](journal/2026/11.26-four-source-deliveries-and-twelve-retained-cases.md)
+proposes four requirement-mapped source completions and twelve separately
+audited tracking retirements only after reviewed intent and actual receiving.
+Ten preparation cases remain independently OPEN in existing #7378 and two
+TTY cases in existing #11966; neither stage identity nor later green runs
+proves repair. Distinct #14423/#14424 and unfinished #14435/#14461 remain OPEN.
+No proposed disposition has executed; parent Plan/Validation states and
+existing ownership, source, resource and live-effect gates remain unchanged.
+
 The [materialization repair and ten retained cases](journal/2026/11.26-materialization-repair-and-ten-retained-cases.md)
 records reviewed #14764, whole accepted receiving and nineteen separately
 audited dispositions: nine `COMPLETED` against the precise merged
@@ -530,7 +539,7 @@ their technical cases independently OPEN. #14310 retains its explicit
 human-owned parent completion boundary despite the delivered follow-up source.
 Two complete censuses agree on 634 whole OPEN, 293 original-cohort and
 341 inflow: the exact nineteen departures from 653, with no arrival or
-unrelated departure. The factual outcome still owes publication; all parent
+unrelated departure. The factual outcome merged in #14766; all parent
 Plan/Validation states remain unchanged.
 
 The [eighteen later TTY-case outcome](journal/2026/11.26-eighteen-later-tty-cases.md)

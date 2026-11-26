@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-26 - Four source deliveries and twelve retained execution cases: conditional proposal](journal/2026/11.26-four-source-deliveries-and-twelve-retained-cases.md)
+
+- [2026-11-26 - Nine materialization completions, ten retained cases and 634 whole open](journal/2026/11.26-materialization-repair-and-ten-retained-cases.md)
+
 - [2026-11-26 - Eighteen audited TTY handoffs, separate verifier/native keepers and 653 whole open](journal/2026/11.26-eighteen-later-tty-cases.md)
 
 - [2026-11-26 - Sixteen audited publication/TTY handoffs and 671 whole open](journal/2026/11.26-further-publication-and-tty-evidence.md)
