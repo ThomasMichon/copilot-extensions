@@ -26,6 +26,9 @@ test_uninstall_missing_uv_refuses_before_removal_without_ambient_fallback = (
 test_uninstall_retains_live_generation_lease_refusal = (
     _source.test_uninstall_retains_live_generation_lease_refusal
 )
+test_uninstall_refuses_unavailable_process_observation = (
+    _source.test_uninstall_refuses_unavailable_process_observation
+)
 test_uninstall_rejects_selected_python_within_removal_root = (
     _source.test_uninstall_rejects_selected_python_within_removal_root
 )

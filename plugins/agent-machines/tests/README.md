@@ -134,8 +134,8 @@ and is idempotent. Separate controls require live-generation-lease refusal,
 missing-UV refusal before helper entry, and rejection of an interpreter within
 the removal root. No acquisition or production-root removal is performed.
 
-The native lane requires eight no-skip cases on each POSIX Bash host and
-eight on each Windows PowerShell host. Both Windows shell packets run in the
+The native lane requires ten no-skip cases on each POSIX Bash host and
+ten on each Windows PowerShell host. Both Windows shell packets run in the
 existing Windows Bash carrier job, which has headroom, rather than enlarging
 the original eight-minute PowerShell jobs. This does not add a Windows Bash
 installer contract. POSIX PowerShell is useful for isolated selection/refusal
@@ -144,9 +144,21 @@ Each raw/materialized success report records actual removal and subsequent
 idempotent-call durations, with six UV calls and two managed lookups across
 the pair. These synthetic-state observations are not full installation or
 tail-latency measurements.
+The retained legacy suite materializes the same provider/request/capture and
+engine closure, supplies a prepared managed store, and makes setup acquisition
+inert in held-transaction fixtures. Its host roster matches the finite protocol:
+POSIX Bash and native Windows PowerShell. Lease-refusal snapshots are read before
+acquisition and after release, never through an actively byte-locked Windows file.
+The source adapter `test_machines_legacy_uninstall_source.py` additionally requires
+the original idle-cleanup/idempotence and all six held-custody controls in those
+same native carriers: seven cases per POSIX host and eight on Windows.
 
 Full local POSIX deletion can refuse when a current-user process is not
 inspectable. That existing fail-closed observation boundary is not relaxed or
-reported as a pass; real positive removal still requires actual native-lane
-qualification. No root, service, credential or process repair is a fixture
-prerequisite.
+reported as a pass. The copied POSIX fixture observes only its own inspector
+for the newly created inert module namespace; filesystem removal and native
+leases remain real. Windows keeps its actual current-user process census.
+An additional unavailable-census control requires refusal without runtime
+mutation on every native host. Production inspection is unchanged, and the
+POSIX global-census path remains separately unqualified. No root, service,
+credential or process repair is a fixture prerequisite.

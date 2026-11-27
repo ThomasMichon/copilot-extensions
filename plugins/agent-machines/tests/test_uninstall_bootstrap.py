@@ -13,6 +13,7 @@ import time
 import pytest
 
 from .managed_command_fixture import HEADLESS, snapshot
+from .legacy_uninstall_fixture import isolate_process_observation
 from .test_cell_lifecycle_bootstrap import LifecycleFixture
 from .test_installer_bootstrap import (
     bootstrap as bootstrap,
@@ -39,6 +40,7 @@ def removal(installer: LifecycleFixture) -> LifecycleFixture:
     package = installer.payload / "src" / module
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("")
+    isolate_process_observation(installer.payload)
     if os.name != "nt":
         executable = shutil.which("ps")
         assert executable
@@ -117,6 +119,7 @@ def test_uninstall_reuses_prepared_python_and_preserves_durable_state(
         "shell": removal.host, "materialized": removal.support == removal.payload / "scripts",
         "samples_seconds": samples, "uv_calls": uv_calls, "managed_lookups": 2,
         "network": "disabled",
+        "process_observation": "native-current-user" if os.name == "nt" else "fixture-owned",
     }, sort_keys=True))
 
 
@@ -151,14 +154,42 @@ def test_uninstall_retains_live_generation_lease_refusal(
     (root / ".install.lock").touch()
     leases = _component("versioned_runtime_leases")
     with leases.batch_removal_custody(root, ["1.2.3"]):
-        before = snapshot(root)
+        pass
+    before = snapshot(root)
+    with leases.batch_removal_custody(root, ["1.2.3"]):
         result = _run(removal, root)
         assert result.returncode != 0, result.stdout + result.stderr
         diagnostic = (result.stdout + result.stderr).lower()
         assert any(word in diagnostic for word in (
             "custody", "lease", "construction", "retention", "publication",
         )), diagnostic
-        assert snapshot(root) == before
+    assert snapshot(root) == before
+    _assert_no_acquisition(removal)
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell"])
+@pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
+def test_uninstall_refuses_unavailable_process_observation(
+    removal: LifecycleFixture,
+) -> None:
+    if os.name != "nt" and removal.host != "bash":
+        pytest.skip("POSIX finite cleanup requires Bash; PowerShell removal is native Windows")
+    root = removal.home / "runtime"
+    _fixture(root, payload=removal.payload)
+    _snapshot(root)
+    (root / ".install.lock").touch()
+    leases = _component("versioned_runtime_leases")
+    for directory in (root, root / "snapshots"):
+        with leases.batch_removal_custody(directory, ["1.2.3"]):
+            pass
+    with leases._kernel_lease(root, "redirects", kind="publication", shared=False, timeout=0):
+        pass
+    before = snapshot(root)
+    removal.env["MACHINES_TEST_CENSUS_UNAVAILABLE"] = "1"
+    result = _run(removal, root)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Fixture-owned process census is unavailable" in result.stdout + result.stderr
+    assert snapshot(root) == before
     _assert_no_acquisition(removal)
 
 
