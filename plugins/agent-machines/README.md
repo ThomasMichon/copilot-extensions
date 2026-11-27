@@ -23,6 +23,14 @@ preserves empty, quoted and Unicode values plus native string conversion of
 numeric variables for both script and module entries.
 See the [inert command controls](tests/README.md) for qualification and limits.
 
+The POSIX session-start manifest check uses the installation-context native JSON
+reader, as its governance check already does. It does not start Python or UV.
+All fields use one native byte-preserving snapshot; decoded path/version captures
+retain trailing linefeeds rather than selecting another identity.
+Malformed, duplicate/case-ambiguous-key and invalid-UTF-8 manifests cannot trigger
+publication. First-use stamping, cell admission and the existing installer launch
+owner remain unchanged; the PowerShell counterpart continues to read JSON natively.
+
 The PowerShell installer's declared, captured human output initializes UTF-8
 only when requested by its admitting parent. Construction diagnostics use
 the existing dual-stream helper; the finite Python lifecycle producer honors

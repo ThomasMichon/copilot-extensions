@@ -55,6 +55,16 @@ def test_hex_query_still_refuses_duplicate_keys() -> None:
     assert b"duplicate" in result.stderr.lower()
 
 
+@pytest.mark.parametrize("escaped", [
+    b"\\u00gg", b"\\u000", b"\\ud800", b"\\udc00",
+    b"\\ud800\\u0000", b"\\ud800\\udc0g",
+])
+def test_string_query_refuses_invalid_unicode_escape_quads(escaped: bytes) -> None:
+    result = _query(b'{"value":"' + escaped + b'"}', mode="string")
+    assert result.returncode == 2
+    assert result.stdout == b""
+
+
 @pytest.mark.parametrize("ensure_ascii", [False, True])
 @pytest.mark.parametrize("value", ['/managed quote"back\\slash/\u00e9\U0001f600/bin/python', "line\n"])
 def test_string_query_preserves_decoded_bytes(ensure_ascii: bool, value: str) -> None:
@@ -66,6 +76,12 @@ def test_string_query_preserves_decoded_bytes(ensure_ascii: bool, value: str) ->
 @pytest.mark.parametrize("value", [None, 42, False, [], {}, "/managed/\x00/python"])
 def test_string_query_refuses_nonstrings_and_nul_before_shell_capture(value: object) -> None:
     result = _query(json.dumps({"value": value}).encode(), mode="string")
+    assert result.returncode == 2
+    assert result.stdout == b""
+
+
+def test_scalar_query_cannot_drop_decoded_nul_into_another_path() -> None:
+    result = _query(b'{"value":"/managed/\\u0000/python"}', mode="get")
     assert result.returncode == 2
     assert result.stdout == b""
 

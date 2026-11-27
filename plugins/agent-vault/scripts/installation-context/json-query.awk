@@ -81,6 +81,9 @@ function hex_number(text, result, index_value) {
 }
 
 function utf8(codepoint) {
+    if (codepoint == 0) {
+        return nul_marker
+    }
     if (codepoint <= 127) {
         return sprintf("%c", codepoint)
     }
@@ -133,7 +136,7 @@ function parse_string(quote, result, character, escape, hex, codepoint, low_hex,
             result = result "\t"
         } else if (escape == "u") {
             hex = substr(document, position, 4)
-            if (length(hex) != 4 || hex !~ /^[0-9A-Fa-f]{4}$/) {
+            if (length(hex) != 4 || hex ~ /[^0-9A-Fa-f]/) {
                 fail("invalid unicode escape")
             }
             position += 4
@@ -144,7 +147,7 @@ function parse_string(quote, result, character, escape, hex, codepoint, low_hex,
                 }
                 position += 2
                 low_hex = substr(document, position, 4)
-                if (length(low_hex) != 4 || low_hex !~ /^[0-9A-Fa-f]{4}$/) {
+                if (length(low_hex) != 4 || low_hex ~ /[^0-9A-Fa-f]/) {
                     fail("invalid low surrogate")
                 }
                 position += 4
@@ -203,6 +206,9 @@ function parse_object(path, key, child, count_value, key_index, prior_key) {
     while (1) {
         parse_string()
         key = parsed_string
+        if (index(key, nul_marker) != 0) {
+            fail("JSON object keys containing NUL are unsupported")
+        }
         if (index(key, separator) != 0) {
             fail("object key contains the reserved query separator")
         }
@@ -352,6 +358,9 @@ function directory_string(path, fallback, text, index_value, components, count_v
         fail("Source field '" components[count_value] "' must be a string.")
     }
     text = value_scalar[path]
+    if (index(text, nul_marker) != 0) {
+        fail("JSON strings containing NUL are unsupported.")
+    }
     for (index_value = 1; index_value <= length(text); index_value++) {
         if (byte_value(substr(text, index_value, 1)) == 0) {
             fail("JSON strings containing NUL are unsupported.")
@@ -363,6 +372,11 @@ function directory_string(path, fallback, text, index_value, components, count_v
 function hex_text(text, index_value, result) {
     result = ""
     for (index_value = 1; index_value <= length(text); index_value++) {
+        if (substr(text, index_value, length(nul_marker)) == nul_marker) {
+            result = result "00"
+            index_value += length(nul_marker) - 1
+            continue
+        }
         result = result sprintf("%02x", byte_value(substr(text, index_value, 1)))
     }
     return result
@@ -396,6 +410,9 @@ BEGIN {
         byte_values[sprintf("%c", byte_index)] = byte_index
     }
     separator = sprintf("%c", 28)
+    # An unpaired-surrogate UTF-8 sequence cannot occur in admitted JSON.
+    # Keep decoded NUL distinct even when an awk drops sprintf("%c", 0).
+    nul_marker = sprintf("%c%c%c", 237, 160, 128)
     position = 1
 }
 
@@ -447,11 +464,12 @@ END {
             exit 4
         }
         if (mode == "get") {
+            if (index(value_scalar[query_path], nul_marker) != 0) {
+                fail("JSON strings containing NUL are unsupported.")
+            }
             printf "%s", value_scalar[query_path]
         } else {
-            for (index_value = 1; index_value <= length(value_scalar[query_path]); index_value++) {
-                printf "%02x", byte_value(substr(value_scalar[query_path], index_value, 1))
-            }
+            printf "%s", hex_text(value_scalar[query_path])
         }
     } else {
         fail("unknown mode '" mode "'")
