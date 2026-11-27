@@ -90,6 +90,23 @@ all five declared retained requests remain OPEN. The two arrivals are
 counting metadata, not content admission. The node rows still represent
 the earlier frozen frame, not a silently refreshed 584-node semantic set.
 
+The [scoped attribution comparison](journal/2026/11.26-scoped-attribution-repair-correspondence.md)
+adds a distinct, whole qualified #11805 original and all six human
+discussions. Changed #14652 source, normal release and corroborated actual
+consumer acceptance support its separately verified completion after
+reviewed #14841. Its original and six incumbent comments are independently
+audited unchanged; historical failed refreshes and the consumer's later
+head retain their original limits.
+
+The next complete equal-pass observation at 2026-11-26 20:02:32
+America/Los_Angeles measures **583 whole OPEN**, comprising 276 original
+and 307 inflow identities. Exactly #11805 departs from the preceding
+584-open observation; there are no arrivals or unrelated departures and
+all declared keepers remain OPEN. The numerical equality with the frozen
+583-node frame does not mean identity equality: the frame retains both
+later verified departures and the intervening #14826/#14832 arrivals
+separately. No other pending row gains semantic or content admission.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

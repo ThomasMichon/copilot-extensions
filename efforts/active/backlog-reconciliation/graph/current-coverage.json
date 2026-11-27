@@ -44,13 +44,40 @@
       "not_runtime_or_resource_completion": true
     }
   ],
+  "later_complete_whole_originals": [11805],
+  "later_complete_discussions": {"11805": 6},
+  "later_verified_source_outcomes": [
+    {
+      "issue": 11805,
+      "state": "CLOSED",
+      "reason": "COMPLETED",
+      "source_pr": 14652,
+      "release_pr": 14660,
+      "reviewed_intent_pr": 14841,
+      "acknowledgment": "https://github.com/ThomasMichon/copilot-extensions/issues/11805#issuecomment-7209449440",
+      "independent_provider_and_whole_audit": true,
+      "prior_discussions_preserved": 6,
+      "later_consumer_head_or_resource_completion_claimed": false
+    }
+  ],
+  "preceding_counting_observations": [
+    {
+      "observed_local": "2026-11-26T18:59:50.411297-08:00",
+      "whole_open": 584,
+      "original_cohort_open": 276,
+      "inflow_open": 308,
+      "arrivals_since_frozen_snapshot": [14826, 14832],
+      "departures_since_frozen_snapshot": [13753],
+      "unrelated_departures": []
+    }
+  ],
   "later_counting_observation": {
-    "observed_local": "2026-11-26T18:59:50.411297-08:00",
-    "whole_open": 584,
+    "observed_local": "2026-11-26T20:02:32.653650-08:00",
+    "whole_open": 583,
     "original_cohort_open": 276,
-    "inflow_open": 308,
+    "inflow_open": 307,
     "arrivals_since_frozen_snapshot": [14826, 14832],
-    "departures_since_frozen_snapshot": [13753],
+    "departures_since_frozen_snapshot": [11805, 13753],
     "unrelated_departures": [],
     "node_rows_still_cover_frozen_583_snapshot": true,
     "arrival_content_admission": false
@@ -82,6 +109,7 @@
     "retained-prior": "Preserve the prior study's actual retained gap, not unread-intake credit.",
     "candidate": "A complete finite source comparison supports a conditional candidate; final verification and disposition remain separate.",
     "completed-guidance": "A separate reviewed final unit and independent provider/whole audit verify this finite guidance outcome, not runtime or resource completion.",
+    "completed-source": "A separate reviewed final unit and independent provider/whole audit verify this finite source outcome; later consumer heads and resource custody remain separate.",
     "pending": "Retain the existing issue and prior research; qualified changed-outcome evidence remains pending."
   },
   "historical_columns_scope": "Reference-roster and weighted-role columns are separately dated historical coverage, not current semantic admission or completion.",
@@ -547,7 +575,7 @@
     [11775, "inflow", "member", 0, true, null, "pending", "qualified-change-evidence"],
     [11800, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
     [11801, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
-    [11805, "inflow", "member", 10, true, null, "pending", "qualified-change-evidence"],
+    [11805, "inflow", "member", 10, true, null, "completed-source", null],
     [11815, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
     [11818, "inflow", "automation", 6, false, null, "pending", "qualified-change-evidence"],
     [11819, "inflow", "automation", 0, false, null, "pending", "qualified-change-evidence"],
