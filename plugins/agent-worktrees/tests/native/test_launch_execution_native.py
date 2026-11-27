@@ -203,6 +203,7 @@ def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path: Path, 
     }
     environment.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        TEMP=str(tmp_path), TMP=str(tmp_path), TMPDIR=str(tmp_path),
         PATH=str(Path(executable).parent), FIXTURE_CAPTURE=str(captured),
         COPILOT_EXTENSIONS_TEST_CONTAINED="1", AGENT_WORKTREES_STATUS_MONITOR="0",
     )
@@ -230,7 +231,8 @@ def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path: Path, 
     assert state["lifetime_policy"] == "cli" and state["restoration"] == "unqualified"
     if identity:
         assert state["session_id"] == "selected"
-    assert list((home / ".agent-worktrees" / "launch-attempts").glob("*/headed.json")) == [state_file]
+    assert list(tmp_path.glob("copilot-launch-*/headed.json")) == [state_file]
+    assert not (home / ".agent-worktrees" / "launch-attempts").exists()
     assert not list(home.rglob("*.yaml")), "A recordless launch must not fabricate a worktree ledger"
     print(f"recordless-selected-core-seconds={time.monotonic() - started:.3f}")
 
