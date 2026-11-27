@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,8 +29,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 @pytest.fixture
-def native_file_symlink():
-    def create(path, target, *, target_is_directory=False):
+def native_file_symlink() -> Callable[..., None]:
+    def create(path: Path, target: Path | str, *, target_is_directory: bool = False) -> None:
         try:
             path.symlink_to(target, target_is_directory=target_is_directory)
         except OSError as error:
@@ -42,7 +42,7 @@ def native_file_symlink():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_runtime_dirs(tmp_path, monkeypatch):
+def _isolate_runtime_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate every test from the machine's live agent-bridge runtime.
 
     Agent enumeration + namespace resolution discover venue providers
@@ -117,7 +117,7 @@ def spawn_target(tmp_path: Path) -> SpawnTarget:
 
 
 @pytest.fixture
-def mock_acp_client():
+def mock_acp_client() -> MagicMock:
     """Create a mock AcpClient."""
     client = MagicMock()
     client.is_running = True

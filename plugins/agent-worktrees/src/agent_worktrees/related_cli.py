@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 from machine_transport import IdentityError, machine_identity_names, resolve_machine_selection
@@ -17,13 +20,13 @@ from .related_acquisition import (
 )
 
 
-def _core():
+def _core() -> Any:
     from . import __main__ as core
 
     return core
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: Any) -> None:
     sub.add_parser("related", help="Per-project related repos (run 'related' for usage)")
 
 
@@ -97,7 +100,7 @@ def _related_anchor(rest: list[str]) -> str | None:
             **no_window_kwargs(),
         )
         if cp.returncode == 0 and cp.stdout.strip():
-            return cp.stdout.strip()
+            return cast(str, cp.stdout.strip())
     except Exception:
         pass
     try:
@@ -181,7 +184,8 @@ def _related_config_source_anchors(
 ) -> list[str]:
     from .related_acquisition import source_anchors
 
-    return source_anchors(base_anchor, installed_anchors=installed_anchors)
+    resolve = cast(Callable[..., list[str]], source_anchors)
+    return resolve(base_anchor, installed_anchors=installed_anchors)
 
 
 def _related_lookup_anchors(
@@ -194,12 +198,12 @@ def _related_lookup_anchors(
     anchors = _related_config_source_anchors(anchor)
     if _related_opt(rest, "--repo"):
         return anchors, False
-    if related.get_related_grafted(anchors, name) is not None:
+    if related.get_related_grafted(cast("list[str | Path]", anchors), name) is not None:
         return anchors, False
     cp = related.find_control_plane_anchor()
     if cp and os.path.abspath(cp) != os.path.abspath(anchor):
         cp_anchors = _related_config_source_anchors(cp)
-        if related.get_related_grafted(cp_anchors, name) is not None:
+        if related.get_related_grafted(cast("list[str | Path]", cp_anchors), name) is not None:
             return cp_anchors, True
     return anchors, False
 
@@ -246,7 +250,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     from . import related, repos
 
     anchors = _related_config_source_anchors(anchor)
-    rc = related.read_related_grafted(anchors)
+    rc = related.read_related_grafted(cast("list[str | Path]", anchors))
 
     current_machine, selected = _related_current_topology(anchors, anchor)
     machines_known_available = selected is not None
@@ -310,7 +314,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     return 1 if has_error else 0
 
 
-def _render_related_findings(findings: list, current_machine: str) -> None:
+def _render_related_findings(findings: list[Any], current_machine: str) -> None:
     from . import related
 
     output.header(f"related doctor  (machine: {current_machine or '?'})")
@@ -347,7 +351,7 @@ def _related_conduct(anchor: str) -> int:
         return 0
 
     anchors = _related_config_source_anchors(anchor)
-    rel = related.read_related_grafted(anchors)
+    rel = related.read_related_grafted(cast("list[str | Path]", anchors))
     related_count = len(rel.related)
     if not config.repos and not related_count:
         return 0
@@ -395,6 +399,8 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
     """Route related subcommands (per-project related-repos index)."""
     from . import related, repos
 
+    e: related.RelatedEntry | None
+    entry: related.RelatedEntry | None
     if not argv or argv[0] in ("--help", "-h"):
         _related_usage()
         return 0 if argv else 1
@@ -413,7 +419,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
             cp = None
         base = cp or _related_anchor(rest)
         owners = (
-            related.owned_targets_grafted(_related_config_source_anchors(base))
+            related.owned_targets_grafted(cast("list[str | Path]", _related_config_source_anchors(base)))
             if base
             else []
         )
@@ -454,7 +460,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
     if sub == "list":
         role = _related_opt(rest, "--role")
         anchors = _related_config_source_anchors(anchor)
-        selected = related.read_related_grafted(anchors)
+        selected = related.read_related_grafted(cast("list[str | Path]", anchors))
         entries = sorted(selected.related.values(), key=lambda entry: entry.name)
         if role:
             entries = [entry for entry in entries if entry.role == related.normalize_role(role)]
@@ -517,7 +523,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
             return 1
         name = rest[0]
         anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
-        e = related.get_related_grafted(anchors, name)
+        e = related.get_related_grafted(cast("list[str | Path]", anchors), name)
         if e is None:
             output.err(f"'{name}' is not a related repo.")
             return 1
@@ -599,7 +605,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
         name = rest[0]
         machines_csv = _related_opt(rest, "--machines", "") or ""
         machines = [m.strip() for m in machines_csv.split(",") if m.strip()]
-        codespace: dict = {}
+        codespace: dict[str, Any] = {}
         for flag, key in (
             ("--cs-repo", "repo"),
             ("--cs-machine", "machine"),
@@ -609,7 +615,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
             v = _related_opt(rest, flag)
             if v:
                 codespace[key] = v
-        container: dict = {}
+        container: dict[str, Any] = {}
         for flag, key in (
             ("--container-repo", "repo"),
             ("--container-workspace", "workspace_folder"),
@@ -679,7 +685,7 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
             return 1
         name = rest[0]
         anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
-        e = related.get_related_grafted(anchors, name)
+        e = related.get_related_grafted(cast("list[str | Path]", anchors), name)
         if e is None:
             output.err(f"'{name}' is not a related repo. Link it first: related add {name}")
             return 1
@@ -692,13 +698,13 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
     if sub == "primary":
         if rest and not rest[0].startswith("-"):
             name = rest[0]
-            if related.get_related_grafted(_related_config_source_anchors(anchor), name) is None:
+            if related.get_related_grafted(cast("list[str | Path]", _related_config_source_anchors(anchor)), name) is None:
                 output.err(f"'{name}' is not a related repo. Link it first.")
                 return 1
             related.set_primary(anchor, name)
             output.ok(f"primary = {name}")
         else:
-            print(related.get_primary_grafted(_related_config_source_anchors(anchor)) or "(unset)")
+            print(related.get_primary_grafted(cast("list[str | Path]", _related_config_source_anchors(anchor))) or "(unset)")
         return 0
 
     if sub == "resolve":
@@ -710,19 +716,19 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
             anchors, via_cp = _related_lookup_anchors(rest, anchor, name)
         else:
             anchors = _related_config_source_anchors(anchor)
-            name = related.get_primary_grafted(anchors)
+            name = related.get_primary_grafted(cast("list[str | Path]", anchors))
             via_cp = False
         if not name and not _related_opt(rest, "--repo"):
             cp = related.find_control_plane_anchor()
             if cp and os.path.abspath(cp) != os.path.abspath(anchor):
                 cp_anchors = _related_config_source_anchors(cp)
-                cp_primary = related.get_primary_grafted(cp_anchors)
+                cp_primary = related.get_primary_grafted(cast("list[str | Path]", cp_anchors))
                 if cp_primary:
                     anchors, name, via_cp = cp_anchors, cp_primary, True
         if not name:
             output.err("Usage: related resolve <name>  (or set a primary first)")
             return 1
-        entry = related.get_related_grafted(anchors, name)
+        entry = related.get_related_grafted(cast("list[str | Path]", anchors), name)
         if entry is None:
             output.err(f"'{name}' is not a related repo.")
             return 1
@@ -853,8 +859,8 @@ def _cmd_related_dispatch(argv: list[str]) -> int:
         print()
         if resn.explore:
             print("  Explore (read/understand the code):")
-            for e in resn.explore:
-                print(f"    - {e}")
+            for item in resn.explore:
+                print(f"    - {item}")
             print()
         print("  Plan:")
         for s in resn.steps:

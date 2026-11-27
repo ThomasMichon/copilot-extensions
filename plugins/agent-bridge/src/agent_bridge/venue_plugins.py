@@ -7,8 +7,9 @@ import logging
 import shlex
 import asyncio
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any, cast
 
 from plugin_resolve.reflection import (
     build_plan, build_prepare_script, parse_prepared, selection_cli_args, selection_spec,
@@ -17,7 +18,9 @@ from plugin_resolve.target import requires_repository_binding
 from worktree_identity import execution_machine_from_fields
 
 
-async def local_plugin_request(target, workspace: str, environment: dict[str, str]) -> dict | None:
+async def local_plugin_request(
+    target: Any, workspace: str, environment: dict[str, str],
+) -> dict[str, Any] | None:
     """Build a readonly producer plan for the actual allocated checkout."""
     from plugin_resolve.conventions import SETTINGS_RELS
     from plugin_resolve.registration import _settings_document
@@ -30,7 +33,7 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
         raise ValueError("Local execution checkout is not a directory")
     if not any((parent / ".git").exists() for parent in (checkout, *checkout.parents)):
         return None  # Legacy Gitless launches have no repository registration surface.
-    from .session_manager import _REQUEST_OVERRIDES_KEY
+    from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 
     provenance = (target.venue or {}).get(_REQUEST_OVERRIDES_KEY, {})
     from .privileged_plugins import controller_source
@@ -43,7 +46,7 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
     roots = list(dict.fromkeys([
         *([Path(controller)] if controller else []), *control_plane_anchors(),
     ]))
-    def plan_request():
+    def plan_request() -> dict[str, Any]:
         for root in roots:
             for relative in SETTINGS_RELS:
                 _settings_document(root.joinpath(*relative))
@@ -62,7 +65,8 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
 
 
 async def prepare_local_plugins(
-    target, workspace: str, environment: dict[str, str], *, prepared_context: dict | None = None,
+    target: Any, workspace: str, environment: dict[str, str], *,
+    prepared_context: dict[str, Any] | None = None,
 ) -> list[str] | None:
     """Prepare the actual local checkout, retaining no copied local payloads."""
     from plugin_resolve.preparation import prepare
@@ -79,11 +83,11 @@ async def prepare_local_plugins(
         return None
     cancelled = threading.Event()
 
-    def check_cancelled():
+    def check_cancelled() -> None:
         if cancelled.is_set():
             raise InterruptedError("Local plugin preparation cancelled")
 
-    def prepare_checkout():
+    def prepare_checkout() -> list[str]:
         check_cancelled()
         direct_launch = not target.project or (target.explicit_cwd and not target.native_resume_id)
         # Managed plans may run opaque setup wrappers. Their selected environment
@@ -121,9 +125,11 @@ async def prepare_local_plugins(
         raise
 
 
-def with_controller_origin(target, origin, *, caller_session_id=None):
+def with_controller_origin(
+    target: Any, origin: str, *, caller_session_id: str | None = None,
+) -> Any:
     from dataclasses import replace
-    from .session_manager import _REQUEST_OVERRIDES_KEY
+    from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 
     venue = target.venue or {}
     return replace(target, venue={
@@ -143,7 +149,7 @@ def _controller_machine_matches(row: Mapping[str, object], owner_machine: str) -
         or not isinstance(row.get("platform"), str) or not row["platform"]
     ):
         return recorded == owner_machine
-    physical = split_machine_environment(recorded, row["platform"])
+    physical = split_machine_environment(recorded, cast(str, row["platform"]))
     if recorded == owner_machine:
         return True
     requested = split_machine_environment(owner_machine)
@@ -154,14 +160,14 @@ def _controller_machine_matches(row: Mapping[str, object], owner_machine: str) -
 
 
 async def resolve_controller_cwd(
-    caller, *, caller_session_id: str | None = None, affinity_id: str | None = None,
+    caller: Any, *, caller_session_id: str | None = None, affinity_id: str | None = None,
 ) -> str | None:
     """Honor explicit controller context without requiring managed adoption."""
     from .acquisition_authority import read_controller_inventory
     from .caller_project import _OWNER_REF
     from .caller_session import normalize_caller_session_id
     from .routes.worktree_reporting import reported_machine
-    from .session_manager import _REQUEST_OVERRIDES_KEY
+    from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 
     raw_path = getattr(caller, "caller_worktree", None)
     owner = getattr(caller, "caller_owner_ref", None)
@@ -235,7 +241,7 @@ async def resolve_controller_cwd(
     return str(canonical)
 
 
-async def _registered_target_binding(repository: str) -> dict:
+async def _registered_target_binding(repository: str) -> dict[str, Any]:
     from plugin_activation import normalize_remote
     from .acquisition_authority import worktree_command
     from .acquisition_contract import AcquisitionRefused
@@ -287,9 +293,9 @@ async def _registered_target_binding(repository: str) -> dict:
 
 
 async def venue_plugin_plan(
-    target: dict, *, caller=None, controller_cwd: str | None = None, codespace: bool = False,
-    layered_related: bool = False,
-) -> dict:
+    target: dict[str, Any], *, caller: Any = None, controller_cwd: str | None = None,
+    codespace: bool = False, layered_related: bool = False,
+) -> dict[str, Any]:
     """Select current-controller plugins independently of the receiver transport.
 
     ``layered_related`` reads related selections from the Worktrees owner's
@@ -328,7 +334,7 @@ async def venue_plugin_plan(
             spec = ref.selection()
             if not is_harness_plugin(spec["source"]):
                 selected_related.setdefault(spec["source"], spec)
-    plan = {"plugins": []}
+    plan: dict[str, Any] = {"plugins": []}
     provider = target.get("provider_command")
     codespace = target.get("plugin_plan") or codespace
     if codespace and not provider:
@@ -338,7 +344,7 @@ async def venue_plugin_plan(
             raise RuntimeError("Codespace plugin preparation requires its active provider")
         provider = manifest.command
     if codespace:
-        provider = _reresolve_stale_interpreter(list(provider))
+        provider = _reresolve_stale_interpreter(list(cast("list[str]", provider)))
         command = [*provider, "plugin-plan", target["name"]]
         if target.get("repo"):
             command += ["--repo", target["repo"]]
@@ -348,14 +354,17 @@ async def venue_plugin_plan(
             if spec.get("allow_missing"):
                 command += selection_cli_args(spec)
         rc, out, _err = await _run_provider(
-            command, timeout=120, **({"cwd": controller_cwd} if controller_cwd is not None else {}),
+            command, timeout=120,
+            **cast("dict[str, Any]", {"cwd": controller_cwd} if controller_cwd is not None else {}),
         )
         if rc:
             raise RuntimeError("Venue provider could not select required plugins")
         plan = json.loads(out)
     if selected_related:
         binding = {}
-        if target.get("repo") and requires_repository_binding(selected_related.values(), roots):
+        if target.get("repo") and requires_repository_binding(
+            cast("Sequence[dict[str, Any]]", selected_related.values()), roots,
+        ):
             binding = await _registered_target_binding(target["repo"])
         related = build_plan(list(selected_related.values()), roots, **binding)
         if (
@@ -383,8 +392,9 @@ async def venue_plugin_plan(
 
 
 async def prepare_venue_plugins(
-    target: dict, transport, workspace: str, *, prelude: str = "", remote_env: str | None = None,
-    caller=None, controller_cwd: str | None = None,
+    target: dict[str, Any], transport: Any, workspace: str, *, prelude: str = "",
+    remote_env: str | None = None,
+    caller: Any = None, controller_cwd: str | None = None,
 ) -> list[str]:
     codespace = getattr(transport, "boundary", None) == "codespace"
     plan = await venue_plugin_plan(
