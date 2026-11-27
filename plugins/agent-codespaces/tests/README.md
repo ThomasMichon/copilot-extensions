@@ -41,3 +41,21 @@ and Legacy modes. Existing canonical bins are reused instead of recopied over
 the fixture's materialized closure. Qualified/unqualified installed descriptors,
 option prefixes, checkout-import refusal, bytecode and unchanged-payload
 assertions remain intact.
+
+## Native POSIX drift metadata
+
+`test_bootstrap_native_metadata.py`, exposed through
+`test_codespaces_metadata_source.py`, executes the actual hook and native JSON
+reader with poisoned Python/UV and an inert installation-driver acknowledgement.
+Raw and materialized inputs retain legacy/current-marker no-ops, cold/stale
+actions, opt-out/pin/context/witness boundaries, exact newline identity and
+malformed/invalid-UTF-8/NUL refusal. Current metadata performs one native query per
+invocation; repeated instrumented samples and counts are serialized.
+
+The existing Linux/macOS jobs run this packet before application admission,
+without new runners or a longer deadline. Linux requires all 42 metadata cases
+plus 22 retained handoff/routing cases; macOS requires the 42 metadata cases and
+retains the existing unsupported-platform refusal for actual driver submission.
+Both require all four repeated reports and no skips. Windows' native JSON
+counterpart is unchanged. These controls do not launch the real driver, provision
+a runtime, contact Codespaces or qualify installed-host readiness.
