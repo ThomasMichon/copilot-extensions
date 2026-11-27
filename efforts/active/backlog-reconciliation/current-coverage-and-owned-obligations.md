@@ -444,6 +444,24 @@ and 33 prior-retained; other categories, historical fields and observations
 are unchanged. No census, issue effect, product execution or custody transfer
 is claimed.
 
+## Generated-copy proposal and original custody
+
+The [receiving proposal](generated-runtime-copy-receiving.md) resolves
+#8596's actual canonical/shared supplier and live release projection,
+retaining complete cohesion and affected-consumer/helper-closure acceptance
+before any administrative retirement. Its Main copy is not declared removed,
+its implementation is not declared complete, and OPEN #5939 has not yet
+received the proposed direct clauses.
+The [three-case study](journal/2026/11.27-generated-copy-and-owned-acceptance.md)
+retains #1043's whole common/family diagnostics and #912's SAME explicit
+nonexpiring claimant rather than expiring custody from an old date.
+
+Only two pending outcomes become current-retained and one becomes a
+conditional candidate. The same retained 582 identities have 399 pending,
+132 current-retained, 33 prior-retained and one candidate; other categories,
+historical fields, observations and owners are unchanged. No issue effect,
+new census, product execution or resource transfer is claimed.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

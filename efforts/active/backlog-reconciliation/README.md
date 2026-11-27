@@ -522,6 +522,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [generated-copy receiving proposal](generated-runtime-copy-receiving.md)
+resolves #8596's authored supplier and live release projection, then preserves
+its whole cohesion/consumer-helper contract as proposed direct intake to
+OPEN #5939 before conditional administrative `NOT_PLANNED` supersession.
+The copy is not obsolete code and no issue effect has occurred.
+The [owned-acceptance study](journal/2026/11.27-generated-copy-and-owned-acceptance.md)
+also retains whole #1043/#912 with current registry negatives and the original
+nonexpiring chained-cutover claimant. Only three outcome/gap pairs change;
+the same retained 582 identities have 399 pending, 132 current-retained and
+one conditional candidate. All parent gates and source/resource limits remain.
+
 The [native-report and conditional-input study](journal/2026/11.27-native-reports-and-conditional-inputs.md)
 retains four whole current requests and nine discussions. Actual native
 publishers qualify two automation reports before reading; the current test source and
@@ -531,6 +542,7 @@ choice, and #688's complete provider/credit/F3-E contract remains.
 Only four outcome/gap pairs change; the unchanged #5352 lead adds no coverage
 delta. The retained 582 identities have 402 pending and 130 current-retained.
 No issue disposition, new census, product execution or parent completion follows.
+The reviewed recording merged in #14897.
 
 The [current-delivery and fleet-naming comparison](journal/2026/11.27-current-delivery-and-fleet-naming.md)
 reads whole #2173/#78 and all five discussions. #2173 retains all 74
