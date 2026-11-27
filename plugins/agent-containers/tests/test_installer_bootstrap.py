@@ -21,6 +21,11 @@ pytestmark = [
 ]
 REPO = Path(__file__).resolve().parents[3]
 HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+CONSTRUCTION_PS_HOSTS: list[str] = [
+    host for host in cases.HOSTS if Path(host).stem != "bash"
+]
+if os.name != "nt" and (core := shutil.which("pwsh")):
+    CONSTRUCTION_PS_HOSTS.append(core)
 
 
 @pytest.fixture
@@ -36,7 +41,7 @@ def seed(removal: Removal, materialized: bool) -> Removal:
         shutil.copytree(REPO / "libs/installer-engine", support)
         for name in (
             "bootstrap-uv.sh", "bootstrap-uv.ps1", "installer-instance-python-version.txt",
-            "bootstrap-capture.ps1", "bootstrap-capture.exe", "installer-engine.ps1",
+            "bootstrap-capture.ps1", "bootstrap-capture.exe",
         ):
             (scripts / name).unlink(missing_ok=True)
         capture = payload.parents[1] / "libs/agent-procutil/src/agent_procutil/native_capture.sh"
@@ -289,3 +294,31 @@ def test_constructor_uses_independent_managed_application_floor(seed: Removal, h
     observed = json.loads(checked.stdout)
     assert observed["version"] == [3, 11] and Path(observed["prefix"]) == slot
     assert not seed.poison.exists()
+
+
+@pytest.mark.parametrize("host", CONSTRUCTION_PS_HOSTS)
+def test_powershell_construction_removes_foreign_environment_keys(host: str) -> None:
+    source = (REPO / "plugins/agent-containers/scripts/runtime-construction.ps1").read_text(
+        encoding="utf-8",
+    )
+    start = source.index("$environment = Get-UvBootstrapEnvironment")
+    environment = source[start:source.index("\n$python = Join-Path", start)]
+    program = (
+        "$ErrorActionPreference='Stop'\nSet-StrictMode -Version 2\n"
+        f". {_ps(REPO / 'libs/installer-engine/bootstrap-uv.ps1')}\n"
+        "$keys=@((Get-UvBootstrapEnvironment).Keys)+@('UV_CONFIG_FILE')\n"
+        "foreach ($key in $keys) { [Environment]::SetEnvironmentVariable($key,'foreign','Process') }\n"
+        + environment + "\n"
+        "$remaining=@($keys | Where-Object {\n"
+        " [Environment]::GetEnvironmentVariables('Process').Contains($_)\n"
+        "})\n"
+        "if ($remaining.Count) { throw ('Foreign environment keys remain: '+($remaining -join ',')) }\n"
+        "if ($env:UV_NO_CONFIG -cne '1') { throw 'Construction configuration is not isolated' }\n"
+        "'isolated'\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", program],
+        capture_output=True, text=True, timeout=15, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "isolated"

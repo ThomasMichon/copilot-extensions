@@ -49,7 +49,7 @@ creates and probes a real managed Python 3.11 environment without dependencies.
 
 The path-gated POSIX command jobs require all eighteen cases and four repeated
 reports without skips. The existing Windows Index/native-engine carrier runs
-both PowerShell hosts (36 cases, eight reports), leaving the near-full Containers
+both PowerShell hosts (38 cases, eight reports), leaving the near-full Containers
 Core job unchanged. Existing eight-minute budgets are preserved. These are native
 source boundaries, not complete installation latency, installed fleet readiness
 or production setup. `test_runtime_profile.py` separately retains profile intent,
@@ -65,6 +65,14 @@ defaults through the actual canonical pip reader, retaining both relative and
 absolute caller site prefixes. The reader runs in the same payload context as
 dependency installation, so an unrelated caller's default cannot suppress the
 governed pip bridge or replace a payload's own default.
+
+The raw constructor fixture retains its existing local `installer-engine.ps1`;
+bootstrap support still belongs to the canonical helper/request owner rather
+than that file's presence. The additional per-PowerShell-host control executes
+the constructor's actual environment block. Null selection overrides must remove
+keys, not retain empty strings: newer Core/.NET retains those empty values and
+UV rejects an empty boolean selector. The native Windows packet also builds
+the real managed environment under both PowerShell hosts.
 
 ## Prepared-only finite removal
 

@@ -8,18 +8,19 @@ Set-StrictMode -Version 2
 function Write-Step { param([string]$Message) [Console]::Error.WriteLine($Message) }
 function Write-Ok { param([string]$Message) [Console]::Error.WriteLine($Message) }
 function Write-Warn { param([string]$Message) [Console]::Error.WriteLine($Message) }
-$support = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'installer-engine.ps1')) {
-    $PSScriptRoot
-} else {
-    [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../libs/installer-engine'))
-}
+. (Join-Path $PSScriptRoot 'installer-bootstrap.ps1')
+$support = Get-ContainersInstallerSupport
 . (Join-Path $support 'bootstrap-uv.ps1')
 . (Join-Path $support 'installer-engine.ps1')
 $environment = Get-UvBootstrapEnvironment
 $environment.UV_CONFIG_FILE = $null
 $environment.UV_NO_CONFIG = '1'
 foreach ($name in $environment.Keys) {
-    [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process')
+    if ($null -eq $environment[$name]) {
+        Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+    } else {
+        [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process')
+    }
 }
 $python = Join-Path $VenvDir 'Scripts/python.exe'
 if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $python -UvCommand $Uv `
