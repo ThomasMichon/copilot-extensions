@@ -160,6 +160,42 @@ if ($Action -eq 'uninstall') {
     exit $LASTEXITCODE
 }
 
+$originalBootstrapPython = [Environment]::GetEnvironmentVariable('COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON', 'Process')
+$originalInstallDeadline = [Environment]::GetEnvironmentVariable('AGENT_MACHINES_INSTALL_DEADLINE_SEC', 'Process')
+try {
+$bootstrapClock = [Diagnostics.Stopwatch]::StartNew()
+$bootstrapDeadline = 480
+$bootstrapDeadlineText = $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC
+if (-not $bootstrapDeadlineText) { $bootstrapDeadlineText = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
+$bootstrapDeadlineEnabled = $true
+if ($bootstrapDeadlineText -and (
+    -not [int]::TryParse($bootstrapDeadlineText, [ref]$bootstrapDeadline) -or $bootstrapDeadline -le 0
+)) {
+    if ($Action -eq 'cell-provision' -or $Action -like 'slot-*') {
+        throw 'Cell installer deadline must be a positive number of seconds.'
+    }
+    $bootstrapDeadlineEnabled = -not [int]::TryParse($bootstrapDeadlineText, [ref]$bootstrapDeadline)
+    $bootstrapDeadline = 480
+}
+. (Join-Path $PSScriptRoot 'installer-bootstrap.ps1')
+$script:MachinesInstallerSelection = $null
+if ($Action -eq 'cell-provision' -or $Action -like 'slot-*') {
+    if ([string]::IsNullOrWhiteSpace($Context) -or [string]::IsNullOrWhiteSpace($ExpectedMarketplaceId)) {
+        throw "$Action requires -Context and -ExpectedMarketplaceId"
+    }
+}
+if ($WheelProfile) {
+    $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $WheelPython
+} else {
+    $operation = if ($Action -in @('install', 'init', 'provision', 'cell-provision')) {
+        'Prepare'
+    } else { 'Inspect' }
+    Initialize-MachinesBootstrap -Operation $operation -TimeoutMilliseconds (
+        [int]([Math]::Min(480000, $bootstrapDeadline * 1000.0))
+    )
+    $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $script:MachinesInstallerSelection.Python
+}
+
 # Refuse every legacy mutation before self-staging creates or removes files.
 $probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
     [IO.Path]::GetFullPath($env:COPILOT_PLUGIN_STAGED_FROM)
@@ -188,6 +224,12 @@ if ($Action -notin @(
     & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
         -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+if ($bootstrapDeadlineEnabled) {
+    $remaining = [Math]::Floor($bootstrapDeadline - $bootstrapClock.Elapsed.TotalSeconds)
+    if ($remaining -le 0) { throw 'Installer deadline expired during bootstrap.' }
+    $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC = [string]$remaining
 }
 
 # The dependency-light cell-slot runner does not need the legacy installer's
@@ -227,6 +269,7 @@ if ($cellSlotAction) {
             timeout = $deadline
         }
         & (Join-Path $PSScriptRoot 'installation-context/shell-caller-owned.ps1') `
+            -Python $script:MachinesInstallerSelection.Python `
             -Worker (Join-Path $PSScriptRoot 'cell_installer.py') `
             -Request $request -TimeoutSeconds $deadline
         exit $LASTEXITCODE
@@ -503,6 +546,7 @@ function Write-Ok      { param([string]$Msg) Write-Host "  [OK]   $Msg" -Foregro
 function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -ForegroundColor Cyan }
 function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
+function Write-Warn    { param([string]$Msg) Write-Warning $Msg }
 
 function Get-CellDeployManifest {
     param(
@@ -985,14 +1029,15 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
+function Get-MachinesBootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
+    if (-not $script:MachinesInstallerSelection) { Initialize-MachinesBootstrap -Operation Inspect }
+    return $script:MachinesInstallerSelection.Python
+}
+
 function Get-SourceRuntimeIdentity {
     param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
-    $py = $null
-    foreach ($candidate in 'python3', 'python', 'py') {
-        $command = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($command -and $command.Source -notmatch 'WindowsApps') { $py = $command.Source; break }
-    }
-    if (-not $py) { throw 'Source runtime validation requires a bootstrap Python interpreter' }
+    $py = Get-MachinesBootstrapPython
     $arguments = @('-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime_source.py'),
         '--payload', $Payload, '--package-version', $PackageVersion,
         '--plugin', 'agent-machines', '--format', 'json')
@@ -1054,8 +1099,8 @@ function Assert-CellPayloadIdentity {
 
 function Get-CellPayloadIdentity {
     param([string]$Payload = $PluginDir)
-    $python = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
-    $detail = Invoke-Hidden -FilePath $python.Path -ArgList @(
+    $python = Get-MachinesBootstrapPython
+    $detail = Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', (Join-Path $PluginDir 'scripts/cell_installer.py'), 'identity',
         '--payload', $Payload, '--version', $PackageVersion
     )
@@ -1080,32 +1125,35 @@ function Get-GitInfo {
     }
 }
 
-$PackageVersion = $SrcVersion
-Initialize-SourceRuntime
-if ($WheelProfile) {
-    Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
-        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-machines' -Root $InstallDir
-}
-if ($cellSlotAction) {
-    $script:SelectedPayloadHash = Get-CellPayloadIdentity
-    if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -and
-        $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -cne $SelectedPayloadHash) {
-        throw 'Payload changed across the installation transaction'
+function Initialize-MachinesInstallerIdentity {
+    $script:PackageVersion = $SrcVersion
+    Initialize-SourceRuntime
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-machines' -Root $InstallDir
     }
-    $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = $SelectedPayloadHash
+    if ($cellSlotAction) {
+        $script:SelectedPayloadHash = Get-CellPayloadIdentity
+        if ($env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -and
+            $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH -cne $SelectedPayloadHash) {
+            throw 'Payload changed across the installation transaction'
+        }
+        $env:AGENT_MACHINES_EXPECTED_PAYLOAD_HASH = $SelectedPayloadHash
+    }
+    $selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
+    if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
+        $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -cne $selectedSourceIdentity) {
+        throw 'Source runtime identity changed across the installation transaction'
+    }
+    $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY = $selectedSourceIdentity
+    if ($SourceRuntimeIdentity) {
+        $sourceOwner = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $script:SourceManifestPath = $sourceOwner
+        $script:SourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceOwner))
+    }
 }
-$selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
-if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
-    $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -cne $selectedSourceIdentity) {
-    throw 'Source runtime identity changed across the installation transaction'
-}
-$env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY = $selectedSourceIdentity
-# Source manifest inputs are captured before activation.
-if ($SourceRuntimeIdentity) {
-    $sourceOwner = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
-    $script:SourceManifestPath = $sourceOwner
-    $script:SourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceOwner))
-}
+Initialize-MachinesInstallerIdentity
+
 if (
     $Action -in @('cell-provision', 'slot-cutover') -and
     -not $env:AGENT_MACHINES_CELL_PROVISION_LOCK_HELD
@@ -1703,25 +1751,7 @@ function Remove-ConsoleTrampolines {
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
-    if ($WheelProfile) { return $WheelPython }
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-    }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
-    }
-    return $null
+    return Get-MachinesBootstrapPython
 }
 
 function Get-PayloadHash(
@@ -2472,45 +2502,8 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-$hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-
-# Find a Python interpreter (skip Windows Store aliases that aren't real)
-$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
-foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
-    $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $testOut = & $found.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
-                $pythonCmd = $found.Source
-            }
-        } catch { }
-        $ErrorActionPreference = $prevEAP
-        if ($pythonCmd) { break }
-    }
-}
-if (-not $pythonCmd) {
-    Write-Fail 'Python not found on PATH (need 3.10+)'
-    Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
-    Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
-    exit 1
-}
+$pythonCmd = Get-MachinesBootstrapPython
 Write-Ok "Python: $pythonCmd"
-
-# Check for uv -- install via winget if missing
-if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Step 'uv not found -- installing via winget...'
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        $env:PATH = (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine') + ';' + (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User')
-        if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
-    }
-}
 
 # -- 1. Create directories ---------------------------------------------
 
@@ -2543,53 +2536,35 @@ try {
 [void](Invoke-VersionedSlotClean)
 if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    # Prefer a SAC-trusted signed base Python via `--copies` so the venv
-    # python.exe is signed (Smart App Control blocks the unsigned uv-managed
-    # python); then uv; then plain python -m venv.
-    $signedBase = $null
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-        foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
+    . (Join-Path (Get-MachinesInstallerSupport) 'bootstrap-uv.ps1')
+    . (Join-Path (Get-MachinesInstallerSupport) 'installer-engine.ps1')
+    $runtimeUv = if ($WheelProfile) { $WheelUv } else { $script:MachinesInstallerSelection.Uv }
+    $runtimeEnvironment = Get-UvBootstrapEnvironment
+    $runtimeEnvironment.UV_CONFIG_FILE = $null
+    $runtimeEnvironment.UV_NO_CONFIG = '1'
+    $originalRuntimeEnvironment = @{}
+    try {
+        foreach ($name in $runtimeEnvironment.Keys) {
+            $originalRuntimeEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            if ($null -eq $runtimeEnvironment[$name]) {
+                Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($name, $runtimeEnvironment[$name], 'Process')
+            }
+        }
+        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython `
+            -PythonVersion '3.11' -UvCommand $runtimeUv)) {
+            throw 'Managed application environment construction failed.'
+        }
+    } finally {
+        foreach ($name in $originalRuntimeEnvironment.Keys) {
+            if ($null -eq $originalRuntimeEnvironment[$name]) {
+                Remove-Item -LiteralPath "Env:\$name" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($name, $originalRuntimeEnvironment[$name], 'Process')
             }
         }
     }
-    if ($signedBase -and (Test-Path $VenvPython)) {
-        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
-    }
-    if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-    }
-    if (-not (Test-Path $VenvPython)) {
-        # The bootstrap interpreter may be older than the package floor; the
-        # runtime uses it only when it satisfies 3.11, otherwise uv supplies 3.11.
-        $runtimePythonCmd = $null
-        & $pythonCmd -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { $runtimePythonCmd = $pythonCmd }
-        $uvPythonRequest = if ($runtimePythonCmd) { $runtimePythonCmd } else { '3.11' }
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            Write-Step 'Creating venv via uv...'
-            Invoke-VersionedSlotClean
-            & uv venv $VenvDir --python $uvPythonRequest --allow-existing 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                if ($runtimePythonCmd) {
-                    Write-Step 'uv venv failed -- falling back to python -m venv'
-                    & $runtimePythonCmd -m venv $VenvDir 2>&1 | Out-Null
-                } else {
-                    Write-Fail "uv venv failed and $pythonCmd is older than Python 3.11"
-                }
-            }
-        } elseif ($runtimePythonCmd) {
-            Write-Step 'Creating venv via python -m venv...'
-            & $runtimePythonCmd -m venv $VenvDir 2>&1 | Out-Null
-        } else {
-            Write-Fail "Python 3.11+ is required for the runtime; $pythonCmd is older and uv is unavailable"
-        }
-    }
-    $ErrorActionPreference = $prevEAP
     if (-not (Test-Path $VenvPython)) {
         Write-Fail "Venv creation failed -- $VenvPython not found"
         exit 1
@@ -2891,4 +2866,16 @@ exit 0
 }
 } finally {
     if ($legacyTransaction) { $legacyTransaction.Dispose() }
+}
+} finally {
+    if ($null -eq $originalBootstrapPython) {
+        Remove-Item Env:\COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON -ErrorAction SilentlyContinue
+    } else {
+        $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $originalBootstrapPython
+    }
+    if ($null -eq $originalInstallDeadline) {
+        Remove-Item Env:\AGENT_MACHINES_INSTALL_DEADLINE_SEC -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC = $originalInstallDeadline
+    }
 }

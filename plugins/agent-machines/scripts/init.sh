@@ -16,6 +16,7 @@ _ok()   { printf '  [OK]   %s\n' "$1"; }
 _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
+_warn() { printf '  [WARN] %s\n' "$1" >&2; }
 
 _source_kind() {
     case "$(printf '%s' "${COPILOT_PLUGIN_STAGED_FROM:-$1}" | tr '\\' '/')" in
@@ -443,6 +444,36 @@ if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == ce
     exec "$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
 fi
 
+. "$SCRIPT_DIR/installer-bootstrap.sh"
+MACHINES_UV=""
+MACHINES_BOOTSTRAP_PYTHON=""
+MACHINES_BOOTSTRAP_STARTED="$SECONDS"
+MACHINES_INSTALL_DEADLINE="${AGENT_MACHINES_INSTALL_DEADLINE_SEC:-${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-480}}"
+if [[ ! "$MACHINES_INSTALL_DEADLINE" =~ ^[1-9][0-9]*$ ]]; then
+    case "$ACTION" in cell-provision|slot-*) _fail 'Cell installer deadline must be a positive number of seconds'; exit 2 ;; esac
+    if [[ "$MACHINES_INSTALL_DEADLINE" =~ ^-?[0-9]+$ ]]; then
+        MACHINES_INSTALL_DEADLINE_DISABLED=1
+    else
+        MACHINES_INSTALL_DEADLINE_DISABLED=0
+    fi
+    MACHINES_INSTALL_DEADLINE=480
+else
+    MACHINES_INSTALL_DEADLINE_DISABLED=0
+fi
+case "$ACTION" in
+    cell-provision|slot-*)
+        [[ -n "$CONTEXT" && -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+            _fail "$ACTION requires --context and --expected-marketplace-id"
+            exit 1
+        }
+        ;;
+esac
+case "$ACTION" in
+    install|init|provision|cell-provision) _initialize_machines_bootstrap Prepare "$MACHINES_INSTALL_DEADLINE" || exit $? ;;
+    *) _initialize_machines_bootstrap Inspect "$MACHINES_INSTALL_DEADLINE" || exit $? ;;
+esac
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$MACHINES_BOOTSTRAP_PYTHON"
+
 # Cell-local slot actions authorize themselves from the explicit context
 # transaction below. Every legacy mutation still requires the legacy probe.
 if [[ "$ACTION" != "slot-provision" &&
@@ -468,6 +499,11 @@ if [[ "$ACTION" != "slot-provision" &&
     if [[ "$LEGACY_PROBE_STATUS" -ne 0 ]]; then
         exit "$LEGACY_PROBE_STATUS"
     fi
+fi
+if [[ "$MACHINES_INSTALL_DEADLINE_DISABLED" == 0 ]]; then
+    remaining=$((MACHINES_INSTALL_DEADLINE - (SECONDS - MACHINES_BOOTSTRAP_STARTED)))
+    ((remaining > 0)) || { _fail 'Installer deadline expired during bootstrap'; exit 1; }
+    export AGENT_MACHINES_INSTALL_DEADLINE_SEC="$remaining"
 fi
 set -- "${ORIGINAL_ARGS[@]}"
 
@@ -706,16 +742,8 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
 _source_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
-            command -v "$candidate"
-            return 0
-        fi
-    done
-    _fail 'Source runtime selection requires a bootstrap Python interpreter'
-    return 1
+    [[ -n "$MACHINES_BOOTSTRAP_PYTHON" ]] || _initialize_machines_bootstrap Inspect || return
+    printf '%s\n' "$MACHINES_BOOTSTRAP_PYTHON"
 }
 
 _source_runtime_identity() {
@@ -769,30 +797,33 @@ _cell_payload_identity() {
         --payload "${1:-$PLUGIN_DIR}" --version "$PACKAGE_VERSION"
 }
 
-PACKAGE_VERSION="$SRC_VERSION"
-_initialize_source_runtime || exit 1
-if [[ "$__cell_slot_direct" == 1 ]]; then
-    SELECTED_PAYLOAD_HASH="$(_cell_payload_identity)" || exit 1
-    if [[ -n "${AGENT_MACHINES_EXPECTED_PAYLOAD_HASH:-}" &&
-          "$AGENT_MACHINES_EXPECTED_PAYLOAD_HASH" != "$SELECTED_PAYLOAD_HASH" ]]; then
-        _fail 'Payload changed across the installation transaction'
-        exit 1
+_initialize_installer_identity() {
+    PACKAGE_VERSION="$SRC_VERSION"
+    _initialize_source_runtime || return
+    if [[ "$__cell_slot_direct" == 1 ]]; then
+        SELECTED_PAYLOAD_HASH="$(_cell_payload_identity)" || return
+        if [[ -n "${AGENT_MACHINES_EXPECTED_PAYLOAD_HASH:-}" &&
+            "$AGENT_MACHINES_EXPECTED_PAYLOAD_HASH" != "$SELECTED_PAYLOAD_HASH" ]]; then
+            _fail 'Payload changed across the installation transaction'
+            return 1
+        fi
+        export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$SELECTED_PAYLOAD_HASH"
     fi
-    export AGENT_MACHINES_EXPECTED_PAYLOAD_HASH="$SELECTED_PAYLOAD_HASH"
-fi
-SELECTED_SOURCE_IDENTITY="$SOURCE_RUNTIME_IDENTITY"
-[[ -n "$SELECTED_SOURCE_IDENTITY" ]] || SELECTED_SOURCE_IDENTITY='{}'
-if [[ -n "${AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY:-}" &&
-      "$AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY" != "$SELECTED_SOURCE_IDENTITY" ]]; then
-    _fail 'Source runtime identity changed across the installation transaction'
-    exit 1
-fi
-export AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY="$SELECTED_SOURCE_IDENTITY"
-# Source manifest inputs are captured before activation.
-if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
-    SOURCE_OWNER="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-    SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$SOURCE_OWNER/../.." && pwd)")" || exit 1
-fi
+    SELECTED_SOURCE_IDENTITY="$SOURCE_RUNTIME_IDENTITY"
+    [[ -n "$SELECTED_SOURCE_IDENTITY" ]] || SELECTED_SOURCE_IDENTITY='{}'
+    if [[ -n "${AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY:-}" &&
+        "$AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY" != "$SELECTED_SOURCE_IDENTITY" ]]; then
+        _fail 'Source runtime identity changed across the installation transaction'
+        return 1
+    fi
+    export AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY="$SELECTED_SOURCE_IDENTITY"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        SOURCE_OWNER="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+        SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$SOURCE_OWNER/../.." && pwd)")" || return
+    fi
+}
+
+_initialize_installer_identity || exit 1
 
 if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
       -z "${AGENT_MACHINES_CELL_PROVISION_LOCK_HELD:-}" ]]; then
@@ -1201,16 +1232,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
 fi
 
 _bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
+    _source_python
 }
 
 _source_snapshot() {
@@ -1600,36 +1622,10 @@ _versioned_mark_complete() {
     _runtime_construction_complete "$actual_hash"
 }
 
-# --- self-provisioning (runtime-self-provisioning pattern) -------------------
-# Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
-_ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    return 1
-}
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
+    local idx="${PIP_INDEX_URL:-}"
     if [[ -z "$idx" ]]; then
         local f
         for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
@@ -1879,25 +1875,11 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
     exit 1
 fi
 
-# Find a Python interpreter
-PYTHON_CMD=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        if "$candidate" --version 2>&1 | grep -qi python; then
-            PYTHON_CMD="$candidate"
-            break
-        fi
-    fi
-done
-if [[ -z "$PYTHON_CMD" ]]; then
-    _fail 'Python not found on PATH (need 3.10+)'
-    exit 1
-fi
+PYTHON_CMD="$(_source_python)" || exit 1
 _ok "Python: $PYTHON_CMD"
 
 _ensure_uv_index
-HAVE_UV=0
-if _ensure_uv; then HAVE_UV=1; fi
+HAVE_UV=1
 
 # -- 1. Directories ----------------------------------------------------
 mkdir -p "$INSTALL_DIR"
@@ -1922,29 +1904,16 @@ fi
 _versioned_slot_clean || exit 1
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
-    # The bootstrap interpreter may be older than the package floor; the
-    # runtime uses it only when it satisfies 3.11, otherwise uv supplies 3.11.
-    RUNTIME_PYTHON_CMD=""
-    if "$PYTHON_CMD" -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
-        RUNTIME_PYTHON_CMD="$PYTHON_CMD"
-    fi
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        _step 'Creating venv via uv...'
-        _versioned_slot_clean
-        uv venv "$VENV_DIR" --python "${RUNTIME_PYTHON_CMD:-3.11}" --allow-existing >/dev/null 2>&1 || {
-            if [[ -n "$RUNTIME_PYTHON_CMD" ]]; then
-                _step 'uv venv failed -- falling back to python -m venv'
-                "$RUNTIME_PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-            else
-                _fail "uv venv failed and $PYTHON_CMD is older than Python 3.11"
-            fi
-        }
-    elif [[ -n "$RUNTIME_PYTHON_CMD" ]]; then
-        _step 'Creating venv via python -m venv...'
-        "$RUNTIME_PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-    else
-        _fail "Python 3.11+ is required for the runtime; $PYTHON_CMD is older and uv is unavailable"
-    fi
+    _step 'Creating venv via managed uv Python...'
+    _versioned_slot_clean
+    (
+        unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON
+        unset VIRTUAL_ENV CONDA_PREFIX PYTHONHOME PYTHONPATH UV_WORKING_DIR UV_WORKING_DIRECTORY
+        unset UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE
+        export UV_NO_CONFIG=1
+        . "$(_machines_installer_support)/installer-engine.sh"
+        new_signed_venv "$MACHINES_UV" "$VENV_DIR" 3.11
+    ) || exit 1
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _fail "Venv creation failed -- $VENV_PYTHON not found"
         exit 1
