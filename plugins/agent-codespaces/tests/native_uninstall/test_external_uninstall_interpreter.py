@@ -6,16 +6,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import venv
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 SOURCE = Path(__file__).resolve().parents[4]
-PLUGINS = ("agent-pull-requests", "agent-ssh", "agent-codespaces")
+PLUGINS = ("agent-pull-requests", "agent-ssh")
 HOSTS = (
     pytest.param(
         "pwsh", marks=pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 7 lane")
@@ -25,10 +27,10 @@ HOSTS = (
     ),
     pytest.param(
         "bash",
-        marks=pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux lane"),
+        marks=pytest.mark.skipif(os.name == "nt", reason="native POSIX lane"),
     ),
 )
-FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+FLAGS = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def _host(name: str) -> str:
@@ -90,6 +92,13 @@ def _path_bin(directory: Path, candidate: Path | None) -> Path:
             "sort",
             "stat",
             "bash",
+            "awk",
+            "wc",
+            "mkfifo",
+            "rmdir",
+            "cut",
+            "cksum",
+            "ps",
         ):
             command = shutil.which(name)
             if command:
@@ -342,7 +351,7 @@ def test_real_native_installer_removes_internal_runtime_using_external_python(
 ) -> None:
     _host(shell)
     payload, root, internal, durable = _case(tmp_path, plugin, layout)
-    paths = [_path_bin(tmp_path / "path", None), Path(sys._base_executable).parent]
+    paths = [_path_bin(tmp_path / "path", None), Path(str(getattr(sys, "_base_executable"))).parent]
     control = _run(
         _selector_harness(tmp_path, payload, root, internal, shell, invoke=False),
         root.parent,
@@ -393,7 +402,7 @@ def test_real_selector_enforces_executable_and_prefix_closure(
             _path_bin(tmp_path / "utilities", None),
         ]
     if mode == "internal-before-external":
-        paths.append(Path(sys._base_executable).parent)
+        paths.append(Path(str(getattr(sys, "_base_executable"))).parent)
     negative = mode in ("missing", "internal-only", "linked-internal")
     command = _selector_harness(tmp_path, payload, root, internal, shell, invoke=negative)
     result = _run(command, root.parent, paths, tmp_path)
@@ -422,7 +431,7 @@ def test_external_venv_with_internal_base_prefix_is_refused(
 ) -> None:
     _host(shell)
     payload, root, internal, durable = _case(tmp_path, plugin, ".venv")
-    base = Path(sys._base_executable)
+    base = Path(str(getattr(sys, "_base_executable")))
     internal_base = root / "base"
     internal_base.mkdir()
     copied_base = internal_base / base.name
@@ -481,85 +490,222 @@ def test_external_venv_with_internal_base_prefix_is_refused(
     _retained(root, durable)
 
 
-def _uv_only(directory: Path, events: Path) -> Path:
-    """Make every attempted uv invocation observable without running uv."""
-    directory = _path_bin(directory, None)
+@pytest.fixture(scope="module")
+def prepared_uninstall_python() -> tuple[Path, Path, Path]:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("This acquisition-free control requires prepared uv")
+    result = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        capture_output=True, text=True, timeout=15, creationflags=FLAGS, check=False,
+    )
+    if result.returncode:
+        pytest.skip("This acquisition-free control requires prepared CPython 3.11.18")
+    store = subprocess.check_output(
+        [uv, "python", "dir"], text=True, timeout=15, creationflags=FLAGS,
+    ).strip()
+    return Path(uv), Path(result.stdout.strip()).resolve(), Path(store)
+
+
+def _prepared_payload(payload: Path, materialized: bool, shell: str) -> Path:
+    previous = sys.path[:]
+    try:
+        owner = runpy.run_path(str(SOURCE / "tools/materialize_installer_engine.py"))
+        for original, target in owner["derived_file_pairs"](
+            SOURCE, payload.parents[1],
+            copied_consumer=(SOURCE / "plugins/agent-codespaces", payload),
+        ):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(original, target)
+        if materialized:
+            changes = owner["materialize_ref_into"](
+                source_consumer_dir=SOURCE / "plugins/agent-codespaces",
+                dest_consumer_dir=payload, canonical_root=SOURCE,
+                dest_root=payload.parents[1],
+            )
+            assert changes and not any(line.startswith("SKIP") for line in changes), changes
+    finally:
+        sys.path[:] = previous
+    scripts = payload / "scripts"
+    support = scripts if materialized else payload.parents[1] / "libs/installer-engine"
+    if not materialized:
+        (scripts / "installer-instance-python-version.txt").unlink(missing_ok=True)
+        assert (scripts / "bootstrap-uv.sh").is_file()
+        (scripts / "native_capture.sh").unlink(missing_ok=True)
+        capture = payload.parents[1] / "libs/agent-procutil/src/agent_procutil/native_capture.sh"
+        capture.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SOURCE / "libs/agent-procutil/src/agent_procutil/native_capture.sh", capture)
+    suffix = "sh" if shell == "bash" else "ps1"
+    provider = support / f"bootstrap-uv.{suffix}"
+    invocation = '    exec "$@"\n' if shell == "bash" else "    $result = & $InvokeCaptured @options\n"
+    observation = (
+        '    printf "%s\\n" "$*" >> "$CODESPACES_UNINSTALL_UV_LOG"\n' if shell == "bash" else
+        '    [IO.File]::AppendAllText($env:CODESPACES_UNINSTALL_UV_LOG, ($Arguments -join " ") + "`n")\n'
+    )
+    text = provider.read_text(encoding="utf-8")
+    assert text.count(invocation) == 1
+    provider.write_text(text.replace(invocation, observation + invocation), encoding="utf-8")
+    # The fixture module has no host consumers; keep filesystem qualification
+    # independent of unrelated privileged processes in the host's POSIX census.
+    helper = scripts / "installer_engine_uninstall.py"
+    text = helper.read_text(encoding="utf-8")
+    needle = '    """Observe current-user consumers; observation never grants stop authority."""\n'
+    assert text.count(needle) == 1
+    observed = text.replace(
+        needle, needle + "    if os.name != 'nt':\n        return []\n",
+    )
+    helper.write_text(observed, encoding="utf-8")
+    (payload.parents[1] / "libs/installer-engine/installer_engine_uninstall.py").write_text(
+        observed, encoding="utf-8",
+    )
+    return support
+
+
+def _internal_store(root: Path, bootstrap: Path, store: Path) -> Path:
+    relative = bootstrap.relative_to(store)
+    private = root / "prepared-store"
+    copied = private / relative
+    copied.parent.mkdir(parents=True)
+    shutil.copy2(bootstrap, copied)
+    prefix = private / relative.parts[0]
+    original_prefix = store / relative.parts[0]
     if os.name == "nt":
-        (directory / "uv.cmd").write_text(
-            f'@echo off\n>>"{events}" echo invoked\nexit /b 99\n', encoding="utf-8"
-        )
+        for dll in bootstrap.parent.glob("*.dll"):
+            shutil.copy2(dll, copied.parent / dll.name)
+        _link(prefix / "Lib", original_prefix / "Lib")
+        if (original_prefix / "DLLs").is_dir():
+            _link(prefix / "DLLs", original_prefix / "DLLs")
     else:
-        stub = directory / "uv"
-        stub.write_text(
-            "#!/bin/sh\nprintf '%s\\n' invoked >> " + _quote(events, "bash") + "\nexit 99\n",
-            encoding="utf-8",
-        )
-        stub.chmod(0o755)
-    return directory
+        (prefix / "lib").mkdir()
+        _link(prefix / "lib/python3.11", original_prefix / "lib/python3.11")
+    return private
 
 
 @pytest.mark.parametrize("shell", HOSTS)
+@pytest.mark.parametrize("materialized", (False, True), ids=("raw", "materialized"))
 @pytest.mark.parametrize(
     "mode",
-    ("admission", "preview", "native-dry-run", "native-remove", "foreign", "foreign-external"),
+    ("remove", "no-flock", "preview", "missing-uv", "missing-python", "missing-provider",
+     "internal-bootstrap", "foreign", "transport", "owner"),
 )
-def test_codespaces_uv_only_never_provisions_before_admission(
+def test_codespaces_prepared_uninstall_preserves_state_and_never_uses_ambient_python(
     tmp_path: Path,
     shell: str,
+    materialized: bool,
     mode: str,
+    prepared_uninstall_python: tuple[Path, Path, Path],
+    record_property: Callable[[str, object], None],
 ) -> None:
     _host(shell)
+    if mode == "no-flock" and shell != "bash":
+        pytest.skip("Native PowerShell has no POSIX flock fallback")
+    uv, bootstrap, store = prepared_uninstall_python
     payload, root, internal, durable = _case(
-        tmp_path, "agent-codespaces", ".venv", provisioned=False
+        tmp_path, "agent-codespaces", ".venv",
     )
-    if mode.startswith("foreign"):
+    root.chmod(0o700)
+    support = _prepared_payload(payload, materialized, shell)
+    if mode == "foreign":
         marker = root / "deploy-manifest.json"
         data = json.loads(marker.read_text())
         data["source"]["plugin"] = "foreign-plugin"
         marker.write_text(json.dumps(data), encoding="utf-8")
-    if shell != "bash":
-        # A real construction-resolver control proves the uv tripwire catches
-        # the provisioning fallback which uninstall must never reach.
-        control_events = tmp_path / "construction-uv-events"
-        control_path = _uv_only(tmp_path / "construction-path", control_events)
-        _run(
-            _selector_harness(tmp_path, payload, root, internal, shell, invoke=False),
-            root.parent,
-            [control_path],
-            tmp_path,
+    elif mode == "transport":
+        (root / "sockets").mkdir()
+        (root / "sockets/reconnect").write_bytes(b"retained transport")
+    elif mode == "owner" and shell == "bash":
+        unit = root.parent / ".config/systemd/user/agent-codespaces-owner.service"
+        unit.parent.mkdir(parents=True)
+        unit.write_bytes(b"fixture owner registration")
+    elif mode == "missing-provider":
+        provider = support / ("bootstrap-uv.sh" if shell == "bash" else "bootstrap-uv.ps1")
+        provider.rename(provider.with_suffix(".unavailable"))
+    tools = _path_bin(tmp_path / "private tools", None)
+    if mode != "missing-uv":
+        shutil.copy2(uv, tools / uv.name)
+    for name in ("python", "python3", "py"):
+        poison = tools / (name + ".cmd" if os.name == "nt" else name)
+        poison.write_text(
+            '@echo off\n> "%AMBIENT_MARKER%" echo called\nexit /b 91\n' if os.name == "nt" else
+            '#!/bin/sh\nprintf called > "$AMBIENT_MARKER"\nexit 91\n', encoding="utf-8",
         )
-        assert control_events.read_text().splitlines(), "real bootstrap did not hit uv tripwire"
-    events = tmp_path / "uninstall-uv-events"
-    paths = [_uv_only(tmp_path / "uninstall-path", events)]
-    if mode == "foreign-external":
-        paths.append(Path(sys._base_executable).parent)
-    if mode in ("admission", "preview"):
-        command = _selector_harness(tmp_path, payload, root, internal, shell, invoke=True)
-        if mode == "preview":
-            script = Path(command[-1])
-            text = script.read_text()
-            text = text.replace("-AdmissionOnly", "-Preview")
-            text = text.replace(
-                "uninstall_state_preserving_runtime 1 validate",
-                "uninstall_state_preserving_runtime 1",
-            )
-            script.write_text(text, encoding="utf-8")
-    else:
-        command = _install_command(tmp_path, payload, root, shell, dry_run=mode != "native-remove")
+        poison.chmod(0o700)
+    env = _environment(root.parent, [tools])
+    log = tmp_path / "uv-calls"
+    empty_store = tmp_path / "empty-store"
+    empty_store.mkdir()
+    selected_store = empty_store if mode == "missing-python" else store
+    if mode == "internal-bootstrap":
+        selected_store = _internal_store(root, bootstrap, store)
+    env.update(
+        UV_PYTHON_INSTALL_DIR=str(selected_store), UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never",
+        UV_PYTHON="unrelated-python", UV_NO_MANAGED_PYTHON="1",
+        UV_CONFIG_FILE="missing-relative.toml", VIRTUAL_ENV=str(internal),
+        PYTHONHOME="unrelated", PYTHONPATH="unrelated",
+        AMBIENT_MARKER=str(tmp_path / "ambient-ran"), CODESPACES_UNINSTALL_UV_LOG=str(log),
+        COPILOT_EXT_NO_FLOCK="1" if mode == "no-flock" else "0",
+        COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC="2",
+    )
+    command = _install_command(tmp_path, payload, root, shell, dry_run=mode == "preview")
+    if mode == "owner" and shell != "bash":
+        wrapper = Path(command[-1])
+        text = wrapper.read_text()
+        text = text.replace(
+            "function Get-ScheduledTask { param($ErrorAction) }",
+            "function Get-ScheduledTask { param($ErrorAction) "
+            "[pscustomobject]@{TaskName='agent-codespaces-owner'} }",
+        )
+        wrapper.write_text(text, encoding="utf-8")
     before = {
         str(path.relative_to(root)): None if path.is_dir() else path.read_bytes()
         for path in root.rglob("*")
     }
-    result = _run(command, root.parent, paths, tmp_path)
-    assert result.returncode != 0, result.stdout + result.stderr
+    if mode == "internal-bootstrap":
+        evidence_env = {
+            key: value for key, value in env.items()
+            if key not in {"UV_CONFIG_FILE", "UV_PYTHON", "UV_NO_MANAGED_PYTHON",
+                           "PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"}
+        }
+        evidence = subprocess.run(
+            [str(uv), "python", "find", "--no-project", "--system", "--managed-python",
+             "--no-python-downloads", "cpython@3.11.18"],
+            env={**evidence_env, "UV_NO_CONFIG": "1"},
+            capture_output=True, text=True, timeout=15, creationflags=FLAGS, check=False,
+        )
+        assert evidence.returncode == 0, evidence.stdout + evidence.stderr
+        assert Path(evidence.stdout.strip()).resolve().is_relative_to(root.resolve())
+    try:
+        result = subprocess.run(
+            command, cwd=tmp_path, env=env, capture_output=True, text=True,
+            timeout=20, creationflags=FLAGS, check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(str(error.stderr))
+    success = mode in ("remove", "no-flock", "preview")
     detail = result.stdout + result.stderr
-    if mode == "foreign-external":
-        assert any(word in detail.lower() for word in ("ownership", "foreign", "belongs")), detail
+    assert (result.returncode == 0) == success, detail
+    assert not (tmp_path / "ambient-ran").exists(), detail
+    calls = log.read_text().splitlines() if log.exists() else []
+    assert not any("python install" in call or " run " in call for call in calls), calls
+    if success:
+        assert any("python find" in call and "--managed-python" in call
+                   and "--no-python-downloads" in call for call in calls), calls
+    if mode in ("remove", "no-flock"):
+        assert not internal.exists(), detail
     else:
-        assert "existing external Python" in detail
-    assert not events.exists(), "uninstall invoked uv before admission"
-    assert before == {
-        str(path.relative_to(root)): None if path.is_dir() else path.read_bytes()
-        for path in root.rglob("*")
-    }
+        assert before == {
+            str(path.relative_to(root)): None if path.is_dir() else path.read_bytes()
+            for path in root.rglob("*")
+        }, detail
+    if mode in ("foreign", "transport", "owner"):
+        assert {"foreign": "foreign", "transport": "transport", "owner": "connection owner"}[
+            mode
+        ] in detail.lower(), detail
     _retained(root, durable)
+    record_property("codespaces_prepared_uninstall", json.dumps({
+        "shell": shell, "materialized": materialized, "mode": mode,
+        "network": "disabled", "bootstrap_python": "3.11.18", "ambient_calls": 0,
+        "uv_calls": calls,
+    }))
