@@ -7,15 +7,20 @@ related repo (the ``plugins:`` block of the entry in
 them into the dispatched agent's launch. This is distinct from a CodeSpace's
 own ``codespacePlugins`` (owned by agent-codespaces).
 
-Kept **dependency-free of agent-worktrees** (which is not installed in the
-bridge daemon venv): a minimal, guarded YAML read of the same committed files.
+agent-worktrees is not importable from the bridge daemon venv. The legacy
+lane is a minimal, guarded YAML read of the committed files. The layered lane
+(:func:`declared_related_plugins`) first asks the agent-worktrees CLI for its
+grafted ``related list --json`` view, so plugin-contributed, canonical and
+machine/knowledge layers are honored with agent-worktrees' own precedence.
 Every function fails safe -- any error yields an empty result, never an
 exception into the dispatch path.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -246,3 +251,76 @@ def related_plugins_for_repo(
             if any(r.lower() == target for r in _entry_repos(entry)):
                 return _parse_plugin_items(entry.get("plugins"))
     return []
+
+
+_LAYERED_TIMEOUT_SECONDS = 60
+
+
+def _read_layered_related(anchor: Path) -> list[dict] | None:
+    """Grafted related entries for ``anchor`` from ``agent-worktrees related list``.
+
+    ``None`` when the owner CLI is unavailable, refuses, or returns no entry
+    list. The entries carry ``plugins`` only from an agent-worktrees release
+    that publishes them; callers treat a missing key as unsupported.
+    """
+    try:
+        from agent_procutil import no_window_kwargs
+
+        from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
+
+        prefix = _agent_worktrees_launch_prefix()
+        if not prefix:
+            return None
+        proc = subprocess.run(
+            [*prefix, "related", "list", "--json", "--repo", str(anchor)],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            timeout=_LAYERED_TIMEOUT_SECONDS, env=_agent_worktrees_environment(),
+            **no_window_kwargs(),
+        )
+        if proc.returncode:
+            log.warning("Layered related view unavailable (exit %s)", proc.returncode)
+            return None
+        rows = json.loads(proc.stdout).get("related")
+    except Exception as exc:
+        log.warning("Layered related view unavailable: %s", type(exc).__name__)
+        return None
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
+
+
+def layered_related_plugins_for_repo(repo: str | None, anchors: list[Path]) -> list[PluginRef]:
+    """Related-repo plugins from agent-worktrees' grafted view of ``anchors``.
+
+    Matches the entry name first, then ``locus.codespace.repo`` /
+    ``locus.container.repo`` (case-insensitive), like the legacy lane. The
+    first anchor whose view declares ``plugins`` for the match wins. ``[]``
+    when no view is available, nothing matches, or the owner predates the
+    ``plugins`` field.
+    """
+    if not repo:
+        return []
+    target = repo.strip().casefold()
+    for anchor in anchors:
+        rows = _read_layered_related(anchor)
+        if not rows:
+            continue
+        entry = next((
+            row for row in rows
+            if isinstance(row.get("name"), str) and row["name"].casefold() == target
+        ), None) or next((
+            row for row in rows if any(r.casefold() == target for r in _entry_repos(row))
+        ), None)
+        if entry is not None and "plugins" in entry:
+            refs = _parse_plugin_items(entry["plugins"])
+            if refs:
+                return refs
+    return []
+
+
+def declared_related_plugins(repo: str | None, anchors: list[Path]) -> list[PluginRef]:
+    """Layered related plugins for ``repo``, else the legacy ``related.yaml`` lane.
+
+    The layered view is authoritative when it declares plugins. The legacy
+    fallback keeps older agent-worktrees owners and a hand-written
+    ``<anchor>/.agent-worktrees/related.yaml`` working.
+    """
+    return layered_related_plugins_for_repo(repo, anchors) or related_plugins_for_repo(repo, anchors=anchors)

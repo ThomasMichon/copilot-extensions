@@ -1,0 +1,13 @@
+{
+  "comment": "Stage layered related-repository plugins into container and local Dev Box workers",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

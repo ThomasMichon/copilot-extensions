@@ -400,6 +400,47 @@ async def test_controller_only_related_declaration_precedes_anchor(
 
 
 @pytest.mark.asyncio
+async def test_container_stages_layered_plugins_when_checkout_declares_none(
+    monkeypatch, controller,
+):
+    """Harness case: the controller checkout's related.yaml is ``related: {}``."""
+    from pathlib import Path
+
+    caller = controller[0]
+    controller_root = Path(caller.caller_worktree)
+    (controller_root / ".agent-worktrees").mkdir(parents=True)
+    (controller_root / ".agent-worktrees" / "related.yaml").write_text(
+        "related: {}\n", encoding="utf-8",
+    )
+    monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+    queried = []
+    monkeypatch.setattr(
+        "agent_bridge.related_plugins._read_layered_related",
+        lambda anchor: queried.append(anchor) or [{
+            "name": "product", "locus": {"container": {"repo": "product"}},
+            "provenance": {"layer": "machine"},
+            "plugins": [
+                {"source": "dev-locally@synthetic", "enable": True},
+                {"source": "product-harness@synthetic", "enable": True},
+            ],
+        }],
+    )
+    observed = []
+    monkeypatch.setattr(
+        "agent_bridge.venue_plugins.build_plan",
+        lambda specs, roots: observed.append(specs) or {"plugins": specs},
+    )
+    monkeypatch.setattr("agent_bridge.venue_plugins.build_prepare_script", lambda *a: "PREPARE")
+    transport = AsyncMock()
+    transport.run.return_value = (0, "__VENUE_PLUGINS__{}", "")
+    await prepare_venue_plugins(
+        {"name": "example", "repo": "product"}, transport, "/selected", caller=caller,
+    )
+    assert queried == [controller_root]
+    assert observed == [[{"source": "dev-locally@synthetic", "enable": True}]]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("retained", [False, True, "legacy-source"])
 async def test_retained_related_rows_outrank_fallback_and_fill_missing(
     monkeypatch, tmp_path, retained,

@@ -787,6 +787,15 @@ is retained rather than replaced with an unresolved target-side lookup.
 Native CLI dispatch resolves the caller's repository root from nested working
 directories and searches it before configured anchors for both related selections
 and reflected payloads, even when that checkout has no venue-provider config.
+Container and local Dev Box preparation read related selections from the
+Worktrees owner's layered `agent-worktrees related list --json --repo <root>`
+view for each searched root, in the same order. That view applies the owner's
+own precedence across plugin-contributed, canonical, harness, machine and
+knowledge layers, so an empty `related: {}` checkout file no longer hides a
+declaration made in another layer. The first root whose matching entry declares
+plugins wins. When the owner is unavailable, refuses, or predates the
+`plugins` field in that output, selection falls back to reading each root's
+`.agent-worktrees/related.yaml` directly, as before.
 
 The existing Bridge-owned request provenance records whether controller
 context was explicit or inherited from affinity. An inherited ID remains
