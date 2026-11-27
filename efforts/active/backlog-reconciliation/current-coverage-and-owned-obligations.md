@@ -181,6 +181,26 @@ six spent-open, five excluded and one coordination identity: 584 in total.
 This is not another live census, a source-completion claim, a new final-check
 unit or permission to replay the outstanding operational work.
 
+The [portable-installer and declaration study](journal/2026/11.27-portable-installer-and-declaration-boundaries.md)
+then qualifies and reads whole #2295/#2307/#2312/#2320 requests and all fifteen
+comments. Three complete older delivery descriptions and #8847's twenty-four
+human comments preserve bounded source credit rather than stale assertions
+that every comparator or capture fix is absent. #2295 still retains its exact
+incumbent mapping-acceptance condition; #2307 retains remaining native
+ordinary-update/all-consumer acceptance; #2312 retains supported-platform and
+whole-request acceptance after the described capture repair. #2320 retains its
+complete all-copy real-descriptor and supported macOS-update contract without
+a new current-source-fulfillment claim.
+
+Only those four frozen outcome/gap fields become current-retained. Historical
+columns, every other node, ownership and all counting observations stay
+unchanged. At the retained 23:59:55 observation, effective coverage remains
+584 identities: 517 pending and twelve current-retained, with all other
+outcome totals unchanged. The eight complete reference screens and their
+source-path lists are not a semantic inventory or admission for unselected
+originals. There is no new census, final unit, source disposition or resource
+effect.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,

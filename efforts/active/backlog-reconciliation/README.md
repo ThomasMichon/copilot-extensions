@@ -522,12 +522,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [portable-installer and declaration study](journal/2026/11.27-portable-installer-and-declaration-boundaries.md)
+retains whole #2295/#2307/#2312/#2320 requests and all fifteen discussions
+against bounded older source deliveries. Exact incumbent mapping, native
+all-consumer, lossless-path and real-descriptor/update requirements remain;
+no unchanged source trace, experiment or completion-check unit is renewed.
+Only four current outcome/gap fields change; the retained count remains 584.
+
 The [seeded-launch and counting-identity study](journal/2026/11.27-seeded-launch-and-counting-identity-delta.md)
 retains #14325's owner-held installed acceptance after released source fixes
 and #14857's verified failed native report. The complete 23:59:55 observation
 remains 584 OPEN, but #14857's arrival offsets the external #14823 departure.
 Historical observations and every remaining parent gate are preserved; neither
 equal counts nor an external closure supplies campaign completion credit.
+The reviewed recording merged in #14863.
 
 The [oldest-pending delivery study](journal/2026/11.26-oldest-pending-and-partial-deliveries.md)
 retains whole #542/#1138/#1419 requests against five attributed partial or
