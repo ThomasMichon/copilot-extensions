@@ -473,6 +473,29 @@ five excluded and one coordination identity. The frozen frame and historical
 fields remain separate from this later counting observation. No product
 execution, source-copy clearance or resource transfer is claimed.
 
+## First adoption and helper-readiness acceptance
+
+The [two-case comparison](journal/2026/11.27-adoption-and-helper-readiness.md)
+reads the complete current #356/#5479 originals and all ten discussions.
+#356 retains every guided adoption/discovery/knowledge alternative and actual
+bounded custody. Documentary #12904 credit does not revive its later
+withdrawn whole-ROOT receiving proof or release the containing-source hold.
+
+Independently qualified current source for #5479 still distinguishes Python
+wrapper-manifest deployment from native scripts' deliberate omission, while
+the POSIX status branch requires the legacy wrapper. Its original
+deployment-consistency OR usable-Manager-readiness alternative remains
+unfinished, alongside the full helper inventory and launch-diagnostic scope.
+Current packaging selection and transactional-helper delivery receive bounded
+credit, not a fabricated live or whole-request pass. The older shared-input
+comparison stays withdrawn; its held captures are neither recovered nor
+retroactively admitted by this independent current study.
+
+Only #356/#5479 outcome/gap columns change. The same retained 581-identity
+observation now has 397 pending and 134 current-retained; all other categories
+and historical fields remain unchanged. No new census, issue effect, source/
+resource clearance, implementation or native operation is claimed.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
