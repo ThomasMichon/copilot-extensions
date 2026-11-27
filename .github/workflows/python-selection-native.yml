@@ -132,6 +132,13 @@ on:
       - plugins/agent-containers/scripts/bootstrap-python.ps1
       - plugins/agent-containers/tests/managed_command_fixture.py
       - plugins/agent-containers/tests/test_managed_command_gate.py
+      - plugins/agent-containers/scripts/legacy-uninstall.sh
+      - plugins/agent-containers/scripts/legacy-uninstall.ps1
+      - plugins/agent-containers/tests/test_uninstall_bootstrap.py
+      - plugins/agent-containers/tests/test_containers_legacy_runtime_uninstall.py
+      - libs/payload-invocation/tests/test_containers_uninstall_bootstrap_source.py
+      - libs/payload-invocation/tests/test_containers_legacy_uninstall_source.py
+      - libs/payload-invocation/tests/test_containers_uninstall_metadata_source.py
       - plugins/agent-mcp/scripts/runtime-gate.sh
       - plugins/agent-mcp/scripts/runtime-gate.ps1
       - plugins/agent-mcp/tests/test_managed_command_gate.py
@@ -941,6 +948,68 @@ jobs:
           assert all(r['bound_uv_on_path'] is False and r['service_started'] is False
           and r['seconds']>0 for r in reports)"
 
+      - &containers-removal-bootstrap
+        name: Qualify prepared-only Containers removal without ambient Python
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_containers_uninstall_bootstrap_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/containers-uninstall-bootstrap
+      - &containers-removal-bootstrap-proof
+        name: Require actual removal, idempotence and missing-UV refusal without skips
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-uninstall-bootstrap').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=6 if os.name=='nt' else 3;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for c in cases for p in c.findall('./properties/property')
+          if p.attrib.get('name')=='containers_uninstall_bootstrap'];
+          assert len(reports)==(2 if os.name=='nt' else 1);
+          assert {r['shell'] for r in reports}==({'pwsh','powershell'} if os.name=='nt' else {'bash'});
+          assert all(r['network']=='disabled' and r['uv_calls']==4 and r['managed_lookups']==2
+          and r['process_observation']==('native-current-user' if os.name=='nt' else 'fixture-owned')
+          and len(r['samples_seconds'])==2 and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'containers_uninstall_bootstrap':reports},sort_keys=True))"
+      - &containers-removal-retained
+        name: Retain Containers kernel custody and actual broker/transport refusals
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_containers_legacy_uninstall_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/containers-retained-removal
+      - &containers-removal-retained-proof
+        name: Require all retained cleanup, kernel and transport controls without skips
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-retained-removal').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=15 if os.name=='nt' else 12;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - &containers-removal-metadata
+        name: Retain Containers activated-runtime metadata selection controls
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        env:
+          METADATA_SELECTOR: ${{ runner.os == 'Windows' && 'agent-containers' || 'agent-containers and not test_windows_legacy_uninstall' }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_containers_uninstall_metadata_source.py --allow-explicit-tiers
+          -k "${{ env.METADATA_SELECTOR }}" --junit-dir qualification-evidence/containers-uninstall-metadata
+      - &containers-removal-metadata-proof
+        name: Require each supported Containers metadata control without skips
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-uninstall-metadata').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=8 if os.name=='nt' else 4;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -1728,6 +1797,13 @@ jobs:
           expected=32 if os.environ['QUALIFIED_SHELL']=='pwsh' else 16;
           assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
+      - *containers-removal-bootstrap
+      - *containers-removal-bootstrap-proof
+      - *containers-removal-retained
+      - *containers-removal-retained-proof
+      - *containers-removal-metadata
+      - *containers-removal-metadata-proof
 
   containers-ready-admission-linux:
     runs-on: ubuntu-latest

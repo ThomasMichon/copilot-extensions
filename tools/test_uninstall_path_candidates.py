@@ -17,6 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
 BASH = str(GIT_BASH) if GIT_BASH.is_file() else shutil.which("bash")
 PWSH = shutil.which("pwsh")
+MANAGED_UNINSTALL = {"agent-machines", "agent-containers"}
 SITES = (
     ("agent-bridge", "install.sh", "_bridge_uninstall_tool"),
     ("agent-bridge", "uninstall-runtime.sh", "_finite_runtime_uninstall"),
@@ -117,7 +118,7 @@ def _payload(tmp_path: Path, plugin: str, root: Path) -> tuple[Path, Path, dict[
     home.mkdir()
     env.update(HOME=str(home), USERPROFILE=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
                SHADOW_ROOT=str(root), SHADOW_RECEIPT=str(receipt))
-    if plugin == "agent-machines":
+    if plugin in MANAGED_UNINSTALL:
         previous = sys.path[:]
         try:
             owner = runpy.run_path(str(REPO / "tools/materialize_installer_engine.py"))
@@ -225,13 +226,13 @@ def test_activated_runtime_does_not_shadow_native_uninstall_metadata(
         utility = tmp_path / "utilities"
         utility.mkdir()
         utilities: tuple[str, ...] = ("dirname", "bash")
-        if plugin == "agent-machines":
+        if plugin in MANAGED_UNINSTALL:
             utilities += ("wc", "cat", "mktemp", "mkfifo", "sleep", "rm", "rmdir", "mkdir")
         for name in utilities:
             executable = shutil.which(name)
             assert executable is not None, f"Required native fixture utility missing: {name}"
             (utility / name).symlink_to(executable)
-    if plugin == "agent-machines" and availability != "none":
+    if plugin in MANAGED_UNINSTALL and availability != "none":
         managed_tools = tmp_path / "managed tools"
         managed_tools.mkdir()
         source_uv = Path(env["SHADOW_MANAGED_UV"])
@@ -295,7 +296,7 @@ def test_windows_legacy_uninstall_enumerates_all_external_candidates(
         directories.append(alias / "Scripts")
     if availability != "none":
         directories.append(external / "Scripts")
-    if plugin == "agent-machines" and availability != "none":
+    if plugin in MANAGED_UNINSTALL and availability != "none":
         managed_tools = tmp_path / "managed tools"
         managed_tools.mkdir()
         source_uv = Path(env["SHADOW_MANAGED_UV"])
@@ -305,7 +306,7 @@ def test_windows_legacy_uninstall_enumerates_all_external_candidates(
     source = REPO / "plugins" / plugin / "scripts" / "legacy-uninstall.ps1"
     helper = scripts / "installer_engine_uninstall.py"
     quote = _ps_quote
-    script = scripts / "invoke-test.ps1" if plugin == "agent-machines" else tmp_path / "invoke.ps1"
+    script = scripts / "invoke-test.ps1" if plugin in MANAGED_UNINSTALL else tmp_path / "invoke.ps1"
     script.write_text("\n".join((
         "$ErrorActionPreference='Stop'",
         f"$env:PATH={quote(os.pathsep.join(str(path) for path in directories))}",

@@ -11,10 +11,10 @@ PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 
 
-def isolate_process_observation(payload: Path) -> None:
+def isolate_process_observation(payload: Path, *, source: Path = PLUGIN) -> None:
     """Keep POSIX filesystem tests out of the host's privileged process census."""
     helper = payload / "scripts/installer_engine_uninstall.py"
-    assert not helper.samefile(PLUGIN / "scripts/installer_engine_uninstall.py")
+    assert not helper.samefile(source / "scripts/installer_engine_uninstall.py")
     profile = json.loads((payload / "scripts/uninstall-profile.json").read_text(encoding="utf-8"))
     assert str(profile["module"]).startswith("finite_fixture_")
     text = helper.read_text(encoding="utf-8")
@@ -32,16 +32,16 @@ def isolate_process_observation(payload: Path) -> None:
     helper.write_text(text.replace(needle, needle + observation), encoding="utf-8", newline="\n")
 
 
-def materialize_bootstrap(payload: Path) -> None:
+def materialize_bootstrap(payload: Path, *, source: Path = PLUGIN) -> None:
     """Prepare a copied payload without allowing explicit setup to acquire tools."""
     previous = sys.path[:]
     try:
         owner = runpy.run_path(str(REPO / "tools/materialize_installer_engine.py"))
-        for source, target in owner["derived_file_pairs"](
-            REPO, payload.parent / "materialized", copied_consumer=(PLUGIN, payload),
+        for original, target in owner["derived_file_pairs"](
+            REPO, payload.parent / "materialized", copied_consumer=(source, payload),
         ):
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            shutil.copy2(original, target)
     finally:
         sys.path[:] = previous
     for suffix in ("sh", "ps1"):
@@ -63,4 +63,4 @@ def materialize_bootstrap(payload: Path) -> None:
             )
         assert text.count(needle) == 1
         provider.write_text(text.replace(needle, interception + needle), encoding="utf-8", newline="\n")
-    isolate_process_observation(payload)
+    isolate_process_observation(payload, source=source)

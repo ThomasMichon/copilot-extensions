@@ -10,6 +10,14 @@ if (-not [IO.File]::Exists($helper)) {
     throw 'Required canonical finite removal helper is unavailable; refusing any purge fallback'
 }
 function Get-LegacyUninstallPython {
+    $support = $PSScriptRoot
+    if (-not (Test-Path -LiteralPath (Join-Path $support 'bootstrap-uv.ps1')) -and
+        -not (Test-Path -LiteralPath (Join-Path $support 'installer-instance-python-version.txt'))) {
+        $support = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../libs/installer-engine'))
+    }
+    $candidate = Resolve-NativeBootstrapPython -MinimumMinor 10 -Action uninstall `
+        -Root $InstallDir -BootstrapDirectory $support
+    if (-not $candidate) { return $null }
     $probe = @'
 import sys
 from pathlib import Path
@@ -25,36 +33,16 @@ for value in paths:
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 print(Path(sys.executable).resolve(strict=True))
 '@
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
-    }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
-        if ($launcher.Source.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
-                    $candidates += $match.Groups[1].Value
-                }
-            }
-        } catch { }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        if ($candidate.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-B', '-c', $probe, $InstallDir, $candidate
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-                return $selected.Trim()
-            }
-        } catch { }
-    }
+    if ($candidate.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    try {
+        $nativeError = ''
+        $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+            '-I', '-B', '-c', $probe, $InstallDir, $candidate
+        ) -ErrorOutput ([ref]$nativeError)
+        if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+            return $selected.Trim()
+        }
+    } catch { }
     return $null
 }
 $python = Get-LegacyUninstallPython
