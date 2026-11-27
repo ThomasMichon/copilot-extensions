@@ -16,7 +16,7 @@ TASKS = [{"id": "q1", "title": "x", "status": "queued", "repo": "o/r"}]
 
 
 class _Client:
-    def __init__(self, pools: list[dict[str, Any]], advertised: bool = True) -> None:
+    def __init__(self, pools: builtins.list[dict[str, Any]], advertised: bool = True) -> None:
         self.pools, self.advertised = pools, advertised
 
     def __enter__(self) -> _Client:

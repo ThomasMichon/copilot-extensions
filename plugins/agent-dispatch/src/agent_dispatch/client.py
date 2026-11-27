@@ -21,6 +21,7 @@ from .client_handoff_claim import HandoffClaimClientMixin
 from .client_pool_placement import PoolPlacementClientMixin
 from .client_pool_decline import PoolDeclineClientMixin
 from .client_pool_startup import PoolStartupClientMixin
+from .client_pool_starvation import PoolStarvationClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_relevance import RelevanceClientMixin
 from .client_relevance_closeout import RelevanceCloseoutClientMixin
@@ -37,7 +38,7 @@ from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(HandoffClaimClientMixin, RelevanceCloseoutClientMixin, RelevanceFinalizeFirstClientMixin, RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
+class DispatchClient(HandoffClaimClientMixin, RelevanceCloseoutClientMixin, RelevanceFinalizeFirstClientMixin, RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, PoolStarvationClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -107,10 +108,6 @@ class DispatchClient(HandoffClaimClientMixin, RelevanceCloseoutClientMixin, Rele
     def health(self, repo: str | None = None, *, timeout: float | None = None) -> dict[str, Any]:
         options: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}  # repo scopes `backlog`
         return cast(dict[str, Any], self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None, **options)))
-
-    def pool_starvation(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
-        options: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
-        return cast(list[dict[str, Any]], self._unwrap(self._http.get("/pool-starvation", **options))["pools"])
 
     def get(
         self, task_id: str, *, native_restart_policy: bool = False,
