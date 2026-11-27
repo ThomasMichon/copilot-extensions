@@ -2576,6 +2576,10 @@ skipping it as "already current."
 
 Registered project binstubs enter the interactive front door as
 `worktree-manager --project <name>`; that project-only form launches the Picker.
+For scheduled cleanup, run `<project> housekeeping`. It runs the Picker's
+cleanup sweeps headlessly, reports each result, and exits nonzero on a sweep
+failure. It respects the Manager's automatic-maintenance settings and neither
+opens the Picker nor starts a resident daemon.
 Truly argument-free `worktree-manager` retains the provider-free first-run
 banner and onboarding roadmap.
 

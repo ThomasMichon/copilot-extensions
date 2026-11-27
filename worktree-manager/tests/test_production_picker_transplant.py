@@ -134,22 +134,22 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
     monkeypatch.setattr(
         runner.housekeeping,
         "reap_orphan_mux_sessions",
-        lambda **kwargs: calls.append(("reap", kwargs.get("only_owned"))),
+        lambda **kwargs: calls.append(("reap", kwargs.get("only_owned"))) or {"reaped": []},
     )
     monkeypatch.setattr(
         runner.housekeeping,
-        "sweep_managed_on_exit",
-        lambda: calls.append(("managed",)),
+        "sweep_managed_worktrees",
+        lambda: calls.append(("managed",)) or {"removed": []},
     )
     monkeypatch.setattr(
         runner.housekeeping,
-        "sweep_launcher_shells_on_exit",
-        lambda: calls.append(("shells",)),
+        "reap_orphan_launcher_shells",
+        lambda: calls.append(("shells",)) or {"reaped": []},
     )
     monkeypatch.setattr(
         runner.housekeeping,
-        "sweep_finished_sessions_on_cadence",
-        lambda: calls.append(("finished",)),
+        "sweep_finished_session_worktrees",
+        lambda: calls.append(("finished",)) or {"removed": []},
     )
     monkeypatch.setattr(
         runner.housekeeping,

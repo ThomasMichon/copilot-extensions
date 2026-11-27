@@ -1,0 +1,9 @@
+{
+  "comment": "Expose flag-free project housekeeping through the Worktree Manager.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

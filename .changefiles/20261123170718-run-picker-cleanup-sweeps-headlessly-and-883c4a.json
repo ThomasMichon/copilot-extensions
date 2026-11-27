@@ -1,0 +1,9 @@
+{
+  "comment": "Run Picker cleanup sweeps headlessly and report completion per step.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
