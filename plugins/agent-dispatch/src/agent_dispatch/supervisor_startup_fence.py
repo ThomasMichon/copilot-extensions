@@ -183,10 +183,14 @@ class TerminalStartupMixin:
     ) -> bool:
         """Whether this body has stayed suspended for the whole grace window.
 
-        The window restarts for a new body incarnation or task generation, so a
-        replaced worker or an observed resume never inherits earlier elapsed time.
+        The window restarts for a new body incarnation, task generation or
+        suspension (``suspended_at``), so a replaced worker or any resume,
+        observed or not, never inherits earlier elapsed time.
         """
-        body = (res.get("startup_revision"), res.get("session_handle"), task.get("generation"))
+        body = (
+            res.get("startup_revision"), res.get("session_handle"),
+            (task.get("generation"), task.get("suspended_at")),
+        )
         if self._dormant_body.get(key) != body:
             self._dormant_body[key] = body
             self._dormant_since[key] = now

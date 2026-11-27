@@ -236,6 +236,7 @@ class Task:
     wake_operation_id: str | None = None
     monitor_kind: str | None = None
     monitor_not_before: float | None = None
+    suspended_at: float | None = None
     category: str = "work"
     kind: str = "finite"
     standing_charter: dict[str, Any] | None = None
@@ -346,6 +347,7 @@ class Task:
             monitor_not_before=(
                 row["monitor_not_before"] if "monitor_not_before" in columns else None
             ),
+            suspended_at=(row["suspended_at"] if "suspended_at" in columns else None),
         )
 
 
@@ -557,4 +559,5 @@ _COLUMNS: dict[str, str] = {
     "wake_operation_id": "TEXT",
     "monitor_kind": "TEXT",
     "monitor_not_before": "REAL",
+    "suspended_at": "REAL",
 }

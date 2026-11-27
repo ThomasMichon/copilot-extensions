@@ -53,6 +53,23 @@ def run_queue_schema_migrations(
             # this exact column after our PRAGMA snapshot.
             if "duplicate column name" not in str(exc).lower():
                 raise
+    # Every entry into ``suspended`` starts a new suspension, whichever path
+    # performed it, so a supervisor's dormant-grace window can restart on an
+    # unobserved resume -> re-suspend without a generation change.
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS tasks_suspended_at_marker"
+        " AFTER UPDATE OF status ON tasks"
+        " WHEN NEW.status = 'suspended' AND OLD.status IS NOT 'suspended'"
+        " BEGIN UPDATE tasks SET suspended_at = NEW.updated_at WHERE id = NEW.id; END"
+    )
+    # An owner re-suspending an already-suspended task rewrites its monitor
+    # columns in place; that is also a new suspension.
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS tasks_resuspended_at_marker"
+        " AFTER UPDATE OF monitor_kind, monitor_not_before ON tasks"
+        " WHEN NEW.status = 'suspended' AND OLD.status = 'suspended'"
+        " BEGIN UPDATE tasks SET suspended_at = NEW.updated_at WHERE id = NEW.id; END"
+    )
     # Canonicalize legacy lane spellings before the repo-scoped unique
     # dedup index is installed. The previous global dedup index already
     # prevented active duplicate keys, so normalization cannot expose an
