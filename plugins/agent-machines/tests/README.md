@@ -152,6 +152,14 @@ acquisition and after release, never through an actively byte-locked Windows fil
 The source adapter `test_machines_legacy_uninstall_source.py` additionally requires
 the original idle-cleanup/idempotence and all six held-custody controls in those
 same native carriers: seven cases per POSIX host and eight on Windows.
+The existing activated-runtime metadata matrix also receives the canonical
+bootstrap closure and a controlled prepared UV directory for Machines.
+`test_machines_uninstall_metadata_source.py` retains four Bash metadata cases
+per POSIX host and eight Bash/PowerShell metadata cases on Windows, covering
+shadowed installed runtimes, broken/aliased candidates and unavailable UV.
+Windows Bash normalizes the declared helper's lookup address through the
+existing canonical converter; this metadata boundary does not expand the
+full Bash installer platform contract.
 
 Full local POSIX deletion can refuse when a current-user process is not
 inspectable. That existing fail-closed observation boundary is not relaxed or
