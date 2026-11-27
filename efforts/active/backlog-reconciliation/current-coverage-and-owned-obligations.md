@@ -201,6 +201,25 @@ source-path lists are not a semantic inventory or admission for unselected
 originals. There is no new census, final unit, source disposition or resource
 effect.
 
+The [lifetime and venue-selector study](journal/2026/11.27-lifetime-and-venue-selector-boundaries.md)
+qualifies and reads five further whole current requests and all fourteen
+comments. #2464 retains its entire accepted lifetime contract beyond four
+bounded source prerequisites. #2549 retains a durable operator raw-SSH-only
+policy rather than basic workflow transport choice. #2551 retains separately
+attributable dirty/stash and process/real-commit incident acceptance; the
+suggested cause remains a hypothesis. #2612 retains the same exact current-mode
+mapping condition already recorded on #2295. #2680 retains requested-capability
+host selection and actual Containers-owned registration/migration, not a
+capability annotation or disabled Machine row.
+
+Only those five frozen outcome/gap fields become current-retained. At the
+same retained counting observation, effective coverage remains 584 identities:
+512 pending and seventeen current-retained, with all other outcome totals,
+historical columns, ownership and counting unchanged. The source claims are
+attributed descriptions, not current-code inspection, native acceptance or
+authority to resume a held incident, source or resource operation. Unselected
+originals receive no semantic or content-admission credit.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,
