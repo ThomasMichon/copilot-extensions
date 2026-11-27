@@ -233,7 +233,7 @@ def test_native_manifest_stale_retains_publication_and_launch_owner(
     "syntax", "duplicate", "case-ambiguous", "invalid-utf8", "schema-bool",
     "dirty-string", "source-nonstring", "wrong-context", "wrong-runtime",
     "wrong-selected-version", "wrong-marker", "runtime-not-executable",
-    "newline-context", "newline-runtime", "newline-interpreter",
+    "newline-context", "newline-runtime", "newline-interpreter", "newline-service",
 ])
 def test_native_namespaced_manifest_refuses_invalid_without_fallback(
     bootstrap: ManifestFixture, invalid: str,
@@ -261,6 +261,8 @@ def test_native_namespaced_manifest_refuses_invalid_without_fallback(
         bootstrap.manifest["runtime"]["path"] += "\n"
     elif invalid == "newline-interpreter":
         bootstrap.manifest["runtime"]["interpreter"] += "\n"
+    elif invalid == "newline-service":
+        bootstrap.manifest["service"] += "\n"
     bootstrap.write()
     if invalid == "syntax":
         bootstrap.manifest_path.write_text("{", encoding="utf-8")
