@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source boundaries and current roster](journal/2026/11.26-scope-boundaries-and-current-roster.md)
+retain whole #12274/#13818/#6925 requests against partial, explicitly excluded
+or policy-different sources, plus two incompletely assessed parent relations.
+Complete current counting and the explicit frozen-frame delta account for
+all 584 observed OPEN identities with a research owner and reviewed or pending
+outcome. Only the global coverage-roster recording criterion resolves;
+continuing semantic/acceptance work and five Plan/eleven actual global
+Validation items remain OPEN. No issue or resource effect is claimed.
+
 The [scoped attribution repair correspondence](journal/2026/11.26-scoped-attribution-repair-correspondence.md)
 maps the complete #11805 original and six discussions to changed source
 #14652, normal release and a corroborated independent consumer result.
@@ -530,7 +539,7 @@ independently audited acknowledged `COMPLETED` outcome. The complete
 two-pass observation is 583 whole OPEN, with exactly the #11805 departure
 and no arrivals or unrelated departures. Old failed refreshes, the
 consumer's later head and all five parent Plan/twelve actual global
-Validation gates remain separate.
+Validation gates remain separate. The factual outcome merged in #14844.
 
 The [current coverage and finite PSMux guidance](journal/2026/11.26-current-coverage-and-psmux-guidance.md)
 records reviewed #14831, one separately spent passing final assessment
@@ -7022,9 +7031,16 @@ incumbent parent check state remains unchanged.
   require the whole actual parent/discussion readback, all incumbent event and
   native/performance clauses, every source reader/compatibility condition and
   current keeper qualification before a separately audited tracking retirement.
-- [ ] _(Agent-recommended)_ Every eligible open issue appears in the graph
+- [x] _(Agent-recommended)_ Every eligible open issue appears in the graph
   coverage roster with a primary research owner and a reviewed or explicitly
   pending outcome; excluded issues remain metadata-only and counted.
+  The [complete current roster proof](journal/2026/11.26-scope-boundaries-and-current-roster.md#complete-current-roster-recording-not-semantic-completion)
+  accounts for all 584 OPEN identities at 2026-11-26 20:31:04
+  America/Los_Angeles: the preserved frozen 583, three separate metadata
+  arrivals and two audited departures. Every effective current node has the
+  Coordinator research role and an explicit outcome/gap. This recording
+  result does not resolve continuing graph maintenance or the semantic,
+  vision/effort, receiving, source, final-observation or custody gates.
 - [ ] _(Agent-recommended)_ Graph relations distinguish thematic alignment,
   duplicate/subsumed outcomes, dependencies, incompatible alternatives and
   ownership constraints. Shared vocabulary or a graph path alone never

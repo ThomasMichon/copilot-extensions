@@ -69,15 +69,26 @@
       "arrivals_since_frozen_snapshot": [14826, 14832],
       "departures_since_frozen_snapshot": [13753],
       "unrelated_departures": []
+    },
+    {
+      "observed_local": "2026-11-26T20:02:32.653650-08:00",
+      "whole_open": 583,
+      "original_cohort_open": 276,
+      "inflow_open": 307,
+      "arrivals_since_frozen_snapshot": [14826, 14832],
+      "departures_since_frozen_snapshot": [11805, 13753],
+      "unrelated_departures": []
     }
   ],
   "later_counting_observation": {
-    "observed_local": "2026-11-26T20:02:32.653650-08:00",
-    "whole_open": 583,
+    "observed_local": "2026-11-26T20:31:04.779035-08:00",
+    "whole_open": 584,
     "original_cohort_open": 276,
-    "inflow_open": 307,
-    "arrivals_since_frozen_snapshot": [14826, 14832],
+    "inflow_open": 308,
+    "arrivals_since_frozen_snapshot": [14826, 14832, 14847],
     "departures_since_frozen_snapshot": [11805, 13753],
+    "arrivals_since_previous_observation": [14847],
+    "departures_since_previous_observation": [],
     "unrelated_departures": [],
     "node_rows_still_cover_frozen_583_snapshot": true,
     "arrival_content_admission": false
@@ -90,7 +101,25 @@
   "content_admission_from_creator_or_reference": false,
   "product_or_resource_ownership_reassigned": false,
   "primary_research_role_for_this_frame": "Coordinator",
+  "primary_research_role_scope": "All frozen nodes and post-snapshot metadata nodes; not product or resource ownership.",
   "historical_primary_assignments_replaced": false,
+  "current_open_roster_recording": {
+    "observed_local": "2026-11-26T20:31:04.779035-08:00",
+    "current_open_identity_count": 584,
+    "frozen_identity_count": 583,
+    "post_snapshot_metadata_identity_count": 3,
+    "audited_frozen_departures": [11805, 13753],
+    "definition": "Union frozen nodes with post_snapshot_metadata_nodes, then subtract later_counting_observation.departures_since_frozen_snapshot.",
+    "every_current_identity_has_research_owner_and_explicit_outcome": true,
+    "pending_is_not_semantic_or_source_completion": true
+  },
+  "later_source_boundary_assessments": [
+    {"issue": 12274, "source_pr": 14020, "relation": "partial-correlation-prerequisite", "original_discussions_read": 6, "outcome": "KEEP_OPEN"},
+    {"issue": 13818, "source_pr": 13819, "relation": "explicitly-excluded-offline-fixture", "original_discussions_read": 0, "outcome": "KEEP_OPEN"},
+    {"issue": 6925, "source_pr": 14634, "relation": "different-declared-timer-policy", "original_discussions_read": 3, "outcome": "KEEP_OPEN"},
+    {"issue": 6030, "source_pr": 11248, "relation": "complete-new-source-correspondence-unestablished", "new_whole_original_read": false, "outcome": "KEEP_OPEN"},
+    {"issue": 1303, "source_pr": 11248, "relation": "metadata-only-umbrella-association", "new_whole_original_read": false, "outcome": "KEEP_OPEN"}
+  ],
   "oldest_pending_current_qualification": {
     "issue": 54,
     "created_at_local": "2026-07-16T23:20:27-07:00"
@@ -107,6 +136,7 @@
     "excluded": "Retain metadata only; do not infer scope or priority from a title.",
     "retained-new": "New whole request is qualified and read; its distinct outcome remains unfinished.",
     "retained-prior": "Preserve the prior study's actual retained gap, not unread-intake credit.",
+    "retained-current": "A complete qualified current original/discussion comparison retains a specific source boundary; no completion or resource transfer follows.",
     "candidate": "A complete finite source comparison supports a conditional candidate; final verification and disposition remain separate.",
     "completed-guidance": "A separate reviewed final unit and independent provider/whole audit verify this finite guidance outcome, not runtime or resource completion.",
     "completed-source": "A separate reviewed final unit and independent provider/whole audit verify this finite source outcome; later consumer heads and resource custody remain separate.",
@@ -122,6 +152,11 @@
     "historical_weighted_role",
     "outcome",
     "research_gap"
+  ],
+  "post_snapshot_metadata_nodes": [
+    [14826, "inflow", "automation", null, false, null, "pending", "automation-producer-and-authored-union-qualification"],
+    [14832, "inflow", "member", null, false, null, "pending", "current-authored-union-and-whole-request"],
+    [14847, "inflow", "member", null, false, null, "pending", "current-authored-union-and-whole-request"]
   ],
   "nodes": [
     [54, "original", "member", 7, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
@@ -362,7 +397,7 @@
     [6888, "original", "member", 33, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [6917, "original", "member", 21, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [6919, "original", "automation", 13, false, "metadata-only", "retained-prior", "preserve-specific-prior-gap"],
-    [6925, "original", "member", 7, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [6925, "original", "member", 7, true, "semantic-snapshot", "retained-current", "phase-policy-and-released-acceptance"],
     [6926, "original", "automation", 7, false, "metadata-only", "retained-prior", "preserve-specific-prior-gap"],
     [6934, "original", "member", 28, true, "metadata-only", "pending", "qualified-change-evidence"],
     [6937, "original", "member", 5, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
@@ -597,7 +632,7 @@
     [12132, "inflow", "member", 0, true, null, "pending", "qualified-change-evidence"],
     [12203, "inflow", "automation", 10, false, null, "pending", "qualified-change-evidence"],
     [12215, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
-    [12274, "inflow", "member", 48, true, null, "pending", "qualified-change-evidence"],
+    [12274, "inflow", "member", 48, true, null, "retained-current", "ordinary-writer-and-legacy-owner-closeout"],
     [12280, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
     [12315, "inflow", "member", 28, true, null, "pending", "qualified-change-evidence"],
     [12393, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
@@ -670,7 +705,7 @@
     [13785, "inflow", "member", 9, false, null, "pending", "qualified-change-evidence"],
     [13790, "inflow", "member", 5, false, null, "pending", "qualified-change-evidence"],
     [13811, "inflow", "member", 23, false, null, "pending", "qualified-change-evidence"],
-    [13818, "inflow", "member", 2, false, null, "pending", "qualified-change-evidence"],
+    [13818, "inflow", "member", 2, false, null, "retained-current", "complete-offline-fixture-preparation"],
     [13842, "inflow", "member", 0, false, null, "pending", "qualified-change-evidence"],
     [13848, "inflow", "member", 3, false, null, "retained-prior", "distinct-fixture-qualification-debt"],
     [13866, "inflow", "member", 3, false, null, "retained-prior", "distinct-fixture-qualification-debt"],
