@@ -463,12 +463,19 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
 }
 
 try {
-    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {
-        try {
-            Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop
-        } catch {}
-    }
-    try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}
+    if (-not [IO.Directory]::Exists($env:USERPROFILE)) { throw 'User profile directory is unavailable' }
+    $null = $ExecutionContext.SessionState.Path.SetLocation(
+        [System.Management.Automation.WildcardPattern]::Escape($env:USERPROFILE))
+} catch {
+    try {
+        $root = [IO.Path]::GetPathRoot($ExecutionContext.SessionState.Path.CurrentLocation.Path)
+        $null = $ExecutionContext.SessionState.Path.SetLocation(
+            [System.Management.Automation.WildcardPattern]::Escape($root))
+    } catch {}
+}
+try { [IO.Directory]::SetCurrentDirectory($ExecutionContext.SessionState.Path.CurrentLocation.Path) } catch {}
+
+try {
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
