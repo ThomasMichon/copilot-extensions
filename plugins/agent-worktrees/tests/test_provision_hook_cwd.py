@@ -15,6 +15,7 @@ import pytest
 
 
 _PLUGIN = Path(__file__).resolve().parents[1]
+_POWERSHELL_DETACH = re.compile(r"Set-Location\b|\$ExecutionContext\.SessionState\.Path\.SetLocation\(")
 
 
 def _hooks() -> list[dict[str, object]]:
@@ -29,7 +30,8 @@ def _hooks() -> list[dict[str, object]]:
 def _assert_powershell_dispatch_after_detach(
     source: str, *, native_entry: str | None = None,
 ) -> None:
-    detach = source.find("Set-Location")
+    location = _POWERSHELL_DETACH.search(source)
+    detach = location.start() if location else -1
     process_cwd = source.find("SetCurrentDirectory")
     dispatches = list(re.finditer(
         r"""(?:&|\.)\s+(?:\$[A-Za-z_]\w*|'[^']*'|"[^"]*"|\()"""
@@ -74,9 +76,12 @@ def test_every_hook_leaves_payload_cwd_before_running_script() -> None:
         powershell = str(hook["powershell"])
         bash = str(hook["bash"])
         _assert_powershell_dispatch_after_detach(powershell, native_entry=native_entry)
-        detach_owner = powershell if "Set-Location" in powershell else native_entry
+        detach_owner = powershell if _POWERSHELL_DETACH.search(powershell) else native_entry
         assert "$env:USERPROFILE" in detach_owner
-        assert "-ErrorAction Stop" in detach_owner
+        if "Set-Location" in detach_owner:
+            assert "-ErrorAction Stop" in detach_owner
+        else:
+            assert "WildcardPattern]::Escape($env:USERPROFILE)" in detach_owner
         assert "GetPathRoot" in detach_owner
         assert 'cd "$HOME"' in bash
         bash_detach = bash.find("cd ")
@@ -124,8 +129,9 @@ def test_native_delegation_exempts_only_the_native_pre_tool_entry(change: str) -
 @pytest.mark.skipif(os.name != "nt", reason="Windows directory replacement semantics")
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("hook_name", ["postToolUse", "preToolUse"])
+@pytest.mark.parametrize("profile_exists", [True, False], ids=["literal-profile", "missing-profile"])
 def test_hook_releases_valid_payload_before_waiting_for_input(
-    tmp_path: Path, host: str, hook_name: str,
+    tmp_path: Path, host: str, hook_name: str, profile_exists: bool,
 ) -> None:
     executable = shutil.which(host)
     if not executable:
@@ -133,8 +139,9 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
     payload = tmp_path / "payload [literal]"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    home = tmp_path / "home"
-    home.mkdir()
+    home = tmp_path / "home [literal]"
+    if profile_exists:
+        home.mkdir()
     project = tmp_path / "project"
     project.mkdir()
     witness = tmp_path / "reader-ready.json"
@@ -143,7 +150,9 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
     # Observe the real ingress immediately before its blocking stdin read.
     witness_reader = (
         "[IO.File]::WriteAllText($env:HOOK_CWD_WITNESS, "
-        "(@{logical=(Get-Location).Path; native=[IO.Directory]::GetCurrentDirectory()} "
+        "(@{logical=$ExecutionContext.SessionState.Path.CurrentLocation.Path; "
+        "native=[IO.Directory]::GetCurrentDirectory(); "
+        "management=[bool](Get-Module Microsoft.PowerShell.Management)} "
         "| ConvertTo-Json -Compress)); $reader = "
     )
     if hook_name == "postToolUse":
@@ -169,13 +178,14 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
             encoding="utf-8",
         )
     environment = {
-        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
         "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_PROJECT_DIR": str(project),
-        "HOOK_CWD_WITNESS": str(witness),
+        "HOOK_CWD_WITNESS": str(witness), "HOOK_CWD_PROFILE": str(home),
         "AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION": "native",
     }
     process = subprocess.Popen(
-        [executable, "-NoLogo", "-NoProfile", "-Command", command],
+        [executable, "-NoLogo", "-NoProfile", "-Command",
+         "$env:USERPROFILE = $env:HOOK_CWD_PROFILE; " + command],
         cwd=payload, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
     )
@@ -189,8 +199,10 @@ def test_hook_releases_valid_payload_before_waiting_for_input(
         payload.rename(moved)
         moved.rename(payload)
         selected = json.loads(witness.read_text(encoding="utf-8"))
-        assert Path(selected["logical"]) == home
-        assert Path(selected["native"]) == home
+        expected = home if profile_exists else Path(payload.anchor)
+        assert Path(selected["logical"]) == expected
+        assert Path(selected["native"]) == expected
+        assert not selected["management"]
         event = {"cwd": str(project), "toolName": "view"}
         stdout, stderr = process.communicate(json.dumps(event), timeout=10)
         assert process.returncode == 0, stderr

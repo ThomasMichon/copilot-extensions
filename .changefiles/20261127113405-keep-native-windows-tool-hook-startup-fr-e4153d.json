@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native Windows tool-hook startup from loading PowerShell Management while releasing the payload directory.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
