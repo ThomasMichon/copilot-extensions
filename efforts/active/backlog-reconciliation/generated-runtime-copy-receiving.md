@@ -201,7 +201,7 @@ Module: plugins/agent-pull-requests/libs/update-driver/scripts/versioned_runtime
   source/refinement, complete receiver and continued #5939 lookup visibility
   after source closure. Reconcile unknown write outcomes; never replay an
   uncertain effect.
-- [ ] Record a complete whole-queue observation and actual outcome through
+- [x] Record a complete whole-queue observation and actual outcome through
   normal review/merge, then return to the parent's unresolved gates.
 
 ## Independent actual readback
@@ -227,8 +227,12 @@ rosters, observe 581 whole OPEN at 2026-11-27 13:49:13
 America/Los_Angeles: 274 original and 307 inflow. They include excluded
 creators and all inflow and exclude PRs. Exactly #8596 departs from the
 preceding 582; there are no arrivals or unrelated departures. The factual
-outcome still owes normal review/merge, source reconciliation and parent
-return. No product, native, source-copy or resource completion follows.
+outcome merged in #14900 at 2026-11-27 14:00:41 America/Los_Angeles.
+Genuine current-head approval, all actual required checks, independent merge
+readback and exact five-file source reconciliation passed. The canonical
+parent's sixteen remaining primary clauses and agenda continuation were read
+after merge; all five Plan and eleven global Validation items remain OPEN.
+No product, native, source-copy or resource completion follows.
 
 ## Validation Plan
 
@@ -239,9 +243,9 @@ return. No product, native, source-copy or resource completion follows.
   fabricated.
 - [x] The map preserves all unique source/refinement obligations without
   taking #8229, a held ROOT, a live claim or another programme's scope.
-- [ ] Review/CI and all ordered tracking gates above pass before reporting
+- [x] Review/CI and all ordered tracking gates above pass before reporting
   a disposition; unfinished implementation checkboxes remain unchecked.
-- [ ] The actual outcome distinguishes tracker supersession from source,
+- [x] The actual outcome distinguishes tracker supersession from source,
   release, installed/native, cleanup and parent completion.
 
 All five parent Plan and eleven global Validation items remain OPEN.

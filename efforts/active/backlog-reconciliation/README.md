@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [adoption and helper-readiness comparison](journal/2026/11.27-adoption-and-helper-readiness.md)
+retains two complete current requests and all ten discussions. #356 preserves
+complete guided adoption and actual custody after the earlier unqualified
+whole-ROOT retirement proof was withdrawn. #5479 retains its complete
+required-helper/diagnostic contract and original deployment-OR-Manager-readiness
+choice against a concrete current POSIX status/deployment mismatch.
+Only those two outcome/gap pairs change; the retained 581-identity observation
+has 397 pending and 134 current-retained. No issue effect, fresh census,
+native operation, source-copy clearance or parent completion follows.
+
 The [generated-copy receiving outcome](generated-runtime-copy-receiving.md)
 records reviewed #14899 intent, complete direct intake to OPEN #5939 and
 independently audited #8596 administrative `NOT_PLANNED` supersession.
@@ -535,9 +545,10 @@ nonexpiring chained-cutover claimant. A complete equal two-pass observation at
 and 307 inflow identities. Exactly #8596 departs, with no arrivals or other
 departures. Effective coverage is 399 pending, 132 current-retained,
 33 prior-retained, zero candidates, five new-retained, six spent-open,
-five excluded and one coordination identity. All parent gates and
-source/resource limits remain; the factual outcome still owes normal review
-and source reconciliation.
+five excluded and one coordination identity. The factual outcome merged in
+#14900 with genuine current-head approval, all actual required checks and
+exact five-file source reconciliation. All parent gates and source/resource
+limits remain after the recorded parent return.
 
 The [native-report and conditional-input study](journal/2026/11.27-native-reports-and-conditional-inputs.md)
 retains four whole current requests and nine discussions. Actual native
