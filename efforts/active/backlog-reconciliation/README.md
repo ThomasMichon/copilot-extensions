@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current-delivery and fleet-naming comparison](journal/2026/11.27-current-delivery-and-fleet-naming.md)
+reads whole #2173/#78 and all five discussions. #2173 retains all 74
+unchecked delivery and finite-provider clauses despite historical aggregator
+retirement. #78's actual moved native-loader path still passes the filename
+stem to the materializer, preserving the precise ID-first naming gap.
+Only those two outcome/gap pairs change; the retained 582-identity observation
+now has 403 pending and 127 current-retained. No issue disposition, new census,
+product execution or parent-gate completion is claimed.
+
 The [legacy-target and retained-acceptance crosswalk](journal/2026/11.27-legacy-targets-and-retained-acceptance.md)
 records 37 whole current originals and 267 discussions, distinguishing
 finite source/release credit from their actual caller, native, cleanup,
@@ -530,6 +539,7 @@ content-generation metadata are unchanged. Only their outcome/gap pairs
 change; at the retained 582-identity observation, 405 remain pending and
 125 are current-retained. No issue disposition, fresh whole census,
 implementation or source/custody release is claimed.
+The reviewed recording merged in #14890.
 
 The [obsolete same-generation test report](journal/2026/11.27-obsolete-same-generation-test-report.md)
 records #6538's `NOT_PLANNED` retirement after reviewed intent #14887,

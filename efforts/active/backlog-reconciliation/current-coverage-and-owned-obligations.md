@@ -406,6 +406,25 @@ The unread original and the late-qualified containing exposure receive no
 new whole-case credit. No fresh census, issue effect, technical completion,
 accepted receiving, native test or resource transfer is claimed.
 
+## Current delivery and exact fleet naming
+
+The [two-case comparison](journal/2026/11.27-current-delivery-and-fleet-naming.md)
+reads #2173's previously excluded whole original and three discussions,
+retaining its 74 unchecked inherited and direct finite requirements.
+Historical custom-authority removal does not complete current delivery,
+catalog, grounding, conflict, latency or provider validation.
+#78's whole original and two discussions are compared with the actual moved
+native-loader path: `load_config` delegates, but `load_native_config` still
+passes the filename stem through `BridgeConfig.name` to the materializer.
+Explicit override and absent-ID fallback remain credited; the missing ID-first
+choice remains a concrete source gap.
+
+Only those two frozen outcome/gap pairs become current-retained. The same
+retained 582 identities have 403 pending and 127 current-retained; other
+categories, historical columns and observations are unchanged.
+No new census, issue effect, source/copy clearance, product execution,
+installed completion or custody transfer follows.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
