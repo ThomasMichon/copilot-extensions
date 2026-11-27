@@ -56,12 +56,20 @@ not qualify the production global process census; Windows retains its actual
 current-user census. No production observer, lease or cleanup policy changes.
 
 The path-gated native workflow requires 19 focused cases on each POSIX host
-and 29 on Windows without skips: prepared-only/refusal, retained cleanup/kernel/
+and 37 on Windows without skips: prepared-only/refusal, retained cleanup/kernel/
 transport and activated-runtime metadata selection. Both Windows PowerShell
 hosts run in the existing Index/native-engine carrier, whose spare budget
 avoids extending the nearly full Containers Core job. This is a carrier, not
 an Index implementation change or a full Windows Bash installer contract.
 No runner or eight-minute job limit is added or enlarged.
+
+Windows additionally requires stalled version/find selection to retire both
+the actual selector root and its child before the calling PowerShell host
+exits, under both shell engines. Those fixture deadlines are reduced from
+thirty to eight seconds, never enlarged. A real selected venv inside the root
+must refuse before the finite helper runs even though its actual base is
+external; fixture-only observation records the real probe's original prefixes.
+An older reader without the callback contract refuses before invocation.
 
 Reproduce the repeated work report with
 `tools/run-tests payload-invocation --test-file tests/test_containers_uninstall_bootstrap_source.py --allow-explicit-tiers --junit-dir <owned-output>`.

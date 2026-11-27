@@ -15,35 +15,37 @@ function Get-LegacyUninstallPython {
         -not (Test-Path -LiteralPath (Join-Path $support 'installer-instance-python-version.txt'))) {
         $support = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../libs/installer-engine'))
     }
-    $candidate = Resolve-NativeBootstrapPython -MinimumMinor 10 -Action uninstall `
-        -Root $InstallDir -BootstrapDirectory $support
-    if (-not $candidate) { return $null }
-    $probe = @'
-import sys
-from pathlib import Path
-assert sys.version_info >= (3, 10)
-root = Path(sys.argv[1]).absolute()
-assert ".." not in root.parts
-roots = (root, root.resolve())
-paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
-         getattr(sys, "_base_executable", sys.executable))
-for value in paths:
-    path = Path(value).absolute()
-    for actual in (path, path.resolve(strict=True)):
-        assert all(not actual.is_relative_to(boundary) for boundary in roots)
-print(Path(sys.executable).resolve(strict=True))
-'@
-    if ($candidate.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $null }
-    try {
-        $nativeError = ''
-        $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-            '-I', '-B', '-c', $probe, $InstallDir, $candidate
-        ) -ErrorOutput ([ref]$nativeError)
-        if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-            return $selected.Trim()
+    $reader = Get-Command Resolve-NativeBootstrapPython -CommandType Function
+    if (-not $reader.Parameters.ContainsKey('InvokeCaptured')) {
+        throw 'Native bootstrap reader lacks bounded capture; restore the owning payload.'
+    }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $captureSupport = if (Test-Path -LiteralPath (Join-Path $support 'bootstrap-capture.ps1')) {
+            $support
+        } else {
+            Join-Path $PSScriptRoot '_bootstrap_python'
         }
-    } catch { }
-    return $null
+        . (Join-Path $captureSupport 'bootstrap-capture.ps1')
+    }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $budget = 30000
+    $capture = {
+        param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+        $remaining = $budget - $clock.ElapsedMilliseconds
+        if ($remaining -le 1) { throw [TimeoutException]::new('WATCHDOG: uninstall bootstrap deadline.') }
+        $cleanup = [int][Math]::Min(3000, [Math]::Max(1, [Math]::Floor($remaining / 4)))
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                -Environment $Environment -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
+        }
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+            -InputText '' -ErrorOutput ([ref]$diagnostic) `
+            -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic }
+    }
+    return Resolve-NativeBootstrapPython -MinimumMinor 10 -Action uninstall `
+        -Root $InstallDir -BootstrapDirectory $support -InvokeCaptured $capture
 }
 $python = Get-LegacyUninstallPython
 if (-not $python) { throw 'Legacy uninstall requires an existing external Python 3.10+ interpreter' }

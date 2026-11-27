@@ -111,6 +111,10 @@ installer request (currently CPython 3.11.18). It does not enumerate PATH
 Python or launchers, acquire an interpreter, or borrow the runtime being
 removed. Both shells retain the full outside-root executable/prefix check;
 the POSIX no-flock path receives that same admitted interpreter explicitly.
+Windows selection and its original-prefix probe share a thirty-second deadline
+through the existing native Job capture, with cleanup reserved inside it.
+The helper refuses a reader without that callback contract rather than
+downgrading to unbounded capture.
 Missing prerequisites refuse before finite helper entry. Prepare prerequisites
 through explicit installation management; this does not migrate the separate
 cold setup or native-stamp readers.

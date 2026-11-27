@@ -135,6 +135,7 @@ on:
       - plugins/agent-containers/scripts/legacy-uninstall.sh
       - plugins/agent-containers/scripts/legacy-uninstall.ps1
       - plugins/agent-containers/tests/test_uninstall_bootstrap.py
+      - plugins/agent-containers/tests/test_uninstall_bootstrap_ps1.py
       - plugins/agent-containers/tests/test_containers_legacy_runtime_uninstall.py
       - libs/payload-invocation/tests/test_containers_uninstall_bootstrap_source.py
       - libs/payload-invocation/tests/test_containers_legacy_uninstall_source.py
@@ -962,7 +963,7 @@ jobs:
           python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/containers-uninstall-bootstrap').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          expected=6 if os.name=='nt' else 3;
+          expected=14 if os.name=='nt' else 3;
           assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for c in cases for p in c.findall('./properties/property')

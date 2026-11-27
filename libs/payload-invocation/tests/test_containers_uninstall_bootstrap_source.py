@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -22,3 +23,14 @@ test_missing_uv_refuses_before_helper_or_transaction = (
 test_unavailable_process_observation_refuses_without_removing_bytes = (
     _source.test_unavailable_process_observation_refuses_without_removing_bytes
 )
+if os.name == "nt":
+    _windows = importlib.import_module(_package.__name__ + ".test_uninstall_bootstrap_ps1")
+    test_windows_stalled_uv_retires_owned_root_and_child_before_return = (
+        _windows.test_windows_stalled_uv_retires_owned_root_and_child_before_return
+    )
+    test_windows_selected_venv_is_rejected_before_external_base_can_hide_it = (
+        _windows.test_windows_selected_venv_is_rejected_before_external_base_can_hide_it
+    )
+    test_windows_old_reader_without_capture_contract_refuses_before_invocation = (
+        _windows.test_windows_old_reader_without_capture_contract_refuses_before_invocation
+    )

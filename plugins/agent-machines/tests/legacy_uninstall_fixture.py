@@ -11,6 +11,26 @@ PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 
 
+def materialize_capture(payload: Path, *, source: Path = PLUGIN) -> None:
+    """Use the selected consumer's declared Invocation capture assets."""
+    manifest = source / "payload-invocation.json"
+    owner = runpy.run_path(str(REPO / "libs/payload-invocation/bootstrap_python.py"))
+    outputs = owner["expected_files"](
+        manifest, json.loads(manifest.read_bytes()), canonical_root=REPO,
+    )
+    selected = {
+        target: content for target, content in outputs.items()
+        if target.parent.name == "_bootstrap_python"
+        and target.name in {"bootstrap-capture.ps1", "bootstrap-capture.exe"}
+    }
+    assert len(selected) == 2
+    for original, content in selected.items():
+        target = payload / original.relative_to(source)
+        assert isinstance(content, bytes)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+
+
 def isolate_process_observation(payload: Path, *, source: Path = PLUGIN) -> None:
     """Keep POSIX filesystem tests out of the host's privileged process census."""
     helper = payload / "scripts/installer_engine_uninstall.py"
@@ -44,6 +64,7 @@ def materialize_bootstrap(payload: Path, *, source: Path = PLUGIN) -> None:
             shutil.copy2(original, target)
     finally:
         sys.path[:] = previous
+    materialize_capture(payload, source=source)
     for suffix in ("sh", "ps1"):
         provider = payload / f"scripts/bootstrap-uv.{suffix}"
         text = provider.read_text(encoding="utf-8")

@@ -132,6 +132,10 @@ def _payload(tmp_path: Path, plugin: str, root: Path) -> tuple[Path, Path, dict[
                 REPO / "plugins/agent-machines/tests/managed_command_fixture.py",
             ))
             uv, _, store = fixture["prepared_python_inputs"]("cpython@3.11.18")
+            capture = runpy.run_path(str(
+                REPO / "plugins/agent-machines/tests/legacy_uninstall_fixture.py",
+            ))
+            capture["materialize_capture"](payload, source=REPO / "plugins" / plugin)
         finally:
             sys.path[:] = previous
         for name in ("UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL", "XDG_BIN_HOME", "XDG_DATA_HOME"):
