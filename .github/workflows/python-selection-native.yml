@@ -966,20 +966,20 @@ jobs:
 
       - &containers-installer
         name: Qualify Containers native setup seed, source readers and construction
-        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        if: startsWith(github.job, 'containers-ready-admission-')
         run: >-
           python tools/run-plugin-tests.py agent-containers
           --test-file tests/test_installer_bootstrap.py --allow-explicit-tiers
-          -k "${{ runner.os == 'Windows' && 'powershell or pwsh' || 'bash' }}"
+          -k "${{ env.CONTAINERS_QUALIFICATION_SHELL }}"
           --junit-dir qualification-evidence/containers-installer
       - &containers-installer-proof
         name: Require all installer controls and repeated seed reports
-        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        if: startsWith(github.job, 'containers-ready-admission-')
         run: >-
           python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/containers-installer').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          shells={'pwsh','powershell'} if os.name=='nt' else {'bash'};
+          shells={os.environ['CONTAINERS_QUALIFICATION_SHELL']};
           expected=(19 if os.name=='nt' else 18)*len(shells);
           assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
