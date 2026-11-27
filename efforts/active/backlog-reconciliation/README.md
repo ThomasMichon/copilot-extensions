@@ -523,13 +523,13 @@ the non-public approval conversation.
 ## Plan
 
 The [clock and preparation correspondence](journal/2026/11.26-clock-and-preparation-report-correspondence.md)
-finishes six bounded source opportunities from previously qualified
-navigation reports. Two direct completion candidates retain separate final
-review/check gates; four generic failure reports remain OPEN because their
-causes are not established by matching symptoms. Six earlier navigation
-gaps remain, including the unadmitted periodic discussion portfolio.
-No new final assessment, issue effect, census or parent completion is
-claimed; next reconcile original-tail coverage against the actual parent gates.
+records reviewed #14824, two separately spent passing final assessments
+and two independently audited `COMPLETED` reports. Ten tail records remain
+OPEN. The finite 57-record navigation roster partitions into 19 audited
+dispositions and 38 retained records, not 38 unread originals. Two equal
+complete censuses measure 583 whole OPEN: two departures and one arrival,
+with no unrelated departure. Whole-queue graph, native/installed,
+source/resource and all actual parent Plan/Validation gates remain.
 
 The [materialized Codespaces fixture correspondence](journal/2026/11.26-materialized-codespaces-fixture-correspondence.md)
 records reviewed #14819, five separately spent passing final assessments
