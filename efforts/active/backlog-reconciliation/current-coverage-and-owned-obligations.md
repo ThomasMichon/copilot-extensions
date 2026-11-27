@@ -142,6 +142,21 @@ change from pending to specific retention; frozen identity rows and all
 counting observations remain unchanged. There is no fresh whole-queue count,
 source completion or content admission for any other row.
 
+The [oldest-pending delivery study](journal/2026/11.26-oldest-pending-and-partial-deliveries.md)
+subsequently reads whole #542/#1138/#1419 originals and all 42 discussions
+against five qualified delivery descriptions. Their specific retained gaps
+replace pending qualification: first-run provisioning/broader acceptance,
+the independent public immutable-reference contract and the wider
+knowledge-lifecycle acceptance. Existing first-run UI and existing-task
+repair claims receive bounded credit rather than stale no-delivery wording.
+The withdrawn acquisition desktop follow-up stays withdrawn. Only those three
+outcome/gap columns change in the frozen identity set; its historical metadata,
+all other rows and every counting observation remain. Effective coverage at
+the retained observation is still 584, with 522 pending and seven
+current-retained outcomes, not a new live count or source-completion claim.
+The sixteen complete reference screens grant no semantic or content admission
+to the thirteen unselected originals.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,

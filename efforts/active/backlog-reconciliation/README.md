@@ -522,11 +522,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [oldest-pending delivery study](journal/2026/11.26-oldest-pending-and-partial-deliveries.md)
+retains whole #542/#1138/#1419 requests against five attributed partial or
+different-contract deliveries, correcting stale no-delivery assertions without
+claiming full acceptance. Sixteen complete reference screens do not admit
+other originals or prove semantic completion. Only three current outcome
+columns change; counting, ownership and every parent gate remain.
+
 The [whole-inflow diagnostic study](journal/2026/11.26-inflow-diagnostics-and-doctor-boundaries.md)
 retains three actual requests after complete qualified intake, bounded doctor
 source comparison and verified automation-origin/run metadata. Only their
 post-snapshot outcomes change; no final unit, issue effect, new census or
-parent criterion resolves.
+parent criterion resolves. The reviewed recording merged in #14860.
 
 The [source boundaries and current roster](journal/2026/11.26-scope-boundaries-and-current-roster.md)
 retain whole #12274/#13818/#6925 requests against partial, explicitly excluded
