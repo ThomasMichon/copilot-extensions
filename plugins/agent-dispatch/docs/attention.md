@@ -60,6 +60,15 @@ on a remote target (an SSH read each; see `bridge` below).
   progress for longer than `AGENT_DISPATCH_ATTENTION_HELD_LIVE_AFTER_SECS`
   (both strictly greater, default 1800; `0` turns that half off). Held tasks
   whose owner is `unknown` or `gone` never count. A read is capped at 5000 open tasks; one that hits the cap reports `uncertain` (the queue reads `partial`), never a complete `ok`. Each active lane's backlog is one coordinator read, started only while it can still finish inside the source's deadline; a lane it doesn't reach, or whose read fails, counts toward `uncertain` too, so backlog probing never fails the source's task items.
+  A pool at capacity whose every running holder stopped progressing (suspended,
+  submitted or finished, but not yet cooled) while permitted work waits is one
+  `stalled` item per pool (`entity: x.dispatch.pool`, `entity_ref`
+  `<registration>@<machine>/<env>`) once its oldest waiting task is older than
+  `AGENT_DISPATCH_ATTENTION_POOL_STARVED_AFTER_SECS` (strictly greater, default
+  600; `0` turns it off); its actions `show` each holder. It is one more
+  coordinator read (`GET /pool-starvation`), made only when a lane's `/health`
+  advertises `pool_starvation: 1` and it can still finish inside the deadline;
+  a skipped or failed read counts toward `uncertain`.
 - **`bridge`** (built in, when agent-bridge is installed; otherwise `disabled`):
   sessions parked on the operator. Candidates are the bridge-managed sessions
   (`agent-bridge --json sessions`, not stopped or ended) and the live registered

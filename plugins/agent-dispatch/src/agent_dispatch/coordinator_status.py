@@ -150,11 +150,16 @@ def register_status_routes(
             "pool_cohort": {"version": 1, "revision": queue.pool_configured_cohort().revision},
             "task_recovery": RECOVERY_CONTRACT,
             "task_relevance": relevance_contract(control_token),
+            "pool_starvation": 1,
             "delegated_run_waiters": {
                 "protocol": "delegated_run_waiters/v1",
                 "coordinator_id": queue.run_waiter_coordinator_id(),
             },
         }
+
+    @app.get("/pool-starvation")
+    def pool_starvation() -> dict[str, Any]:
+        return {"pools": queue.pool_starvation()}
 
     @app.get("/events")
     async def events_stream(ready_frame: bool = False) -> StreamingResponse:

@@ -17,7 +17,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("suffix", ["ps1", "sh"])
-def test_codespaces_bootstrap_has_no_outer_installer_owner(suffix):
+def test_codespaces_bootstrap_has_no_outer_installer_owner(suffix: str) -> None:
     text = (PLUGIN / "scripts" / f"bootstrap-check.{suffix}").read_text()
     assert ("first-use.$suffix" if suffix == "ps1" else "first-use.sh") in text
     assert "vault-stamp-v1" in text
@@ -29,7 +29,7 @@ def test_codespaces_bootstrap_has_no_outer_installer_owner(suffix):
         assert removed not in text
 
 
-def test_codespaces_preserves_deadlines_and_independent_hook_owners():
+def test_codespaces_preserves_deadlines_and_independent_hook_owners() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["sessionStart"]
     assert len(hooks) == 3
     assert [hook["timeoutSec"] for hook in hooks] == [15, 10, 45]
@@ -39,7 +39,7 @@ def test_codespaces_preserves_deadlines_and_independent_hook_owners():
         assert f"write-session-guidance.{suffix}" in hooks[2][shell]
 
 
-def test_codespaces_packages_foundation_through_canonical_materializer():
+def test_codespaces_packages_foundation_through_canonical_materializer() -> None:
     text = (PLUGIN / "pyproject.toml").read_text()
     assert '"agent-update-driver"' in text
     assert 'agent-update-driver = { path = "../../libs/update-driver", editable = true }' in text
@@ -53,7 +53,9 @@ def test_codespaces_packages_foundation_through_canonical_materializer():
     "ordinary", "empty-no-self", "no-ack", "foreign-ack", "driver-refused",
     "old-driver", "wrong-plugin", "array-plugin", "snapshot", "ordinary-copy",
 ])
-def test_native_bootstrap_validates_handoff_without_installing(tmp_path, phase, condition):
+def test_native_bootstrap_validates_handoff_without_installing(
+    tmp_path: Path, phase: str, condition: str,
+) -> None:
     if os.name != "nt" and _BASH is None:
         pytest.skip("native Bash unavailable")
     home = tmp_path / "home-caf\u00e9"
@@ -70,7 +72,7 @@ def test_native_bootstrap_validates_handoff_without_installing(tmp_path, phase, 
     suffix = "ps1" if os.name == "nt" else "sh"
     hook = scripts / f"bootstrap-check.{suffix}"
     shutil.copyfile(PLUGIN / "scripts" / hook.name, hook)
-    identity = "agent-codespaces"
+    identity: str | list[str] = "agent-codespaces"
     if condition == "wrong-plugin":
         identity = "agent-vault"
     elif condition == "array-plugin":
@@ -82,6 +84,9 @@ def test_native_bootstrap_validates_handoff_without_installing(tmp_path, phase, 
     query = driver.parent.parent / "src/update_driver/json-query.awk"
     query.parent.mkdir(parents=True)
     shutil.copyfile(PLUGIN.parents[1] / "libs/update-driver/src/update_driver/json-query.awk", query)
+    native_query = scripts / "installation-context/json-query.awk"
+    native_query.parent.mkdir()
+    shutil.copyfile(PLUGIN / "scripts/installation-context/json-query.awk", native_query)
     if os.name == "nt":
         driver.write_text(
             "# Installation driver lifecycle contract: vault-stamp-v1\n"
@@ -123,7 +128,8 @@ def test_native_bootstrap_validates_handoff_without_installing(tmp_path, phase, 
         env["AGENT_CODESPACES_NO_SELFPROVISION"] = ""
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        def quote(value: object) -> str:
+            return "'" + str(value).replace("'", "''") + "'"
         command = [
             str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
             f"Set-Location -LiteralPath {quote(project)}; "
@@ -131,6 +137,7 @@ def test_native_bootstrap_validates_handoff_without_installing(tmp_path, phase, 
             f"& {quote(hook)}; exit $LASTEXITCODE",
         ]
     else:
+        assert _BASH is not None
         command = [_BASH, str(hook)]
     result = subprocess.run(
         command, env=env, cwd=project, capture_output=True, text=True,
