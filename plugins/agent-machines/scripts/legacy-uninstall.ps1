@@ -25,40 +25,20 @@ for value in paths:
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 print(Path(sys.executable).resolve(strict=True))
 '@
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
-    }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
-        if ($launcher.Source.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
-                    $candidates += $match.Groups[1].Value
-                }
-            }
-        } catch { }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        if ($candidate.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-B', '-c', $probe, $InstallDir, $candidate
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-                return $selected.Trim()
-            }
-        } catch { }
+    . (Join-Path $PSScriptRoot 'installer-bootstrap.ps1')
+    Initialize-MachinesBootstrap -Operation Inspect
+    $candidate = $script:MachinesInstallerSelection.Python
+    $nativeError = ''
+    $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+        '-I', '-B', '-c', $probe, $InstallDir, $candidate
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+        return $selected.Trim()
     }
     return $null
 }
 $python = Get-LegacyUninstallPython
-if (-not $python) { throw 'Legacy uninstall requires an existing external Python 3.10+ interpreter' }
+if (-not $python) { throw 'Legacy uninstall requires prepared managed Python outside runtime and prefix closure' }
 $argsForHelper = @(
     '-I', '-B', $helper, '--payload-root', (Split-Path -Parent $PSScriptRoot),
     '--plugin-id', 'agent-machines', '--root', $InstallDir,

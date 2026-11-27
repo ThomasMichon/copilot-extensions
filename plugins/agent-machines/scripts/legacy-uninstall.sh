@@ -25,17 +25,15 @@ for value in paths:
     for actual in (path, path.resolve(strict=True)):
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
-    while IFS= read -r candidate; do
-        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
-        case "${OSTYPE:-}" in
-            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
-        esac
-        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
-        [[ -n "$selected" && -x "$selected" ]] || continue
+    . "$SCRIPT_DIR/installer-bootstrap.sh" || return
+    _initialize_machines_bootstrap Inspect || return
+    candidate="$MACHINES_BOOTSTRAP_PYTHON"
+    if selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" &&
+        [[ -n "$selected" && -x "$selected" ]]; then
         printf '%s' "$selected"
         return 0
-    done < <(type -aP python3 python 2>/dev/null)
-    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
+    fi
+    printf '%s\n' 'Uninstall requires prepared managed Python outside runtime and prefix closure' >&2
     return 1
 }
 python="$(_uninstall_external_python "$root")" || exit 1
@@ -47,6 +45,7 @@ arguments=(-I -B "$helper" --payload-root "$(dirname -- "$SCRIPT_DIR")" \
 [[ -d "$root" ]] || exit 0
 . "$SCRIPT_DIR/legacy-transaction.sh"
 INSTALL_DIR="$root"
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$python"
 _enter_install_lock || { printf '%s\n' 'Could not acquire the install transaction lock; refusing to proceed unlocked' >&2; exit 1; }
 trap '_exit_install_lock' EXIT
 "$python" "${arguments[@]}" --remove-runtime

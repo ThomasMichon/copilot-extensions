@@ -123,3 +123,30 @@ The Windows packet retains real self-stage success and exit-124 cleanup with
 materialized bootstrap support and fixture-owned inert preparation.
 Windows Git Bash is not an installer target. Large copied UV fixture binaries
 are released after each case so the packet retains the existing scratch cap.
+
+## Prepared-only legacy uninstall
+
+`test_uninstall_bootstrap.py`, exposed through
+`test_machines_uninstall_bootstrap_source.py`, exercises both raw and
+materialized helpers under poisoned ambient Python and selectors. Actual
+finite removal preserves durable/unknown bytes and persistent lease inodes,
+and is idempotent. Separate controls require live-generation-lease refusal,
+missing-UV refusal before helper entry, and rejection of an interpreter within
+the removal root. No acquisition or production-root removal is performed.
+
+The native lane requires eight no-skip cases on each POSIX Bash host and
+eight on each Windows PowerShell host. Both Windows shell packets run in the
+existing Windows Bash carrier job, which has headroom, rather than enlarging
+the original eight-minute PowerShell jobs. This does not add a Windows Bash
+installer contract. POSIX PowerShell is useful for isolated selection/refusal
+controls, but is not a native shell for the finite removal protocol.
+Each raw/materialized success report records actual removal and subsequent
+idempotent-call durations, with six UV calls and two managed lookups across
+the pair. These synthetic-state observations are not full installation or
+tail-latency measurements.
+
+Full local POSIX deletion can refuse when a current-user process is not
+inspectable. That existing fail-closed observation boundary is not relaxed or
+reported as a pass; real positive removal still requires actual native-lane
+qualification. No root, service, credential or process repair is a fixture
+prerequisite.
