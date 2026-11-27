@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 import os
 import shutil
+import signal
 import subprocess
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -136,32 +137,47 @@ def test_posix_remote_handoff_replaces_picker_without_a_waiting_parent(
 
     def replace(executable: str, argv: list[str], env: dict[str, str]) -> None:
         assert executable == "ssh" and argv == composed.argv and env == composed.env
+        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+            if (signum := getattr(signal, name, None)) is not None:
+                assert signal.getsignal(signum) == signal.SIG_DFL
         if fails:
             raise FileNotFoundError("SSH unavailable")
         raise SystemExit(17)
 
     monkeypatch.setattr(os, "execvpe", replace)
-    with pytest.raises(FileNotFoundError if fails else SystemExit):
-        launcher.execute(composed)
+    previous = {
+        signum: signal.signal(signum, signal.SIG_IGN)
+        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ")
+        if (signum := getattr(signal, name, None)) is not None
+    }
+    try:
+        with pytest.raises(FileNotFoundError if fails else SystemExit):
+            launcher.execute(composed)
+        assert all(signal.getsignal(signum) == signal.SIG_IGN for signum in previous)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process replacement")
-def test_native_remote_handoff_keeps_the_callers_pid() -> None:
+@pytest.mark.parametrize("signal_exit", [False, True])
+def test_native_remote_handoff_keeps_the_callers_pid(signal_exit: bool) -> None:
     shell = shutil.which("sh")
     if shell is None:
         pytest.skip("native POSIX shell unavailable")
+    child = "echo $$; kill -s PIPE $$" if signal_exit else "echo $$; exit 17"
     program = (
         "import os\n"
         "from worktree_manager.launcher import LaunchExec, execute\n"
         "print(os.getpid(), flush=True)\n"
-        f"execute(LaunchExec(kind='exec', argv=[{shell!r}, '-c', 'echo $$; exit 17'], "
+        f"execute(LaunchExec(kind='exec', argv=[{shell!r}, '-c', {child!r}], "
         "cwd=None, env=dict(os.environ), muxed=False, exit_code=0, session=None, "
         "replace_process=True))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", program], capture_output=True, text=True, timeout=15,
     )
-    assert result.returncode == 17, result.stderr
+    assert result.returncode == (-getattr(signal, "SIGPIPE") if signal_exit else 17), result.stderr
     before, after = result.stdout.splitlines()
     assert before == after
 

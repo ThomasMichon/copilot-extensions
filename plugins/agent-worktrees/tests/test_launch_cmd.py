@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -2630,6 +2631,9 @@ def test_remote_direct_fallback_replaces_posix_caller_and_cancels_watchdog(
     def replace(executable: str, command: list[str]) -> None:
         assert executable == "ssh" and command == argv
         assert events == ["handoff"]
+        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+            if (signum := getattr(signal, name, None)) is not None:
+                assert signal.getsignal(signum) == signal.SIG_DFL
         raise SystemExit(17)
 
     def popen(command: list[str]) -> SimpleNamespace:
@@ -2647,11 +2651,21 @@ def test_remote_direct_fallback_replaces_posix_caller_and_cancels_watchdog(
         ) == 17
         assert events == ["spawn", "handoff"]
     else:
-        with pytest.raises(SystemExit) as result:
-            launch._run_direct_launch_fallback(
-                "example", [], on_handoff=lambda: events.append("handoff"),
-            )
-        assert result.value.code == 17
+        previous = {
+            signum: signal.signal(signum, signal.SIG_IGN)
+            for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ")
+            if (signum := getattr(signal, name, None)) is not None
+        }
+        try:
+            with pytest.raises(SystemExit) as result:
+                launch._run_direct_launch_fallback(
+                    "example", [], on_handoff=lambda: events.append("handoff"),
+                )
+            assert result.value.code == 17
+            assert all(signal.getsignal(signum) == signal.SIG_IGN for signum in previous)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
         assert events == ["handoff"]
 
 

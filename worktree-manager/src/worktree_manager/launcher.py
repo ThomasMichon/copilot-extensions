@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -213,7 +214,17 @@ def execute(le: LaunchExec) -> int:
     if le.replace_process and not _windows_host():
         if le.cwd is not None:
             os.chdir(le.cwd)
-        os.execvpe(le.argv[0], le.argv, le.env)
+        previous = {}
+        try:
+            # Match subprocess restore_signals when replacing the interpreter.
+            for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+                signum = getattr(signal, name, None)
+                if signum is not None:
+                    previous[signum] = signal.signal(signum, signal.SIG_DFL)
+            os.execvpe(le.argv[0], le.argv, le.env)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
     proc = subprocess.run(le.argv, cwd=le.cwd, env=le.env)
     return proc.returncode
 
