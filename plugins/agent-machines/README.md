@@ -23,6 +23,27 @@ preserves empty, quoted and Unicode values plus native string conversion of
 numeric variables for both script and module entries.
 See the [inert command controls](tests/README.md) for qualification and limits.
 
+Explicit `install`, `init`, `provision` and `cell-provision` establish UV and
+the Installer Engine's declared managed bootstrap Python before Python-backed
+admission, source identity or the Windows cell watchdog. Missing UV uses
+Astral's official user-local prerequisite installer and its durable command
+exposure, not ambient Python or a private runtime's UV copy. Acquisition and
+discovery share the configured `UV_UNMANAGED_INSTALL` or `UV_INSTALL_DIR`
+destination, otherwise honoring `XDG_BIN_HOME` or `XDG_DATA_HOME/../bin` before
+the user-local `.local/bin` default.
+Slot validation and source-qualified stamping only inspect already-prepared
+prerequisites. Native legacy POSIX `stamp` and PowerShell `stamp-binstub`
+avoid eager UV selection while retaining their original transaction/admission
+owners; source-qualified stamping still validates its identity.
+The five early cell
+lifecycle actions retain their separate prepared-only ingress. Closed-wheel
+inputs remain explicit. Application construction uses the canonical managed
+venv owner with its independent Python requirement, then restores governed
+dependency/feed configuration for package installation. Bootstrap consumes the
+existing installer deadline rather than renewing the downstream watchdog.
+The PowerShell self-stage default remains an output-inactivity watchdog;
+caller-supplied deadlines retain elapsed-time enforcement or explicit disable.
+
 The POSIX session-start manifest check uses the installation-context native JSON
 reader, as its governance check already does. It does not start Python or UV.
 All fields use one native byte-preserving snapshot; decoded path/version captures
