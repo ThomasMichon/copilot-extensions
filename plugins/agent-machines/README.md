@@ -27,8 +27,11 @@ Explicit `install`, `init`, `provision` and `cell-provision` establish UV and
 the Installer Engine's declared managed bootstrap Python before Python-backed
 admission, source identity or the Windows cell watchdog. Missing UV uses
 Astral's official user-local prerequisite installer and its durable command
-exposure, not ambient Python or a private runtime's UV copy. Stamp and slot
-validation only inspect already-prepared prerequisites; the five early cell
+exposure, not ambient Python or a private runtime's UV copy. Full stamp and slot
+validation only inspect already-prepared prerequisites. Native legacy
+`stamp-binstub` leaves installer Python selection lazy, retaining its original
+admission owner; source-qualified stamping still validates its identity.
+The five early cell
 lifecycle actions retain their separate prepared-only ingress. Closed-wheel
 inputs remain explicit. Application construction uses the canonical managed
 venv owner with its independent Python requirement, then restores governed

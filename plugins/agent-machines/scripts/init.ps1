@@ -186,7 +186,7 @@ if ($Action -eq 'cell-provision' -or $Action -like 'slot-*') {
 }
 if ($WheelProfile) {
     $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $WheelPython
-} else {
+} elseif ($Action -ne 'stamp-binstub') {
     $operation = if ($Action -in @('install', 'init', 'provision', 'cell-provision')) {
         'Prepare'
     } else { 'Inspect' }

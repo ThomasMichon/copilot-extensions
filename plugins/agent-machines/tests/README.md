@@ -110,7 +110,7 @@ environment restoration. This does not install application dependencies or
 qualify a production update, service/task PATH, SAC-enforcing deployment or
 installed adoption.
 
-The existing native workflow requires all 24 applicable Bash controls on
-Linux/macOS and all 26 controls on each Windows PowerShell host, without skips.
+The existing native workflow requires all 28 applicable Bash controls on
+Linux/macOS and all 28 controls on each Windows PowerShell host, without skips.
 Windows Git Bash is not an installer target. Large copied UV fixture binaries
 are released after each case so the packet retains the existing scratch cap.

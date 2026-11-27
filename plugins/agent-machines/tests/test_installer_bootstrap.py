@@ -232,9 +232,9 @@ def installer(
     for name in ("plugin.json", "pyproject.toml", "payload-invocation.json"):
         shutil.copy2(PLUGIN / name, bootstrap.payload / name)
     if os.name != "nt":
-        for name in ("bash", "sed", "head", "tr", "awk", "readlink", "ln", "flock", "stat", "date", "git"):
+        for name in ("bash", "sed", "head", "tr", "awk", "readlink", "ln", "stat", "date", "git"):
             executable = shutil.which(name)
-            assert executable
+            assert executable, name
             if not (bootstrap.tools / name).exists():
                 (bootstrap.tools / name).symlink_to(executable)
     # Policy is independently covered; this fixture never inspects the host account.
@@ -359,6 +359,30 @@ def test_invalid_cell_request_never_prepares_prerequisites(
         timeout=40, creationflags=HEADLESS,
     )
     assert result.returncode != 0, result.stdout + result.stderr
+    assert not installer.calls.exists()
+    assert not installer.poison.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
+def test_native_stamp_binstub_does_not_select_installer_python(
+    installer: LifecycleFixture,
+) -> None:
+    scripts = installer.payload / "scripts"
+    (scripts / "installation-context/legacy-entrypoint-probe.ps1").write_text("exit 0\n")
+    uv = next(path for path in installer.tools.iterdir() if path.stem == "uv")
+    uv.rename(uv.with_name("unavailable-uv" + uv.suffix))
+    result = subprocess.run(
+        [installer.shell, "-NoProfile", "-File", str(scripts / "init.ps1"),
+         "-Action", "stamp-binstub"],
+        capture_output=True, text=True, env=installer.env, cwd=installer.home,
+        timeout=40, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    root = installer.home / ".agent-machines"
+    assert Path((root / "payload-dir").read_text().strip()) == installer.payload
+    command_name = "agent-machines.cmd" if os.name == "nt" else "agent-machines"
+    assert (installer.home / ".local/bin" / command_name).is_file()
     assert not installer.calls.exists()
     assert not installer.poison.exists()
 

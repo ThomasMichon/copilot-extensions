@@ -76,6 +76,7 @@ on:
       - plugins/agent-machines/scripts/installer-bootstrap.sh
       - plugins/agent-machines/scripts/installer-bootstrap.ps1
       - plugins/agent-machines/tests/test_installer_bootstrap.py
+      - plugins/agent-machines/tests/test_installer_index.py
       - plugins/agent-machines/tests/test_cell_lifecycle_bootstrap.py
       - plugins/agent-machines/tests/test_installer_native_output_ps1.py
       - libs/installation-context/json-query.awk
@@ -2139,7 +2140,7 @@ jobs:
           python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/machines-installer-bootstrap').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          expected=24 if os.environ['QUALIFIED_SHELL']=='bash' else 26;
+          expected=28;
           assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Retain Windows lifecycle refusal producer encoding

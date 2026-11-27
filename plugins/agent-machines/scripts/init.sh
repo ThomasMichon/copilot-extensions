@@ -1625,15 +1625,20 @@ _versioned_mark_complete() {
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx="${PIP_INDEX_URL:-}"
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local helper_dir py idx site_prefix=""
+    helper_dir="$(_machines_installer_support)" || return
+    [[ -f "$helper_dir/installer_pip_index.py" ]] || {
+        _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+        return 1
+    }
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
     fi
+    py="$(_source_python)" || return
+    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+        --uv "$MACHINES_UV" --site-prefix "$site_prefix" </dev/null)" || return
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the

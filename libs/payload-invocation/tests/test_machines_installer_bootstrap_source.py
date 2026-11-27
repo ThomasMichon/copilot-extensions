@@ -11,6 +11,7 @@ _package = ModuleType("_machines_installer_bootstrap_source")
 _package.__path__ = [str(_tests)]
 sys.modules[_package.__name__] = _package
 _source = importlib.import_module(_package.__name__ + ".test_installer_bootstrap")
+_index = importlib.import_module(_package.__name__ + ".test_installer_index")
 pytestmark = _source.pytestmark
 installer_python = _source.installer_python
 lifecycle = _source.lifecycle
@@ -34,6 +35,12 @@ test_cell_watchdog_uses_selected_python_before_any_source_helper = (
 test_invalid_cell_request_never_prepares_prerequisites = (
     _source.test_invalid_cell_request_never_prepares_prerequisites
 )
+test_native_stamp_binstub_does_not_select_installer_python = (
+    _source.test_native_stamp_binstub_does_not_select_installer_python
+)
 test_application_constructor_uses_independent_managed_requirement = (
     _source.test_application_constructor_uses_independent_managed_requirement
+)
+test_native_index_adapter_retains_user_and_site_precedence = (
+    _index.test_native_index_adapter_retains_user_and_site_precedence
 )
