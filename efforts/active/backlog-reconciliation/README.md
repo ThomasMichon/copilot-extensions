@@ -525,10 +525,12 @@ the non-public approval conversation.
 The [scoped attribution repair correspondence](journal/2026/11.26-scoped-attribution-repair-correspondence.md)
 maps the complete #11805 original and six discussions to changed source
 #14652, normal release and a corroborated independent consumer result.
-It proposes a conditional acknowledged completion only after reviewed
-intent and a separate passing final metadata assessment; no issue effect,
-old-failure reclassification, consumer takeover or parent completion is
-claimed.
+Reviewed #14841 precedes the separately spent passing final assessment and
+independently audited acknowledged `COMPLETED` outcome. The complete
+two-pass observation is 583 whole OPEN, with exactly the #11805 departure
+and no arrivals or unrelated departures. Old failed refreshes, the
+consumer's later head and all five parent Plan/twelve actual global
+Validation gates remain separate.
 
 The [current coverage and finite PSMux guidance](journal/2026/11.26-current-coverage-and-psmux-guidance.md)
 records reviewed #14831, one separately spent passing final assessment
