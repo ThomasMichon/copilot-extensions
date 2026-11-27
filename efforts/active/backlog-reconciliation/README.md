@@ -522,6 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [scoped attribution repair correspondence](journal/2026/11.26-scoped-attribution-repair-correspondence.md)
+maps the complete #11805 original and six discussions to changed source
+#14652, normal release and a corroborated independent consumer result.
+It proposes a conditional acknowledged completion only after reviewed
+intent and a separate passing final metadata assessment; no issue effect,
+old-failure reclassification, consumer takeover or parent completion is
+claimed.
+
 The [current coverage and finite PSMux guidance](journal/2026/11.26-current-coverage-and-psmux-guidance.md)
 records reviewed #14831, one separately spent passing final assessment
 and independently audited finite-guidance `COMPLETED` #13753 outcome.
@@ -530,7 +538,8 @@ separate from semantic admission; the later two-pass census is 584 whole
 OPEN, with two arrivals offsetting the one departure and no unrelated
 departure. No installer/native/resource outcome is claimed. The two
 bounded recording gates are resolved; the other five Plan and twelve
-actual global Validation items remain OPEN.
+actual global Validation items remain OPEN. The factual outcome merged
+in #14836.
 
 The [clock and preparation correspondence](journal/2026/11.26-clock-and-preparation-report-correspondence.md)
 records reviewed #14824, two separately spent passing final assessments
