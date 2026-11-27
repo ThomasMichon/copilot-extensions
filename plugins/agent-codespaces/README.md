@@ -105,8 +105,13 @@ receipts also refuse; uninstall does not stop the owner or close SSH masters.
 The canonical uninstall engine holds runtime, snapshot and redirect-publication
 custody throughout finite native cleanup. Persistent lease files alone are not
 busy and retain their inodes; actual conflicting owners refuse admission.
+Legacy removal and preview select the declared, already-prepared uv-managed
+bootstrap interpreter outside the removable runtime and its prefix closure.
+Missing uv, interpreter or bootstrap support refuses without acquiring Python
+or falling back to PATH Python, launcher registrations or the installed runtime.
 Every native mutating lifecycle action shares the install transaction inode;
-Bash uses an attached standard-library owner rather than depending on `flock`.
+for uninstall, Bash uses native `flock` when available, otherwise an attached
+standard-library owner running the same prepared selection.
 Existing native dry runs perform read-only admission and remove nothing.
 
 ## Overview
