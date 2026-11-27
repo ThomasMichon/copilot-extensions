@@ -42,6 +42,8 @@ on:
       - libs/payload-invocation/tests/test_pull_requests_ready_source.py
       - plugins/agent-pull-requests/scripts/invoke-payload-runtime.sh
       - plugins/agent-pull-requests/scripts/invoke-payload-runtime.ps1
+      - plugins/agent-pull-requests/scripts/argument-transport.ps1
+      - libs/agent-procutil/src/agent_procutil/private_paths.ps1
       - plugins/agent-pull-requests/scripts/cell_invoke.py
       - plugins/agent-pull-requests/tests/managed_command_fixture.py
       - plugins/agent-pull-requests/tests/test_managed_command_gate.py

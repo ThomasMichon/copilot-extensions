@@ -20,11 +20,13 @@ exit status and slot/payload bytes. Native PowerShell variables include numbers
 and booleans. Missing UV/provider/capture/bootstrap/application support and
 selection changes during admission refuse before application entry. Long-body
 controls retain 25,000 characters, including non-BMP Unicode, without Base64
-command-line expansion or consuming stdin. Temporary argument environment values
-are removed before application entry and the caller's prior values are restored.
-Each invocation uses an independent chunk namespace. Controls retain caller
-values during native launch and keep a sibling invocation's transport out of
-the application without changing its parent values.
+body expansion or consuming stdin. Legacy forwarding uses a per-invocation JSON
+file in an owner-private temporary directory, never process-wide environment
+payloads. Windows uses canonical private ACL creation; POSIX uses mode 0700,
+with native `mktemp` for older Core runtimes lacking the mode-creation API.
+Controls verify privacy before launch, removal before application entry,
+finally-cleanup and unchanged caller/sibling environment values. Only the short
+file/entry paths are encoded for native command-line compatibility.
 Inert applications are precompiled before snapshots; operational isolation and
 bytecode flags remain unchanged. Materialized controls use payload-embedded
 process support and packaged capture, not a canonical-checkout import.

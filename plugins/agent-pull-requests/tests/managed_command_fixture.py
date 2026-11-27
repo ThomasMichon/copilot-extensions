@@ -74,6 +74,8 @@ def prepare_application(uv: Path, application: Path, slot: Path, env: dict[str, 
     (module / "__init__.py").write_text("", encoding="utf-8")
     (module / "__main__.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
+        "transport=Path(os.environ['PULL_REQUESTS_TRANSPORT_LOG'])\n"
+        "artifact=json.loads(transport.read_text(encoding='utf-8').splitlines()[-1]) if transport.exists() else {}\n"
         "if os.environ.get('INHERITED_FD_TARGET'):\n"
         " for fd in range(5,10): os.write(fd,('application-fd-%s\\n'%fd).encode())\n"
         "value={'python':sys.executable,'prefix':sys.prefix,'version':list(sys.version_info[:3]),"
@@ -81,6 +83,9 @@ def prepare_application(uv: Path, application: Path, slot: Path, env: dict[str, 
         "'root':os.environ.get('AGENT_RT_ROOT'),"
         "'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT'),"
         "'transport_keys':[key for key in os.environ if key.startswith('COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_')],"
+        "'argument_artifact_present':any(Path(artifact[key]).exists() for key in ('path','directory') if key in artifact),"
+        "'caller_state':os.environ.get('PULL_REQUESTS_CALLER_STATE'),"
+        "'sibling_state':os.environ.get('PULL_REQUESTS_SIBLING_STATE'),"
         "'selector':os.environ.get('UV_PYTHON')}\n"
         "Path(os.environ['APPLICATION_PROOF']).write_text(json.dumps(value),encoding='utf-8')\n"
         "print('application stdout')\nprint('application stderr',file=sys.stderr)\nraise SystemExit(37)\n",

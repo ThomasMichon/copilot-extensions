@@ -1202,6 +1202,10 @@ Python versions. Missing UV, prepared Python or admission support refuses withou
 acquisition or implicit provisioning. Legacy READY commands use the same
 prepared-only application admission; their existing native first-touch
 installation driver remains the owner of the separate missing-runtime route.
+Legacy PowerShell forwarding keeps argument data in a per-invocation file under
+an owner-private temporary directory, removed before application entry. It does
+not consume command stdin, expand long bodies on the native command line or
+publish them in process-wide environment variables.
 
 The [inert command controls](tests/README.md) exercise both
 dispatch paths with real prepared interpreters, without PR/provider, network,

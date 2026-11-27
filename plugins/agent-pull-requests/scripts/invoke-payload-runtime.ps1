@@ -47,38 +47,46 @@ function Invoke-PythonEntry {
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     $ErrorActionPreference = 'Continue'
     if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
-        $json = ConvertTo-Json -InputObject @($Arguments) -Compress
-        $previous = @{}
-        $count = 0
-        $prefix = 'COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_' + [Guid]::NewGuid().ToString('N') + '_'
+        $argumentFile = $null
         try {
-            for ($offset = 0; $offset -lt $json.Length; $offset += $length) {
-                $length = [Math]::Min(8192, $json.Length - $offset)
-                # Keep UTF-16 surrogate pairs within the same environment value.
-                if ($offset + $length -lt $json.Length -and
-                    [char]::IsHighSurrogate($json[$offset + $length - 1])) {
-                    $length--
-                }
-                $name = $prefix + $count
-                $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-                [Environment]::SetEnvironmentVariable($name, $json.Substring($offset, $length), 'Process')
-                $count++
-            }
-            $decode = "prefix=sys.argv[3];arguments=json.loads(''.join(os.environ.pop(prefix+str(i)) for i in range(int(sys.argv[2]))));[os.environ.pop(k) for k in tuple(os.environ) if k.startswith('COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_')];"
+            $ErrorActionPreference = 'Stop'
+            . (Join-Path $PSScriptRoot 'argument-transport.ps1')
+            $json = ConvertTo-Json -InputObject @($Arguments) -Compress
+            $argumentFile = New-PullRequestsArgumentFile $json
+            $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argumentFile))
+            $encodedTarget = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Target))
+            $entry = @'
+import base64,json,os,runpy,sys
+target,path=(base64.b64decode(value).decode('utf-8') for value in sys.argv[1:3])
+try:
+    with open(path,encoding='utf-8') as stream:
+        arguments=json.load(stream)
+    if not isinstance(arguments,list) or not all(isinstance(value,str) for value in arguments):
+        raise ValueError('Argument transport requires an array of strings')
+    os.unlink(path)
+    os.rmdir(os.path.dirname(path))
+except (OSError,ValueError) as error:
+    print('Argument transport refused: '+str(error),file=sys.stderr)
+    raise SystemExit(126)
+if sys.argv[3]=='script':
+    sys.argv=[target,'--']+arguments
+    runpy.run_path(target,run_name='__main__')
+else:
+    sys.argv=[target]+arguments
+    runpy.run_module(target,run_name='__main__',alter_sys=True)
+'@
+            $ErrorActionPreference = 'Continue'
             if ($ScriptEntry) {
-                $entry = 'import json,os,runpy,sys;script=sys.argv[1];' + $decode +
-                    "sys.argv=[script,'--']+arguments;runpy.run_path(script,run_name='__main__')"
-                & $Python -I -c $entry $Target $count $prefix
+                & $Python -I -c $entry $encodedTarget $encodedPath script
             } else {
-                $entry = 'import json,os,runpy,sys;module=sys.argv[1];' + $decode +
-                    "sys.argv=[module]+arguments;runpy.run_module(module,run_name='__main__',alter_sys=True)"
-                & $Python -c $entry $Target $count $prefix
+                & $Python -c $entry $encodedTarget $encodedPath module
             }
             $invocationExit = $LASTEXITCODE
+        } catch {
+            [Console]::Error.WriteLine("[agent-pull-requests] argument transport refused: $($_.Exception.Message)")
+            $invocationExit = 126
         } finally {
-            foreach ($name in $previous.Keys) {
-                [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
-            }
+            if ($argumentFile) { Remove-PullRequestsArgumentFile $argumentFile }
         }
         exit $invocationExit
     } elseif ($ScriptEntry) {

@@ -78,8 +78,19 @@ def test_ready_command_admits_exact_prepared_application(
         assert original.count(invocation) == 1
         entry.write_text(original.replace(
             invocation,
+            "            $argumentDirectory=[IO.Path]::GetDirectoryName($argumentFile)\n"
+            "            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {\n"
+            "                . $env:PULL_REQUESTS_PRIVATE_SUPPORT\n"
+            "                Test-CEPrivatePath $argumentDirectory\n"
+            "                Test-CEPrivatePath $argumentFile -File -TokenOwner\n"
+            "                $private=$true\n"
+            "            } else {\n"
+            "                $private=(([int][IO.File]::GetUnixFileMode($argumentDirectory) -band 63) -eq 0)\n"
+            "            }\n"
+            "            $observed=@{path=$argumentFile;directory=$argumentDirectory;private=$private;"
+            "caller=$env:PULL_REQUESTS_CALLER_STATE;sibling=$env:PULL_REQUESTS_SIBLING_STATE}\n"
             '            [IO.File]::AppendAllText($env:PULL_REQUESTS_TRANSPORT_LOG, '
-            '$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0 + "`n")\n' + invocation,
+            '($observed | ConvertTo-Json -Compress) + "`n")\n' + invocation,
         ), encoding="utf-8")
     suffix = "sh" if host == "bash" else "ps1"
     provider = scripts / "_bootstrap_python" / f"bootstrap-uv.{suffix}"
@@ -150,6 +161,7 @@ def test_ready_command_admits_exact_prepared_application(
         PULL_REQUESTS_TEST_CONTEXT=str(context), PULL_REQUESTS_TEST_SCENARIO=scenario,
         PULL_REQUESTS_UV_LOG=str(uv_log), APPLICATION_PROOF=str(proof),
         PULL_REQUESTS_TRANSPORT_LOG=str(transport_log),
+        PULL_REQUESTS_PRIVATE_SUPPORT=str(library / "src/agent_procutil/private_paths.ps1"),
         BOOTSTRAP_PROOF=str(bootstrap_proof), AMBIENT_MARKER=str(tmp_path / "ambient-ran"),
         UV_PYTHON="unrelated-python", UV_NO_MANAGED_PYTHON="1",
         UV_CONFIG_FILE="missing-relative.toml", UV_NO_CONFIG="false",
@@ -199,13 +211,13 @@ def test_ready_command_admits_exact_prepared_application(
         )
         harness.write_text(
             "$PSNativeCommandArgumentPassing='Legacy'\n"
-            "$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0='caller-owned'\n"
-            "$env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_sibling_0='other-command'\n"
+            "$env:PULL_REQUESTS_CALLER_STATE='caller-owned'\n"
+            "$env:PULL_REQUESTS_SIBLING_STATE='other-command'\n"
             + values +
             f"& '{str(payload / 'bin/agent-pull-requests.ps1').replace(chr(39), chr(39)*2)}' @forward\n"
             "$code=$LASTEXITCODE\n"
-            "if ($env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_0 -cne 'caller-owned') { throw 'caller argument environment changed' }\n"
-            "if ($env:COPILOT_EXTENSIONS_FORWARDED_ARGUMENTS_sibling_0 -cne 'other-command') { throw 'sibling argument environment changed' }\n"
+            "if ($env:PULL_REQUESTS_CALLER_STATE -cne 'caller-owned') { throw 'caller argument environment changed' }\n"
+            "if ($env:PULL_REQUESTS_SIBLING_STATE -cne 'other-command') { throw 'sibling argument environment changed' }\n"
             "exit $code\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]
@@ -234,11 +246,19 @@ def test_ready_command_admits_exact_prepared_application(
         lookups = uv_log.read_text(encoding="utf-8").splitlines() if uv_log.exists() else []
         assert lookups == expected_lookups * (cycle + 1), result.stdout + result.stderr
         if host != "bash":
-            transports = transport_log.read_text(encoding="utf-8").splitlines() if transport_log.exists() else []
+            transports = [
+                json.loads(line) for line in transport_log.read_text(encoding="utf-8").splitlines()
+            ] if transport_log.exists() else []
             expected_transports = (
                 cycle + 1 if positive or scenario in ("cell-changed", "cell-missing-admission") else 0
             )
-            assert transports == ["caller-owned"] * expected_transports
+            assert len(transports) == expected_transports
+            assert all(
+                item["private"] is True and item["caller"] == "caller-owned"
+                and item["sibling"] == "other-command"
+                and not Path(item["path"]).exists() and not Path(item["directory"]).exists()
+                for item in transports
+            )
         if not positive:
             assert result.stderr and not result.stdout and not proof.exists(), result.stdout + result.stderr
             continue
@@ -247,7 +267,9 @@ def test_ready_command_admits_exact_prepared_application(
             "python": str(python), "prefix": str(slot), "version": [3, 10, 20],
             "argv": arguments, "stdin": "foreground input\n", "cwd": str(tmp_path),
             "root": str(root), "context": str(context) if cell else None,
-            "selector": "unrelated-python", "transport_keys": [],
+            "selector": "unrelated-python", "transport_keys": [], "argument_artifact_present": False,
+            "caller_state": "caller-owned" if host != "bash" else None,
+            "sibling_state": "other-command" if host != "bash" else None,
         }
         if cell:
             assert json.loads(bootstrap_proof.read_text(encoding="utf-8")) == {

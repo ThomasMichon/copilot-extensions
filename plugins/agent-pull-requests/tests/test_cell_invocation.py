@@ -613,6 +613,10 @@ def test_generated_powershell_preserves_actual_python_stdout_args_cwd_and_failur
     (payload / "plugin.json").write_text("{}", encoding="utf-8")
     shutil.copy2(SCRIPTS.parent / "bin" / "agent-pull-requests.ps1", payload / "bin")
     shutil.copy2(SCRIPTS / "invoke-payload-runtime.ps1", scripts)
+    shutil.copy2(SCRIPTS / "argument-transport.ps1", scripts)
+    support = payload / "libs/agent-procutil/src/agent_procutil"
+    support.mkdir(parents=True)
+    shutil.copy2(SCRIPTS.parents[2] / "libs/agent-procutil/src/agent_procutil/private_paths.ps1", support)
     selector = scripts / "_bootstrap_python" / "select.ps1"
     selector.parent.mkdir()
     selector.write_text("'" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8")
