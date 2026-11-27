@@ -3270,7 +3270,8 @@ and spawn handle remain durable. A managed supervisor waits a grace window
 (default 300 seconds, `AGENT_DISPATCH_DORMANT_GRACE_SECONDS`) after it first
 sees a task suspended before stopping its body, so a quick wake reuses the live
 session; a supervisor restart, a new body incarnation, a new task generation,
-or an observed resume restarts that window. Unresolved startup or cooling still occupies
+or any new suspension (the task's durable `suspended_at`, so even a resume and
+re-suspend between two sweeps) restarts that window. Unresolved startup or cooling still occupies
 capacity. Steering requests the preserved body's resume where supported;
 replacement paths consume the saved guidance. The coordinator-held
 [startup/cooling fence](docs/spawn-startup-fencing.md) excludes stale physical
