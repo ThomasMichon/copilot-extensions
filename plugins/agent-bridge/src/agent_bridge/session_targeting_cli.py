@@ -702,6 +702,11 @@ def _match_agents(target: str, agents: list[dict[str, Any]]) -> list[str]:
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
+    # An unreadable --prompt-file must fail before anything is created; reading it
+    # only after session creation leaves an orphan worker behind the error.
+    prompt_file = getattr(args, "prompt_file", None)
+    if prompt_file and prompt_file != "-":
+        _read_prompt_from_file(prompt_file)
     dispatch_origin = workspace_creation_cli.validate_origin_arguments(args)
     worktree_writer = workspace_creation_cli.validate_arguments(args)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
