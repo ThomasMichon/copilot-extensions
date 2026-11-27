@@ -80,6 +80,12 @@ def test_string_query_refuses_nonstrings_and_nul_before_shell_capture(value: obj
     assert result.stdout == b""
 
 
+def test_scalar_query_cannot_drop_decoded_nul_into_another_path() -> None:
+    result = _query(b'{"value":"/managed/\\u0000/python"}', mode="get")
+    assert result.returncode == 2
+    assert result.stdout == b""
+
+
 @pytest.mark.parametrize("mode,prefix,status", [
     ("deployment-string", b"\xef\xbb\xbf", 0),
     ("string", b"\xef\xbb\xbf", 2),

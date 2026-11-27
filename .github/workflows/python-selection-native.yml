@@ -1967,7 +1967,7 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/native-json').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==160 and len({c.attrib['name'] for c in cases})==160;
+          assert len(cases)==161 and len({c.attrib['name'] for c in cases})==161;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
 
   machines-native-manifest-macos:

@@ -59,6 +59,9 @@ its whole working set rolled back.
   Unicode escape quads use portable length/hex checks, including on older
   `mawk` without regular-expression interval support; malformed escapes and
   unpaired surrogates remain errors.
+  Decoded NUL stays distinguishable on awk implementations that drop NUL string
+  bytes: hex queries preserve its `00`, while ordinary scalar/path queries and
+  object keys refuse it instead of aliasing another name.
 - `installation-context.ps1` is a thin PowerShell 5.1+/pwsh adapter to the
   same stdlib-only Python SDK. Setup can pass its prepared interpreter through
   `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`, an absolute executable path inherited

@@ -1,5 +1,5 @@
 {
-  "comment": "Read Machines bootstrap manifests natively and preserve JSON Unicode escapes on older POSIX awk",
+  "comment": "Read Machines bootstrap manifests natively and preserve Unicode/NUL semantics across POSIX awk implementations",
   "changes": [
     {
       "plugin": "agent-machines",
@@ -51,6 +51,10 @@
     },
     {
       "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]
