@@ -167,12 +167,23 @@ neither releases a real restriction nor establishes copying by itself.
 | Issue | Retained boundary |
 |---|---|
 | #5472 | The actual earlier whole-source/copy boundary is unreconciled; no text is acquired or read. |
-| #5529 | The actual suspect whole-containing-copy condition remains; no alternate packet, text, count, hash or excision qualifies it. |
-| #5851 | The suspect held-derived whole-original and containing-copy condition remains; fresh metadata is not release. |
-| #5873 | The actual #7028 chain includes an independent unqualified source author. Commit-identity clarification does not clear that content. |
+| #5529 | The actual suspect whole-containing-copy condition remains; no alternate packet, text, count, hash or excision qualifies it. The entrypoint study withdraws whole-comparison credit and retains the pending source gap. |
+| #5851 | The suspect held-derived whole-original and containing-copy condition remains; fresh metadata is not release. The entrypoint study withdraws whole-comparison credit and retains the pending source gap. |
+| #5873 | The actual #7028 chain includes an independent unqualified source author. Commit-identity clarification does not clear that content. The entrypoint study withholds whole-comparison credit without claiming independent chain admission. |
 | #6082 | The specific prior return was incomplete: an actual vendored-installer-engine-derived unit and its containing response remain opaque. The earlier five-row proposal did not establish whole coverage or authorize an installer amendment. Exposure followed by stopping is not whole-read acceptance; no part read, recount, hash, excision, alternate or proxy follows. |
 | #6109 | Actual vendored-installer-engine-derived content is a copy condition, not a mere citation. Its applicability remains unresolved; no whole original/source/alternate is admitted. |
 | #7500 | The particular writer's source qualification is missing and its body was unread. This is neither a current complete original/home assessment nor an automatic whole-original ban; do not proxy the writer through another source. |
+
+The [entrypoint study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md#source-admission-correction)
+records ten admitted originals and 48 discussions, separately from the
+three restricted cases above and ten other comparisons whose only current
+text inputs share held containing captures. Those ten do not acquire a new
+original-source ban; independent source admission remains separate.
+Earlier acquisition/rendering does not establish
+qualified whole evidence and is not retroactively cleared. No held original,
+containing response, linked source or alternate is reopened for the correction;
+withdrawing credit does not qualify a source by excision. This preserves the
+specific actual restrictions, not a blanket hold inferred from a citation.
 
 ## Specific correspondence gaps
 

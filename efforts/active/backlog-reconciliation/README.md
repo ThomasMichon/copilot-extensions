@@ -523,12 +523,15 @@ the non-public approval conversation.
 ## Plan
 
 The [entrypoint alternatives and source-authority study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md)
-compares twenty-three whole current requests and all 78 discussions. It
-preserves diagnostic alternatives, actual conditional triggers, specific
-native and owner gates, and complete received acceptance. Four finite source
+compares ten admitted whole current requests and all 48 discussions. It
+preserves admitted-case alternatives, specific native and owner gates, and
+actual source/input restrictions. Four finite source
 reports distinguish explicit-account refusal, runtime-only expansion,
 retired-owner recovery and telemetry registration from their wider parents.
-Only those outcome/gap pairs change; the retained count remains 584 and all
+Thirteen prior comparison credits are withdrawn under actual source/copy
+and containing-input restrictions; their outcomes stay pending with specific
+admission gaps.
+Only those outcome/gap fields change; the retained count remains 584 and all
 parent Plan/Validation gates remain unchanged.
 
 The [finite-source delivery and retained-acceptance study](journal/2026/11.27-finite-source-delivery-and-retained-acceptance.md)

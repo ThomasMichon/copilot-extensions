@@ -290,7 +290,7 @@ Attributed source/native reports are not this campaign's current-code,
 execution, installed or rollout verification.
 
 The [entrypoint alternatives and source-authority study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md)
-qualifies and reads twenty-three further whole requests and all 78 discussions.
+records ten admitted whole requests and all 48 discussions.
 Four complete qualified PR descriptions and 27 human-authored comment texts
 credit delivered bounded work: explicit missing-token refusal, native
 runtime-only provider expansion, retired-parent recovery and command-telemetry
@@ -299,20 +299,31 @@ historical follow-up. Neither source registration nor an optional mode proves
 caller adoption; the original process-spawn and integration outcomes remain.
 
 The study preserves existing alternatives rather than requiring every proposed
-remedy, retains conditional future performance work without manufacturing a
-trigger, and keeps source-isolation, chosen configuration, readiness,
-authorization and atomic ownership as distinct contracts. Historical source
+remedy and does not substitute partial source reports for complete acceptance
+or use an unqualified containing input as evidence. Historical source
 findings are not restated as fresh code observations. In particular, the
 delivered explicit missing-token correction is credited instead of reporting
 the old warning/fallthrough path as the current explicit-account behavior.
 
-Only the twenty-three selected frozen outcome/gap pairs become current-retained.
+Whole-comparison credit for #5529/#5851/#5873 is withdrawn under the actual
+issue-specific source/copy restrictions in the
+[continuation controls](roadmap-historical-continuation-controls.md#actual-source-and-copy-gaps).
+Actor metadata did not release those conditions, and prior exposure is not
+qualified whole evidence. Ten further comparisons are also withheld because
+their only current text inputs share those held containing captures; this is
+not a new ban on independently admitted originals. All thirteen outcomes stay
+pending; only their explicit source-admission gap fields change.
+No held original, containing response, linked source or alternate copy is
+re-opened to make this correction.
+
+Only the ten admitted frozen outcome/gap pairs become current-retained.
 At the same retained 04:38:04 observation, the effective 584 identities have
-425 pending, 104 current-retained, 38 prior-retained, five new-retained,
+438 pending, 91 current-retained, 38 prior-retained, five new-retained,
 six spent-open, five excluded and one coordination outcome. All historical
 columns, other rows, prior observations, claims and parent check states are
-preserved. Nine other metadata-screened originals gain no whole-text or
-semantic credit. No new census, whole-request completion, accepted transfer,
+preserved. Nine other metadata-screened originals and the thirteen withheld
+comparisons gain no whole-text or semantic credit. No new census,
+whole-request completion, accepted transfer,
 final completion unit, issue mutation, product/native execution or resource
 action occurs.
 
