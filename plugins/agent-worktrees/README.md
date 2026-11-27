@@ -14,6 +14,13 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+The payload command admits its selected completed application interpreter through
+prepared-only UV selection before cache-policy queries, readiness probes, ordinary
+entry and any boot-trace prune launch. Missing UV/admission support refuses before
+application execution without downloading or installing prerequisites. Explicit
+setup prepares them; existing context, fallback, first-use and terminal routing
+owners remain unchanged.
+
 Automatic hook handling establishes managed-repository membership before
 resident lifecycle priority or shared policy-lock admission. Unmanaged callers
 return the existing no-op result without waiting for that lock. Managed callers

@@ -63,7 +63,7 @@ def _adopter(fixture: dict[str, Any], plugin: str, source: Path | None = None) -
         COPILOT_PLUGIN_INSTALL_SMOKE="1",
         COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP="0",
     )
-    if plugin in {"agent-codespaces", "agent-containers", "agent-machines"}:
+    if plugin in {"agent-codespaces", "agent-containers", "agent-machines", "agent-worktrees"}:
         prepare_adopter_admission(fixture, environment, ROOT, plugin)
     for name in (
         "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
