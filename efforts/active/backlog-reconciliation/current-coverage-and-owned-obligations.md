@@ -78,6 +78,18 @@ current-head review/required CI and acknowledged issue disposition remain
 separate evidence tiers. No source-review body or runtime action is
 admitted by this index.
 
+After reviewed #14831, #13753 passed its separate final metadata unit and
+received an independently audited disclosed acknowledgment and `COMPLETED`
+disposition. Its later outcome is annotated separately from the original
+583-identity counting frame.
+
+The subsequent two-pass observation at 2026-11-26 18:59:50
+America/Los_Angeles measures 584 whole OPEN: the verified #13753 departure
+is offset by arrivals #14826 and #14832. There are no unrelated departures;
+all five declared retained requests remain OPEN. The two arrivals are
+counting metadata, not content admission. The node rows still represent
+the earlier frozen frame, not a silently refreshed 584-node semantic set.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

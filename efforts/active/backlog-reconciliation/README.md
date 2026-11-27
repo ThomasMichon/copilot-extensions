@@ -523,14 +523,14 @@ the non-public approval conversation.
 ## Plan
 
 The [current coverage and finite PSMux guidance](journal/2026/11.26-current-coverage-and-psmux-guidance.md)
-separates all 583 frozen counting identities from 572 metadata/reference
-observations, historical semantic roles and explicit retained gaps.
-The actual #13759 merge postdates the prior OPEN-PR judgment for #13753;
-whole source/current-documentation comparison supports one conditional
-finite-guidance candidate, not an installer or live-operation claim.
-Five distinct requests remain OPEN. The bounded metric/journal checkpoint
-and reconstructible-ledger recording gates are resolved; the other five
-Plan and twelve actual global Validation items remain OPEN.
+records reviewed #14831, one separately spent passing final assessment
+and independently audited finite-guidance `COMPLETED` #13753 outcome.
+Five distinct requests remain OPEN. The typed 583-identity frame stays
+separate from semantic admission; the later two-pass census is 584 whole
+OPEN, with two arrivals offsetting the one departure and no unrelated
+departure. No installer/native/resource outcome is claimed. The two
+bounded recording gates are resolved; the other five Plan and twelve
+actual global Validation items remain OPEN.
 
 The [clock and preparation correspondence](journal/2026/11.26-clock-and-preparation-report-correspondence.md)
 records reviewed #14824, two separately spent passing final assessments
