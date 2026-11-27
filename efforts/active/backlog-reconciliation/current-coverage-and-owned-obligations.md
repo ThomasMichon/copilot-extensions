@@ -333,6 +333,31 @@ maintenance, semantic relations, current vision/effort correspondence,
 accepted receiving, source fulfillment, final observation or resource custody.
 No historical researcher or product owner is replaced.
 
+## Five incomplete reports received; status token retired
+
+After reviewed intent #14881, the
+[five-record status outcome](journal/2026/11.27-five-incomplete-attempt-status-records.md#actual-receiving-and-administrative-outcome)
+preserves the complete #5621 original and four updates directly in OPEN #4783.
+The receiver's full incumbent body and both discussions are unchanged.
+Disclosed acknowledgment and independent proper-reason/whole-preservation
+readbacks confirm only the redundant status token retired `NOT_PLANNED`.
+All fifteen direct failed-attempt records, original hosted-execution witness,
+causal uncertainty, #5747/#5590 owners and actual source/native limits remain.
+
+Two complete six-page scans at **2026-11-27 08:27:06 America/Los_Angeles**
+agree on **583 whole OPEN identities**: 275 original-cohort and 308 inflow.
+Exactly #5621 departs from the preceding 584; no arrival or unrelated
+departure occurs. The frozen frame's identities and first six metadata
+columns remain historical. Its union with the four post-snapshot identities,
+minus #5621/#11805/#13753/#14823, accounts for all current identities.
+
+The effective OPEN outcomes are 438 pending, 91 current-retained, 37
+prior-retained, five new-retained, six spent-open, five excluded and one
+coordination identity. #5621's separate `retired-status` annotation is not an
+OPEN outcome or a technical completion. No other pending row gains content
+or semantic admission; all five parent Plan and eleven global Validation
+items remain OPEN.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
