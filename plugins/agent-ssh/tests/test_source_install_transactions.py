@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -32,7 +34,7 @@ def _entry(plugin: str) -> str:
     return "install" if plugin == "agent-ssh" else "init"
 
 
-def _identity_module(plugin: str):
+def _identity_module(plugin: str) -> ModuleType:
     name = "fixture_source_" + plugin.replace("-", "_")
     spec = importlib.util.spec_from_file_location(
         name, _scripts(plugin) / "versioned_runtime_source.py",
@@ -91,11 +93,11 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixture-owned native executable and harness
         argv, cwd=cwd, env=environment, capture_output=True, text=True,
         encoding="utf-8", timeout=60, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
-def _payload(tmp_path: Path, plugin: str) -> tuple[Path, dict]:
+def _payload(tmp_path: Path, plugin: str) -> tuple[Path, dict[str, Any]]:
     payload = tmp_path / "payload"
     (payload / "scripts").mkdir(parents=True)
     for source in _scripts(plugin).glob("versioned_runtime*.*"):
@@ -144,10 +146,12 @@ def _assert_previous(tmp_path: Path, previous: dict[str, bytes]) -> None:
 
 
 def _ps_setup(tmp_path: Path, plugin: str, payload: Path) -> str:
-    names = (
+    names: tuple[str, ...] = (
         "Get-SourceRuntimeIdentity", "Initialize-SourceRuntime", "Assert-SourceRuntimeIdentity",
         "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
     )
+    if plugin == "agent-machines":
+        names += ("Assert-CellPayloadIdentity", "Get-CellPayloadIdentity")
     return f"""
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -161,10 +165,16 @@ $PackageVersion = $SrcVersion
 $VenvDir = Join-Path $InstallDir 'legacy'
 $LinkDir = $VenvDir
 $VersionedRuntime = $true
+$NativeWheelSelection = $null
+$WheelProfile = ''
+$WheelDirectory = ''
+$WheelUv = ''
+$Force = $false
 $RealPython = {_ps(sys.executable)}
 $Events = {_ps(tmp_path / 'events')}
 function Rec($value) {{ Add-Content -LiteralPath $Events -Value $value }}
 function Get-BootstrapPython {{ return $RealPython }}
+function Get-MachinesBootstrapPython {{ return $RealPython }}
 function Get-PayloadHash {{ return 'fixture-construction-hash' }}
 function Start-RuntimeConstruction {{
     param($Python, $Helper, $Root, $Version, $PayloadHash, $LinkName)
@@ -224,11 +234,13 @@ Invoke-VersionedMarkComplete
 
 
 def _sh_setup(tmp_path: Path, plugin: str, payload: Path) -> str:
-    names = (
+    names: tuple[str, ...] = (
         "_source_python", "_source_runtime_identity", "_initialize_source_runtime",
         "_assert_source_runtime_identity",
         "_versioned_slot_clean", "_versioned_mark_complete",
     )
+    if plugin == "agent-machines":
+        names += ("_assert_cell_payload_identity", "_cell_payload_identity")
     return f"""
 set -euo pipefail
 PLUGIN_DIR={_sh(payload)}
@@ -239,6 +251,7 @@ PACKAGE_VERSION="$SRC_VERSION"
 LINK_DIR="$INSTALL_DIR/legacy"
 VERSIONED_RUNTIME=1
 PY={_sh(sys.executable)}
+MACHINES_BOOTSTRAP_PYTHON="$PY"
 EVENTS={_sh(tmp_path / 'events')}
 _bootstrap_python() {{ printf '%s\\n' "$PY"; }}
 _payload_hash() {{ printf fixture-construction-hash; }}
@@ -368,7 +381,7 @@ def test_source_ps_stamp_preserves_hashed_closure_and_refuses_corruption(
 ) -> None:
     payload, _receipt = _payload(tmp_path, plugin)
     previous = _previous(tmp_path)
-    names = ("Invoke-Stamp",)
+    names: tuple[str, ...] = ("Invoke-Stamp",)
     if plugin == "agent-ssh":
         names += ("Get-SnapshotSourceMarkerPath", "Get-SnapshotVersionMarkerPath")
     functions = "\n".join(_function(plugin, name, "ps1") for name in names)
