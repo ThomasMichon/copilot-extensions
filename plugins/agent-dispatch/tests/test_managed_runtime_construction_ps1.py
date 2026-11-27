@@ -164,12 +164,13 @@ def test_powershell_construction_uses_managed_default_without_ambient_python(
     }))
 
 
-@pytest.mark.parametrize("installed", [True, False])
-def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
-    tmp_path: Path, installed: bool,
+@pytest.mark.parametrize("scenario", ["prepared", "downloaded", "missing"])
+def test_powershell_construction_homes_venv_on_exact_patch_not_minor_link(
+    tmp_path: Path, scenario: str,
 ) -> None:
-    """Dev Box RedirectionGuard refuses uv's 3.11 junction (os error 448);
-    construction retries once with the installed exact managed patch."""
+    """Dev Box RedirectionGuard refuses uv's 3.11 junction (os error 448) in
+    SSH/network logons, so the venv home must be the exact managed patch even
+    when the installing (interactive) session could traverse the junction."""
     host = shutil.which("pwsh") or shutil.which("powershell")
     if not host:
         pytest.skip("This control requires a PowerShell host")
@@ -178,7 +179,8 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
          "version_parts": dict(zip(("major", "minor", "patch"), map(int, version.split("."))))}
         for version in ("3.11.19", "3.11.18", "3.11.7", "3.12.3")
     ]
-    installed_patches = "3.11.7,3.11.18,3.12.3" if installed else "3.12.3"
+    installed_patches = tmp_path / "installed.txt"
+    installed_patches.write_text("3.11.7,3.11.18,3.12.3" if scenario == "prepared" else "3.12.3", encoding="utf-8")
     bootstrap = tmp_path / "policy"
     bootstrap.mkdir()
     (bootstrap / "bootstrap-uv.ps1").write_text(
@@ -194,7 +196,7 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
     calls = tmp_path / "uv-calls.jsonl"
     runner = tmp_path / "construct.ps1"
     runner.write_text(
-        "param($Engine,$Policy,$Runtime,$Listing,$Installed,$Calls)\n"
+        "param($Engine,$Policy,$Runtime,$Listing,$Installed,$Calls,$Scenario)\n"
         "$ErrorActionPreference='Stop'\n. $Engine\n$env:OS='Windows_NT'\n"
         + fixture.function("ps1", "Test-DispatchVenv") + "\n"
         + fixture.function("ps1", "New-DispatchRuntimeVenv") + "\n"
@@ -208,8 +210,11 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
         " if ($ArgList[0] -eq 'python' -and $ArgList[1] -eq 'list') {\n"
         "  $ErrorOutput.Value='warning: fixture diagnostic'; $global:LASTEXITCODE=0; return $Listing\n }\n"
         " if ($ArgList[0] -eq 'python' -and $ArgList[1] -eq 'find') {\n"
-        "  $global:LASTEXITCODE=$(if (($Installed -split ',') -contains $ArgList[-1]) { 0 } else { 2 }); return ''\n }\n"
-        " if ($ArgList[$ArgList.IndexOf('--python')+1] -eq '3.11') {\n"
+        "  $known=[IO.File]::ReadAllText($Installed) -split ','\n"
+        "  $global:LASTEXITCODE=$(if ($known -contains $ArgList[-1]) { 0 } else { 2 }); return ''\n }\n"
+        " $bare = $ArgList[$ArgList.IndexOf('--python')+1] -eq '3.11'\n"
+        " if ($bare -and $Scenario -eq 'downloaded') {\n"
+        "  [IO.File]::WriteAllText($Installed, '3.11.18,3.12.3')\n } elseif ($bare) {\n"
         "  $ErrorOutput.Value='error: untrusted mount point. (os error 448)'; $global:LASTEXITCODE=2; return ''\n }\n"
         " $null=New-Item -ItemType Directory -Force (Join-Path $ArgList[1] 'Scripts')\n"
         " Set-Content -LiteralPath (Join-Path $ArgList[1] 'Scripts/python.exe') -Value fixture\n"
@@ -221,7 +226,8 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(runner),
          str(fixture.REPO / "libs/installer-engine/installer-engine.ps1"),
-         str(bootstrap / "installer-dependencies.json"), str(runtime), json.dumps(listing), installed_patches, str(calls)],
+         str(bootstrap / "installer-dependencies.json"), str(runtime), json.dumps(listing), str(installed_patches), str(calls),
+         scenario],
         cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True,
         timeout=60, creationflags=fixture.HEADLESS,
     )
@@ -230,10 +236,12 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
         for args in map(json.loads, calls.read_text(encoding="utf-8").splitlines())
         if "--python" in args
     ]
-    if installed:
+    if scenario == "prepared":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pythons == ["3.11.18"]
+    elif scenario == "downloaded":
         assert result.returncode == 0, result.stdout + result.stderr
         assert pythons == ["3.11", "3.11.18"]
-        assert "retrying with the installed 3.11.18 interpreter" in result.stderr
     else:
         assert result.returncode == 1, result.stdout + result.stderr
         assert pythons == ["3.11"]
