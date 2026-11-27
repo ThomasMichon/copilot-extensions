@@ -126,6 +126,7 @@ class LaunchExec:
     exit_code: int
     session: str | None
     error: str = ""
+    replace_process: bool = False
 
 
 def _windows_host() -> bool:
@@ -175,6 +176,7 @@ def compose_launch(
             muxed=False,
             exit_code=plan.exit_code,
             session=None,
+            replace_process=True,
         )
 
     if plan.action != "exec":
@@ -208,6 +210,10 @@ def execute(le: LaunchExec) -> int:
         if le.error:
             print(f"error: {le.error}", file=sys.stderr)
         return 1
+    if le.replace_process and not _windows_host():
+        if le.cwd is not None:
+            os.chdir(le.cwd)
+        os.execvpe(le.argv[0], le.argv, le.env)
     proc = subprocess.run(le.argv, cwd=le.cwd, env=le.env)
     return proc.returncode
 

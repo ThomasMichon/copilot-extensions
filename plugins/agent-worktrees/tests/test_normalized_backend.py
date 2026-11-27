@@ -54,8 +54,36 @@ def test_recordless_refuses_an_existing_non_directory_storage_parent(
     monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(agent_policy, "require", lambda _: None)
     monkeypatch.setattr(caller, "execute", lambda *_a, **_kw: pytest.fail("unsafe storage execution"))
-    with pytest.raises(ValueError, match="storage is not private"):
+    with pytest.raises(ValueError, match="Could not prepare recordless launch storage"):
         backend.launch(["copilot"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes")
+@pytest.mark.parametrize("mode", [0o775, 0o777])
+def test_resume_does_not_require_private_launch_storage_or_ancestors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int,
+) -> None:
+    shared = tmp_path / "shared"
+    root = shared / "installation"
+    parent = root / "launch-attempts"
+    parent.mkdir(parents=True)
+    for path in (shared, root, parent):
+        path.chmod(mode)
+    before = {path: path.stat().st_mode for path in (shared, root, parent)}
+    monkeypatch.setattr(config, "install_dir", lambda: root)
+    monkeypatch.setattr(agent_policy, "require", lambda _: None)
+
+    def execute(argv: list[str], **kwargs: Any) -> tuple[int, bool]:
+        assert "--resume=existing" in argv
+        attempt = kwargs["attempt_directory"]
+        assert attempt.parent == parent and (attempt / "runtime").is_dir()
+        assert attempt.stat().st_mode & 0o077 == 0
+        assert (attempt / "runtime").stat().st_mode & 0o077 == 0
+        return 0, True
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert backend.launch(["copilot", "--resume=existing"]) == 0
+    assert {path: path.stat().st_mode for path in before} == before
 
 
 @pytest.mark.parametrize("arguments", [

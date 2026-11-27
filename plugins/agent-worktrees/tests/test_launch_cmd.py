@@ -2615,6 +2615,46 @@ def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(
     assert os.environ["WORKTREE_VERBOSE"] == "1"
 
 
+@pytest.mark.parametrize("windows", [False, True])
+def test_remote_direct_fallback_replaces_posix_caller_and_cancels_watchdog(
+    monkeypatch: pytest.MonkeyPatch, windows: bool,
+) -> None:
+    from agent_worktrees import manager_launch_cli as launch
+
+    events: list[str] = []
+    argv = ["ssh", "-t", "example-ssh", "example --worktree-id existing"]
+    monkeypatch.setattr(launch, "_resolve_direct_launch_plan", lambda *_a: ({
+        "action": "remote", "ssh_alias": argv[2], "remote_command": argv[3],
+    }, "example"))
+
+    def replace(executable: str, command: list[str]) -> None:
+        assert executable == "ssh" and command == argv
+        assert events == ["handoff"]
+        raise SystemExit(17)
+
+    def popen(command: list[str]) -> SimpleNamespace:
+        assert windows and command == argv
+        events.append("spawn")
+        return SimpleNamespace(wait=lambda: 17)
+
+    monkeypatch.setattr(launch, "os", SimpleNamespace(
+        name="nt" if windows else "posix", execvp=replace,
+    ))
+    monkeypatch.setattr(launch.subprocess, "Popen", popen)
+    if windows:
+        assert launch._run_direct_launch_fallback(
+            "example", [], on_handoff=lambda: events.append("handoff"),
+        ) == 17
+        assert events == ["spawn", "handoff"]
+    else:
+        with pytest.raises(SystemExit) as result:
+            launch._run_direct_launch_fallback(
+                "example", [], on_handoff=lambda: events.append("handoff"),
+            )
+        assert result.value.code == 17
+        assert events == ["handoff"]
+
+
 def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
