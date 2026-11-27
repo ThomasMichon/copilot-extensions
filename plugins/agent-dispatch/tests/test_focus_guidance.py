@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from functools import cache
+import importlib.util
 import json
 import os
 import shlex
 import shutil
 import stat
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -77,6 +81,27 @@ def _write_command_shim(path: Path, command: str, target: str) -> None:
     )
 
 
+@cache
+def _prepared_uv() -> str:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("prepared managed bootstrap requires uv")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("UV_", "PYTHON")) and key not in {"VIRTUAL_ENV", "CONDA_PREFIX"}
+    }
+    if "UV_PYTHON_INSTALL_DIR" in os.environ:
+        environment["UV_PYTHON_INSTALL_DIR"] = os.environ["UV_PYTHON_INSTALL_DIR"]
+    result = subprocess.run(
+        [uv, "python", "find", "--no-project", "--no-config", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        env=environment, capture_output=True, text=True, timeout=10,
+    )
+    if result.returncode:
+        pytest.skip("managed CPython 3.11.18 is not prepared; no acquisition attempted")
+    return uv
+
+
 def _tool_path(
     path: Path,
     *,
@@ -90,6 +115,8 @@ def _tool_path(
         target = shutil.which(command)
         assert target
         _write_command_shim(path, command, target)
+    if os.name != "nt":
+        _write_command_shim(path, "uv", _prepared_uv())
     if include_aw:
         if os.name == "nt":
             project = "echo example-project" if managed else "exit /b 1"
@@ -165,10 +192,13 @@ def _run(
     env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     if hook.suffix == ".ps1":
-        command = [_powershell(), "-NoProfile", "-File", str(hook), *args]
+        host = _powershell()
+        assert host
+        command = [host, "-NoProfile", "-File", str(hook), *args]
     else:
-        command = [shutil.which("bash"), str(hook), *args]
-    assert all(command)
+        host = shutil.which("bash")
+        assert host
+        command = [host, str(hook), *args]
     return subprocess.run(
         command,
         cwd=process_cwd or payload_repo,
@@ -199,10 +229,80 @@ def _hook_with_manifest(
     scripts.mkdir(parents=True)
     copied = scripts / hook.name
     shutil.copy2(hook, copied)
+    if hook.suffix == ".sh":
+        shutil.copy2(PLUGIN / "scripts/bootstrap-python.sh", scripts)
+        spec = importlib.util.spec_from_file_location(
+            "_focus_bootstrap_producer", REPO / "libs/payload-invocation/bootstrap_python.py",
+        )
+        assert spec and spec.loader
+        producer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(producer)
+        declaration = PLUGIN / "payload-invocation.json"
+        data = json.loads(declaration.read_text(encoding="utf-8"))
+        generated: dict[Path, str | bytes] = producer.expected_files(declaration, data)
+        for source, content in generated.items():
+            destination = plugin / source.relative_to(PLUGIN)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
     if manifest is not None:
         content = manifest if isinstance(manifest, bytes) else json.dumps(manifest).encode()
         (plugin / "plugin.json").write_bytes(content)
     return copied
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX focus reader")
+@pytest.mark.parametrize("layout", ["source", "materialized"])
+@pytest.mark.parametrize("available", [True, False])
+def test_focus_reader_uses_one_prepared_bootstrap_without_ambient_python(
+    tmp_path: Path, layout: str, available: bool,
+    record_property: Callable[[str, object], None],
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    tools = _tool_path(tmp_path / "bin")
+    calls = tmp_path / "uv-calls"
+    poison = tmp_path / "ambient-python-called"
+    for name in ("python", "python3", "py"):
+        _write_executable(
+            tools / name, f"#!/bin/sh\n: > {shlex.quote(str(poison))}\nexit 97\n",
+        )
+    uv_command = f'exec {shlex.quote(_prepared_uv())} "$@"' if available else "exit 42"
+    _write_executable(
+        tools / "uv",
+        f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n{uv_command}\n",
+    )
+    hook = (
+        BASH_HOOK if layout == "source"
+        else _hook_with_manifest(tmp_path, BASH_HOOK, {"version": VERSION})
+    )
+    samples = []
+    for _ in range(2 if available else 1):
+        started = time.perf_counter()
+        result = _run(
+            hook, repo, tools,
+            env_overrides={
+                "UV_PYTHON": "3.9", "UV_NO_MANAGED_PYTHON": "true",
+                "VIRTUAL_ENV": str(tmp_path / "foreign-venv"),
+                "PYTHONHOME": str(tmp_path / "foreign-home"),
+                "PYTHONPATH": str(tmp_path / "foreign-modules"),
+                "UV_OFFLINE": "1",
+            },
+        )
+        samples.append(time.perf_counter() - started)
+        assert result.stdout == (EXPECTED.encode() if available else b"{}"), result
+        assert result.stderr == b""
+    assert not poison.exists()
+    observed = calls.read_text(encoding="utf-8").splitlines()
+    expected_calls = ["--version"]
+    if available:
+        expected_calls.append(
+            "python find --no-project --system --managed-python "
+            "--no-python-downloads cpython@3.11.18"
+        )
+    assert observed == expected_calls * len(samples)
+    record_property("dispatch_focus_admission", json.dumps({
+        "layout": layout, "available": available, "samples_seconds": samples,
+        "uv_calls": len(observed), "acquisition": "disabled",
+    }, sort_keys=True))
 
 
 @pytest.mark.parametrize("enabled", [None, False, "true", 1, "yes", [], {}])

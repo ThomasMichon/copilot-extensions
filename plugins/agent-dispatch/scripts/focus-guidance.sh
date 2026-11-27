@@ -8,14 +8,16 @@ emit_empty() {
     exit 0
 }
 
-python="$(command -v python3 || command -v python || true)"
 git="$(command -v git || true)"
 agent_worktrees="$(command -v agent-worktrees || true)" # marketplace-isolation: allow agent-worktrees-management
-[[ -n "$python" && -n "$git" && -n "$agent_worktrees" ]] || emit_empty
+[[ -n "$git" && -n "$agent_worktrees" ]] || emit_empty
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" ||
     emit_empty
-plugin_version="$("$python" - "$script_dir/../plugin.json" 2>/dev/null <<'PY'
+[[ -f "$script_dir/bootstrap-python.sh" ]] || emit_empty
+. "$script_dir/bootstrap-python.sh"
+python="$(dispatch_bootstrap_python 2>/dev/null)" || emit_empty
+plugin_version="$("$python" -I -B -X utf8 - "$script_dir/../plugin.json" 2>/dev/null <<'PY'
 import json
 import re
 import sys
@@ -68,7 +70,7 @@ clean_git_env() {
     env "${args[@]}" "$@"
 }
 
-cwd="$("$python" -c '
+cwd="$("$python" -I -B -X utf8 -c '
 import json, os, sys
 try:
     raw = sys.stdin.buffer.read(65537)
@@ -92,7 +94,7 @@ root="$(clean_git_env "$git" -C "$cwd" rev-parse --show-toplevel 2>/dev/null)" |
 root="$(cd "$root" 2>/dev/null && pwd -P)" || emit_empty
 
 config="$root/.agent-dispatch/session-guidance.json"
-enabled="$("$python" - "$root" "$config" <<'PY'
+enabled="$("$python" -I -B -X utf8 - "$root" "$config" <<'PY'
 import json
 import os
 import stat
@@ -157,7 +159,7 @@ if (( ! aggregate )); then
         emit_empty
 fi
 
-output="$("$python" - "$kernel" <<'PY'
+output="$("$python" -I -B -X utf8 - "$kernel" <<'PY'
 import json
 import sys
 
