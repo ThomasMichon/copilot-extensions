@@ -67,11 +67,13 @@ on:
       - libs/payload-invocation/tests/test_machines_health_source.py
       - libs/payload-invocation/tests/test_machines_manifest_source.py
       - libs/payload-invocation/tests/test_machines_cell_bootstrap_source.py
+      - libs/payload-invocation/tests/test_machines_cell_output_source.py
       - plugins/agent-machines/scripts/init.sh
       - plugins/agent-machines/scripts/init.ps1
       - plugins/agent-machines/scripts/cell-lifecycle-bootstrap.sh
       - plugins/agent-machines/scripts/cell-lifecycle-bootstrap.ps1
       - plugins/agent-machines/tests/test_cell_lifecycle_bootstrap.py
+      - plugins/agent-machines/tests/test_installer_native_output_ps1.py
       - libs/installation-context/json-query.awk
       - libs/installation-context/tests/test_json_query_bytes.py
       - plugins/agent-machines/scripts/bootstrap-check.sh
@@ -2118,6 +2120,21 @@ jobs:
           and r['uv_calls']==2 and len(r['samples_seconds'])==2
           and all(v>0 for v in r['samples_seconds']) for r in reports);
           print(json.dumps({'machines_cell_bootstrap':reports},sort_keys=True))"
+      - name: Retain Windows lifecycle refusal producer encoding
+        if: runner.os == 'Windows' && env.MACHINES_QUALIFICATION_SHELL != 'bash'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_cell_output_source.py --allow-explicit-tiers
+          -k "${{ env.MACHINES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/machines-cell-output
+      - name: Require actual lifecycle refusal encoding with both output modes
+        if: runner.os == 'Windows' && env.MACHINES_QUALIFICATION_SHELL != 'bash'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/machines-cell-output').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==2 and len({c.attrib['name'] for c in cases})==2;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Retain native health capability and rollback assertions
         run: >-
           python tools/run-plugin-tests.py payload-invocation

@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
 
 import pytest
 
+from .managed_command_fixture import prepared_python_inputs
+
 PLUGIN = Path(__file__).resolve().parents[1]
+REPO = PLUGIN.parents[1]
 INSTALLER = PLUGIN / "scripts" / "init.ps1"
 VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
 HOSTS = [
@@ -43,6 +47,21 @@ def _copy_payload(target: Path) -> None:
     )
     for name in ("plugin.json", "pyproject.toml", "payload-invocation.json"):
         shutil.copyfile(PLUGIN / name, target / name)
+    previous = sys.path[:]
+    try:
+        owner = runpy.run_path(str(REPO / "tools/materialize_installer_engine.py"))
+        for source, destination in owner["derived_file_pairs"](
+            REPO, target.parents[1], copied_consumer=(PLUGIN, target),
+        ):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+    finally:
+        sys.path[:] = previous
+
+
+@pytest.fixture(scope="module")
+def prepared_lifecycle_python() -> tuple[Path, Path, Path]:
+    return prepared_python_inputs("cpython@3.11.18")
 
 
 def _environment(home: Path) -> dict[str, str]:
@@ -70,7 +89,7 @@ def _run(
         arguments, require_job=True, allow_breakaway=False,
         cwd=script.parent, env=env, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert job is not None
     try:
@@ -196,8 +215,15 @@ def test_actual_legacy_probe_and_staged_stamp_keep_requested_output(
 @pytest.mark.parametrize("requested", [False, True])
 def test_actual_lifecycle_refusal_retains_requested_error_encoding(
     host: str | None, requested: bool, tmp_path: Path,
+    prepared_lifecycle_python: tuple[Path, Path, Path],
 ) -> None:
+    uv, _, store = prepared_lifecycle_python
     env = _environment(tmp_path / "home")
+    env.update(
+        UV_PYTHON_INSTALL_DIR=str(store), UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never",
+        UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        PATH=os.pathsep.join((str(uv.parent), env.get("PATH", ""))),
+    )
     if not requested:
         env.pop("COPILOT_EXTENSIONS_HUMAN_UTF8")
     payload = tmp_path / "payload"
@@ -218,9 +244,6 @@ def test_actual_lifecycle_refusal_retains_requested_error_encoding(
         "$PSBoundParameters['ExpectedInstallGeneration'] = '1'\n"
         "$PSBoundParameters['ExpectCurrentAbsent'] = [Management.Automation.SwitchParameter]$true\n"
         "$PSBoundParameters['ExpectLastKnownGoodAbsent'] = [Management.Automation.SwitchParameter]$true\n"
-        f"function Get-Command {{ param($Name,$CommandType,$ErrorAction)\n"
-        "if ($Name -ne 'python') { throw 'unexpected interpreter lookup' }\n"
-        f"[pscustomobject]@{{ Source = {_quote(sys.executable)} }} }}\n"
         + _producer_setup(script.parent),
         encoding="ascii",
     )
@@ -244,7 +267,7 @@ def test_actual_lifecycle_refusal_retains_requested_error_encoding(
              "--expected-namespace-generation", "1", "--expected-install-generation", "1",
              "--expect-current-absent", "--expect-last-known-good-absent"],
             env=env, capture_output=True, timeout=20,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         assert baseline.returncode == result.returncode
         assert baseline.stdout == result.stdout
