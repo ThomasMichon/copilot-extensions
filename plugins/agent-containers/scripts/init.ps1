@@ -420,13 +420,19 @@ if ($SrcVersion) {
 $PackageVersion = $SrcVersion
 $SourceSelected = $false
 $SourceRuntimeIdentity = '{}'
+. (Join-Path $PSScriptRoot 'installer-bootstrap.ps1')
+$script:ContainersInstallerSelection = $null
+if (-not $WheelProfile -and $Action -in @('install', 'init', 'provision')) {
+    Initialize-ContainersBootstrap -Operation Prepare
+} elseif ($Action -eq 'stamp' -and (
+    (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) -or
+    (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json')))) {
+    Initialize-ContainersBootstrap -Operation Inspect
+}
 function Get-SourceRuntimePython {
     if ($WheelProfile) { return $WheelPython }
-    $py = @('python3', 'python', 'py') | ForEach-Object {
-        Get-Command $_ -ErrorAction SilentlyContinue
-    } | Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
-    if (-not $py) { throw 'Source runtime selection requires a bootstrap Python interpreter' }
-    return $py.Source
+    if (-not $script:ContainersInstallerSelection) { Initialize-ContainersBootstrap -Operation Inspect }
+    return $script:ContainersInstallerSelection.Python
 }
 
 function Get-InstallerBootstrapPython {
@@ -436,6 +442,8 @@ function Get-InstallerBootstrapPython {
     # with managed-python-not-prepared. Returns $null when no selection is needed.
     if ($env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON) { return $null }
     if ($WheelProfile) { return $WheelPython }
+    $selection = Get-Variable -Name ContainersInstallerSelection -Scope Script -ErrorAction SilentlyContinue
+    if ($selection -and $selection.Value) { return $selection.Value.Python }
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bootstrap-python-launcher.txt') -PathType Leaf)) {
         return $null
     }
@@ -443,7 +451,8 @@ function Get-InstallerBootstrapPython {
     if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
         throw 'Declared command bootstrap selector is unavailable; update the owning plugin.'
     }
-    $selected = @(& $selector -Operation Prepare -TimeoutMilliseconds 600000 | Where-Object { $_ })
+    $operation = if ($Action -eq 'stamp') { 'Inspect' } else { 'Prepare' }
+    $selected = @(& $selector -Operation $operation -TimeoutMilliseconds 600000 | Where-Object { $_ })
     $python = if ($selected.Count) { ([string]$selected[-1]).Trim() } else { '' }
     if (-not $python -or -not [IO.Path]::IsPathRooted($python) -or
         -not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -878,31 +887,7 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-$hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-
-# Find a Python interpreter (skip Windows Store aliases that aren't real)
-$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
-foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
-    $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $testOut = & $found.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
-                $pythonCmd = $found.Source
-            }
-        } catch { }
-        $ErrorActionPreference = $prevEAP
-        if ($pythonCmd) { break }
-    }
-}
-if (-not $pythonCmd) {
-    Write-Fail 'Python not found on PATH (need 3.10+)'
-    Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
-    Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
-    exit 1
-}
+$pythonCmd = Get-SourceRuntimePython
 Write-Ok "Python: $pythonCmd"
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
@@ -927,19 +912,6 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Step 'docker CLI not found -- agent-containers fleet operations unavailable on this machine (non-fatal)'
 }
 
-# Check for uv -- install via winget if missing
-if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Step 'uv not found -- installing via winget...'
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        $env:PATH = (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine') + ';' + (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User')
-        if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
-    }
-}
-
 # -- 1. Create directories ---------------------------------------------
 
 foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -951,61 +923,13 @@ Write-Ok "Directories: $InstallDir"
 
 # -- 2. Provision the selected immutable profile (uv pip install or pip) --
 
-$signedBase = $null
-if (-not $WheelProfile -and $env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-    foreach ($v in '3.13', '3.12', '3.11') {
-        $probePreference = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = 'Continue'
-            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            $probeExit = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $probePreference
-        }
-        if ($probeExit -eq 0 -and $cand -and (Test-Path $cand)) {
-            if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break }
-        }
-    }
-}
-if ($signedBase) { $pythonCmd = $signedBase }
-# The bootstrap interpreter may be older than the package floor; the runtime
-# profile then runs on, and builds the runtime with, uv's managed Python 3.11.
-if (-not $WheelProfile) {
-    $probePreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $floorExit = 1
-    $runtimePython = $null
-    try {
-        & $pythonCmd -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>$null | Out-Null
-        $floorExit = $LASTEXITCODE
-        if ($floorExit -ne 0) {
-            if (Get-Command uv -ErrorAction SilentlyContinue) {
-                $runtimePython = (& uv python find 3.11 2>$null | Out-String).Trim()
-                if ($LASTEXITCODE -ne 0 -or -not $runtimePython) {
-                    & uv python install 3.11 2>$null | Out-Null
-                    $runtimePython = if ($LASTEXITCODE -eq 0) { (& uv python find 3.11 2>$null | Out-String).Trim() } else { $null }
-                }
-            }
-        }
-    } finally {
-        $ErrorActionPreference = $probePreference
-    }
-    if ($floorExit -ne 0) {
-        if (-not $runtimePython) {
-            Write-Fail "Python 3.11+ is required; $pythonCmd is older and uv could not provide 3.11"
-            exit 1
-        }
-        $pythonCmd = $runtimePython
-        Write-Ok "Python: $pythonCmd (uv-managed 3.11)"
-    }
-}
 $profileArgs = @(
     '-I',
     (Join-Path $PSScriptRoot 'runtime_profile.py'),
     '--root', $InstallDir, '--payload', $PluginDir, '--python', $pythonCmd
 )
-$uv = Get-Command $(if ($WheelProfile) { $WheelUv } else { 'uv' }) -ErrorAction SilentlyContinue
-if ($uv) { $profileArgs += @('--uv', $uv.Source) }
+$uv = if ($WheelProfile) { $WheelUv } else { $script:ContainersInstallerSelection.Uv }
+$profileArgs += @('--uv', $uv)
 if ($Profile) { $profileArgs += @('--profile', $Profile) }
 if ($WheelProfile) { $profileArgs += @('--wheel-profile', $WheelProfile, '--wheel-directory', $WheelDirectory) }
 $profileArgs += @('--expected-source-version', $SrcVersion)

@@ -36,6 +36,25 @@ filesystem metadata. Six POSIX controls retain successful admission and
 replaced-file/symlink refusal; native-flock behavior, persistent inode,
 legacy-receipt refusal and close-only lock lifetime are unchanged.
 
+## Native explicit setup
+
+`test_installer_bootstrap.py` runs eighteen cases per native shell across raw
+and materialized layouts. Repeated Inspect/Prepare samples record actual UV
+work and timing, with poisoned ambient Python and foreign selectors. Missing UV,
+the exact helper request or its prepared interpreter refuses without acquisition.
+The cold-UV control substitutes a fixture-owned inert downloader, not an actual
+network or user installation. Source-reader controls enter the real installer
+and stop after isolated identity selection; independent application construction
+creates and probes a real managed Python 3.11 environment without dependencies.
+
+The path-gated POSIX command jobs require all eighteen cases and four repeated
+reports without skips. The existing Windows Index/native-engine carrier runs
+both PowerShell hosts (36 cases, eight reports), leaving the near-full Containers
+Core job unchanged. Existing eight-minute budgets are preserved. These are native
+source boundaries, not complete installation latency, installed fleet readiness
+or production setup. `test_runtime_profile.py` separately retains profile intent,
+immutable reuse, failed-candidate cleanup, source mutation and source stamping.
+
 ## Prepared-only finite removal
 
 `test_uninstall_bootstrap.py` invokes the real isolated legacy helpers with

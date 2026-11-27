@@ -269,17 +269,24 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_SELECTED=0
 SOURCE_RUNTIME_IDENTITY='{}'
-_source_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -I -c 'import sys; assert sys.version_info >= (3, 10)' >/dev/null 2>&1; then
-            command -v "$candidate"
-            return 0
+. "$SCRIPT_DIR/installer-bootstrap.sh"
+CONTAINERS_BOOTSTRAP_PYTHON=""
+CONTAINERS_UV=""
+case "$ACTION" in
+    install|init|provision) _initialize_containers_bootstrap Prepare || exit $? ;;
+    stamp)
+        if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" ||
+            -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+            _initialize_containers_bootstrap Inspect || exit $?
         fi
-    done
-    _fail 'Source runtime selection requires a bootstrap Python interpreter'
-    return 1
+        ;;
+esac
+if [[ -n "$CONTAINERS_BOOTSTRAP_PYTHON" ]]; then
+    export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$CONTAINERS_BOOTSTRAP_PYTHON"
+fi
+_source_python() {
+    [[ -n "$CONTAINERS_BOOTSTRAP_PYTHON" ]] || _initialize_containers_bootstrap Inspect || return
+    printf '%s\n' "$CONTAINERS_BOOTSTRAP_PYTHON"
 }
 _source_runtime_version() {
     local py
@@ -307,43 +314,23 @@ _assert_source_runtime_identity() {
 }
 
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
-# Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
-_ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    return 1
-}
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local helper_dir py idx site_prefix=""
+    helper_dir="$(_containers_installer_support)" || return
+    [[ -f "$helper_dir/installer_pip_index.py" ]] || {
+        _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+        return 1
+    }
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
     fi
+    py="$(_source_python)" || return
+    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+        --uv "$CONTAINERS_UV" --site-prefix "$site_prefix" </dev/null)" || return
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
@@ -506,20 +493,7 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
     exit 1
 fi
 
-# Find a Python interpreter
-PYTHON_CMD=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        if "$candidate" --version 2>&1 | grep -qi python; then
-            PYTHON_CMD="$candidate"
-            break
-        fi
-    fi
-done
-if [[ -z "$PYTHON_CMD" ]]; then
-    _fail 'Python not found on PATH (need 3.10+)'
-    exit 1
-fi
+PYTHON_CMD="$CONTAINERS_BOOTSTRAP_PYTHON"
 _ok "Python: $PYTHON_CMD"
 
 if command -v docker >/dev/null 2>&1; then
@@ -535,27 +509,6 @@ else
 fi
 
 _ensure_uv_index
-HAVE_UV=0
-if _ensure_uv; then HAVE_UV=1; fi
-
-# The bootstrap interpreter may be older than the package floor; the runtime
-# profile then runs on, and builds the runtime with, uv's managed Python 3.11.
-if ! "$PYTHON_CMD" -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
-    runtime_python=""
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        runtime_python="$(uv python find 3.11 2>/dev/null)" || runtime_python=""
-        if [[ -z "$runtime_python" ]] && uv python install 3.11 >/dev/null 2>&1; then
-            runtime_python="$(uv python find 3.11 2>/dev/null)" || runtime_python=""
-        fi
-    fi
-    if [[ -z "$runtime_python" ]]; then
-        _fail "Python 3.11+ is required; $PYTHON_CMD is older and uv could not provide 3.11"
-        exit 1
-    fi
-    PYTHON_CMD="$runtime_python"
-    _ok "Python: $PYTHON_CMD (uv-managed 3.11)"
-fi
-# End of runtime Python selection.
 
 # -- 1. Directories ----------------------------------------------------
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
@@ -577,7 +530,7 @@ profile_args=(
     --expected-source-version "$SRC_VERSION"
     --expected-source-identity "$SOURCE_RUNTIME_IDENTITY"
 )
-if [[ "$HAVE_UV" -eq 1 ]]; then profile_args+=(--uv "$(command -v uv)"); fi
+profile_args+=(--uv "$CONTAINERS_UV")
 if [[ -n "$PROFILE" ]]; then profile_args+=(--profile "$PROFILE"); fi
 # Source manifest inputs are captured before activation.
 if [[ "$SOURCE_SELECTED" == 1 ]]; then

@@ -20,7 +20,7 @@ PWSH = shutil.which("pwsh") or ""
 pytestmark = pytest.mark.skipif(not PWSH, reason="pwsh is required")
 
 _DRIVER = r"""
-param([string]$Init, [string]$WheelProfile, [string]$WheelPython)
+param([string]$Init, [string]$WheelProfile, [string]$WheelPython, [string]$Action = 'install')
 $ErrorActionPreference = 'Stop'
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($Init, [ref]$tokens, [ref]$errors)
@@ -85,6 +85,14 @@ def test_installer_prepares_declared_bootstrap_python(scripts: tuple[Path, Path]
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout)["python"] == str(python)
     assert _calls(root) == ["Prepare", "600000"]
+
+
+def test_stamp_does_not_acquire_command_bootstrap_python(scripts: tuple[Path, Path]) -> None:
+    root, python = scripts
+    proc = _run(root, "-Action", "stamp")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["python"] == str(python)
+    assert _calls(root) == ["Inspect", "600000"]
 
 
 def test_wheel_profile_uses_wheel_python_without_preparing(
