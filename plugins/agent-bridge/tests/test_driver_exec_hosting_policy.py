@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+import sysconfig
+import venv
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,6 +18,11 @@ from agent_bridge.transport import SpawnTarget
 
 INSTANCE = "0123456789ab"
 PROVIDER = ["/payload/bin/agent-containers"]
+INSTALLATION_ENV = (
+    "AGENT_CONTAINERS_HOME", "AGENT_CONTAINERS_STATE_DIR",
+    "AGENT_CONTAINERS_CONFIG", "AGENT_CONTAINERS_DRIVERS_DIR",
+    "AGENT_CONTAINERS_PAYLOAD_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
+)
 ALLOWED = {
     "version": 1, "allowed": True, "repository": "/workspaces/example",
     "expose_agent": None, "sources": [], "denied_by": [],
@@ -82,6 +92,161 @@ async def test_undeclared_driver_venue_keeps_legacy_guest_check(
         await query_provider_policy(_target(), operation="launch")
     argv, kwargs = calls[-1]
     assert "agent-policy check" in argv[-1] and "input_bytes" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [True, False], ids=["explicit-selectors", "default-selectors"])
+async def test_bound_hosting_reaches_real_proxy_without_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: bool,
+) -> None:
+    from agent_bridge import hosting_policy
+    from agent_bridge.session_host import container_transport
+
+    root = Path(__file__).resolve().parents[2] / "agent-containers"
+    # This fixture supplies Bridge's marketplace identity without installing a cell.
+    monkeypatch.setattr(hosting_policy, "marketplace_id", lambda: "bridge-fixture")
+    slot = tmp_path / "provider-slot"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    site = Path(sysconfig.get_path("purelib", vars={"base": str(slot), "platbase": str(slot)}))
+    dependencies = sysconfig.get_path("purelib")
+    (site / "provider-fixture.pth").write_text(
+        f"{root / 'src'}\n{root.parents[1] / 'libs' / 'session-liveness-probe' / 'src'}\n"
+        f"import site; site.addsitedir({dependencies!r})\n",
+        encoding="utf-8",
+    )
+    python = slot / "Scripts" / "python.exe" if os.name == "nt" else slot / "bin" / "python"
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.delenv("PYTHONHOME", raising=False)
+    monkeypatch.setenv("PATH", "")  # no host Docker or guest tools
+    monkeypatch.chdir(tmp_path)
+    provider_home = tmp_path / "provider"
+    drivers = tmp_path / "explicit-drivers" if override else provider_home / "drivers.d"
+    config = tmp_path / "explicit-config.yaml" if override else provider_home / "containers.yaml"
+    provider_home.mkdir()
+    drivers.mkdir(parents=True)
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(provider_home))
+    monkeypatch.setenv("AGENT_CONTAINERS_STATE_DIR", str(tmp_path / "provider-state"))
+    monkeypatch.setenv("AGENT_CONTAINERS_PAYLOAD_ROOT", str(root))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    if override:
+        monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(config))
+        monkeypatch.setenv("AGENT_CONTAINERS_DRIVERS_DIR", str(drivers))
+    else:
+        monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+        monkeypatch.delenv("AGENT_CONTAINERS_DRIVERS_DIR", raising=False)
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    state_path = runtime / "state.json"
+    slow = tmp_path / "slow"
+    for driver, options in [
+        ("example-driver", ["--root", str(runtime)]),
+        ("slow-driver", ["--root", str(slow), "--delay", "list", "60"]),
+    ]:
+        (drivers / f"{driver}.json").write_text(json.dumps({
+            "schema_version": 1, "name": driver,
+            "command": [sys.executable, str(root / "tests" / "fake_runtime_driver.py"), *options],
+        }))
+    config.write_text(json.dumps({"fleets": {
+        "example": {"driver": "example-driver", "workspace_folder": "/workspaces/example",
+                    "relay_enabled": False},
+        "slow": {"driver": "slow-driver", "relay_enabled": False},
+    }}))
+    monkeypatch.setenv("FAKE_DRIVER_ROOT", str(runtime))
+    monkeypatch.setenv("FAKE_DRIVER_EXEC_STDOUT", json.dumps(ALLOWED))
+    state_path.write_text(json.dumps({"members": {
+        f"example-{index}": {"id": f"{index:012x}", "state": "running",
+                             "fleet": "example", "instance": f"example-{index}"}
+        for index in range(1, 4)
+    }, "calls": []}))
+
+    provider = [str(python), "-m", "agent_containers"]
+    run = container_transport._run_provider
+    rc, out, err = await run([*provider, "namespace-resolve", "example-1"], timeout=30)
+    assert rc == 0, err.decode()
+    spec = json.loads(out)
+    venue = {**spec["venue"], "provider_command": provider}
+    binding = venue["runtime_proxy"]
+    target = _target(**venue)
+    assert target.venue is not None
+    target.venue.pop("runtime_proxy")  # old caller/provider: genuinely bare ID
+    before = len(json.loads(state_path.read_text())["calls"])
+    assert (await query_provider_policy(target, operation="launch"))["allowed"]
+    state = json.loads(state_path.read_text())
+    assert [call["verb"] for call in state["calls"][before:]] == ["list", "inspect", "list", "exec"]
+
+    target.venue["runtime_proxy"] = binding
+    assert binding["provider_environment"] == {key: os.environ.get(key) for key in INSTALLATION_ENV}
+    for key in INSTALLATION_ENV:
+        monkeypatch.setenv(key, str(tmp_path / f"bridge-{key.lower()}"))
+    other_src = tmp_path / "other-checkout"
+    (other_src / "agent_containers").mkdir(parents=True)
+    (other_src / "agent_containers" / "__init__.py").write_text(
+        '"""Unrelated fixture package without a CLI."""\n', encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(other_src))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "bridge-python-home"))
+    before = len(state["calls"])
+    assert (await query_provider_policy(target, operation="launch"))["allowed"]
+    state = json.loads(state_path.read_text())
+    calls = state["calls"][before:]
+    assert [call["verb"] for call in calls] == ["inspect", "exec"]
+    assert all(call["request"]["name"] == "example-1" and
+               call["request"]["id"] == "000000000001" for call in calls)
+    assert not slow.exists()
+    assert os.environ["AGENT_CONTAINERS_HOME"] != str(provider_home)
+
+    target.venue["runtime_proxy"] = {
+        **binding, "provider_environment": {**binding["provider_environment"], "PYTHONPATH": "foreign"},
+    }
+    with pytest.raises(AgentHostingError, match="Invalid bound runtime proxy installation environment"):
+        await query_provider_policy(target, operation="launch")
+    assert json.loads(state_path.read_text())["calls"] == state["calls"]
+    target.venue["runtime_proxy"] = binding
+
+    async def replace_after_inspect(argv: list[str], **kwargs: Any) -> tuple[int, bytes, bytes]:
+        result = await run(argv, **kwargs)
+        if "inspect" in argv:
+            state = json.loads(state_path.read_text())
+            state["members"]["example-1"]["id"] = "000000000004"
+            state_path.write_text(json.dumps(state))
+        return result
+
+    monkeypatch.setattr(container_transport, "_run_provider", replace_after_inspect)
+    with pytest.raises(AgentHostingError):
+        await query_provider_policy(target, operation="launch")
+    assert not slow.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrong", ["Id", "Name", "fleet", "driver"])
+async def test_bound_hosting_refuses_mismatched_response_before_exec(
+    monkeypatch: pytest.MonkeyPatch, wrong: str,
+) -> None:
+    from agent_bridge.session_host import container_transport
+
+    labels = {"agent-containers.fleet": "example", "agent-containers.driver": "example-driver"}
+    actual = {
+        "Id": INSTANCE, "Name": "/example-1", "State": {"Running": True},
+        "Config": {"Labels": labels},
+    }
+    if wrong == "Id":
+        actual["Id"] = INSTANCE + "0"  # not a Docker ID prefix match
+    elif wrong == "Name":
+        actual["Name"] = "/example-2"
+    else:
+        labels[f"agent-containers.{wrong}"] = "other"
+
+    async def run(argv: list[str], **kwargs: Any) -> tuple[int, bytes, bytes]:
+        assert argv[-2:] == ["inspect", INSTANCE]
+        return 0, json.dumps([actual]).encode(), b""
+
+    monkeypatch.setattr(container_transport, "_run_provider", run)
+    with pytest.raises(AgentHostingError, match="Cannot establish"):
+        await query_provider_policy(_target(runtime_proxy={
+            "version": 1, "execution_runtime": "driver:example-driver/example@fixture",
+            "provider_environment": dict.fromkeys(INSTALLATION_ENV),
+            "provider_command": [sys.executable, "-m", "agent_containers"],
+        }), operation="launch")
 
 
 @pytest.mark.asyncio

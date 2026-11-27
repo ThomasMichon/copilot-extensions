@@ -1,0 +1,13 @@
+{
+  "comment": "Use a provider-verified member binding to avoid fleet inventory during hosting inspection and execution.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
