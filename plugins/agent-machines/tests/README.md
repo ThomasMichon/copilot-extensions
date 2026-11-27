@@ -89,3 +89,37 @@ command-lookup shim or an extracted preamble with missing defaults.
 The original lifecycle error, bytes and no-state-mutation assertions remain
 unchanged. The isolated construction fixture supplies the installer's empty
 wheel-option defaults before its extracted function definitions.
+
+## Native explicit-setup seed
+
+`test_installer_bootstrap.py`, exposed by
+`test_machines_installer_bootstrap_source.py`, exercises raw and materialized
+setup support with poisoned ambient Python and selectors. UV-missing and
+UV-present preparation use inert acquisition owners; no network or host
+installation is performed. Prepared-only inspection refuses missing inputs
+without repair. Actual installer entrypoints select Python before source
+identity for installation and stamping, with an inert legacy-policy decision
+that never inspects the host account. Invalid cell context/deadline inputs do
+not prepare prerequisites.
+Configured UV installation, unmanaged and XDG destinations are exercised through
+inert acquisition followed by a fresh prepared-only discovery invocation.
+Native legacy stamps publish their actual launcher without UV lookup; POSIX
+retains its existing no-flock transaction prerequisite through an explicit
+prepared seed, without falling back to poisoned ambient Python.
+
+The PowerShell watchdog control retains the actual shell-caller custody
+handshake and proves that its selected worker receives only the remaining
+installer deadline. Separate native controls retain implicit inactivity,
+explicit elapsed-time and disabled PowerShell watchdog modes after bootstrap
+deadline forwarding. Real UV constructs fixture-owned application venvs through
+the canonical engine under poisoned selectors/configuration, with caller
+environment restoration. This does not install application dependencies or
+qualify a production update, service/task PATH, SAC-enforcing deployment or
+installed adoption.
+
+The existing native workflow requires all 38 applicable Bash controls on
+Linux/macOS and all 46 controls on each Windows PowerShell host, without skips.
+The Windows packet retains real self-stage success and exit-124 cleanup with
+materialized bootstrap support and fixture-owned inert preparation.
+Windows Git Bash is not an installer target. Large copied UV fixture binaries
+are released after each case so the packet retains the existing scratch cap.
