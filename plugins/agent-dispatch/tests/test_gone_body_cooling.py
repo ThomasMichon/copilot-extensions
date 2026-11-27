@@ -313,6 +313,59 @@ def test_resumed_task_clears_grace_even_while_cold_retry_is_backed_off(
     assert stopped == []
 
 
+def test_unobserved_resume_and_resuspend_restarts_the_grace_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Dormant review", labels=["review"])
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:bridge-a",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.claim_one("host/worker", task_id=task.id)
+    queue.start(task.id, "host/worker", owner_session_id="original-native")
+    start = time.time()
+    queue.suspend(task.id, "host/worker", reason="Waiting on the source", now=start)
+    generation = queue.get(task.id).generation
+    assert queue.get(task.id).suspended_at == start
+    stopped: list[str] = []
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor.dormant_grace_seconds = 300.0
+    clock = {"now": start}
+    monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
+    assert supervisor.cool_dormant_bodies() == 0
+
+    queue.resume(task.id, "host/worker", now=start + 200.0)
+    queue.suspend(task.id, "host/worker", reason="Waiting again", now=start + 250.0)
+    assert queue.get(task.id).generation == generation
+    assert queue.get(task.id).suspended_at == start + 250.0
+    clock["now"] = start + 301.0
+    assert supervisor.cool_dormant_bodies() == 0
+    assert stopped == []
+    assert supervisor._dormant_since[reservation.key] == start + 301.0
+
+    queue.suspend(task.id, "host/worker", reason="Still waiting", now=start + 400.0)
+    assert queue.get(task.id).suspended_at == start + 400.0
+
+
+def test_grace_without_suspended_at_keeps_the_generation_window(tmp_path: Path) -> None:
+    # An older coordinator omits ``suspended_at``; the window must still elapse
+    # on the prior generation-only identity instead of restarting every sweep.
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    supervisor.dormant_grace_seconds = 300.0
+    res = {"startup_revision": 1, "session_handle": "local-body:bridge-a"}
+    legacy_task = {"generation": 2}
+
+    assert not supervisor._dormant_grace_elapsed("k", res, legacy_task, 1000.0)
+    assert not supervisor._dormant_grace_elapsed("k", res, legacy_task, 1299.0)
+    assert supervisor._dormant_grace_elapsed("k", res, legacy_task, 1300.0)
+    assert not supervisor._dormant_grace_elapsed(
+        "k", res, {"generation": 2, "suspended_at": 1250.0}, 1301.0,
+    )
+
+
 def test_dormant_grace_seconds_env_falls_back_on_invalid_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
