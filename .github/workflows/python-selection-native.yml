@@ -138,6 +138,7 @@ on:
       - plugins/agent-containers/scripts/runtime-construction.ps1
       - plugins/agent-containers/scripts/runtime_profile.py
       - plugins/agent-containers/tests/test_installer_bootstrap.py
+      - plugins/agent-containers/tests/test_installer_index.py
       - plugins/agent-containers/tests/test_installer_bootstrap_python.py
       - plugins/agent-containers/tests/test_runtime_profile.py
       - plugins/agent-containers/tests/managed_command_fixture.py
@@ -984,6 +985,7 @@ jobs:
           assert {r['operation'] for r in reports}=={'Prepare','Inspect'};
           assert {r['materialized'] for r in reports}=={False,True};
           assert all(r['network']=='disabled' and len(r['samples_seconds'])==2
+          and r['uv_calls']==(8 if r['shell']=='bash' and r['operation']=='Prepare' else 6)
           and all(v>0 for v in r['samples_seconds']) for r in reports);
           print(json.dumps({'containers_installer_seed':reports},sort_keys=True))"
       - &containers-removal-bootstrap
@@ -1717,6 +1719,20 @@ jobs:
       - *command-native-interpreters
       - *containers-installer
       - *containers-installer-proof
+      - name: Qualify Containers feed selection in the actual payload context
+        if: runner.os != 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-containers
+          --test-file tests/test_installer_index.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/containers-installer-index
+      - name: Require all eight caller, payload and site feed controls
+        if: runner.os != 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-installer-index').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==8 and len({c.attrib['name'] for c in cases})==8;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Containers command admission
         run: >-
           python tools/run-plugin-tests.py payload-invocation

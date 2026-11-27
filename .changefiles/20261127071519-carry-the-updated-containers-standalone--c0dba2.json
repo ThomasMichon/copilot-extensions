@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the updated Containers standalone installer support closure through managed source materialization.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

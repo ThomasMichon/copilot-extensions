@@ -55,6 +55,17 @@ source boundaries, not complete installation latency, installed fleet readiness
 or production setup. `test_runtime_profile.py` separately retains profile intent,
 immutable reuse, failed-candidate cleanup, source mutation and source stamping.
 
+The prepared helper's native owners have different warm behavior: Bash Prepare
+reaches `uv python install`, while PowerShell reuses an existing exact interpreter
+without installation. The setup controls preserve those owner-specific work
+counts rather than requiring a redundant Windows acquisition.
+
+Eight POSIX `test_installer_index.py` controls compare caller and payload UV
+defaults through the actual canonical pip reader, retaining both relative and
+absolute caller site prefixes. The reader runs in the same payload context as
+dependency installation, so an unrelated caller's default cannot suppress the
+governed pip bridge or replace a payload's own default.
+
 ## Prepared-only finite removal
 
 `test_uninstall_bootstrap.py` invokes the real isolated legacy helpers with

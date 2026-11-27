@@ -134,12 +134,20 @@ def test_seed_selects_managed_python_without_using_ambient(
         "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18"
     ) == 2
     installs = [call for call in calls if call.startswith("python install")]
-    assert len(installs) == (2 if operation == "Prepare" else 0)
+    assert len(installs) == (2 if operation == "Prepare" and Path(host).stem == "bash" else 0)
     assert not any("pip" in call for call in calls)
+    uv_calls = [call for call in calls if not call.startswith("-I -S -B -c ")]
+    expected = ["--version", "--version"]
+    if operation == "Prepare" and Path(host).stem == "bash":
+        expected.append("python install --no-bin --no-registry cpython@3.11.18")
+    expected.append(
+        "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18"
+    )
+    assert uv_calls == expected * 2
     record_property("containers_installer_seed", json.dumps({
         "shell": Path(host).stem, "operation": operation,
         "materialized": seed.env["CONTAINERS_TEST_SUPPORT"] == str(seed.payload / "scripts"),
-        "samples_seconds": samples, "uv_calls": len(calls), "network": "disabled",
+        "samples_seconds": samples, "uv_calls": len(uv_calls), "network": "disabled",
     }, sort_keys=True))
 
 
@@ -198,7 +206,9 @@ def test_explicit_cold_seed_uses_native_prerequisite_owner(seed: Removal, host: 
     assert result.returncode == 0, result.stdout + result.stderr
     assert (destination / seed.uv.name).is_file()
     assert not seed.poison.exists()
-    assert "python install --no-bin --no-registry cpython@3.11.18" in seed.calls.read_text()
+    assert (
+        "python install --no-bin --no-registry cpython@3.11.18" in seed.calls.read_text()
+    ) == (Path(host).stem == "bash")
 
 
 @pytest.mark.parametrize("host", cases.HOSTS)
@@ -242,7 +252,9 @@ def test_actual_installer_prepares_before_source_identity(
     assert Path(observed["python"]).resolve() == python
     assert observed["isolated"] == 1 and observed["bytecode"]
     assert not seed.poison.exists()
-    assert ("python install " in seed.calls.read_text()) == (action == "install")
+    assert ("python install " in seed.calls.read_text()) == (
+        action == "install" and Path(host).stem == "bash"
+    )
 
 
 @pytest.mark.parametrize("host", cases.HOSTS)

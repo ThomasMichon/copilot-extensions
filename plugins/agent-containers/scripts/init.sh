@@ -328,9 +328,15 @@ _ensure_uv_index() {
     elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
         site_prefix="$CONDA_PREFIX"
     fi
+    if [[ -n "$site_prefix" && "$site_prefix" != /* ]]; then
+        site_prefix="$PWD/$site_prefix"
+    fi
     py="$(_source_python)" || return
-    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
-        --uv "$CONTAINERS_UV" --site-prefix "$site_prefix" </dev/null)" || return
+    idx="$(
+        cd -- "$PLUGIN_DIR" || exit
+        "$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+            --uv "$CONTAINERS_UV" --site-prefix "$site_prefix" </dev/null
+    )" || return
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
