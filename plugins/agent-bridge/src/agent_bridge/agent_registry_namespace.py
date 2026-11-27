@@ -139,14 +139,17 @@ class CliNamespaceResolver(NamespaceResolver):
     async def _run(
         self, argv: list[str], *, timeout: float = 90.0,
     ) -> tuple[int, str, str] | None:
-        """Run ``<binstub> <argv...>`` or return ``None`` if launch failed."""
+        """Run the provider, preserving launch failures for owner-only resolution."""
         from .container_fleet_context import check_provider_arguments, provider_arguments
 
+        owner_only_resolve = argv[:1] == ["namespace-resolve"] and self._fallback is None
         if self._command:
             command = self._command
         else:
             exe = shutil.which(self._binstub)
             if not exe:
+                if owner_only_resolve:
+                    raise RuntimeError("CLI namespace provider executable is unavailable")
                 return None
             command = [exe]
         arguments = await provider_arguments(command, self.prefix, argv)
@@ -168,11 +171,17 @@ class CliNamespaceResolver(NamespaceResolver):
             else:
                 result = await asyncio.to_thread(_call)
         except subprocess.TimeoutExpired:
+            if owner_only_resolve:
+                raise RuntimeError("CLI namespace provider timed out during resolution") from None
             if argv == ["namespace-list"]:
                 self._list_timed_out = True
             log.warning("CLI namespace call exceeded execution timeout: %s %s", self._binstub, argv)
             return None
-        except Exception:
+        except Exception as exc:
+            if owner_only_resolve:
+                if isinstance(exc, FileNotFoundError):
+                    raise RuntimeError("CLI namespace provider executable is unavailable") from None
+                raise RuntimeError("CLI namespace provider could not execute resolution") from None
             log.debug(
                 "CLI namespace call failed: %s %s",
                 self._binstub,
@@ -377,7 +386,11 @@ class CliNamespaceResolver(NamespaceResolver):
             if rc == 0:
                 try:
                     spec = json.loads(out)
-                except Exception:
+                except (ValueError, RecursionError):
+                    if self._fallback is None:
+                        raise RuntimeError(
+                            "CLI namespace provider returned malformed resolution JSON"
+                        ) from None
                     log.warning(
                         "namespace-resolve output unparseable (%s) -- falling "
                         "back",
@@ -385,6 +398,8 @@ class CliNamespaceResolver(NamespaceResolver):
                         exc_info=True,
                     )
                 else:
+                    if not isinstance(spec, dict):
+                        raise RuntimeError("CLI namespace provider returned a non-object resolution")
                     raw_venue = spec.get("venue")
                     if raw_venue is not None and not isinstance(raw_venue, dict):
                         raise RuntimeError(
@@ -401,10 +416,9 @@ class CliNamespaceResolver(NamespaceResolver):
                             f"{self._binstub} namespace-resolve returned an "
                             "invalid workspace_folder"
                         )
-                    if security_profile is not None and security_profile not in {
-                        "trusted",
-                        "restricted",
-                    }:
+                    if security_profile is not None and security_profile not in (
+                        "trusted", "restricted",
+                    ):
                         raise RuntimeError(
                             f"{self._binstub} namespace-resolve returned an "
                             "invalid security_profile"
@@ -558,7 +572,7 @@ class CliNamespaceResolver(NamespaceResolver):
                     if target_type != "command":
                         raise RuntimeError(
                             f"{self._binstub} namespace-resolve returned "
-                            f"unsupported target type {target_type!r}"
+                            "an unsupported target type"
                         )
                     if (
                         not isinstance(spawn_command, list)
@@ -581,6 +595,10 @@ class CliNamespaceResolver(NamespaceResolver):
                         container=spec.get("container"),
                         venue=venue or None,
                     )
+            elif self._fallback is None:
+                raise RuntimeError(
+                    f"CLI namespace provider exited with status {rc} during resolution"
+                )
         return await self._fallback_or_raise(
             "resolve",
             name,

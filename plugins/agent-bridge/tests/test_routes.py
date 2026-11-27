@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -20,8 +21,8 @@ from agent_bridge.agent_registry_cache import AgentRosterCache
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig
 from agent_bridge.session_status import SessionStatus
-from agent_bridge.agent_registry_namespace import NamespaceResolver
-from agent_bridge.routes.worktree_entry import WorktreeEntry
+from agent_bridge.agent_registry_namespace import CliNamespaceResolver, NamespaceResolver
+from agent_bridge.routes.worktree_entry import WorktreeEntry, parse_worktree_list
 from agent_bridge.routes.worktree_probe import probe_archived_owner
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_manager import Session, SessionManager
@@ -403,6 +404,51 @@ class TestSessionRoutes:
 
         assert resp.status_code == 409
         assert "no matching fleet configuration" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        ("outcome", "detail"),
+        [
+            ("missing", "executable is unavailable"),
+            ("timeout", "timed out during resolution"),
+            ("launch", "could not execute resolution"),
+            ("exit", "exited with status 1 during resolution"),
+            ("malformed", "returned malformed resolution JSON"),
+            ("non-object", "returned a non-object resolution"),
+        ],
+    )
+    def test_create_session_reports_safe_cli_namespace_resolution_failure(
+        self, client: Any, app: Any, outcome: str, detail: str,
+    ) -> None:
+        resolver = app.state.resolver
+        resolver.register_namespace_resolver(CliNamespaceResolver("container", "example-provider"))
+        start = AsyncMock()
+        calls = []
+
+        def run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(command[1:])
+            if outcome == "timeout":
+                raise subprocess.TimeoutExpired(command, 90, stderr="private diagnostic")
+            if outcome == "launch":
+                raise PermissionError("private diagnostic")
+            rc, stdout = {
+                "exit": (1, ""),
+                "malformed": (0, "private output"),
+                "non-object": (0, "[]"),
+            }[outcome]
+            return subprocess.CompletedProcess(command, rc, stdout, "private diagnostic")
+
+        with (
+            patch.object(resolver, "refresh_provider_resolvers"),
+            patch.object(app.state.session_manager, "start_session", start),
+            patch("shutil.which", return_value=None if outcome == "missing" else "example-provider"),
+            patch("subprocess.run", side_effect=run),
+        ):
+            resp = client.post("/api/v1/sessions", json={"agent": "container:sample-target"})
+
+        assert resp.status_code == 409
+        assert resp.json() == {"detail": f"CLI namespace provider {detail}"}
+        assert calls == ([] if outcome == "missing" else [["namespace-resolve", "sample-target"]])
+        start.assert_not_awaited()
 
     def test_get_session_falls_through_to_cold_store_provider(
         self, client: Any, app: Any
@@ -1618,15 +1664,13 @@ class TestWorktreeRoutes:
         assert entry.interactive_cli_state() == "held"
 
     def test_parse_worktree_list_reads_mux_details(self) -> None:
-        """_parse_worktree_list threads mux_details fields from list --json."""
-        from agent_bridge.routes import worktrees as wt_routes
-
+        """The parser preserves mux details from list --json."""
         raw = (
             '{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
             ' "branch": "b1", "status": "active", "mux_session": true,'
             ' "mux_clients": 2, "mux_attached": true}]}'
         )
-        entries = wt_routes._parse_worktree_list(raw, "test-agent")
+        entries = parse_worktree_list(raw, "test-agent")
         assert len(entries) == 1
         assert entries[0].mux_session is True
         assert entries[0].mux_clients == 2
@@ -1636,8 +1680,6 @@ class TestWorktreeRoutes:
     def test_parse_worktree_list_reads_taxonomy_marks(self) -> None:
         """#2668: _parse_worktree_list threads interface/origin/picker_hidden
         from ``agent-worktrees list --json`` and to_dict re-exposes them."""
-        from agent_bridge.routes import worktrees as wt_routes
-
         raw = (
             '{"version": 1, "worktrees": ['
             '{"id": "u1", "path": "/u1", "branch": "b", "status": "active",'
@@ -1645,7 +1687,7 @@ class TestWorktreeRoutes:
             '{"id": "d1", "path": "/d1", "branch": "b", "status": "active",'
             ' "interface": "acp", "origin": "delegate", "picker_hidden": true}]}'
         )
-        entries = wt_routes._parse_worktree_list(raw, "test-agent")
+        entries = parse_worktree_list(raw, "test-agent")
         by_id = {e.id: e for e in entries}
         # Operator-owned ACP session: shown.
         assert by_id["u1"].origin == "user"
@@ -1660,11 +1702,9 @@ class TestWorktreeRoutes:
     def test_parse_worktree_list_taxonomy_defaults_when_absent(self) -> None:
         """An older agent-worktrees runtime omits the marks -> degrade to
         None/shown so the cockpit shows everything (today's behavior)."""
-        from agent_bridge.routes import worktrees as wt_routes
-
         raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
                ' "branch": "b", "status": "active"}]}')
-        entries = wt_routes._parse_worktree_list(raw, "test-agent")
+        entries = parse_worktree_list(raw, "test-agent")
         assert entries[0].origin is None
         assert entries[0].interface is None
         assert entries[0].picker_hidden is False
@@ -1674,8 +1714,6 @@ class TestWorktreeRoutes:
         """#2956: _parse_worktree_list threads the status-core disposition
         (follow_up/summary) + derived live pulse from ``agent-worktrees list
         --json`` and to_dict re-exposes them for the cockpit."""
-        from agent_bridge.routes import worktrees as wt_routes
-
         raw = (
             '{"version": 1, "worktrees": ['
             '{"id": "f1", "path": "/f1", "branch": "b", "status": "active",'
@@ -1684,7 +1722,7 @@ class TestWorktreeRoutes:
             ' "live_intent": "Wiring the cockpit render",'
             ' "live_intent_at": "2026-07-16T16:00:00Z", "live_intent_idle": false}]}'
         )
-        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        e = parse_worktree_list(raw, "test-agent")[0]
         assert e.follow_up is True
         assert e.summary == "Phase 8 left; PR open"
         assert e.live_intent == "Wiring the cockpit render"
@@ -1701,11 +1739,9 @@ class TestWorktreeRoutes:
     def test_parse_worktree_list_status_core_defaults_when_absent(self) -> None:
         """Older runtime omits the status-core fields -> disposition unset,
         pulse absent (the cockpit simply shows no overlay)."""
-        from agent_bridge.routes import worktrees as wt_routes
-
         raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
                ' "branch": "b", "status": "active"}]}')
-        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        e = parse_worktree_list(raw, "test-agent")[0]
         assert e.follow_up is False
         assert e.summary is None
         assert e.live_intent is None
@@ -1722,8 +1758,6 @@ class TestWorktreeRoutes:
         the cockpit consumer's job via ``prune.interpret_descriptor_payload``,
         since a cross-machine crawl may reach a different agent-worktrees
         version)."""
-        from agent_bridge.routes import worktrees as wt_routes
-
         closure = {
             "version": 1,
             "label": "FINAL",
@@ -1737,18 +1771,16 @@ class TestWorktreeRoutes:
                 "closure": closure,
             }],
         })
-        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        e = parse_worktree_list(raw, "test-agent")[0]
         assert e.closure == closure
         assert e.to_dict()["closure"] == closure
 
     def test_parse_worktree_list_closure_absent_when_not_classified(self) -> None:
         """Absent when the crawl didn't run --classify (or hit an older
         runtime) -- the cockpit falls back to legacy fields, never guesses."""
-        from agent_bridge.routes import worktrees as wt_routes
-
         raw = ('{"version": 1, "worktrees": [{"id": "w1", "path": "/w1",'
                ' "branch": "b", "status": "active"}]}')
-        e = wt_routes._parse_worktree_list(raw, "test-agent")[0]
+        e = parse_worktree_list(raw, "test-agent")[0]
         assert e.closure is None
         assert e.to_dict()["closure"] is None
 
