@@ -1193,8 +1193,30 @@ An older owned, completed selected runtime remains usable under current
 management receipts until an installer-driven update selects its replacement.
 The follow-on command preserves the caller's outside-payload working directory,
 argument vector, standard streams and native exit status. Context-bearing
-invocation requires an existing Python 3.10+ interpreter; this prerequisite does
-not affect native legacy first-touch installation.
+invocation selects its independently declared managed bootstrap through
+prepared-only UV inspection, never ambient `python` or `python3`. After strict
+cell selection, the selected application interpreter also passes the shared
+exact-addressed UV admission; metadata is revalidated after that bounded lookup
+before application entry. The helper and application may use different declared
+Python versions. Missing UV, prepared Python or admission support refuses without
+acquisition or implicit provisioning. Legacy READY commands use the same
+prepared-only application admission; their existing native first-touch
+installation driver remains the owner of the separate missing-runtime route.
+PowerShell forwarding keeps argument data in a per-invocation file under
+an owner-private temporary directory, removed before application entry. It does
+not consume command stdin, expand long bodies on the native command line or
+publish them in process-wide environment variables.
+Python startup sanitization happens in the selected child, not by clearing the
+caller's Python environment or changing its console encoding. Legacy module
+entry uses an isolated control process and foreground application child with the
+same admitted interpreter; other application startup/cache variables remain in
+that child's environment. Governed entry retains its existing isolated helper
+and application-child model.
+
+The [inert command controls](tests/README.md) exercise both
+dispatch paths with real prepared interpreters, without PR/provider, network,
+broker or service effects. Canonical governance and complete-selection
+regressions remain in `tests/test_cell_invocation.py`.
 
 A live lease-only holder without
 verifiable same-cell ownership blocks activation, even when its legacy endpoint
