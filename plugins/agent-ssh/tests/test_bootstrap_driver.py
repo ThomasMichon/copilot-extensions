@@ -1,23 +1,31 @@
 """The bootstrap is one producer, not an installer or a companion-hook owner."""
+from __future__ import annotations
 
+from collections.abc import Callable
+from importlib import import_module
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from typing import cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
-from test_bootstrap_check_reconcile_always_on import _BASH, _clean_env
+_routing = import_module(
+    ".test_bootstrap_check_reconcile_always_on", __package__,
+) if __package__ else import_module("test_bootstrap_check_reconcile_always_on")
+_BASH = cast(str | None, _routing._BASH)
+_clean_env = cast(Callable[[dict[str, str]], dict[str, str]], _routing._clean_env)
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("suffix", ["ps1", "sh"])
-def test_ssh_bootstrap_routes_only_fixed_actions_without_an_outer_owner(suffix):
+def test_ssh_bootstrap_routes_only_fixed_actions_without_an_outer_owner(suffix: str) -> None:
     script = (PLUGIN / "scripts" / f"bootstrap-check.{suffix}").read_text()
     assert f"first-use.{suffix}" in script
     assert "vault-stamp-v1" in script
@@ -29,7 +37,7 @@ def test_ssh_bootstrap_routes_only_fixed_actions_without_an_outer_owner(suffix):
     assert "Stop-Process" not in script and "nohup" not in script
 
 
-def test_ssh_bootstrap_preserves_declared_deadline_and_independent_hooks():
+def test_ssh_bootstrap_preserves_declared_deadline_and_independent_hooks() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["sessionStart"]
     assert len(hooks) == 3
     assert [hook["timeoutSec"] for hook in hooks] == [15, 10, 45]
@@ -39,7 +47,7 @@ def test_ssh_bootstrap_preserves_declared_deadline_and_independent_hooks():
         assert "write-session-guidance" in hooks[2][shell]
 
 
-def test_ssh_foundation_uses_existing_source_materialization_owner():
+def test_ssh_foundation_uses_existing_source_materialization_owner() -> None:
     text = (PLUGIN / "pyproject.toml").read_text()
     assert '"agent-update-driver"' in text
     assert 'agent-update-driver = { path = "../../libs/update-driver", editable = true }' in text
@@ -53,7 +61,9 @@ def test_ssh_foundation_uses_existing_source_materialization_owner():
     "ordinary", "empty-no-self", "no-ack", "foreign-ack", "driver-refused", "old-driver",
     "wrong-plugin", "array-plugin", "snapshot", "ordinary-copy",
 ])
-def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, phase, condition):
+def test_native_bootstrap_validates_launch_handoff_without_installing(
+    tmp_path: Path, phase: str, condition: str,
+) -> None:
     if os.name != "nt" and _BASH is None:
         pytest.skip("native Bash is unavailable")
     home = tmp_path / "home-caf\u00e9"
@@ -67,6 +77,11 @@ def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, 
         payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    (scripts / "installation-context").mkdir()
+    shutil.copyfile(
+        PLUGIN / "scripts/installation-context/json-query.awk",
+        scripts / "installation-context/json-query.awk",
+    )
     suffix = "ps1" if os.name == "nt" else "sh"
     hook = scripts / f"bootstrap-check.{suffix}"
     shutil.copyfile(PLUGIN / "scripts" / hook.name, hook)
@@ -125,7 +140,9 @@ def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, 
         env["AGENT_SSH_NO_SELFPROVISION"] = ""
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        def quote(value: Path) -> str:
+            return "'" + str(value).replace("'", "''") + "'"
+
         command = [
             str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
             f"Set-Location -LiteralPath {quote(project)}; "
@@ -133,6 +150,7 @@ def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, 
             f"& {quote(hook)}; exit $LASTEXITCODE",
         ]
     else:
+        assert _BASH is not None
         command = [_BASH, str(hook)]
     result = subprocess.run(
         command, env=env, cwd=project, capture_output=True, text=True,

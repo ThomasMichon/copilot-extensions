@@ -17,6 +17,11 @@ submit fixed native actions before holding any outer provisioning lock. The
 and log, not durable acceptance. The ordinary request receipt and result in that
 log remain authoritative. Healthy and namespaced hooks remain no-ops; companion
 registration and session guidance keep their independent hooks.
+POSIX drift detection reads the selected source path and version from one
+native JSON snapshot, without Python or UV. The invoked payload owns that
+reader; the manifest-selected payload still owns version comparison and driver
+submission. Malformed, ambiguous or NUL metadata refuses instead of selecting
+another source. PowerShell already reads the manifest natively.
 
 Managed publication, disabled self-provisioning, pinned reads, nested owners,
 unavailable sources and unsupported retained/custom sources refuse before queue

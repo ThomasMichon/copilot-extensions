@@ -43,6 +43,11 @@ on:
       - plugins/agent-codespaces/tests/test_bootstrap_check_reconcile_always_on.py
       - libs/payload-invocation/tests/test_containers_ready_source.py
       - libs/payload-invocation/tests/test_ssh_ready_source.py
+      - libs/payload-invocation/tests/test_ssh_metadata_source.py
+      - plugins/agent-ssh/scripts/bootstrap-check.sh
+      - plugins/agent-ssh/tests/test_bootstrap_native_metadata.py
+      - plugins/agent-ssh/tests/test_bootstrap_driver.py
+      - plugins/agent-ssh/tests/test_bootstrap_check_reconcile_always_on.py
       - libs/payload-invocation/tests/test_logger_ready_source.py
       - libs/payload-invocation/tests/test_pull_requests_ready_source.py
       - libs/payload-invocation/tests/test_worktrees_ready_source.py
@@ -1729,6 +1734,31 @@ jobs:
       - *command-native-python
       - *command-native-uv
       - *command-native-interpreters
+      - name: Qualify native SSH drift metadata and retained Linux handoff
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          selector="not test_native_bootstrap_validates_launch_handoff_without_installing and not test_sh_reconciles_"
+          if [ "$RUNNER_OS" = Linux ]; then selector=""; fi
+          python tools/run-plugin-tests.py payload-invocation \
+            --test-file tests/test_ssh_metadata_source.py --allow-explicit-tiers \
+            -k "$selector" --junit-dir qualification-evidence/ssh-metadata
+      - name: Require actual native SSH metadata cases and repeated two-query reports
+        if: runner.os != 'Windows'
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/ssh-metadata').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          expected=78 if os.environ['RUNNER_OS']=='Linux' else 56;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='ssh_native_metadata'];
+          assert len(reports)==4 and {(r['layout'],r['selection']) for r in reports}==
+          {(l,s) for l in ('raw','materialized') for s in ('legacy-venv','current-marker')};
+          assert all(r['query_calls']==4 and r['python_calls']==r['uv_calls']==r['driver_calls']==0
+          and len(r['samples_seconds'])==2 and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'ssh_native_metadata':reports},sort_keys=True))"
       - name: Qualify prepared SSH command admission without SSH effects
         run: >-
           python tools/run-plugin-tests.py payload-invocation
