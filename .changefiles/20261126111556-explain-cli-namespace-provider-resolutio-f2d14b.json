@@ -1,0 +1,9 @@
+{
+  "comment": "Explain CLI namespace provider resolution failures without exposing provider output",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -72,7 +72,7 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
     procutil = module("agent_procutil", __path__=[], no_window_flags=unavailable)
     module("agent_procutil.metrics", CpuObservation=object)
     module("plugin_resolve", __path__=[])
-    module("plugin_resolve.reflection", selection_spec=unavailable)
+    module("plugin_resolve.reflection", selection_spec=unavailable, selection_cli_args=unavailable)
     config = SimpleNamespace(fleets={}, image_prefixes=[])
     configuration = module(
         f"{provider}.config",
@@ -175,6 +175,62 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
         inventory, config, leases, holds, calls, wire, lifecycle, reader,
         consumer.NamespaceListIncomplete,
     )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "detail"),
+    [
+        pytest.param("missing", "executable is unavailable", id="missing"),
+        pytest.param("timeout", "timed out during resolution", id="timeout"),
+        pytest.param("launch", "could not execute resolution", id="launch"),
+        pytest.param("exit", "exited with status 7 during resolution", id="exit"),
+        pytest.param("malformed", "returned malformed resolution JSON", id="malformed"),
+        pytest.param("non-object", "returned a non-object resolution", id="non-object"),
+    ],
+)
+def test_bridge_namespace_resolution_failure_is_classified(
+    contract: NamespaceContract, monkeypatch: pytest.MonkeyPatch, outcome: str, detail: str,
+) -> None:
+    consumer = sys.modules[type(contract.reader).__module__]
+    package = consumer.__package__
+    fleet = ModuleType(f"{package}.container_fleet_context")
+    compatibility = ModuleType(f"{package}.agent_registry")
+
+    async def provider_arguments(command: list[str], namespace: str, argv: list[str]) -> list[str]:
+        assert command == ["/synthetic/provider"] and namespace == "container"
+        return argv
+
+    fleet.__dict__.update(
+        provider_arguments=provider_arguments,
+        check_provider_arguments=lambda arguments, returncode, stderr: None,
+    )
+    compatibility.__dict__.update(_NS_NOT_FOUND_EXIT=3, _NS_BAD_STATE_EXIT=4)
+    monkeypatch.setitem(sys.modules, fleet.__name__, fleet)
+    monkeypatch.setitem(sys.modules, compatibility.__name__, compatibility)
+    monkeypatch.setattr(consumer, "no_window_flags", lambda: 0)
+    if outcome == "missing":
+        monkeypatch.setattr(consumer.shutil, "which", lambda command: None)
+    calls: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: Any) -> Any:
+        calls.append(command[1:])
+        if outcome == "timeout":
+            raise consumer.subprocess.TimeoutExpired(command, 90, stderr="private diagnostic")
+        if outcome == "launch":
+            raise PermissionError("private diagnostic")
+        returncode, stdout = {
+            "exit": (7, ""),
+            "malformed": (0, "private output"),
+            "non-object": (0, "[]"),
+        }[outcome]
+        return consumer.subprocess.CompletedProcess(command, returncode, stdout, "private diagnostic")
+
+    monkeypatch.setattr(consumer.subprocess, "run", run)
+    resolver = consumer.CliNamespaceResolver("container", "synthetic-provider")
+    with pytest.raises(RuntimeError) as failure:
+        complete_inline(resolver.resolve("sample-target"))
+    assert str(failure.value) == f"CLI namespace provider {detail}"
+    assert calls == ([] if outcome == "missing" else [["namespace-resolve", "sample-target"]])
 
 
 @pytest.mark.parametrize("delivered", [True, False], ids=["delivered", "refused"])

@@ -1295,6 +1295,8 @@ provider manifests are skipped with a warning, and a foreign standard
 cross-cell mix-up never breaks daemon startup. The built-in `admin:` resolver
 is registered in-process.
 
+When a CLI namespace provider has no in-process fallback, session start reports failures to run the provider, unexpected exit statuses, and malformed or non-object resolution JSON as HTTP 409, with a reason that omits provider output and command arguments.
+
 `namespace-resolve` may return a versioned, provider-owned `venue` object.
 Agent-bridge preserves that object unchanged in the `SpawnTarget` and durable
 session record so stable target/instance identity, trust posture, readiness, and
