@@ -260,6 +260,35 @@ Actual source claims, test reports, complete issue reading and source/copy
 admission remain separate. No final unit, issue effect, product/native
 execution or resource operation follows.
 
+The [finite-source delivery and retained-acceptance study](journal/2026/11.27-finite-source-delivery-and-retained-acceptance.md)
+qualifies and reads twenty-one further whole requests and all 73 discussions.
+Eight complete qualified PR descriptions and 29 human-authored comment texts
+distinguish delivered source slices from their original remaining acceptance.
+Twenty-seven PR comments are attribution-only; two carry substantive owner
+follow-ups. Reference/provenance metadata for eleven other originals does not
+give them whole-text or semantic credit.
+
+The study credits finite wheel configuration, owned-capacity admission,
+released-only acquisition, stopped-venue reservation, structured native
+question answering and the bounded coverage-auditability amendment. It does
+not repeat the obsolete assertions that the question answer path is absent,
+the amended coverage PR is still an unmerged native candidate, or the older
+capacity fallthrough remains proven current. Wider native, recycler,
+same-instance rescue, legacy-input and original-owner conditions remain.
+Conditional future hotfix intent and a claimed multi-round historical
+publication cleanup are not obsolete merely because they are presently
+inactive or have partial preventive controls.
+
+Only the twenty-one selected frozen outcome/gap pairs become current-retained.
+At the same retained 04:38:04 counting observation, effective coverage remains
+584: 448 pending, 81 current-retained, 38 prior-retained, five new-retained,
+six spent-open, five excluded and one coordination identity. All first-six
+historical columns, other rows, prior observations, claims and parent check
+states are preserved. No new census, whole-request completion, accepted
+transfer, final completion-check unit, issue effect or resource action occurs.
+Attributed source/native reports are not this campaign's current-code,
+execution, installed or rollout verification.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,
