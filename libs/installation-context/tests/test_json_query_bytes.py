@@ -55,6 +55,16 @@ def test_hex_query_still_refuses_duplicate_keys() -> None:
     assert b"duplicate" in result.stderr.lower()
 
 
+@pytest.mark.parametrize("escaped", [
+    b"\\u00gg", b"\\u000", b"\\ud800", b"\\udc00",
+    b"\\ud800\\u0000", b"\\ud800\\udc0g",
+])
+def test_string_query_refuses_invalid_unicode_escape_quads(escaped: bytes) -> None:
+    result = _query(b'{"value":"' + escaped + b'"}', mode="string")
+    assert result.returncode == 2
+    assert result.stdout == b""
+
+
 @pytest.mark.parametrize("ensure_ascii", [False, True])
 @pytest.mark.parametrize("value", ['/managed quote"back\\slash/\u00e9\U0001f600/bin/python', "line\n"])
 def test_string_query_preserves_decoded_bytes(ensure_ascii: bool, value: str) -> None:

@@ -56,6 +56,9 @@ its whole working set rolled back.
   It still validates the entire JSON document, all inspected name fields and
   selected source fields; duplicate/ambiguous entries and containment violations
   remain refusals. No source identity or readiness result is cached.
+  Unicode escape quads use portable length/hex checks, including on older
+  `mawk` without regular-expression interval support; malformed escapes and
+  unpaired surrogates remain errors.
 - `installation-context.ps1` is a thin PowerShell 5.1+/pwsh adapter to the
   same stdlib-only Python SDK. Setup can pass its prepared interpreter through
   `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`, an absolute executable path inherited

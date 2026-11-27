@@ -233,58 +233,41 @@ if [ ! -f "$Manifest" ]; then
   exit 0
 fi
 
-py="$(command -v python3 || command -v python || true)"
-[ -n "$py" ] || exit 0
+manifest_value() {
+  LC_ALL=C awk -f "$query" -v mode="$1" -v query_path="$2" "$Manifest" 2>/dev/null
+}
+manifest_string() {
+  local value
+  value="$(manifest_value string "$1")" && [ -n "$value" ] || return 1
+  printf '%s' "$value"
+}
 
 if [ "$ContextSelected" = 1 ]; then
-  manifestValues="$("$py" -c '
-import json, sys
-def strict(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError("duplicate key")
-        value[key] = item
-    return value
-with open(sys.argv[1], "r", encoding="utf-8") as stream:
-    manifest = json.load(stream, object_pairs_hook=strict)
-source = manifest.get("source")
-runtime = manifest.get("runtime")
-installation = manifest.get("installation")
-selected = runtime.get("selectedBy") if isinstance(runtime, dict) else None
-valid = (
-    type(manifest.get("schema_version")) is int
-    and manifest["schema_version"] == 4
-    and manifest.get("service") == "agent-machines"
-    and isinstance(source, dict)
-    and source.get("repo") == "copilot-extensions"
-    and source.get("plugin") == "agent-machines"
-    and all(isinstance(source.get(key), str) and source[key]
-            for key in ("kind", "path", "version"))
-    and type(source.get("dirty")) is bool
-    and isinstance(runtime, dict)
-    and runtime.get("kind") == "python"
-    and all(isinstance(runtime.get(key), str) and runtime[key]
-            for key in ("version", "path", "interpreter"))
-    and isinstance(selected, dict)
-    and all(isinstance(selected.get(key), str) and selected[key]
-            for key in ("kind", "path", "version"))
-    and isinstance(installation, dict)
-    and installation.get("marketplaceId") == sys.argv[2]
-    and installation.get("pluginId") == "agent-machines"
-    and installation.get("context") == sys.argv[3]
-)
-if not valid:
-    raise ValueError("invalid manifest")
-print("\x1c".join((
-    source["version"], source["path"], runtime["version"],
-    runtime["path"], runtime["interpreter"], selected["version"],
-)))
-' "$Manifest" "$ContextMarketplaceId" "$ContextPath" 2>/dev/null)" || {
+  valid_manifest() {
+    [ "$(manifest_value type schema_version)" = number ] &&
+    [ "$(manifest_value get schema_version)" = 4 ] &&
+    [ "$(manifest_string service)" = agent-machines ] &&
+    [ "$(manifest_string "$(jsonPath source repo)")" = copilot-extensions ] &&
+    [ "$(manifest_string "$(jsonPath source plugin)")" = agent-machines ] &&
+    manifest_string "$(jsonPath source kind)" >/dev/null &&
+    [ "$(manifest_value type "$(jsonPath source dirty)")" = boolean ] &&
+    [ "$(manifest_string "$(jsonPath runtime kind)")" = python ] &&
+    manifest_string "$(jsonPath runtime selectedBy kind)" >/dev/null &&
+    manifest_string "$(jsonPath runtime selectedBy path)" >/dev/null &&
+    [ "$(manifest_string "$(jsonPath installation marketplaceId)")" = "$ContextMarketplaceId" ] &&
+    [ "$(manifest_string "$(jsonPath installation pluginId)")" = agent-machines ] &&
+    [ "$(manifest_string "$(jsonPath installation context)")" = "$ContextPath" ] &&
+    deployed="$(manifest_string "$(jsonPath source version)")" &&
+    sourcePath="$(manifest_string "$(jsonPath source path)")" &&
+    activeVersion="$(manifest_string "$(jsonPath runtime version)")" &&
+    runtimePath="$(manifest_string "$(jsonPath runtime path)")" &&
+    runtimeInterpreter="$(manifest_string "$(jsonPath runtime interpreter)")" &&
+    selectedByVersion="$(manifest_string "$(jsonPath runtime selectedBy version)")"
+  }
+  valid_manifest || {
     echo "[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback." >&2
     exit 0
   }
-  IFS=$'\034' read -r deployed sourcePath activeVersion runtimePath runtimeInterpreter selectedByVersion <<<"$manifestValues"
   CurrentMarker="$InstallDir/current-version"
   expectedRuntimePath="$InstallDir/versions/$activeVersion"
   expectedInterpreter="$expectedRuntimePath/bin/python"
@@ -299,9 +282,9 @@ print("\x1c".join((
     exit 0
   fi
   current="$deployed"
-  pyproj="$PluginDir/pyproject.toml"
-  if [ -f "$pyproj" ]; then
-    v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
+  projectFile="$PluginDir/pyproject.toml"
+  if [ -f "$projectFile" ]; then
+    v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$projectFile" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
     [ -n "$v" ] && current="$v"
   fi
   if { [ "$deployed" = "$current" ] && [ "$sourcePath" = "$PluginDir" ]; } ||
@@ -319,14 +302,14 @@ print("\x1c".join((
   exit 0
 fi
 
-deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
-pluginDir="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"]["path"])' "$Manifest" 2>/dev/null)"
+deployed="$(manifest_value string "$(jsonPath source version)" || true)"
+pluginDir="$(manifest_string "$(jsonPath source path)")" || exit 0
 [ -n "$pluginDir" ] && [ -d "$pluginDir" ] || exit 0
 
 current="$deployed"
-pyproj="$pluginDir/pyproject.toml"
-if [ -f "$pyproj" ]; then
-  v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
+projectFile="$pluginDir/pyproject.toml"
+if [ -f "$projectFile" ]; then
+  v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$projectFile" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
 

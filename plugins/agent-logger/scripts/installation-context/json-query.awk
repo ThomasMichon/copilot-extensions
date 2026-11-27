@@ -133,7 +133,7 @@ function parse_string(quote, result, character, escape, hex, codepoint, low_hex,
             result = result "\t"
         } else if (escape == "u") {
             hex = substr(document, position, 4)
-            if (length(hex) != 4 || hex !~ /^[0-9A-Fa-f]{4}$/) {
+            if (length(hex) != 4 || hex ~ /[^0-9A-Fa-f]/) {
                 fail("invalid unicode escape")
             }
             position += 4
@@ -144,7 +144,7 @@ function parse_string(quote, result, character, escape, hex, codepoint, low_hex,
                 }
                 position += 2
                 low_hex = substr(document, position, 4)
-                if (length(low_hex) != 4 || low_hex !~ /^[0-9A-Fa-f]{4}$/) {
+                if (length(low_hex) != 4 || low_hex ~ /[^0-9A-Fa-f]/) {
                     fail("invalid low surrogate")
                 }
                 position += 4
