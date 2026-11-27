@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [legacy-target and retained-acceptance crosswalk](journal/2026/11.27-legacy-targets-and-retained-acceptance.md)
+records 37 whole current originals and 267 discussions, distinguishing
+finite source/release credit from their actual caller, native, cleanup,
+ownership and installed acceptance. Current provenance and available
+content-generation metadata are unchanged. Only their outcome/gap pairs
+change; at the retained 582-identity observation, 405 remain pending and
+125 are current-retained. No issue disposition, fresh whole census,
+implementation or source/custody release is claimed.
+
 The [obsolete same-generation test report](journal/2026/11.27-obsolete-same-generation-test-report.md)
 records #6538's `NOT_PLANNED` retirement after reviewed intent #14887,
 current qualification and independently audited acknowledgment/reason/original
@@ -531,6 +540,7 @@ Two complete equal-identity scans at 09:54:40 America/Los_Angeles measure
 582 whole OPEN: 274 original-cohort and 308 inflow. Exactly #6538 departs
 with no arrivals or unrelated departures. All five Plan and eleven global
 Validation items remain OPEN.
+The actual outcome recording merged in #14888.
 
 The [five incomplete-attempt status records](journal/2026/11.27-five-incomplete-attempt-status-records.md)
 were delivered completely into OPEN #4783 after reviewed intent #14881.
@@ -6115,7 +6125,7 @@ separate qualified report evidence and deliberate source-contract replacement
 from reviewed intent, current pre-effect qualification and acknowledged
 proper-reason retirement. Independent provider and whole-original readbacks
 verify #6538 `NOT_PLANNED` with its exact disclosed acknowledgment; the actual
-outcome recording still requires normal review. No technical completion,
+outcome recording merged in #14888. No technical completion,
 native operation or source/custody release follows.
 
 The [four-publication-case delivery gates](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#delivery-gates)

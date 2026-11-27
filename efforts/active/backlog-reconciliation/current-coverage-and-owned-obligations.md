@@ -384,6 +384,28 @@ five excluded and one coordination identity. All five parent Plan and eleven
 global Validation items remain OPEN; the historical incident and wider
 runtime, installation, recovery and custody conditions are not completed.
 
+## Legacy targets and complete retained acceptance
+
+The [thirty-seven-case crosswalk](journal/2026/11.27-legacy-targets-and-retained-acceptance.md)
+retains 37 whole current originals and all 267 discussions after current
+complete provenance and available content-generation comparison. Real
+finite deliveries are credited rather than described as absent; native,
+caller, cleanup, source and ownership conditions remain explicit.
+The artifact report's actual native publisher is separately qualified;
+its 44 discussions are human-authored and preserve distinct historical
+release stages, not 44 automation report units or current reproduction proof.
+
+Only those 37 frozen outcome/gap pairs change. Thirty-three pending and
+one prior-retained outcome become current-retained; three existing
+current-retained gaps are refined. The same retained 582 identities have
+405 pending, 125 current-retained, 35 prior-retained, five new-retained,
+six spent-open, five excluded and one coordination outcome.
+Frozen identities and first-six metadata columns, all other rows, prior
+counts, owners and actual source/copy restrictions remain.
+The unread original and the late-qualified containing exposure receive no
+new whole-case credit. No fresh census, issue effect, technical completion,
+accepted receiving, native test or resource transfer is claimed.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
