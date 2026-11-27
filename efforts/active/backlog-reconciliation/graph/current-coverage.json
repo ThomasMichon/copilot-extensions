@@ -32,6 +32,29 @@
     "provider_connection_empty": true,
     "qualified_description_claim": "Closes #13753"
   },
+  "later_verified_guidance_outcomes": [
+    {
+      "issue": 13753,
+      "state": "CLOSED",
+      "reason": "COMPLETED",
+      "source_pr": 13759,
+      "reviewed_intent_pr": 14831,
+      "acknowledgment": "https://github.com/ThomasMichon/copilot-extensions/issues/13753#issuecomment-7208581699",
+      "independent_provider_and_whole_audit": true,
+      "not_runtime_or_resource_completion": true
+    }
+  ],
+  "later_counting_observation": {
+    "observed_local": "2026-11-26T18:59:50.411297-08:00",
+    "whole_open": 584,
+    "original_cohort_open": 276,
+    "inflow_open": 308,
+    "arrivals_since_frozen_snapshot": [14826, 14832],
+    "departures_since_frozen_snapshot": [13753],
+    "unrelated_departures": [],
+    "node_rows_still_cover_frozen_583_snapshot": true,
+    "arrival_content_admission": false
+  },
   "separate_complete_coordination_original": 7556,
   "complete_coordination_discussions": 32,
   "source_or_tracker_completion_from_this_index": false,
@@ -58,6 +81,7 @@
     "retained-new": "New whole request is qualified and read; its distinct outcome remains unfinished.",
     "retained-prior": "Preserve the prior study's actual retained gap, not unread-intake credit.",
     "candidate": "A complete finite source comparison supports a conditional candidate; final verification and disposition remain separate.",
+    "completed-guidance": "A separate reviewed final unit and independent provider/whole audit verify this finite guidance outcome, not runtime or resource completion.",
     "pending": "Retain the existing issue and prior research; qualified changed-outcome evidence remains pending."
   },
   "historical_columns_scope": "Reference-roster and weighted-role columns are separately dated historical coverage, not current semantic admission or completion.",
@@ -610,7 +634,7 @@
     [13614, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
     [13660, "inflow", "automation", 21, false, null, "pending", "qualified-change-evidence"],
     [13734, "inflow", "member", 12, false, null, "pending", "qualified-change-evidence"],
-    [13753, "inflow", "member", 2, false, null, "candidate", "conditional-source-verification"],
+    [13753, "inflow", "member", 2, false, null, "completed-guidance", null],
     [13764, "inflow", "automation", 0, false, null, "pending", "qualified-change-evidence"],
     [13775, "inflow", "member", 111, false, null, "pending", "qualified-change-evidence"],
     [13781, "inflow", "member", 10, false, null, "pending", "qualified-change-evidence"],
