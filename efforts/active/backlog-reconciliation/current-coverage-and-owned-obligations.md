@@ -289,6 +289,33 @@ transfer, final completion-check unit, issue effect or resource action occurs.
 Attributed source/native reports are not this campaign's current-code,
 execution, installed or rollout verification.
 
+The [entrypoint alternatives and source-authority study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md)
+qualifies and reads twenty-three further whole requests and all 78 discussions.
+Four complete qualified PR descriptions and 27 human-authored comment texts
+credit delivered bounded work: explicit missing-token refusal, native
+runtime-only provider expansion, retired-parent recovery and command-telemetry
+registration. Twenty-six comments are attribution-only and one is a substantive
+historical follow-up. Neither source registration nor an optional mode proves
+caller adoption; the original process-spawn and integration outcomes remain.
+
+The study preserves existing alternatives rather than requiring every proposed
+remedy, retains conditional future performance work without manufacturing a
+trigger, and keeps source-isolation, chosen configuration, readiness,
+authorization and atomic ownership as distinct contracts. Historical source
+findings are not restated as fresh code observations. In particular, the
+delivered explicit missing-token correction is credited instead of reporting
+the old warning/fallthrough path as the current explicit-account behavior.
+
+Only the twenty-three selected frozen outcome/gap pairs become current-retained.
+At the same retained 04:38:04 observation, the effective 584 identities have
+425 pending, 104 current-retained, 38 prior-retained, five new-retained,
+six spent-open, five excluded and one coordination outcome. All historical
+columns, other rows, prior observations, claims and parent check states are
+preserved. Nine other metadata-screened originals gain no whole-text or
+semantic credit. No new census, whole-request completion, accepted transfer,
+final completion unit, issue mutation, product/native execution or resource
+action occurs.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,
