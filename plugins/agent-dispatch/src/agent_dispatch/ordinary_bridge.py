@@ -325,8 +325,7 @@ def start(
             raise BridgeCarriedSessionBusy(f"ordinary pool initial startup is unqualified: {exc}") from exc
     diagnostics.creation_key = reservation.get("creation_key")
     from .bridge import registered_agent_project
-    harness = registered_agent_project(agent, strict=True)
-    project = reservation.get("allocation_project") or harness or project
+    project = reservation.get("allocation_project") or registered_agent_project(agent, strict=True) or project
     from .hosting_policy import require_execution_harness
 
     if not info and (project or reservation.get("worktree_path") or reservation.get("worktree")):

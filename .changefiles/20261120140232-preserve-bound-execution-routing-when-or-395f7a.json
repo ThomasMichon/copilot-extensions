@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve bound execution routing when original startup discovery is unavailable",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
