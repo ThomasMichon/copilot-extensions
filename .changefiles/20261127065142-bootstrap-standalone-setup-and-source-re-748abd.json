@@ -1,0 +1,9 @@
+{
+  "comment": "Bootstrap standalone setup and source readers through managed UV Python and retain independent managed application construction.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

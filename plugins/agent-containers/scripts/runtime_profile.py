@@ -333,6 +333,25 @@ def _run(arguments: list[str], *, cwd: Path) -> None:
             raise RuntimeError(f"Runtime command failed (exit {result.returncode})")
 
 
+def _construct_runtime(slot: Path, uv: str, *, payload: Path) -> None:
+    if os.name == "nt":
+        shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        _run(
+            [str(shell), "-NoProfile", "-File",
+             str(Path(__file__).with_name("runtime-construction.ps1")),
+             "-Uv", uv, "-VenvDir", str(slot)],
+            cwd=payload,
+        )
+    else:
+        bash = shutil.which("bash")
+        if bash is None:
+            raise RuntimeError("Managed Containers construction requires Bash")
+        _run(
+            [bash, str(Path(__file__).with_name("runtime-construction.sh")), uv, str(slot)],
+            cwd=payload,
+        )
+
+
 def _health(python: Path, profile: str, *, cwd: Path) -> None:
     modules = ["agent_containers", *(name.replace("-", "_") for name in LIBRARIES)]
     code = (
@@ -585,26 +604,7 @@ def provision(
                     slot = runtime.slot(
                         root, runtime_version, clean_incomplete=True, link_name=".venv"
                     )
-                    if os.name == "nt":
-                        _run(
-                            [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
-                            cwd=payload,
-                        )
-                    else:
-                        try:
-                            _run([uv, "venv", "--python", python, str(slot)], cwd=payload)
-                        except RuntimeError:
-                            print(
-                                "uv venv failed; retrying the incomplete slot with python -m venv",
-                                file=sys.stderr,
-                            )
-                            runtime.slot(
-                                root, runtime_version, clean_incomplete=True, link_name=".venv"
-                            )
-                            _run(
-                                [python, "-m", "venv", "--copies", "--without-pip", str(slot)],
-                                cwd=payload,
-                            )
+                    _construct_runtime(slot, uv, payload=payload)
                     package = str(payload)
                     if profile == "provider-exec":
                         package += "[provider-exec]"
