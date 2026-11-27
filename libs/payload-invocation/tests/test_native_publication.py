@@ -11,6 +11,7 @@ import venv
 from pathlib import Path
 
 import pytest
+from adopter_admission_fixture import prepare_adopter_admission
 from test_command_binding import PowerShellFactory, _PowerShellHost
 
 from test_command_binding import (
@@ -69,6 +70,9 @@ def _native_fixture(fixture: dict[str, Any], shell: str) -> dict[str, str]:
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("AGENT_WORKTREES_NO_SELFPROVISION", None)
     environment.pop("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", None)
+    for name in ("payload-invocation.json", "pyproject.toml", "readiness-isolation.json"):
+        shutil.copy2(ROOT / "plugins/agent-worktrees" / name, fixture["payload"] / name)
+    prepare_adopter_admission(fixture, environment, ROOT, "agent-worktrees")
     return environment
 
 
@@ -279,7 +283,7 @@ def test_native_first_use_rechecks_real_policy_under_existing_provision_lock(
         binding_fixture, environment, _command(binding_fixture, shell, "invoke-payload-runtime"),
     )
     assert result.returncode == 126, result
-    assert "deployment-managed" in result.stderr
+    assert "deployment-managed" in result.stderr, result.stderr
     assert "explicit installation management" in result.stderr
     assert (binding_fixture["legacy"] / ".provision.lock").exists()
     assert not (binding_fixture["legacy"] / "smoke.json").exists()
@@ -311,7 +315,7 @@ def test_native_bootstrap_preserves_aliased_home(
     )
     assert result.returncode == (3 if state == "managed" else 0), result
     if state == "managed":
-        assert "deployment-managed" in result.stderr
+        assert "deployment-managed" in result.stderr, result.stderr
         assert _snapshot(binding_fixture["home"]) == before
     else:
         assert (binding_fixture["legacy"] / "smoke.json").is_file()
@@ -349,7 +353,7 @@ def test_native_first_use_reads_namespaced_policy_not_legacy(
         host,
     )
     assert result.returncode == 126, result
-    assert "deployment-managed" in result.stderr
+    assert "deployment-managed" in result.stderr, result.stderr
     assert _snapshot(binding_fixture["home"]) == before
     assert not (root / ".provision.lock").exists()
 
@@ -429,6 +433,7 @@ def test_native_first_use_missing_provenance_retains_standalone_dispatch(
     scripts = binding_fixture["payload"] / "scripts"
     (scripts / "install.ps1").write_text(
         "param([Parameter(Position=0)][string]$Action)\n"
+        "# agent-worktrees:first-use-driver-nonblocking-v1\n"
         "$root=Join-Path $env:USERPROFILE '.agent-worktrees'\n"
         "if ($Action -eq 'stamp') {\n"
         "  [IO.File]::WriteAllText((Join-Path $root 'payload-dir'), $env:AGENT_WORKTREES_PAYLOAD_ROOT)\n"
@@ -449,7 +454,18 @@ def test_native_first_use_missing_provenance_retains_standalone_dispatch(
     modules = binding_fixture["home"] / "runtime-module"
     modules.mkdir()
     (modules / "agent_worktrees.py").write_text("print('standalone-runtime')\n", encoding="utf-8")
-    environment.update({"TEST_RUNTIME_PY": sys.executable, "PYTHONPATH": str(modules)})
+    prepared = binding_fixture["home"] / "first-use-runtime"
+    created = subprocess.run(
+        [binding_fixture["admission_uv"], "venv", "--no-project", "--no-python-downloads",
+         "--python", binding_fixture["managed_runtime_python"], str(prepared)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert created.returncode == 0, created.stdout + created.stderr
+    environment.update({
+        "TEST_RUNTIME_PY": str(prepared / ("Scripts/python.exe" if os.name == "nt" else "bin/python")),
+        "PYTHONPATH": str(modules),
+    })
     result = _run(
         binding_fixture, environment, _command(binding_fixture, shell, "invoke-payload-runtime"),
     )
