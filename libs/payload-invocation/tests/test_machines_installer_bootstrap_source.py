@@ -26,6 +26,9 @@ test_inspect_refuses_without_fallback_or_acquisition = (
 test_prepare_reaches_declared_managed_python_without_ambient_interpreter = (
     _source.test_prepare_reaches_declared_managed_python_without_ambient_interpreter
 )
+test_prepare_and_inspect_discover_uv_at_configured_destination = (
+    _source.test_prepare_and_inspect_discover_uv_at_configured_destination
+)
 test_actual_installer_selects_before_source_identity = (
     _source.test_actual_installer_selects_before_source_identity
 )
@@ -37,6 +40,9 @@ test_invalid_cell_request_never_prepares_prerequisites = (
 )
 test_native_stamp_binstub_does_not_select_installer_python = (
     _source.test_native_stamp_binstub_does_not_select_installer_python
+)
+test_bootstrap_forwarding_preserves_watchdog_deadline_mode = (
+    _source.test_bootstrap_forwarding_preserves_watchdog_deadline_mode
 )
 test_application_constructor_uses_independent_managed_requirement = (
     _source.test_application_constructor_uses_independent_managed_requirement

@@ -27,6 +27,8 @@ pytestmark = [
 
 @pytest.fixture
 def bootstrap(lifecycle: LifecycleFixture) -> Iterator[LifecycleFixture]:
+    for name in ("UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL"):
+        lifecycle.env.pop(name, None)
     scripts = lifecycle.payload / "scripts"
     for suffix in ("sh", "ps1"):
         shutil.copy2(PLUGIN / f"scripts/installer-bootstrap.{suffix}", scripts)
@@ -36,7 +38,7 @@ def bootstrap(lifecycle: LifecycleFixture) -> Iterator[LifecycleFixture]:
             assert executable
             (lifecycle.tools / name).symlink_to(executable)
     yield lifecycle
-    for root in (lifecycle.tools, lifecycle.home / ".local/bin"):
+    for root in (lifecycle.tools, lifecycle.home / ".local/bin", lifecycle.home / "uv destination"):
         for name in ("uv", "uv.exe", "unavailable-uv", "unavailable-uv.exe"):
             (root / name).unlink(missing_ok=True)
 
@@ -160,9 +162,10 @@ def _inert_preparation(fixture: LifecycleFixture, *, missing_uv: bool) -> Path:
         downloader = fixture.tools / "curl"
         downloader.write_text(
             "#!/bin/sh\ncat <<'INERT_INSTALLER'\n"
-            'mkdir -p "$HOME/.local/bin"\n'
-            'cp "$MACHINES_TEST_UV" "$HOME/.local/bin/uv"\n'
-            'chmod +x "$HOME/.local/bin/uv"\n'
+            'destination="${UV_UNMANAGED_INSTALL:-$UV_INSTALL_DIR}"\n'
+            'mkdir -p "$destination"\n'
+            'cp "$MACHINES_TEST_UV" "$destination/uv"\n'
+            'chmod +x "$destination/uv"\n'
             'printf acquired > "$MACHINES_TEST_ACQUIRED"\n'
             "INERT_INSTALLER\n",
         )
@@ -187,7 +190,8 @@ def _inert_preparation(fixture: LifecycleFixture, *, missing_uv: bool) -> Path:
         start = text.index("if ($PrepareUv) {")
         helper.write_text(text[:start] + (
             "if ($PrepareUv) {\n"
-            "    $directory = Join-Path $env:USERPROFILE '.local/bin'\n"
+            "    $directory = $env:UV_INSTALL_DIR\n"
+            "    if ($env:UV_UNMANAGED_INSTALL) { $directory = $env:UV_UNMANAGED_INSTALL }\n"
             "    [void][IO.Directory]::CreateDirectory($directory)\n"
             "    [IO.File]::Copy($env:MACHINES_TEST_UV, (Join-Path $directory "
             + ("'uv.exe'" if os.name == "nt" else "'uv'") + "))\n"
@@ -216,6 +220,28 @@ def test_prepare_reaches_declared_managed_python_without_ambient_interpreter(
     calls = bootstrap.calls.read_text().splitlines()
     assert calls.count("python install --no-bin --no-registry cpython@3.11.18") == 1
     assert not any("pip" in call for call in calls)
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell"])
+@pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
+@pytest.mark.parametrize("setting", ["UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL"])
+def test_prepare_and_inspect_discover_uv_at_configured_destination(
+    bootstrap: LifecycleFixture, setting: str,
+) -> None:
+    directory = bootstrap.home / "uv destination"
+    bootstrap.env[setting] = str(directory)
+    if setting == "UV_UNMANAGED_INSTALL":
+        bootstrap.env["UV_INSTALL_DIR"] = str(bootstrap.home / "unused destination")
+    acquisition = _inert_preparation(bootstrap, missing_uv=True)
+    for operation in ("Prepare", "Inspect"):
+        result = _run(bootstrap, operation)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert Path(json.loads(result.stdout)["python"]).resolve() == bootstrap.python
+    assert acquisition.is_file()
+    assert (directory / ("uv.exe" if os.name == "nt" else "uv")).is_file()
+    assert not (bootstrap.home / ".local/bin").exists()
+    assert not (bootstrap.home / "unused destination").exists()
+    assert not bootstrap.poison.exists()
 
 
 @pytest.fixture
@@ -257,6 +283,8 @@ def test_actual_installer_selects_before_source_identity(
     scripts = bootstrap.payload / "scripts"
     if action == "install":
         _inert_preparation(bootstrap, missing_uv=False)
+    elif bootstrap.host == "bash":
+        (scripts / "installation-context/legacy-entrypoint-probe.sh").write_text("exit 0\n")
     proof = bootstrap.home / "source-proof.json"
     bootstrap.env["MACHINES_SOURCE_PROOF"] = str(proof)
     bootstrap.env["COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"] = "fixture-source"
@@ -363,18 +391,29 @@ def test_invalid_cell_request_never_prepares_prerequisites(
     assert not installer.poison.exists()
 
 
-@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("host", ["bash", "pwsh", "powershell"])
 @pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
 def test_native_stamp_binstub_does_not_select_installer_python(
     installer: LifecycleFixture,
 ) -> None:
     scripts = installer.payload / "scripts"
-    (scripts / "installation-context/legacy-entrypoint-probe.ps1").write_text("exit 0\n")
+    suffix = "sh" if installer.host == "bash" else "ps1"
+    (scripts / f"installation-context/legacy-entrypoint-probe.{suffix}").write_text("exit 0\n")
     uv = next(path for path in installer.tools.iterdir() if path.stem == "uv")
     uv.rename(uv.with_name("unavailable-uv" + uv.suffix))
+    if installer.host == "bash":
+        # Retain the existing no-flock transaction prerequisite, not eager UV selection.
+        installer.env["COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"] = str(installer.python)
+        for name in ("mv", "cmp"):
+            executable = shutil.which(name)
+            assert executable
+            (installer.tools / name).symlink_to(executable)
+        command = [installer.shell, str(scripts / "init.sh"), "stamp"]
+    else:
+        command = [installer.shell, "-NoProfile", "-File", str(scripts / "init.ps1"),
+                   "-Action", "stamp-binstub"]
     result = subprocess.run(
-        [installer.shell, "-NoProfile", "-File", str(scripts / "init.ps1"),
-         "-Action", "stamp-binstub"],
+        command,
         capture_output=True, text=True, env=installer.env, cwd=installer.home,
         timeout=40, creationflags=HEADLESS,
     )
@@ -384,6 +423,45 @@ def test_native_stamp_binstub_does_not_select_installer_python(
     command_name = "agent-machines.cmd" if os.name == "nt" else "agent-machines"
     assert (installer.home / ".local/bin" / command_name).is_file()
     assert not installer.calls.exists()
+    assert not installer.poison.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
+@pytest.mark.parametrize("deadline", ["implicit", "plugin", "generic", "disabled"])
+def test_bootstrap_forwarding_preserves_watchdog_deadline_mode(
+    installer: LifecycleFixture, deadline: str,
+) -> None:
+    installer.env.pop("AGENT_MACHINES_INSTALL_DEADLINE_SEC", None)
+    installer.env.pop("COPILOT_PLUGIN_INSTALL_DEADLINE_SEC", None)
+    if deadline == "generic":
+        installer.env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = "20"
+    elif deadline != "implicit":
+        installer.env["AGENT_MACHINES_INSTALL_DEADLINE_SEC"] = "0" if deadline == "disabled" else "20"
+    entry = installer.payload / "scripts/init.ps1"
+    text = entry.read_text()
+    start = text.index("                $__wdDeadline = 480\n")
+    end = text.index("                $__selfStageArgs =", start)
+    decision = text[start:end]
+    marker = "\n# The dependency-light cell-slot runner"
+    assert text.count(marker) == 1
+    entry.write_text(text.replace(marker, (
+        "\n$__selfStageName = 'agent-machines'\n" + decision
+        + "\n@{ explicit=$__wdExplicit; seconds=$__wdDeadline } | ConvertTo-Json -Compress\nexit 0\n"
+        + marker
+    )))
+    result = subprocess.run(
+        [installer.shell, "-NoProfile", "-File", str(entry), "-Action", "stamp"],
+        capture_output=True, text=True, env=installer.env, cwd=installer.home,
+        timeout=40, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["explicit"] == (deadline != "implicit")
+    if deadline == "disabled":
+        assert observed["seconds"] == 0
+    else:
+        assert 0 < observed["seconds"] <= (480 if deadline == "implicit" else 20)
     assert not installer.poison.exists()
 
 

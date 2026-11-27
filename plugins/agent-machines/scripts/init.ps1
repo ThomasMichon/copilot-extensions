@@ -167,6 +167,7 @@ $bootstrapClock = [Diagnostics.Stopwatch]::StartNew()
 $bootstrapDeadline = 480
 $bootstrapDeadlineText = $env:AGENT_MACHINES_INSTALL_DEADLINE_SEC
 if (-not $bootstrapDeadlineText) { $bootstrapDeadlineText = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
+if (-not $bootstrapDeadlineText) { $InstallerWatchdogDefaultApplied = $true }
 $bootstrapDeadlineEnabled = $true
 if ($bootstrapDeadlineText -and (
     -not [int]::TryParse($bootstrapDeadlineText, [ref]$bootstrapDeadline) -or $bootstrapDeadline -le 0

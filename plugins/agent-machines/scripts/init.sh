@@ -470,9 +470,17 @@ case "$ACTION" in
 esac
 case "$ACTION" in
     install|init|provision|cell-provision) _initialize_machines_bootstrap Prepare "$MACHINES_INSTALL_DEADLINE" || exit $? ;;
+    stamp)
+        if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" ||
+            -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+            _initialize_machines_bootstrap Inspect "$MACHINES_INSTALL_DEADLINE" || exit $?
+        fi
+        ;;
     *) _initialize_machines_bootstrap Inspect "$MACHINES_INSTALL_DEADLINE" || exit $? ;;
 esac
-export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$MACHINES_BOOTSTRAP_PYTHON"
+if [[ -n "$MACHINES_BOOTSTRAP_PYTHON" ]]; then
+    export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$MACHINES_BOOTSTRAP_PYTHON"
+fi
 
 # Cell-local slot actions authorize themselves from the explicit context
 # transaction below. Every legacy mutation still requires the legacy probe.

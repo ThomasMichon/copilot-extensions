@@ -1,15 +1,32 @@
 param([switch]$PrepareUv)
 
+function Get-MachinesInstallerUvDirectory {
+    $directory = if ($env:UV_UNMANAGED_INSTALL) { $env:UV_UNMANAGED_INSTALL } elseif ($env:UV_INSTALL_DIR) {
+        $env:UV_INSTALL_DIR
+    } else {
+        $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+        Join-Path $userHome '.local/bin'
+    }
+    return [IO.Path]::GetFullPath($directory)
+}
+
 function Find-MachinesInstallerUv {
     param([Parameter(Mandatory)][scriptblock]$InvokeCaptured)
-    foreach ($command in @(Get-Command uv -CommandType Application -All -ErrorAction SilentlyContinue)) {
-        if ($command.Source -match '[\r\n]' -or $command.Source -match '[\\/]WindowsApps[\\/]') { continue }
-        $result = Invoke-UvBootstrapSelection -Uv $command.Source -Arguments @('--version') `
+    $executable = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 'uv.exe' } else { 'uv' }
+    $candidates = @(
+        Get-Command uv -CommandType Application -All -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Source }
+        Join-Path (Get-MachinesInstallerUvDirectory) $executable
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -match '[\r\n]' -or $candidate -match '[\\/]WindowsApps[\\/]' -or
+            -not [IO.File]::Exists($candidate)) { continue }
+        $result = Invoke-UvBootstrapSelection -Uv $candidate -Arguments @('--version') `
             -InvokeCaptured $InvokeCaptured -IsolateSelection
         if ($result.ExitCode -eq 0 -and
             $result.Stdout -match '\Auv[ \t]+([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t(+]|\r?\n|\z)' -and
             [version]$Matches[1] -ge [version]'0.8.0') {
-            return $command.Source
+            return $candidate
         }
     }
     return $null
@@ -53,13 +70,15 @@ function Initialize-MachinesBootstrap {
     }
     $uv = Find-MachinesInstallerUv -InvokeCaptured $capture
     if (-not $uv -and $Operation -eq 'Prepare') {
+        $localBin = Get-MachinesInstallerUvDirectory
+        $acquisitionEnvironment = Get-UvBootstrapEnvironment
+        $acquisitionEnvironment.UV_INSTALL_DIR = $localBin
         $hostPath = (Get-Process -Id $PID).Path
         $result = & $capture -FilePath $hostPath -ArgList @(
             '-NoProfile', '-File', $PSCommandPath, '-PrepareUv'
-        ) -Environment (Get-UvBootstrapEnvironment)
+        ) -Environment $acquisitionEnvironment
         if ($result.Stderr) { [Console]::Error.Write($result.Stderr) }
         if ($result.ExitCode -ne 0) { throw 'UV prerequisite setup failed; no Python fallback was attempted.' }
-        $localBin = Join-Path $env:USERPROFILE '.local/bin'
         $env:PATH = $localBin + [IO.Path]::PathSeparator + $env:PATH
         $uv = Find-MachinesInstallerUv -InvokeCaptured $capture
     }

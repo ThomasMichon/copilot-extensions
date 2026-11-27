@@ -12,6 +12,12 @@ _machines_installer_support() {
     fi
 }
 
+_machines_uv_install_dir() {
+    local directory="${UV_UNMANAGED_INSTALL:-${UV_INSTALL_DIR:-$HOME/.local/bin}}"
+    [[ "$directory" == /* ]] || directory="$PWD/$directory"
+    printf '%s\n' "$directory"
+}
+
 _machines_find_uv() {
     local candidate version
     while IFS= read -r candidate; do
@@ -22,7 +28,7 @@ _machines_find_uv() {
             printf '%s\n' "$candidate"
             return 0
         fi
-    done < <(type -ap uv)
+    done < <(type -ap uv; printf '%s/uv\n' "$(_machines_uv_install_dir)")
     return 1
 }
 
@@ -35,18 +41,18 @@ _machines_select_bootstrap() (
             printf '%s\n' 'Prepared uv 0.8.0 or newer is required; run explicit prerequisite setup.' >&2
             return 1
         }
+        local_bin="$(_machines_uv_install_dir)"
         # The official prerequisite owner persists command exposure for later shells.
         if command -v curl >/dev/null 2>&1; then
             set -o pipefail
-            curl -LsSf https://astral.sh/uv/install.sh | sh >&2 || return
+            curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$local_bin" sh >&2 || return
         elif command -v wget >/dev/null 2>&1; then
             set -o pipefail
-            wget -qO- https://astral.sh/uv/install.sh | sh >&2 || return
+            wget -qO- https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$local_bin" sh >&2 || return
         else
             printf '%s\n' 'UV prerequisite setup requires curl or wget; no Python fallback was attempted.' >&2
             return 1
         fi
-        local_bin="$HOME/.local/bin"
         export PATH="$local_bin:$PATH"
         uv="$(_machines_find_uv)" || {
             printf '%s\n' 'UV prerequisite setup did not expose a working uv 0.8.0 or newer.' >&2
