@@ -522,12 +522,22 @@ the non-public approval conversation.
 
 ## Plan
 
+The [finite-source delivery and retained-acceptance study](journal/2026/11.27-finite-source-delivery-and-retained-acceptance.md)
+compares twenty-one whole current requests and all 73 discussions. Finite
+wheel configuration, capacity admission, returned-venue reuse, structured
+question answering and coverage-auditability deliveries receive positive
+credit without completing their wider originals. Explicit claims, conditional
+ideas, alternatives and actual native remainders stay actionable. Only those
+outcome/gap pairs change; the retained count remains 584 and every parent
+Plan/Validation gate remains unchanged.
+
 The [cleanup custody and bootstrap delta](journal/2026/11.27-cleanup-custody-and-current-bootstrap-delta.md)
 retains eleven whole requests and 21 discussions, plus three actual changed
 owner messages on the separate bootstrap parent. Finite source deliveries
 are credited without completing broader cleanup, migration or native outcomes.
 Two equal complete scans at 04:38:04 retain the same 584 identities; no issue
 effect, final unit or parent criterion resolves.
+The reviewed recording merged in #14873.
 
 The [maintenance intake and finite-delivery keepers](journal/2026/11.27-maintenance-intake-and-finite-delivery-keepers.md)
 record thirty-two whole current requests and all 76 discussions. Explicit
