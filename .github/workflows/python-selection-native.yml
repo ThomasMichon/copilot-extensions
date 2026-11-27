@@ -2240,10 +2240,12 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Retain activated-runtime metadata shadow and broken-candidate controls
         if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        env:
+          METADATA_SELECTOR: ${{ runner.os == 'Windows' && 'agent-machines' || 'agent-machines and not test_windows_legacy_uninstall' }}
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_machines_uninstall_metadata_source.py --allow-explicit-tiers
-          -k "agent-machines" --junit-dir qualification-evidence/machines-uninstall-metadata
+          -k "${{ env.METADATA_SELECTOR }}" --junit-dir qualification-evidence/machines-uninstall-metadata
       - name: Require each supported Machines metadata selection case without skips
         if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
         run: >-
