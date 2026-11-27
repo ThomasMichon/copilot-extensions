@@ -444,23 +444,34 @@ and 33 prior-retained; other categories, historical fields and observations
 are unchanged. No census, issue effect, product execution or custody transfer
 is claimed.
 
-## Generated-copy proposal and original custody
+## Generated-copy receiving and original custody
 
-The [receiving proposal](generated-runtime-copy-receiving.md) resolves
+The [reviewed receiving outcome](generated-runtime-copy-receiving.md) resolves
 #8596's actual canonical/shared supplier and live release projection,
 retaining complete cohesion and affected-consumer/helper-closure acceptance
-before any administrative retirement. Its Main copy is not declared removed,
-its implementation is not declared complete, and OPEN #5939 has not yet
-received the proposed direct clauses.
+before administrative retirement. Reviewed intent #14899 preceded complete
+direct intake and actual whole-body readback in OPEN #5939. All eight
+implementation/validation/coordination clauses remain unchecked. One disclosed
+acknowledgment and an independently audited `NOT_PLANNED` #8596 disposition
+preserve the complete source and human refinement. The normal report lookup
+includes #5939 both before and after source retirement. The Main copy is
+not declared removed and implementation is not declared complete.
 The [three-case study](journal/2026/11.27-generated-copy-and-owned-acceptance.md)
 retains #1043's whole common/family diagnostics and #912's SAME explicit
 nonexpiring claimant rather than expiring custody from an old date.
 
-Only two pending outcomes become current-retained and one becomes a
-conditional candidate. The same retained 582 identities have 399 pending,
-132 current-retained, 33 prior-retained and one candidate; other categories,
-historical fields, observations and owners are unchanged. No issue effect,
-new census, product execution or resource transfer is claimed.
+The initial study changed two pending outcomes to current-retained and one
+to a conditional candidate. The later actual tracker transaction has three
+audited effects: receiving body, source acknowledgment and proper-reason close.
+A complete equal two-pass observation at 2026-11-27 13:49:13
+America/Los_Angeles measures 581 whole OPEN, comprising 274 original and
+307 inflow identities. Exactly #8596 departs from the preceding 582, with
+no arrivals or unrelated departures. All excluded creators and inflow count;
+PRs do not. Effective categories are 399 pending, 132 current-retained,
+33 prior-retained, zero candidates, five new-retained, six spent-open,
+five excluded and one coordination identity. The frozen frame and historical
+fields remain separate from this later counting observation. No product
+execution, source-copy clearance or resource transfer is claimed.
 
 ## Publication state is not resource completion
 

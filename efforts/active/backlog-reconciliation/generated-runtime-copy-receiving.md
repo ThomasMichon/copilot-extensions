@@ -2,12 +2,15 @@
 
 Parent: [Backlog Reconciliation](README.md).
 
-## Proposal, not a disposition
+## Reviewed intent and actual tracker outcome
 
-Receive the complete unfinished #8596 outcome in the existing canonical
-runtime decomposition tracker #5939, then conditionally retire #8596
-`NOT_PLANNED` as an administratively superseded generated-copy report.
-**No issue has been edited or closed by this proposal.**
+The intent merged in #14899 before effects. The complete unfinished #8596
+outcome is now directly retained in the existing canonical runtime
+decomposition tracker #5939. After complete current-body readback and
+normal report-lookup verification, #8596 received one disclosed
+[acknowledgment](https://github.com/ThomasMichon/copilot-extensions/issues/8596#issuecomment-7228746243)
+and an independently audited `NOT_PLANNED` disposition as an
+administratively superseded generated-copy report.
 
 The reported file still exists in the inspected `main` release tree.
 This is not obsolete-code removal, a completed split, a claim that a
@@ -40,9 +43,10 @@ invented. Its complete human discussion qualifies separately.
 
 The existing #5939 whole original and empty discussion are already
 qualified and read; current complete producer/edit/discussion metadata
-matches those admitted bytes. Both issues remain OPEN, unlocked and
-unassigned with their existing `needs-decomposition` labels. This
-observation assigns nobody and expires or transfers no claim.
+matches those admitted bytes. At the final intake preflight both issues
+were OPEN, unlocked and unassigned with their existing `needs-decomposition`
+labels. The later source disposition changes none of those ownership
+observations into an assignment, expiry or claim transfer.
 
 ## Actual source and projection ownership
 
@@ -107,12 +111,12 @@ the separate generated-copy tracker. No watchdog code or execution changes.
 | No owner absence, implementation, installation or duplicate closure inferred from this report | C1/C2 and the tracking gates below |
 | Keep the existing report identity routed to accepted OPEN tracking after supersession | Generated alias below and the actual lookup/readback gate |
 
-## Proposed direct acceptance for OPEN #5939
+## Reviewed direct acceptance delivered to OPEN #5939
 
-The following is complete unfinished implementation acceptance to append,
-not work completed by the tracking transaction. Preserve the entire
-incumbent #5939 body, history, labels and discussions; a prominent
-AI-assistance disclosure will be added before the otherwise unchanged body.
+The following complete unfinished implementation acceptance was appended,
+not completed by the tracking transaction. The entire incumbent #5939 body,
+history, title, labels and discussions are preserved; one prominent
+AI-assistance disclosure precedes the otherwise unchanged original body.
 
 ### Direct retained generated-copy request from #8596
 
@@ -180,25 +184,51 @@ Module: plugins/agent-pull-requests/libs/update-driver/scripts/versioned_runtime
 
 ## Tracking Plan
 
-- [ ] Land this intent through actual current-head review and required CI.
-- [ ] Recheck current complete source/receiver eligibility, generations,
+- [x] Land this intent through actual current-head review and required CI.
+- [x] Recheck current complete source/receiver eligibility, generations,
   discussions, labels and actual custody; retain the source on a conflicting
   hold or scope change rather than overwriting or dropping acceptance.
-- [ ] Deliver the complete proposed acceptance directly in OPEN #5939,
+- [x] Deliver the complete proposed acceptance directly in OPEN #5939,
   preserve every incumbent byte apart from the disclosed leading header,
   and fully read back the entire actual current body before supersession.
   Verify that the normal OPEN/decomposition-label/Module-identity lookup
   includes #5939 without running the watchdog or replacing semantic readback
   with a search receipt.
-- [ ] Publish one disclosed #8596 acknowledgment with the actual keeper
+- [x] Publish one disclosed #8596 acknowledgment with the actual keeper
   link, then conditionally retire the report `NOT_PLANNED`, not `COMPLETED`.
   Preserve its original, sole incumbent refinement, title and labels.
-- [ ] Independently verify the acknowledgment, proper reason, unchanged
+- [x] Independently verify the acknowledgment, proper reason, unchanged
   source/refinement, complete receiver and continued #5939 lookup visibility
   after source closure. Reconcile unknown write outcomes; never replay an
   uncertain effect.
 - [ ] Record a complete whole-queue observation and actual outcome through
   normal review/merge, then return to the parent's unresolved gates.
+
+## Independent actual readback
+
+Current complete producer/editor/history/discussion metadata and a fresh
+complete fifteen-member roster qualified both generations before effects.
+The existing watchdog reader contract was unchanged. The receiving PATCH
+was followed by an independent complete body read: all 1,296 incumbent
+characters, canonical title, labels, first canonical `Module:` identity,
+generated lookup alias, one disclosure and eight unchecked clauses match.
+GitHub's first-edit history exposes the current edit plus the admitted
+automation original snapshot; neither is an unexplained new producer.
+
+The normal OPEN/label/generated-Module lookup included #8596 and #5939
+before source retirement and only #5939 afterward. Independent current
+metadata and whole-byte readbacks preserve all 1,365 source characters and
+the sole 1,084-character incumbent human refinement. Exactly one new
+acknowledgment exists, the reason is `NOT_PLANNED`, and #5939 remains OPEN.
+No uncertain write was replayed.
+
+Two complete equal six-page issue passes, with equal complete before/after
+rosters, observe 581 whole OPEN at 2026-11-27 13:49:13
+America/Los_Angeles: 274 original and 307 inflow. They include excluded
+creators and all inflow and exclude PRs. Exactly #8596 departs from the
+preceding 582; there are no arrivals or unrelated departures. The factual
+outcome still owes normal review/merge, source reconciliation and parent
+return. No product, native, source-copy or resource completion follows.
 
 ## Validation Plan
 
