@@ -129,8 +129,18 @@ The typed frame now separately records three post-snapshot metadata rows
 rows and the unchanged frozen 583 identities, minus audited frozen departures
 #11805/#13753: exactly 584 unique current identities. The declared Coordinator
 research role applies to both sets; every current row has a reviewed or
-explicit pending outcome and gap. The three arrivals remain body-unread
-metadata, not newly admitted or semantically assessed content.
+explicit pending outcome and gap. At that counting observation, the three
+arrivals remained body-unread metadata.
+
+The [later whole-inflow study](journal/2026/11.26-inflow-diagnostics-and-doctor-boundaries.md)
+qualifies and reads those three originals and their one issue discussion.
+Verified-producer #14826 retains an actual failed native gate with no
+established cause or fulfilling source. #14832 retains its separate structured
+PR-read diagnostic request. #14847 retains configured-channel correspondence
+after bounded #14850 source credit. Only those three post-snapshot outcomes
+change from pending to specific retention; frozen identity rows and all
+counting observations remain unchanged. There is no fresh whole-queue count,
+source completion or content admission for any other row.
 
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
