@@ -128,15 +128,19 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         '$1/first-use-12345678-1234-1234-1234-123456789abc.log}"\n',
         encoding="utf-8",
     )
+    acknowledgement = json.dumps({
+        "launched": True, "pid": 42, "created": 123,
+        "log": str(root / "home/.copilot-extensions/update-driver"
+                   / "first-use-12345678123412341234123456789abc.log"),
+    }).replace("'", "''")
     (driver / "first-use.ps1").write_text(
         "# Installation driver lifecycle contract: budget-install-v1\n"
         "param($Root, $Payload, $RuntimeRoot, $Project, $InstallerAction)\n"
-        "[IO.File]::WriteAllLines((Join-Path $env:USERPROFILE 'driver-args'), "
+        "[IO.File]::WriteAllLines([IO.Path]::Combine($env:USERPROFILE, 'driver-args'), "
         "@($Root, $Payload, $RuntimeRoot, $Project, '--installer-action', $InstallerAction))\n"
         "if ($env:BOOTSTRAP_DRIVER_STATUS) { exit ([int]$env:BOOTSTRAP_DRIVER_STATUS) }\n"
-        "if ($env:BOOTSTRAP_DRIVER_ACK) { $env:BOOTSTRAP_DRIVER_ACK } else {\n"
-        "@{launched=$true; pid=42; created=123; "
-        "log=(Join-Path $Root 'first-use-12345678123412341234123456789abc.log')} | ConvertTo-Json -Compress\n"
+        "if ($env:BOOTSTRAP_DRIVER_ACK) { [Console]::Out.WriteLine($env:BOOTSTRAP_DRIVER_ACK) } else {\n"
+        f"[Console]::Out.WriteLine('{acknowledgement}')\n"
         "}\nexit 0\n",
         encoding="utf-8",
     )
@@ -255,7 +259,10 @@ def _run_hook(
 @pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
 def test_driver_submission_retains_fixed_install_action_and_project(tmp_path: Path, host: str) -> None:
     result, home, payload, installation = _run_hook(tmp_path, host)
-    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
+    assert result.returncode == 0 and result.stdout == "{}", (
+        result.stdout + result.stderr
+        + f"\nSynthetic driver entered: {(home / 'driver-args').is_file()}"
+    )
     assert "bootstrap install supervision launched" in result.stderr
     assert "Launch is not durable request acceptance" in result.stderr
     arguments = (home / "driver-args").read_text(encoding="utf-8-sig").splitlines()
