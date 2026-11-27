@@ -522,16 +522,22 @@ the non-public approval conversation.
 
 ## Plan
 
-The [generated-copy receiving proposal](generated-runtime-copy-receiving.md)
-resolves #8596's authored supplier and live release projection, then preserves
-its whole cohesion/consumer-helper contract as proposed direct intake to
-OPEN #5939 before conditional administrative `NOT_PLANNED` supersession.
-The copy is not obsolete code and no issue effect has occurred.
+The [generated-copy receiving outcome](generated-runtime-copy-receiving.md)
+records reviewed #14899 intent, complete direct intake to OPEN #5939 and
+independently audited #8596 administrative `NOT_PLANNED` supersession.
+The original report and human refinement remain intact, all eight receiving
+clauses stay unchecked, and the normal report lookup includes #5939.
+The release copy is not obsolete code and no implementation is complete.
 The [owned-acceptance study](journal/2026/11.27-generated-copy-and-owned-acceptance.md)
 also retains whole #1043/#912 with current registry negatives and the original
-nonexpiring chained-cutover claimant. Only three outcome/gap pairs change;
-the same retained 582 identities have 399 pending, 132 current-retained and
-one conditional candidate. All parent gates and source/resource limits remain.
+nonexpiring chained-cutover claimant. A complete equal two-pass observation at
+2026-11-27 13:49:13 America/Los_Angeles measures 581 whole OPEN: 274 original
+and 307 inflow identities. Exactly #8596 departs, with no arrivals or other
+departures. Effective coverage is 399 pending, 132 current-retained,
+33 prior-retained, zero candidates, five new-retained, six spent-open,
+five excluded and one coordination identity. All parent gates and
+source/resource limits remain; the factual outcome still owes normal review
+and source reconciliation.
 
 The [native-report and conditional-input study](journal/2026/11.27-native-reports-and-conditional-inputs.md)
 retains four whole current requests and nine discussions. Actual native
