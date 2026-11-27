@@ -74,7 +74,7 @@ def test_ready_command_admits_exact_prepared_application(
     if host != "bash":
         entry = scripts / "invoke-payload-runtime.ps1"
         original = entry.read_text(encoding="utf-8")
-        invocation = "            if ($ScriptEntry) {\n"
+        invocation = "        if ($ScriptEntry) {\n"
         assert original.count(invocation) == 1
         entry.write_text(original.replace(
             invocation,
@@ -210,7 +210,9 @@ def test_ready_command_admits_exact_prepared_application(
             if arguments else "$forward=@()\n"
         )
         harness.write_text(
-            "$PSNativeCommandArgumentPassing='Legacy'\n"
+            ("$PSNativeCommandArgumentPassing='Standard'\n" if scenario == "newest" else
+             "$PSNativeCommandArgumentPassing='Legacy'\n")
+            + "$beforeConsole=[Console]::OutputEncoding.CodePage\n"
             "$env:PULL_REQUESTS_CALLER_STATE='caller-owned'\n"
             "$env:PULL_REQUESTS_SIBLING_STATE='other-command'\n"
             + values +
@@ -218,6 +220,8 @@ def test_ready_command_admits_exact_prepared_application(
             "$code=$LASTEXITCODE\n"
             "if ($env:PULL_REQUESTS_CALLER_STATE -cne 'caller-owned') { throw 'caller argument environment changed' }\n"
             "if ($env:PULL_REQUESTS_SIBLING_STATE -cne 'other-command') { throw 'sibling argument environment changed' }\n"
+            "if ($env:PYTHONHOME -cne 'unrelated' -or $env:PYTHONPATH -cne 'unrelated') { throw 'caller Python environment changed' }\n"
+            "if ([Console]::OutputEncoding.CodePage -ne $beforeConsole) { throw 'caller console encoding changed' }\n"
             "exit $code\n", encoding="utf-8-sig",
         )
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)]
@@ -270,6 +274,8 @@ def test_ready_command_admits_exact_prepared_application(
             "selector": "unrelated-python", "transport_keys": [], "argument_artifact_present": False,
             "caller_state": "caller-owned" if host != "bash" else None,
             "sibling_state": "other-command" if host != "bash" else None,
+            "python_home": None, "python_path": None,
+            "isolated": cell, "dont_write": not cell,
         }
         if cell:
             assert json.loads(bootstrap_proof.read_text(encoding="utf-8")) == {

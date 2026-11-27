@@ -20,13 +20,18 @@ exit status and slot/payload bytes. Native PowerShell variables include numbers
 and booleans. Missing UV/provider/capture/bootstrap/application support and
 selection changes during admission refuse before application entry. Long-body
 controls retain 25,000 characters, including non-BMP Unicode, without Base64
-body expansion or consuming stdin. Legacy forwarding uses a per-invocation JSON
+body expansion or consuming stdin. PowerShell forwarding uses a per-invocation JSON
 file in an owner-private temporary directory, never process-wide environment
 payloads. Windows uses canonical private ACL creation; POSIX uses mode 0700,
 with native `mktemp` for older Core runtimes lacking the mode-creation API.
 Controls verify privacy before launch, removal before application entry,
-finally-cleanup and unchanged caller/sibling environment values. Only the short
+finally-cleanup and unchanged caller/sibling/Python environment and console
+encoding after both normal return and prerequisite refusal. Existing cases
+exercise both Legacy and Standard argument-passing settings. Only the short
 file/entry paths are encoded for native command-line compatibility.
+The isolated module control uses the same admitted interpreter for a foreground
+application child, retaining normal application startup/cache environment.
+That extra Python process is a deliberate isolation cost, not a latency claim.
 Inert applications are precompiled before snapshots; operational isolation and
 bytecode flags remain unchanged. Materialized controls use payload-embedded
 process support and packaged capture, not a canonical-checkout import.

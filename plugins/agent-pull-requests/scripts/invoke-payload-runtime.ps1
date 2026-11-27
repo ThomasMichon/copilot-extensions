@@ -2,10 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $forward = [string[]]@($args)
 $mode = & (Join-Path $PSScriptRoot 'payload-mode.ps1')
-$env:PYTHONUTF8 = '1'
-Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
-Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
-$OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+$OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 function Get-AdmittedRuntimePython([string]$Interpreter) {
     try {
@@ -44,19 +41,19 @@ function Get-AdmittedRuntimePython([string]$Interpreter) {
 
 function Invoke-PythonEntry {
     param([string]$Python, [string]$Target, [switch]$ScriptEntry, [string[]]$Arguments)
-    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
-    $ErrorActionPreference = 'Continue'
-    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
-        $argumentFile = $null
-        try {
-            $ErrorActionPreference = 'Stop'
-            . (Join-Path $PSScriptRoot 'argument-transport.ps1')
-            $json = ConvertTo-Json -InputObject @($Arguments) -Compress
-            $argumentFile = New-PullRequestsArgumentFile $json
-            $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argumentFile))
-            $encodedTarget = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Target))
-            $entry = @'
-import base64,json,os,runpy,sys
+    $argumentFile = $null
+    try {
+        $ErrorActionPreference = 'Stop'
+        . (Join-Path $PSScriptRoot 'argument-transport.ps1')
+        $json = ConvertTo-Json -InputObject @($Arguments) -Compress
+        $argumentFile = New-PullRequestsArgumentFile $json
+        $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argumentFile))
+        $encodedTarget = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Target))
+        $entry = @'
+import base64,json,os,runpy,subprocess,sys
+os.environ.pop('PYTHONHOME',None)
+os.environ.pop('PYTHONPATH',None)
+os.environ['PYTHONUTF8']='1'
 target,path=(base64.b64decode(value).decode('utf-8') for value in sys.argv[1:3])
 try:
     with open(path,encoding='utf-8') as stream:
@@ -72,29 +69,31 @@ if sys.argv[3]=='script':
     sys.argv=[target,'--']+arguments
     runpy.run_path(target,run_name='__main__')
 else:
-    sys.argv=[target]+arguments
-    runpy.run_module(target,run_name='__main__',alter_sys=True)
+    try:
+        result=subprocess.run(
+            [sys.executable,'-m',target,*arguments],env=os.environ.copy(),
+            stdin=sys.stdin,stdout=sys.stdout,stderr=sys.stderr,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
+        )
+    except OSError as error:
+        print('Application dispatch refused: '+str(error),file=sys.stderr)
+        raise SystemExit(126)
+    raise SystemExit(result.returncode)
 '@
-            $ErrorActionPreference = 'Continue'
-            if ($ScriptEntry) {
-                & $Python -I -c $entry $encodedTarget $encodedPath script
-            } else {
-                & $Python -c $entry $encodedTarget $encodedPath module
-            }
-            $invocationExit = $LASTEXITCODE
-        } catch {
-            [Console]::Error.WriteLine("[agent-pull-requests] argument transport refused: $($_.Exception.Message)")
-            $invocationExit = 126
-        } finally {
-            if ($argumentFile) { Remove-PullRequestsArgumentFile $argumentFile }
+        $ErrorActionPreference = 'Continue'
+        if ($ScriptEntry) {
+            & $Python -I -c $entry $encodedTarget $encodedPath script
+        } else {
+            & $Python -I -B -X utf8 -c $entry $encodedTarget $encodedPath module
         }
-        exit $invocationExit
-    } elseif ($ScriptEntry) {
-        & $Python -I $Target -- @Arguments
-    } else {
-        & $Python -m $Target @Arguments
+        $invocationExit = $LASTEXITCODE
+    } catch {
+        [Console]::Error.WriteLine("[agent-pull-requests] argument transport refused: $($_.Exception.Message)")
+        $invocationExit = 126
+    } finally {
+        if ($argumentFile) { Remove-PullRequestsArgumentFile $argumentFile }
     }
-    exit $LASTEXITCODE
+    exit $invocationExit
 }
 
 if ($mode -ceq 'legacy') {

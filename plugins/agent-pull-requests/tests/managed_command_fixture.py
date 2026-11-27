@@ -86,6 +86,8 @@ def prepare_application(uv: Path, application: Path, slot: Path, env: dict[str, 
         "'argument_artifact_present':any(Path(artifact[key]).exists() for key in ('path','directory') if key in artifact),"
         "'caller_state':os.environ.get('PULL_REQUESTS_CALLER_STATE'),"
         "'sibling_state':os.environ.get('PULL_REQUESTS_SIBLING_STATE'),"
+        "'python_home':os.environ.get('PYTHONHOME'),'python_path':os.environ.get('PYTHONPATH'),"
+        "'isolated':bool(sys.flags.isolated),'dont_write':bool(sys.dont_write_bytecode),"
         "'selector':os.environ.get('UV_PYTHON')}\n"
         "Path(os.environ['APPLICATION_PROOF']).write_text(json.dumps(value),encoding='utf-8')\n"
         "print('application stdout')\nprint('application stderr',file=sys.stderr)\nraise SystemExit(37)\n",
