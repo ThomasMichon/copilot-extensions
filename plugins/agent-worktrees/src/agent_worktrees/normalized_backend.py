@@ -6,30 +6,34 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from typing import Any
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
 from agent_procutil._daemon_instance_owner import mkdir_private
+from agent_procutil import python_cache_permissions as executable_permissions
 
-from . import agent_policy, config, launch_execution
+from . import agent_policy, launch_execution
 from .launch_seed_exec import _interactive_console
 from .launch_seed_native import _headed_command
 from .process_launcher import bind_execution_directory
 
 
 def _attempt_directory() -> Path:
-    root = config.install_dir()
+    root = Path(tempfile.gettempdir()).resolve()
     try:
-        mkdir_private(root, exist_ok=True)
-        parent = root / "launch-attempts"
-        mkdir_private(parent, exist_ok=True)
-        attempt = parent / uuid4().hex
+        # Executable staging is independent of the installation's storage modes.
+        executable_permissions.check_ancestors(root)
+        executable_permissions.check(root, ancestor=True)
+        attempt = root / f"copilot-launch-{uuid4().hex}"
         mkdir_private(attempt)
+        executable_permissions.check(attempt, private=True)
         mkdir_private(attempt / "runtime")
+        executable_permissions.check(attempt / "runtime", private=True)
         return attempt
     except (OSError, ValueError) as exc:
-        raise ValueError(f"Could not prepare recordless launch storage: {exc}") from exc
+        raise ValueError(f"Could not prepare recordless execution staging: {exc}") from exc
 
 
 def launch(command: list[str]) -> int:

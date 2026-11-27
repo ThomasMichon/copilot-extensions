@@ -132,7 +132,7 @@ def test_posix_remote_handoff_replaces_picker_without_a_waiting_parent(
     composed = launcher.compose_launch(plan)
     monkeypatch.setattr(launcher, "_windows_host", lambda: False)
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: pytest.fail("waiting Python parent"))
-    monkeypatch.setattr(launcher.os, "chdir", lambda *_a: pytest.fail("remote handoff changed cwd"))
+    monkeypatch.setattr(os, "chdir", lambda *_a: pytest.fail("remote handoff changed cwd"))
 
     def replace(executable: str, argv: list[str], env: dict[str, str]) -> None:
         assert executable == "ssh" and argv == composed.argv and env == composed.env
@@ -140,7 +140,7 @@ def test_posix_remote_handoff_replaces_picker_without_a_waiting_parent(
             raise FileNotFoundError("SSH unavailable")
         raise SystemExit(17)
 
-    monkeypatch.setattr(launcher.os, "execvpe", replace)
+    monkeypatch.setattr(os, "execvpe", replace)
     with pytest.raises(FileNotFoundError if fails else SystemExit):
         launcher.execute(composed)
 

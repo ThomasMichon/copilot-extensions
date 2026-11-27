@@ -18,7 +18,7 @@ from agent_procutil.owned_process import run_caller_owned
 
 from agent_worktrees import launch_execution, launch_seed_state
 
-_FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+_FLAGS = procutil.no_window_kwargs()
 _SETUP = """
 import json, os, sys
 from pathlib import Path
@@ -29,10 +29,12 @@ project = cfg.project_dir("demo")
 project.mkdir(parents=True, exist_ok=True)
 (project / "config.yaml").write_text(json.dumps({
     "repo_name": "demo", "machine": "test",
-    "repos": {"demo": {"anchor": str(root), "default_branch": "dev"}},
+    "repos": {"demo": {
+        "anchor": str(root), "worktree_root": str(root / "worktrees"), "default_branch": "dev",
+    }},
 }), encoding="utf-8")
-checkout = root / "checkout"
-checkout.mkdir()
+checkout = root / "worktrees" / "wt-a"
+checkout.mkdir(parents=True)
 path = tracking.create_new_record(
     "wt-a", "worktree/wt-a", str(checkout), "demo", "test",
     cfg.detect_platform(), project / "worktrees",
@@ -42,7 +44,7 @@ launch_seed_exec.sessions.verify_worktree_active = lambda *a: LiveVerdict()
 
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
-def test_actual_setup_function_forwards_exact_child_correlation(tmp_path, shell):
+def test_actual_setup_function_forwards_exact_child_correlation(tmp_path: Path, shell: str) -> None:
     scripts = Path(__file__).resolve().parents[2] / "scripts"
     output = tmp_path / "captured.json"
     environment = {
@@ -115,7 +117,7 @@ _exec_copilot_backend copilot.exe
 
 
 @pytest.mark.parametrize("exit_code", [7, 3])
-def test_recordless_normalized_powershell_handoff_runs_after_setup(tmp_path, exit_code):
+def test_recordless_normalized_powershell_handoff_runs_after_setup(tmp_path: Path, exit_code: int) -> None:
     executable = shutil.which("pwsh")
     if not executable:
         pytest.skip("PowerShell unavailable")
@@ -157,7 +159,7 @@ def test_recordless_normalized_powershell_handoff_runs_after_setup(tmp_path, exi
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows executable fixture")
 @pytest.mark.parametrize("identity", [[], ["--resume=selected"]])
-def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path, identity):
+def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path: Path, identity: list[str]) -> None:
     executable = shutil.which("pwsh")
     compiler = next((path for framework in ("Framework64", "Framework") if (
         path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
@@ -234,7 +236,7 @@ def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path, identi
 
 
 @pytest.mark.parametrize("resolver", ["missing", "empty"])
-def test_recordless_powershell_selected_runtime_cannot_fall_back(tmp_path, resolver):
+def test_recordless_powershell_selected_runtime_cannot_fall_back(tmp_path: Path, resolver: str) -> None:
     executable = shutil.which("pwsh")
     if not executable:
         pytest.skip("PowerShell unavailable")
@@ -259,7 +261,9 @@ def test_recordless_powershell_selected_runtime_cannot_fall_back(tmp_path, resol
 
 
 @pytest.mark.parametrize("ambient", [False, True], ids=["absent", "conflicting"])
-def test_recordless_powershell_resolver_binds_selected_root_and_restores_ambient(tmp_path, ambient):
+def test_recordless_powershell_resolver_binds_selected_root_and_restores_ambient(
+    tmp_path: Path, ambient: bool,
+) -> None:
     executable = shutil.which("pwsh")
     if not executable:
         pytest.skip("PowerShell unavailable")
@@ -312,7 +316,7 @@ def test_recordless_powershell_resolver_binds_selected_root_and_restores_ambient
     assert observed["root"] == (str(legacy) if ambient else None)
 
 
-def test_recordless_normalized_shell_rejects_execution_directory_override(tmp_path):
+def test_recordless_normalized_shell_rejects_execution_directory_override(tmp_path: Path) -> None:
     executable = shutil.which("pwsh")
     if not executable:
         pytest.skip("PowerShell unavailable")
@@ -348,26 +352,33 @@ def test_recordless_normalized_shell_rejects_execution_directory_override(tmp_pa
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native POSIX umask and ownership required")
-@pytest.mark.parametrize("unsafe_parent", [False, True])
-def test_recordless_private_storage_survives_permissive_umask(tmp_path, unsafe_parent):
+@pytest.mark.parametrize("existing_parent", [False, True])
+def test_recordless_private_storage_survives_permissive_umask(
+    tmp_path: Path, existing_parent: bool,
+) -> None:
     # Keep process-wide umask changes inside a dedicated, bounded fixture process.
     script = r'''
 import os, stat, sys
 from pathlib import Path
 os.umask(0o002)
 from agent_worktrees import normalized_backend as backend
+from agent_worktrees import config
 from agent_remote_driver.headed import caller, launcher
 root = Path(sys.argv[1]) / "installation"
 root.mkdir(mode=0o755)
-backend.config.install_dir = lambda: root
+config.install_dir = lambda: root
 backend.agent_policy.require = lambda _cwd: None
-unsafe = sys.argv[2] == "True"
-if unsafe:
+existing = sys.argv[2] == "True"
+staging = Path(sys.argv[1]) / "execution-staging"
+staging.mkdir(mode=0o700)
+backend.tempfile.gettempdir = lambda: str(staging)
+if existing:
     (root / "launch-attempts").mkdir()
     assert stat.S_IMODE((root / "launch-attempts").stat().st_mode) == 0o775
 def execute(argv, **kwargs):
-    assert not unsafe, "unsafe existing storage reached core execution"
     attempt = kwargs["attempt_directory"]
+    assert attempt.parent == staging
+    assert not attempt.is_relative_to(root)
     for path in (attempt.parent, attempt, attempt / "runtime"):
         assert stat.S_IMODE(path.stat().st_mode) == 0o700, path
         assert path.stat().st_uid == os.getuid()
@@ -378,18 +389,15 @@ def execute(argv, **kwargs):
     assert Path(command[3]).is_file()
     return 0, True
 caller.execute = execute
-try:
-    result = backend.launch(["copilot", "--resume=selected"])
-except ValueError as error:
-    assert unsafe and "storage is not private" in str(error), error
-    assert not list((root / "launch-attempts").glob("*/runtime"))
-else:
-    assert not unsafe and result == 0
+assert backend.launch(["copilot", "--resume=selected"]) == 0
 assert stat.S_IMODE(root.stat().st_mode) == 0o755
+if existing:
+    assert stat.S_IMODE((root / "launch-attempts").stat().st_mode) == 0o775
+    assert not list((root / "launch-attempts").iterdir())
 print("recordless-private-storage-pass")
 '''
     result = run_caller_owned(
-        [sys.executable, "-I", "-B", "-c", script, str(tmp_path), str(unsafe_parent)],
+        [sys.executable, "-I", "-B", "-c", script, str(tmp_path), str(existing_parent)],
         cwd=tmp_path, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -397,7 +405,9 @@ print("recordless-private-storage-pass")
 
 
 @pytest.mark.parametrize("interruption", [None, "seed-claimed", "process-spawned", "finish"])
-def test_real_daemon_and_backend_keep_two_exact_handoffs_separate(tmp_path, interruption):
+def test_real_daemon_and_backend_keep_two_exact_handoffs_separate(
+    tmp_path: Path, interruption: str | None,
+) -> None:
     script = textwrap.dedent(_SETUP + """
 interruption = sys.argv[2] or None
 server = tracking_write.start_server(tracking_write.compute)
@@ -464,7 +474,7 @@ finally:
     assert result.stdout.strip() == "native-execution-receipts-pass"
 
 
-def test_process_loss_after_claim_keeps_seed_fence_and_no_success_receipt(tmp_path):
+def test_process_loss_after_claim_keeps_seed_fence_and_no_success_receipt(tmp_path: Path) -> None:
     script = textwrap.dedent(_SETUP + """
 import os, time
 dispatch = launch_seed_state._dispatch
@@ -513,7 +523,7 @@ launch_seed_exec.launch(
     os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_NATIVE_WINDOWS") != "1",
     reason="opt-in native Windows desktop observation",
 )
-def test_consoleless_parent_records_two_backend_cycles_without_visible_windows(tmp_path):
+def test_consoleless_parent_records_two_backend_cycles_without_visible_windows(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[4]
     spec = importlib.util.spec_from_file_location(
         "launch_execution_window_observer",
@@ -564,7 +574,8 @@ for cycle in range(2):
             assert process.wait(timeout=30) == 0, (tmp_path / "driver.log").read_text(errors="replace")
             assert json.loads((tmp_path / "cycles.json").read_text()) == {"cycles": 2}
         finally:
-            job.terminate_and_wait(10)
+            if job is not None:
+                job.terminate_and_wait(10)
             process.wait(timeout=10)
     assert observer.surfaced == {}, observer.surfaced
     assert observer.focus_changes == {}, observer.focus_changes

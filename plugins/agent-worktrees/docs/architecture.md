@@ -1069,15 +1069,16 @@ Native directory overrides must match the caller's selected execution directory;
 an allowed caller cannot admit a different target through `-C`.
 The core receives directory-bound argv even on resume without an explicit `-C`,
 so historical session metadata cannot restore a different workspace.
-The installation's `launch-attempts/<operation>/` retains the copied runtime
-and native receipt without inventing a worktree record or using the anchor
-claim ledger as launch authority. This path adds no recovery or auth admission.
-The existing private-directory primitives create new attempt parents, attempts
-and runtime directories before bundle construction, independent of umask.
-Existing installation directories and their ancestors do not need private
-permission modes; launch neither audits them as executable-bytecode caches nor
-changes their permissions. Unusable storage (for example, a file in place of
-the attempt parent) still reports an I/O failure before core execution.
+A fresh `copilot-launch-<operation>/` directory under the OS temporary root
+retains the copied runtime and native receipt without inventing a worktree
+record or using the anchor claim ledger as launch authority. This path adds no
+recovery or auth admission. Executable staging uses the existing private-directory
+primitives, independent of umask, and checks its temporary parent against
+cross-user replacement (a normal sticky shared temporary root is supported).
+The installation's storage and `launch-attempts` directory are not used for
+these executable assets. Their existing permission modes and ancestors do not
+gate resume and are not changed. Unusable or replaceable execution staging
+still reports a preparation failure before core execution.
 A missing/incompatible selected runtime or uncertain native receipt never
 replays the original command through a raw-backend fallback. Legacy direct
 script use with no Worktrees runtime selection retains its existing behavior;
