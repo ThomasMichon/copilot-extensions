@@ -157,6 +157,30 @@ current-retained outcomes, not a new live count or source-completion claim.
 The sixteen complete reference screens grant no semantic or content admission
 to the thirteen unselected originals.
 
+The [seeded-launch and identity-delta study](journal/2026/11.27-seeded-launch-and-counting-identity-delta.md)
+records a later complete equal-pass observation at **2026-11-26 23:59:55
+America/Los_Angeles**: 584 whole OPEN, comprising 276 original-cohort and
+308 inflow identities. The count is unchanged, but the identity set is not:
+#14857 arrives and #14823 is externally closed `COMPLETED`. The latter is a
+provider-state observation, not this campaign's source-verification or closure.
+Its historical whole-original and retained-outcome evidence remains intact.
+
+The effective current roster is now the frozen 583 identities plus four
+post-snapshot arrivals, minus #11805/#13753/#14823. All earlier counting
+observations remain recorded. The two newly compared whole requests retain
+specific gaps: #14325's released fixes still require its owner's authorized
+installed seeded-startup, registration and terminal-receipt verification;
+verified automation report #14857 retains an actual failed native Manager step.
+Its successful evidence upload is not a passing native result, and the report's
+cleanup excerpt does not establish a cause or fix.
+
+Only #14325's frozen outcome/gap fields change, and #14857 receives a separate
+post-snapshot row. At this retained counting observation, effective outcomes
+are 521 pending, eight current-retained, 38 prior-retained, five new-retained,
+six spent-open, five excluded and one coordination identity: 584 in total.
+This is not another live census, a source-completion claim, a new final-check
+unit or permission to replay the outstanding operational work.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,

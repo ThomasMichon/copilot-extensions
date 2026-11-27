@@ -78,18 +78,32 @@
       "arrivals_since_frozen_snapshot": [14826, 14832],
       "departures_since_frozen_snapshot": [11805, 13753],
       "unrelated_departures": []
+    },
+    {
+      "observed_local": "2026-11-26T20:31:04.779035-08:00",
+      "whole_open": 584,
+      "original_cohort_open": 276,
+      "inflow_open": 308,
+      "arrivals_since_frozen_snapshot": [14826, 14832, 14847],
+      "departures_since_frozen_snapshot": [11805, 13753],
+      "arrivals_since_previous_observation": [14847],
+      "departures_since_previous_observation": [],
+      "unrelated_departures": [],
+      "node_rows_still_cover_frozen_583_snapshot": true,
+      "arrival_content_admission": false
     }
   ],
   "later_counting_observation": {
-    "observed_local": "2026-11-26T20:31:04.779035-08:00",
+    "observed_local": "2026-11-26T23:59:55.219167-08:00",
     "whole_open": 584,
     "original_cohort_open": 276,
     "inflow_open": 308,
-    "arrivals_since_frozen_snapshot": [14826, 14832, 14847],
-    "departures_since_frozen_snapshot": [11805, 13753],
-    "arrivals_since_previous_observation": [14847],
-    "departures_since_previous_observation": [],
-    "unrelated_departures": [],
+    "arrivals_since_frozen_snapshot": [14826, 14832, 14847, 14857],
+    "departures_since_frozen_snapshot": [11805, 13753, 14823],
+    "arrivals_since_previous_observation": [14857],
+    "departures_since_previous_observation": [14823],
+    "unrelated_departures": [14823],
+    "equal_count_is_not_identity_equality": true,
     "node_rows_still_cover_frozen_583_snapshot": true,
     "arrival_content_admission": false
   },
@@ -104,11 +118,11 @@
   "primary_research_role_scope": "All frozen nodes and post-snapshot metadata nodes; not product or resource ownership.",
   "historical_primary_assignments_replaced": false,
   "current_open_roster_recording": {
-    "observed_local": "2026-11-26T20:31:04.779035-08:00",
+    "observed_local": "2026-11-26T23:59:55.219167-08:00",
     "current_open_identity_count": 584,
     "frozen_identity_count": 583,
-    "post_snapshot_metadata_identity_count": 3,
-    "audited_frozen_departures": [11805, 13753],
+    "post_snapshot_metadata_identity_count": 4,
+    "audited_frozen_departures": [11805, 13753, 14823],
     "definition": "Union frozen nodes with post_snapshot_metadata_nodes, then subtract later_counting_observation.departures_since_frozen_snapshot.",
     "every_current_identity_has_research_owner_and_explicit_outcome": true,
     "pending_is_not_semantic_or_source_completion": true
@@ -158,6 +172,39 @@
     "product_or_native_execution": false,
     "other_pending_rows_gain_content_or_semantic_admission": false
   },
+  "later_changed_outcome_research": {
+    "journal": "../journal/2026/11.27-seeded-launch-and-counting-identity-delta.md",
+    "whole_current_originals": [14325, 14857],
+    "whole_issue_discussions": {"14325": 6, "14857": 0},
+    "complete_collaborator_roster": 15,
+    "whole_selected_delivery_description": 14546,
+    "selected_delivery_human_comments": 0,
+    "seeded_launch_outcome": "KEEP_OPEN-owner-retained-installed-startup-registration-and-certain-terminal-receipt",
+    "verified_repository_report_producer_issue": 14857,
+    "report_workflow": 366720516,
+    "report_run": 45948354020,
+    "complete_run_job_count": 14,
+    "native_failed_job": 140339138422,
+    "successful_reporter_job": 140342435709,
+    "automation_outcome": "KEEP_OPEN-failed-native-step-cause-and-fulfillment-unestablished",
+    "external_departure": {
+      "issue": 14823,
+      "state": "CLOSED",
+      "reason": "COMPLETED",
+      "closed_at": "2026-11-27T05:31:37Z",
+      "closing_actor": "ThomasMichon",
+      "closer": null,
+      "campaign_closure_or_technical_completion_credit": false
+    },
+    "changed_frozen_outcome_columns_only": [14325],
+    "new_post_snapshot_identity": 14857,
+    "prior_counting_observations_and_historical_metadata_preserved": true,
+    "source_review_bodies_read": false,
+    "current_source_or_product_execution_claimed": false,
+    "final_verification_units_started": 0,
+    "source_issue_effects": 0,
+    "other_pending_rows_gain_content_or_semantic_admission": false
+  },
   "oldest_pending_current_qualification": {
     "issue": 54,
     "created_at_local": "2026-07-16T23:20:27-07:00"
@@ -194,7 +241,8 @@
   "post_snapshot_metadata_nodes": [
     [14826, "inflow", "automation", null, false, null, "retained-new", "failed-frozen-native-step-cause-and-fulfillment-unestablished"],
     [14832, "inflow", "member", null, false, null, "retained-new", "distinct-structured-pr-read-diagnostics-source-fulfillment-unestablished"],
-    [14847, "inflow", "member", null, false, null, "retained-current", "configured-channel-correspondence-unestablished"]
+    [14847, "inflow", "member", null, false, null, "retained-current", "configured-channel-correspondence-unestablished"],
+    [14857, "inflow", "automation", null, false, null, "retained-new", "failed-native-manager-step-cause-and-fulfillment-unestablished"]
   ],
   "nodes": [
     [54, "original", "member", 7, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
@@ -761,7 +809,7 @@
     [14309, "inflow", "member", 1, false, null, "pending", "qualified-change-evidence"],
     [14310, "inflow", "automation", 23, false, null, "pending", "qualified-change-evidence"],
     [14313, "inflow", "member", 3, false, null, "pending", "qualified-change-evidence"],
-    [14325, "inflow", "member", 4, false, null, "pending", "qualified-change-evidence"],
+    [14325, "inflow", "member", 4, false, null, "retained-current", "owner-retained-installed-startup-registration-and-certain-terminal-receipt"],
     [14336, "inflow", "member", 12, false, null, "pending", "qualified-change-evidence"],
     [14423, "inflow", "automation", 2, false, null, "pending", "qualified-change-evidence"],
     [14424, "inflow", "automation", 1, false, null, "pending", "qualified-change-evidence"],
