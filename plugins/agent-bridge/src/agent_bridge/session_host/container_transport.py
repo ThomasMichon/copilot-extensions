@@ -16,10 +16,13 @@ import posixpath
 import re
 import shlex
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_flags
 from ssh_manager import ConnectionManager, SSHConfig
+
+if TYPE_CHECKING:
+    from .spawner import CodeSpaceSpawner
 
 log = logging.getLogger("agent-bridge.session-host.container")
 
@@ -34,10 +37,16 @@ async def _run_provider(
     timeout: float,
     cwd: str | None = None,
     input_bytes: bytes | None = None,
+    environment: dict[str, str | None] | None = None,
 ) -> tuple[int, bytes, bytes]:
     from ..transport import _wrap_batch_for_windows
 
     env = os.environ.copy()
+    for key, value in (environment or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     command = _wrap_batch_for_windows(list(command), env)
     proc = await asyncio.create_subprocess_exec(
         *command,
@@ -47,7 +56,7 @@ async def _run_provider(
         creationflags=no_window_flags(),
         start_new_session=os.name != "nt",
         env=env,
-        **({"cwd": cwd} if cwd is not None else {}),
+        cwd=cwd,
     )
     try:
         communicate = proc.communicate(input_bytes) if input_bytes is not None else proc.communicate()
@@ -134,7 +143,8 @@ async def prepare_container_session_host(
             "agent-containers session-host preparation returned invalid JSON"
         ) from exc
     if (
-        result.get("name") != name
+        not isinstance(result, dict)
+        or result.get("name") != name
         or expected_instance and result.get("execution_instance") != expected_instance
         or not isinstance(result.get("ssh"), dict)
         or not result.get("remote_command")
@@ -469,7 +479,7 @@ def build_container_spawner(
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
     require_relay_ready: bool = False,
-):
+) -> CodeSpaceSpawner:
     """Construct the generic remote spawner for a trusted container."""
     from .spawner import CodeSpaceSpawner
 

@@ -90,7 +90,7 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
     ):
         setattr(configuration, f"{label}_LABEL", f"synthetic.{label.lower()}")
     for child, names in {
-        "_invoke": ["payload_command_argv"],
+        "_invoke": ["current_provider_argv", "current_provider_environment", "payload_command_argv"],
         "inference": ["NativeInferenceConfig"],
         "private_state": [
             "enforce_mode", "fsync_directory", "private_file_lock", "strict_posix_modes",
@@ -126,6 +126,7 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
     module(f"{provider}.consumer_telemetry", instrument=lambda entry: entry)
     for child, names in {
         "claim_provider_cli": ["add_claim_provider_parsers"],
+        "driver_cli": ["add_runtime_proxy_parser"],
         "rescue_capture_cli": ["add_rescue_capture_parser"],
         "dispatch_projection": ["add_exec_subparser", "add_subparsers"],
         "copilot_login": ["add_copilot_login_subparser"],

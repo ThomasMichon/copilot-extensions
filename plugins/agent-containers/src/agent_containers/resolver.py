@@ -37,7 +37,7 @@ from agent_procutil import no_window_flags
 from plugin_resolve.reflection import selection_spec
 
 from . import lifecycle
-from ._invoke import payload_command_argv
+from ._invoke import current_provider_argv, current_provider_environment, payload_command_argv
 from .config import (
     DISPATCH_ONLY_LABEL,
     DISPATCH_BINDING_LABEL,
@@ -616,6 +616,7 @@ def resolve_live_exec_target(
 
 def _lookup(
     config: ContainersConfig, name: str, inventory: Callable[[ContainersConfig, str], Any],
+    *, inspect_exact: bool = False,
 ) -> tuple[bool, Any]:
     """``(scoped, member)``: a driver member from its own fleet, else ``inventory``.
 
@@ -627,7 +628,7 @@ def _lookup(
     if any(getattr(f, "driver", None) for f in (getattr(config, "fleets", None) or {}).values()):
         from . import runtime_drivers
 
-        scoped, info = runtime_drivers.scoped_member(config, name)
+        scoped, info = runtime_drivers.scoped_member(config, name, inspect_exact=inspect_exact)
         if scoped:
             return True, info
     return False, inventory(config, name)
@@ -694,7 +695,9 @@ class ContainerResolver:
         if parse(name) is not None:
             return await asyncio.to_thread(resolve, name)
         config = load_config()
-        scoped, info = await asyncio.to_thread(_lookup, config, name, get_container)
+        scoped, info = await asyncio.to_thread(
+            _lookup, config, name, get_container, inspect_exact=True,
+        )
         if info is None and scoped:
             # The owning driver fleet already established absence; never wait
             # on unrelated fleets just to describe it.
@@ -802,12 +805,22 @@ class ContainerResolver:
         plan = None
         if getattr(fleet, "driver", None) and not restricted:
             from . import runtime_drivers
+            from .bound_proxy import proxy_binding
 
             # Fails closed when the driver lacks a capability the fleet needs.
             plan = await asyncio.to_thread(
                 runtime_drivers.launch_plan, fleet, name, relay_enabled,
             )
             spec["venue"]["driver"] = fleet.driver
+            binding = (
+                proxy_binding(config, name, info.fleet, plan.driver)
+                if plan.driver is not None else None
+            )
+            if binding is not None:
+                spec["venue"]["runtime_proxy"] = {
+                    **binding, "provider_command": current_provider_argv(),
+                    "provider_environment": current_provider_environment(),
+                }
             spec["venue"]["transport"] = "ssh" if plan.ssh else "driver-exec"
             spec["venue"]["capabilities"]["session_host"] = plan.ssh
             if not plan.ssh:
