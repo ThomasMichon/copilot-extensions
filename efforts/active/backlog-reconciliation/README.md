@@ -522,6 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [obsolete same-generation test report](journal/2026/11.27-obsolete-same-generation-test-report.md)
+proposes conditional `NOT_PLANNED` retirement of #6538 after reviewed intent,
+current qualification and independently audited acknowledgment/reason/original
+preservation. Qualified source history deliberately replaced its recovery
+assertion; current source correspondence does not diagnose the historical
+timeout or establish installed acceptance. No issue effect or new census is
+claimed, and all five Plan and eleven global Validation items remain OPEN.
+
 The [five incomplete-attempt status records](journal/2026/11.27-five-incomplete-attempt-status-records.md)
 were delivered completely into OPEN #4783 after reviewed intent #14881.
 The separate #5621 automation status token then retired `NOT_PLANNED`,
@@ -532,6 +540,8 @@ none is promoted to a successful repair. Two complete equal-identity scans
 at 08:27:06 America/Los_Angeles measure 583 whole OPEN: 275 original-cohort
 and 308 inflow, with exactly #5621 departing and no arrivals or unrelated
 departures. #4783/#5747/#5590/#7556 and all parent gates remain OPEN.
+The actual outcome recording merged in #14883; the continuing campaign
+retains all five Plan and eleven global Validation items.
 
 The [entrypoint alternatives and source-authority study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md)
 compares ten admitted whole current requests and all 48 discussions. It
@@ -6097,6 +6107,12 @@ reserved guidance before renewed research. It does not resolve other
 parent/global gates or declare the Active effort complete.
 
 ## Validation Plan
+
+The [obsolete-report delivery gates](journal/2026/11.27-obsolete-same-generation-test-report.md#delivery-gates)
+separate qualified report evidence and deliberate source-contract replacement
+from reviewed intent, current pre-effect qualification, acknowledged proper-reason
+retirement and actual outcome recording. #6538 remains OPEN at proposal time;
+no technical completion, native operation or source/custody release follows.
 
 The [four-publication-case delivery gates](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#delivery-gates)
 are settled: reviewed publication, whole accepted receiving and independently
