@@ -43,3 +43,21 @@ These controls perform no real machine module, configuration mutation, health
 resource collection, scheduling, service, network or credential operation.
 They do not qualify first-use installation, installed maintenance or daemon
 lifetime.
+
+## Native POSIX bootstrap manifests
+
+`test_bootstrap_manifest_native.py` (also exposed by the lightweight
+`test_machines_manifest_source.py` adapter) exercises the actual Bash hook and
+native JSON reader from source and materialized inputs. Its inert status,
+publication and installer owners isolate legacy/namespaced manifest admission:
+current and stale versions, strict schema/UTF-8/duplicate-key refusal,
+runtime/current-marker coherence, first-use ordering and publication denial.
+Newline-suffixed context/runtime/source fields retain their identity, atomic
+replacement between queries cannot mix manifest generations, and literal NUL
+is refused before Bash capture. The adapter retains the source module's
+POSIX skip and T2/process/filesystem marks.
+Every Python/UV command and the addressed runtime are poisoned; these checks
+must neither start Python nor prepare an interpreter. Repeated current-path
+samples are recorded without increasing the existing fifteen-second outer cap.
+This is manifest-reader qualification, not an end-to-end installation-policy
+or first-use provisioning pass. The PowerShell-native reader is unchanged.
