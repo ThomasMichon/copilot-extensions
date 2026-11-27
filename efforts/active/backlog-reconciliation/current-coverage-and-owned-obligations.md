@@ -358,6 +358,32 @@ OPEN outcome or a technical completion. No other pending row gains content
 or semantic admission; all five parent Plan and eleven global Validation
 items remain OPEN.
 
+## Obsolete same-generation test report retired
+
+After reviewed intent #14887, the
+[obsolete-report outcome](journal/2026/11.27-obsolete-same-generation-test-report.md#actual-acknowledged-obsolete-report-retirement)
+records current report/editor/discussion and complete-roster qualification,
+actual repository-owned producer proof and exact current source correspondence.
+#9623 deliberately replaced the failing test's expected behavior; this is not
+a diagnosed or fixed historical timeout. The sole disclosed acknowledgment,
+independent `NOT_PLANNED` reason and unchanged whole original are verified.
+No receiving transfer, completed-source final unit or native operation occurs.
+
+Two complete equal-identity six-page scans at **2026-11-27 09:54:40
+America/Los_Angeles** measure **582 whole OPEN**: 274 original-cohort and
+308 inflow. Exactly #6538 departs from the preceding 583, with no arrival
+or unrelated departure. #4783/#5747/#5590/#7556 remain OPEN.
+All earlier counts and the frozen graph's identities and first six columns
+are preserved. The same four arrivals minus five audited frozen departures
+account for the current set.
+
+Only #6538's outcome/gap fields become `retired-obsolete`; no other row gains
+content admission or semantic credit. Effective OPEN outcomes are 438 pending,
+91 current-retained, 36 prior-retained, five new-retained, six spent-open,
+five excluded and one coordination identity. All five parent Plan and eleven
+global Validation items remain OPEN; the historical incident and wider
+runtime, installation, recovery and custody conditions are not completed.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

@@ -66,8 +66,13 @@
       "whole_open": 584,
       "original_cohort_open": 276,
       "inflow_open": 308,
-      "arrivals_since_frozen_snapshot": [14826, 14832],
-      "departures_since_frozen_snapshot": [13753],
+      "arrivals_since_frozen_snapshot": [
+        14826,
+        14832
+      ],
+      "departures_since_frozen_snapshot": [
+        13753
+      ],
       "unrelated_departures": []
     },
     {
@@ -75,8 +80,14 @@
       "whole_open": 583,
       "original_cohort_open": 276,
       "inflow_open": 307,
-      "arrivals_since_frozen_snapshot": [14826, 14832],
-      "departures_since_frozen_snapshot": [11805, 13753],
+      "arrivals_since_frozen_snapshot": [
+        14826,
+        14832
+      ],
+      "departures_since_frozen_snapshot": [
+        11805,
+        13753
+      ],
       "unrelated_departures": []
     },
     {
@@ -84,11 +95,49 @@
       "whole_open": 584,
       "original_cohort_open": 276,
       "inflow_open": 308,
-      "arrivals_since_frozen_snapshot": [14826, 14832, 14847],
-      "departures_since_frozen_snapshot": [11805, 13753],
-      "arrivals_since_previous_observation": [14847],
+      "arrivals_since_frozen_snapshot": [
+        14826,
+        14832,
+        14847
+      ],
+      "departures_since_frozen_snapshot": [
+        11805,
+        13753
+      ],
+      "arrivals_since_previous_observation": [
+        14847
+      ],
       "departures_since_previous_observation": [],
       "unrelated_departures": [],
+      "node_rows_still_cover_frozen_583_snapshot": true,
+      "arrival_content_admission": false
+    },
+    {
+      "observed_local": "2026-11-27T08:27:06.810421-08:00",
+      "whole_open": 583,
+      "original_cohort_open": 275,
+      "inflow_open": 308,
+      "arrivals_since_frozen_snapshot": [
+        14826,
+        14832,
+        14847,
+        14857
+      ],
+      "departures_since_frozen_snapshot": [
+        5621,
+        11805,
+        13753,
+        14823
+      ],
+      "arrivals_since_previous_observation": [],
+      "departures_since_previous_observation": [
+        5621
+      ],
+      "unrelated_departures": [],
+      "complete_equal_issue_passes": 2,
+      "pages_per_complete_pass": 6,
+      "all_excluded_creators_and_inflow_counted": true,
+      "pull_requests_excluded": true,
       "node_rows_still_cover_frozen_583_snapshot": true,
       "arrival_content_admission": false
     }
@@ -109,14 +158,27 @@
     "superseded_by_later_status_observation": true
   },
   "later_status_counting_observation": {
-    "observed_local": "2026-11-27T08:27:06.810421-08:00",
-    "whole_open": 583,
-    "original_cohort_open": 275,
+    "observed_local": "2026-11-27T09:54:40.985824-08:00",
+    "whole_open": 582,
+    "original_cohort_open": 274,
     "inflow_open": 308,
-    "arrivals_since_frozen_snapshot": [14826, 14832, 14847, 14857],
-    "departures_since_frozen_snapshot": [5621, 11805, 13753, 14823],
+    "arrivals_since_frozen_snapshot": [
+      14826,
+      14832,
+      14847,
+      14857
+    ],
+    "departures_since_frozen_snapshot": [
+      5621,
+      6538,
+      11805,
+      13753,
+      14823
+    ],
     "arrivals_since_previous_observation": [],
-    "departures_since_previous_observation": [5621],
+    "departures_since_previous_observation": [
+      6538
+    ],
     "unrelated_departures": [],
     "complete_equal_issue_passes": 2,
     "pages_per_complete_pass": 6,
@@ -136,11 +198,17 @@
   "primary_research_role_scope": "All frozen nodes and post-snapshot metadata nodes; not product or resource ownership.",
   "historical_primary_assignments_replaced": false,
   "current_open_roster_recording": {
-    "observed_local": "2026-11-27T08:27:06.810421-08:00",
-    "current_open_identity_count": 583,
+    "observed_local": "2026-11-27T09:54:40.985824-08:00",
+    "current_open_identity_count": 582,
     "frozen_identity_count": 583,
     "post_snapshot_metadata_identity_count": 4,
-    "audited_frozen_departures": [5621, 11805, 13753, 14823],
+    "audited_frozen_departures": [
+      5621,
+      6538,
+      11805,
+      13753,
+      14823
+    ],
     "definition": "Union frozen nodes with post_snapshot_metadata_nodes, then subtract later_status_counting_observation.departures_since_frozen_snapshot.",
     "every_current_identity_has_research_owner_and_explicit_outcome": true,
     "pending_is_not_semantic_or_source_completion": true
@@ -419,7 +487,8 @@
     "completed-guidance": "A separate reviewed final unit and independent provider/whole audit verify this finite guidance outcome, not runtime or resource completion.",
     "completed-source": "A separate reviewed final unit and independent provider/whole audit verify this finite source outcome; later consumer heads and resource custody remain separate.",
     "retired-status": "Reviewed complete receiving, disclosed acknowledgment and independent proper-reason/whole-preservation readbacks verify an administrative NOT_PLANNED status retirement, not technical completion.",
-    "pending": "Retain the existing issue and prior research; qualified changed-outcome evidence remains pending."
+    "pending": "Retain the existing issue and prior research; qualified changed-outcome evidence remains pending.",
+    "retired-obsolete": "Reviewed deliberate target retirement, disclosed acknowledgment and independent proper-reason/whole-original preservation verify an obsolete-report NOT_PLANNED retirement, not a technical fix or receiving transfer."
   },
   "historical_columns_scope": "Reference-roster and weighted-role columns are separately dated historical coverage, not current semantic admission or completion.",
   "node_columns": [
@@ -642,7 +711,7 @@
     [6486, "original", "member", 2, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [6507, "original", "member", 4, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [6535, "original", "automation", 29, false, "metadata-only", "retained-prior", "preserve-specific-prior-gap"],
-    [6538, "original", "automation", 2, false, "metadata-only", "retained-prior", "preserve-specific-prior-gap"],
+    [6538, "original", "automation", 2, false, "metadata-only", "retired-obsolete", "Reviewed14887/qualified-repository-report/source9623-deliberately-replaces-assertion/exact-current-blobs/ack7224883651/independent-NOT_PLANNED-original-preservation;not-timeout-fix-native-or-runtime-completion"],
     [6545, "original", "automation", null, false, "metadata-only", "spent-open", "verification-class-spent"],
     [6556, "original", "automation", 11, false, "metadata-only", "retained-prior", "preserve-specific-prior-gap"],
     [6557, "original", "automation", 11, false, "metadata-only", "retained-prior", "preserve-specific-prior-gap"],
@@ -1022,5 +1091,22 @@
     [14791, "inflow", "member", 1, false, null, "retained-new", "distinct-unfinished-request"],
     [14813, "inflow", "member", 4, false, null, "retained-new", "distinct-unfinished-request"],
     [14823, "inflow", "member", 1, false, null, "retained-new", "distinct-unfinished-request"]
-  ]
+  ],
+  "later_verified_obsolete_test_report_outcome": {
+    "journal": "../journal/2026/11.27-obsolete-same-generation-test-report.md",
+    "issue": 6538,
+    "state": "CLOSED",
+    "reason": "NOT_PLANNED",
+    "reviewed_intent_pr": 14887,
+    "deliberate_contract_replacement_pr": 9623,
+    "native_report_run": 38409809802,
+    "native_report_job": 115359808105,
+    "original_discussions": 0,
+    "acknowledgment": "https://github.com/ThomasMichon/copilot-extensions/issues/6538#issuecomment-7224883651",
+    "source_original_title_and_body_unchanged": true,
+    "independent_proper_reason_and_whole_preservation_readbacks": true,
+    "completed_source_final_units": 0,
+    "technical_completion_or_resource_transfer": false,
+    "other_pending_rows_gain_content_or_semantic_admission": false
+  }
 }
