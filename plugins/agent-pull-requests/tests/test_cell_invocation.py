@@ -7,54 +7,88 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Protocol, cast
 
 import pytest
+import agent_procutil
 from agent_procutil import no_window_kwargs
+from agent_procutil import managed_python
+from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
 from test_cell_installer_slice import SCRIPTS
 from test_cell_payload_upgrade import native_profile
-from test_watch_installation import _policy
+from test_watch_installation import _FixtureAPI, _policy
 from test_watch_runtime import completed as completed
 
-from agent_pull_requests import _installation_context as api
+from agent_pull_requests import _installation_context as _api
 from agent_pull_requests.watch_install import _manifest
 from agent_pull_requests.watch_invocation import WatchInvocation
 
 pytestmark = pytest.mark.timeout(90)
 
 
+class _InvocationAPI(_FixtureAPI, Protocol):
+    CURRENT_VERSION_FILE: str
+    LAST_KNOWN_GOOD_FILE: str
+    RUNTIME_SLOT_COMPLETION_FILE: str
+
+    def validate_runtime_slot_completion(self, **kwargs: Any) -> dict[str, Any]: ...
+
+    def _current_environment(self, **kwargs: Any) -> tuple[Any, Path]: ...
+
+    def _payload_identity_from_install(self, receipt: str | Path) -> dict[str, Any]: ...
+
+    def resolve_context(self, **kwargs: Any) -> dict[str, Any]: ...
+
+    def normalize_source(self, descriptor: dict[str, str]) -> dict[str, Any]: ...
+
+    def source_identity(self, source: dict[str, Any], key: str) -> dict[str, Any]: ...
+
+
+api = cast(_InvocationAPI, _api)
+Selected = tuple[Any, Any, Any, dict[str, Any], Path]
+FirstTouch = tuple[Any, Path]
+LegacyStaging = tuple[Path, Path, Path, Path, dict[str, str]]
+
+
 @pytest.mark.parametrize("actions,runner", [("false", "github-hosted"), ("true", "self-hosted")])
-def test_native_account_acceptance_refuses_non_disposable_hosts(monkeypatch, actions, runner):
+def test_native_account_acceptance_refuses_non_disposable_hosts(
+    monkeypatch: pytest.MonkeyPatch, actions: str, runner: str,
+) -> None:
     monkeypatch.setenv("APR_NATIVE_OS_ACCOUNT_ACCEPTANCE", "1")
     monkeypatch.setenv("GITHUB_ACTIONS", actions)
     monkeypatch.setenv("RUNNER_ENVIRONMENT", runner)
     with pytest.raises(pytest.fail.Exception, match="disposable GitHub-hosted"):
-        native_profile.__wrapped__(None)
+        getattr(native_profile, "__wrapped__")(None)
 
 
-def test_native_account_acceptance_refuses_environment_profile_substitution(monkeypatch, tmp_path):
+def test_native_account_acceptance_refuses_environment_profile_substitution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setenv("APR_NATIVE_OS_ACCOUNT_ACCEPTANCE", "1")
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     with pytest.raises(AssertionError, match="native OS account"):
-        native_profile.__wrapped__(None)
+        getattr(native_profile, "__wrapped__")(None)
     assert not list(tmp_path.iterdir())
 
 
-def load():
+def load() -> Any:
     spec = importlib.util.spec_from_file_location(
         "apr_cell_invocation", SCRIPTS / "cell_invoke.py",
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 @pytest.fixture
-def selected(completed, monkeypatch):
+def selected(completed: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch) -> Selected:
     installation, runtime = completed
     module = load()
     monkeypatch.setattr(module, "PAYLOAD", installation.payload_root)
@@ -71,7 +105,7 @@ def selected(completed, monkeypatch):
     return module, installation, runtime, status, python
 
 
-def test_selection_requires_exact_complete_target_without_creating_owner(selected):
+def test_selection_requires_exact_complete_target_without_creating_owner(selected: Selected) -> None:
     module, installation, _, status, python = selected
     assert module.selection(api, status, installation.durable_home) == (
         python, installation.plugin_root,
@@ -80,12 +114,14 @@ def test_selection_requires_exact_complete_target_without_creating_owner(selecte
     assert not installation.run_root.exists()
 
 
-def test_running_selection_admission_reuses_the_same_completed_validation(selected, monkeypatch):
+def test_running_selection_admission_reuses_the_same_completed_validation(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, installation, runtime, _, _ = selected
     validate = api.validate_runtime_slot_completion
-    calls = []
+    calls: list[dict[str, Any]] = []
 
-    def capture(**kwargs):
+    def capture(**kwargs: Any) -> Any:
         calls.append(kwargs)
         return validate(**kwargs)
 
@@ -100,7 +136,9 @@ def test_running_selection_admission_reuses_the_same_completed_validation(select
     "current", "lkg", "manifest", "manifest-runtime", "manifest-payload",
     "manifest-digest", "completion", "snapshot", "interpreter",
 ])
-def test_selection_never_falls_back_from_incoherent_or_incomplete_metadata(selected, damage):
+def test_selection_never_falls_back_from_incoherent_or_incomplete_metadata(
+    selected: Selected, damage: str,
+) -> None:
     module, installation, runtime, status, python = selected
     root = installation.plugin_root
     if damage == "current":
@@ -133,7 +171,7 @@ def test_selection_never_falls_back_from_incoherent_or_incomplete_metadata(selec
     assert not installation.run_root.exists()
 
 
-def test_only_entirely_absent_selection_may_self_provision(selected):
+def test_only_entirely_absent_selection_may_self_provision(selected: Selected) -> None:
     module, installation, _, status, _ = selected
     root = installation.plugin_root
     for name in (api.CURRENT_VERSION_FILE, api.LAST_KNOWN_GOOD_FILE, "deploy-manifest.json"):
@@ -144,7 +182,9 @@ def test_only_entirely_absent_selection_may_self_provision(selected):
         module.selection(api, status, installation.durable_home)
 
 
-def test_selection_refuses_foreign_cell_and_payload(selected, tmp_path, monkeypatch):
+def test_selection_refuses_foreign_cell_and_payload(
+    selected: Selected, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module, installation, _, status, _ = selected
     foreign = tmp_path / "foreign"
     foreign.mkdir()
@@ -157,7 +197,9 @@ def test_selection_refuses_foreign_cell_and_payload(selected, tmp_path, monkeypa
         module.selection(api, status, installation.durable_home)
 
 
-def test_dispatch_preserves_structured_arguments_and_target_status(selected, monkeypatch):
+def test_dispatch_preserves_structured_arguments_and_target_status(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module, installation, runtime, status, python = selected
     adapter = SimpleNamespace(
         foundation=lambda: api,
@@ -168,14 +210,20 @@ def test_dispatch_preserves_structured_arguments_and_target_status(selected, mon
     monkeypatch.setattr(module, "discover", lambda _: (
         status, installation.durable_home, installation.os_profile, {},
     ))
-    commands = []
+    admissions: list[Path] = []
+    commands: list[tuple[list[str], dict[str, Any], Path]] = []
     cwd = Path.cwd()
 
-    def run(command, **kwargs):
+    def admit(_: Any, expected: Path) -> str:
+        admissions.append(expected)
+        return str(expected)
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         commands.append((command, kwargs, Path.cwd()))
         return subprocess.CompletedProcess(command, 7)
 
     monkeypatch.setattr(module.subprocess, "run", run)
+    monkeypatch.setattr(module, "admitted_runtime", admit)
     arguments = ["a spaced argument", 'a"quote', "two\nlines", "", "--flag"]
     assert module.execute(arguments) == 7
     command, kwargs, actual_cwd = commands.pop()
@@ -184,11 +232,93 @@ def test_dispatch_preserves_structured_arguments_and_target_status(selected, mon
     assert kwargs["env"]["AGENT_RT_ROOT"] == str(installation.plugin_root)
     assert kwargs["env"]["COPILOT_PLUGIN_ROOT"] == str(installation.payload_root)
     assert kwargs["env"]["COPILOT_EXTENSIONS_CONTEXT"] == str(installation.receipt)
+    assert admissions == [python]
     assert not commands
 
 
+@pytest.mark.parametrize("failure", ["admission", "selection"])
+def test_dispatch_refuses_failed_admission_or_selection_changed_during_lookup(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    module, installation, runtime, status, python = selected
+    adapter = SimpleNamespace(
+        foundation=lambda: api, management_version=lambda: runtime.payload_version,
+    )
+    monkeypatch.setattr(module, "installer", lambda: adapter)
+    monkeypatch.setattr(module, "discover", lambda _: (
+        status, installation.durable_home, installation.os_profile, {},
+    ))
+    admissions: list[Path] = []
+
+    def admit(_: Any, expected: Path) -> str:
+        admissions.append(expected)
+        if failure == "admission":
+            raise RuntimeError("prepared admission refused")
+        (installation.plugin_root / api.CURRENT_VERSION_FILE).write_text(
+            "changed-during-admission\n", encoding="utf-8",
+        )
+        return str(expected)
+
+    monkeypatch.setattr(module, "admitted_runtime", admit)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "refused application must not run or provision",
+    ))
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        module.execute(["--help"])
+    assert admissions == [python]
+
+
+@pytest.mark.parametrize("error", [
+    subprocess.TimeoutExpired(["uv", "python", "find"], 10),
+    OutputLimitExceeded("stdout", 65536),
+])
+def test_settled_lookup_failure_reports_refusal_without_traceback_or_application(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], error: subprocess.SubprocessError,
+) -> None:
+    module, installation, runtime, status, _ = selected
+    adapter = SimpleNamespace(
+        foundation=lambda: api, management_version=lambda: runtime.payload_version,
+        process_helpers=lambda: agent_procutil,
+    )
+    monkeypatch.setattr(module, "installer", lambda: adapter)
+    monkeypatch.setattr(module, "discover", lambda _: (
+        status, installation.durable_home, installation.os_profile, {},
+    ))
+
+    def refuse(_: Path) -> str:
+        raise error
+
+    monkeypatch.setattr(managed_python, "resolve_runtime_python", refuse)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "failed application admission must not run or provision",
+    ))
+    assert module.main(["--", "inspect"]) == 126
+    captured = capsys.readouterr()
+    assert not captured.out and "Application runtime admission failed" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_application_admission_preserves_unconfirmed_cleanup_for_its_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load()
+    adapter = SimpleNamespace(process_helpers=lambda: agent_procutil)
+    error = OwnedCleanupError(None, phase="fixture", cause=RuntimeError("unconfirmed cleanup"))
+
+    def refuse(_: Path) -> str:
+        raise error
+
+    monkeypatch.setattr(managed_python, "resolve_runtime_python", refuse)
+    with pytest.raises(OwnedCleanupError) as observed:
+        module.admitted_runtime(adapter, Path("not-executed"))
+    assert observed.value is error
+
+
 @pytest.mark.parametrize("pointer", ["relative/install.json", '{"installReceipt":"not-a-path"}'])
-def test_explicit_context_must_be_absolute_receipt_path(tmp_path, monkeypatch, pointer):
+def test_explicit_context_must_be_absolute_receipt_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pointer: str,
+) -> None:
     module = load()
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", pointer)
@@ -197,10 +327,14 @@ def test_explicit_context_must_be_absolute_receipt_path(tmp_path, monkeypatch, p
     assert not list(tmp_path.iterdir())
 
 
-def native(script, arguments=(), *, environment=None):
+def native(
+    script: Path, arguments: Sequence[str] = (), *, environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        assert shell is not None
         command = [
-            shutil.which("pwsh") or shutil.which("powershell"),
+            shell,
             "-NoProfile", "-NonInteractive", "-File", str(script.with_suffix(".ps1")),
         ]
     else:
@@ -212,7 +346,9 @@ def native(script, arguments=(), *, environment=None):
 
 
 @pytest.mark.parametrize("enabled", [None, False, True, "invalid"])
-def test_native_mode_needs_no_python_and_never_mutates_legacy(tmp_path, enabled):
+def test_native_mode_needs_no_python_and_never_mutates_legacy(
+    tmp_path: Path, enabled: Any,
+) -> None:
     if os.name != "nt":
         pytest.skip("Native POSIX policy must be exercised in an isolated OS account")
     profile = tmp_path / "profile"
@@ -240,8 +376,8 @@ def test_native_mode_needs_no_python_and_never_mutates_legacy(tmp_path, enabled)
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_native_frozen_input_checks_canonical_source_bytes_and_ignores_only_generated_files(
-    legacy_staging, changed,
-):
+    legacy_staging: LegacyStaging, changed: bool,
+) -> None:
     import ast
 
     profile, origin, _, _, environment = legacy_staging
@@ -281,7 +417,9 @@ def test_native_frozen_input_checks_canonical_source_bytes_and_ignores_only_gene
 
 
 @pytest.mark.parametrize("overrides", ["absent", {}, {"fixture": {"enabled": True}}, None, "invalid"])
-def test_posix_legacy_admission_distinguishes_missing_and_invalid_marketplaces(tmp_path, overrides):
+def test_posix_legacy_admission_distinguishes_missing_and_invalid_marketplaces(
+    tmp_path: Path, overrides: Any,
+) -> None:
     from test_source_install_transactions import _host, _quote
 
     profile = tmp_path / "profile"
@@ -322,7 +460,7 @@ def test_posix_legacy_admission_distinguishes_missing_and_invalid_marketplaces(t
 
 
 @pytest.fixture
-def first_touch(tmp_path, monkeypatch):
+def first_touch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FirstTouch:
     module = load()
     profile = tmp_path / "profile"
     profile.mkdir()
@@ -338,7 +476,7 @@ def first_touch(tmp_path, monkeypatch):
     return module, profile
 
 
-def test_first_touch_uses_canonical_receipt_and_activation_without_owner(first_touch):
+def test_first_touch_uses_canonical_receipt_and_activation_without_owner(first_touch: FirstTouch) -> None:
     module, profile = first_touch
     status, durable, _, probe = module.discover(api)
     assert status["reason"] == "activation-required"
@@ -357,7 +495,9 @@ def test_first_touch_uses_canonical_receipt_and_activation_without_owner(first_t
     assert not (profile / ".agent-pull-requests").exists()
 
 
-def test_command_cannot_activate_an_unqualified_cold_cell(first_touch, monkeypatch):
+def test_command_cannot_activate_an_unqualified_cold_cell(
+    first_touch: FirstTouch, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module, profile = first_touch
     monkeypatch.setattr(module, "installer", lambda: SimpleNamespace(foundation=lambda: api))
     assert module.discover(api)[0]["reason"] == "activation-required"
@@ -370,7 +510,9 @@ def test_command_cannot_activate_an_unqualified_cold_cell(first_touch, monkeypat
     assert set(profile.rglob("*")) == before
 
 
-def test_command_cannot_provision_an_empty_active_cell(selected, monkeypatch):
+def test_command_cannot_provision_an_empty_active_cell(
+    selected: Selected, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module, installation, runtime, current, _ = selected
     adapter = SimpleNamespace(
         foundation=lambda: api, management_version=lambda: runtime.payload_version,
@@ -387,7 +529,7 @@ def test_command_cannot_provision_an_empty_active_cell(selected, monkeypatch):
         module.execute(["--help"])
 
 
-def test_existing_unactivated_receipt_requires_explicit_decision(first_touch):
+def test_existing_unactivated_receipt_requires_explicit_decision(first_touch: FirstTouch) -> None:
     module, profile = first_touch
     status, durable, _, probe = module.discover(api)
     resolved = api.resolve_context(payload_root=module.PAYLOAD, plugin_id=module.PLUGIN)
@@ -403,12 +545,14 @@ def test_existing_unactivated_receipt_requires_explicit_decision(first_touch):
 
 
 @pytest.mark.parametrize("change", ["disabled", "malformed", "legacy", "explicit"])
-def test_first_touch_refuses_inadmissible_governance_or_state(first_touch, monkeypatch, change):
+def test_first_touch_refuses_inadmissible_governance_or_state(
+    first_touch: FirstTouch, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     module, profile = first_touch
     if change == "disabled":
         _policy(profile, False)
     elif change == "malformed":
-        _policy(profile, "not-a-boolean")
+        _policy(profile, cast(Any, "not-a-boolean"))
     elif change == "legacy":
         (profile / ".agent-pull-requests").mkdir()
     else:
@@ -424,7 +568,7 @@ def test_first_touch_refuses_inadmissible_governance_or_state(first_touch, monke
     assert not (durable / "marketplaces").exists()
 
 
-def test_bootstrap_refresh_advances_only_its_active_source_generation(first_touch):
+def test_bootstrap_refresh_advances_only_its_active_source_generation(first_touch: FirstTouch) -> None:
     module, profile = first_touch
     status, durable, _, probe = module.discover(api)
     module.activate_fresh(
@@ -445,7 +589,7 @@ def test_bootstrap_refresh_advances_only_its_active_source_generation(first_touc
 
 
 @pytest.mark.parametrize("entry", ["payload-mode", "init", "invoke-payload-runtime"])
-def test_native_explicit_missing_receipt_never_falls_back(tmp_path, entry):
+def test_native_explicit_missing_receipt_never_falls_back(tmp_path: Path, entry: str) -> None:
     environment = os.environ.copy()
     environment.update(
         HOME=str(tmp_path), USERPROFILE=str(tmp_path),
@@ -461,7 +605,7 @@ def test_native_explicit_missing_receipt_never_falls_back(tmp_path, entry):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell forwarding contract")
-def test_generated_powershell_preserves_actual_python_stdout_args_cwd_and_failure(tmp_path):
+def test_generated_powershell_preserves_actual_python_stdout_args_cwd_and_failure(tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
@@ -469,6 +613,13 @@ def test_generated_powershell_preserves_actual_python_stdout_args_cwd_and_failur
     (payload / "plugin.json").write_text("{}", encoding="utf-8")
     shutil.copy2(SCRIPTS.parent / "bin" / "agent-pull-requests.ps1", payload / "bin")
     shutil.copy2(SCRIPTS / "invoke-payload-runtime.ps1", scripts)
+    shutil.copy2(SCRIPTS / "argument-transport.ps1", scripts)
+    support = payload / "libs/agent-procutil/src/agent_procutil"
+    support.mkdir(parents=True)
+    shutil.copy2(SCRIPTS.parents[2] / "libs/agent-procutil/src/agent_procutil/private_paths.ps1", support)
+    selector = scripts / "_bootstrap_python" / "select.ps1"
+    selector.parent.mkdir()
+    selector.write_text("'" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8")
     (scripts / "payload-mode.ps1").write_text("'cell'\n", encoding="utf-8")
     (scripts / "cell_invoke.py").write_text(
         "import json, os, sys\n"
@@ -490,8 +641,8 @@ def test_generated_powershell_preserves_actual_python_stdout_args_cwd_and_failur
 )
 @pytest.mark.parametrize("enabled", [True, "malformed"])
 def test_session_start_never_runs_legacy_reconciler_for_governed_or_invalid_policy(
-    tmp_path, native_profile, enabled,
-):
+    tmp_path: Path, native_profile: Path | None, enabled: Any,
+) -> None:
     profile = native_profile or tmp_path
     _policy(profile, enabled)
     environment = os.environ.copy()
@@ -513,7 +664,9 @@ def test_session_start_never_runs_legacy_reconciler_for_governed_or_invalid_poli
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
 @pytest.mark.parametrize("mode", ["cell", "legacy", "legacy-fails", "refused", "unknown"])
-def test_bootstrap_admission_always_emits_one_empty_json_and_preserves_failures(tmp_path, shell, mode):
+def test_bootstrap_admission_always_emits_one_empty_json_and_preserves_failures(
+    tmp_path: Path, shell: str, mode: str,
+) -> None:
     from test_source_install_transactions import _host
 
     suffix = "sh" if shell == "bash" else "ps1"
@@ -562,7 +715,9 @@ def test_bootstrap_admission_always_emits_one_empty_json_and_preserves_failures(
 
 @pytest.mark.skipif(os.name != "nt", reason="Native POSIX policy needs an isolated OS account")
 @pytest.mark.parametrize("action", ["install", "update", "stamp", "provision", "uninstall"])
-def test_implicit_legacy_installer_refuses_governed_policy_before_all_writes(tmp_path, action):
+def test_implicit_legacy_installer_refuses_governed_policy_before_all_writes(
+    tmp_path: Path, action: str,
+) -> None:
     _policy(tmp_path)
     environment = os.environ.copy()
     environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path))
@@ -576,7 +731,7 @@ def test_implicit_legacy_installer_refuses_governed_policy_before_all_writes(tmp
 
 
 @pytest.fixture
-def legacy_staging(tmp_path, native_profile):
+def legacy_staging(tmp_path: Path, native_profile: Path | None) -> Iterator[LegacyStaging]:
     if os.name != "nt" and native_profile is None:
         pytest.skip("Native POSIX admission requires a disposable OS account")
     profile = native_profile or tmp_path / "profile"
@@ -635,8 +790,8 @@ def legacy_staging(tmp_path, native_profile):
 @pytest.mark.parametrize("action", ["install", "update", "stamp", "provision", "uninstall"])
 @pytest.mark.parametrize("policy_form", ["marketplace-opt-out", "disabled-with-other-override"])
 def test_legacy_staging_installer_revalidates_marketplace_opt_out(
-    legacy_staging, action, policy_form,
-):
+    legacy_staging: LegacyStaging, action: str, policy_form: str,
+) -> None:
     profile, payload, policy, _, environment = legacy_staging
     if policy_form == "disabled-with-other-override":
         policy.write_text(json.dumps({
@@ -661,7 +816,9 @@ def test_legacy_staging_installer_revalidates_marketplace_opt_out(
 @pytest.mark.parametrize("damage", [
     "none", "stage-content", "unselected", "stamped", "identity", "missing-provenance",
 ])
-def test_native_staged_snapshot_requires_current_canonical_selection(legacy_staging, damage):
+def test_native_staged_snapshot_requires_current_canonical_selection(
+    legacy_staging: LegacyStaging, damage: str,
+) -> None:
     profile, origin, _, settings, environment = legacy_staging
     captured = api.resolve_context(
         payload_root=origin, plugin_id="agent-pull-requests",
@@ -714,8 +871,8 @@ def test_native_staged_snapshot_requires_current_canonical_selection(legacy_stag
     "ordinary-payload-hint", "linked-entry",
 ])
 def test_legacy_staging_reentry_never_trusts_flags_or_stale_admission(
-    legacy_staging, tmp_path, damage,
-):
+    legacy_staging: LegacyStaging, tmp_path: Path, damage: str,
+) -> None:
     profile, payload, policy, settings, environment = legacy_staging
     staged = profile / ".agent-pull-requests" / ".install-stage" / "fixture-0" / payload.name
     shutil.copytree(payload, staged)
@@ -750,7 +907,7 @@ def test_legacy_staging_reentry_never_trusts_flags_or_stale_admission(
         except OSError as error:
             pytest.skip(f"Native symlink creation unavailable: {error}")
 
-    def owned_files():
+    def owned_files() -> dict[Path, bytes]:
         return {
             path.relative_to(profile): path.read_bytes()
             for root in (payload.parent, policy.parent, profile / ".agent-pull-requests")
@@ -774,8 +931,8 @@ def test_legacy_staging_reentry_never_trusts_flags_or_stale_admission(
 @pytest.mark.timeout(420)
 @pytest.mark.skipif(os.name != "nt", reason="Native POSIX bootstrap needs an isolated OS account")
 def test_normal_init_and_generated_command_build_and_use_fresh_cell_without_legacy(
-    tmp_path_factory,
-):
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     # The full test-name prefix exceeds Windows' native build-backend CWD limit.
     tmp_path = tmp_path_factory.mktemp("b")
     profile = tmp_path / "profile"
@@ -787,6 +944,7 @@ def test_normal_init_and_generated_command_build_and_use_fresh_cell_without_lega
     environment.update(HOME=str(profile), USERPROFILE=str(profile))
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     host = shutil.which("pwsh") or shutil.which("powershell")
+    assert host is not None
     result = subprocess.run(  # noqa: S603 -- exact owning payload, disposable governed profile
         [host, "-NoProfile", "-NonInteractive", "-File", str(SCRIPTS / "init.ps1")],
         env=environment, cwd=caller, capture_output=True, text=True,
