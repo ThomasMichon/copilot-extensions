@@ -530,6 +530,7 @@ all 584 observed OPEN identities with a research owner and reviewed or pending
 outcome. Only the global coverage-roster recording criterion resolves;
 continuing semantic/acceptance work and five Plan/eleven actual global
 Validation items remain OPEN. No issue or resource effect is claimed.
+The reviewed recording delta merged in #14849.
 
 The [scoped attribution repair correspondence](journal/2026/11.26-scoped-attribution-repair-correspondence.md)
 maps the complete #11805 original and six discussions to changed source
@@ -7004,6 +7005,9 @@ incumbent parent check state remains unchanged.
 - [ ] Each use of the standing completion-check approval retains the actual
   issue, complete roster and PR review/check metadata results and its conditional
   disposition, without resetting body/source allowances or other owners' holds.
+  The [bounded retained-record audit](journal/2026/11.26-scope-boundaries-and-current-roster.md#bounded-retained-verification-audit)
+  distinguishes candidate verification, continuation and disposition records;
+  historical coverage and class attribution remain unresolved.
   The [owner-gone source completion](journal/2026/11.23-owner-gone-lane-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
   retains the unchanged whole original, full roster, actual source-review/
   required-CI and eight current-file results, exact live acknowledgment and
