@@ -40,23 +40,26 @@ InstallDir="$HOME/.agent-ssh"
 Manifest="$InstallDir/deploy-manifest.json"
 installer_action=stamp
 if [[ -f "$Manifest" ]]; then
-  # Retain the existing metadata-reader prerequisite only for drift detection.
-  py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
-  if ! PluginDir="$("$py" -I -c '
-import json, sys
-path = json.load(open(sys.argv[1]))["source"]["path"]
-if not isinstance(path, str) or not path:
-    raise ValueError("deployed runtime source is unavailable")
-print(path)
-' "$Manifest")"; then refuse 'deployed runtime source could not be read.'; fi
+  query="$ScriptDir/installation-context/json-query.awk"
+  [[ -f "$query" ]] || refuse 'native deployed runtime metadata reader is unavailable.'
+  deploymentDocument=""
+  # Both fields belong to one document, even if the manifest is replaced.
+  if IFS= read -r -d '' deploymentDocument 2>/dev/null < "$Manifest"; then
+    refuse 'deployed runtime metadata contains NUL.'
+  fi
+  if ! PluginDir="$(LC_ALL=C awk -f "$query" -v mode=string \
+      -v query_path=$'source\034path' <<<"$deploymentDocument" && printf .)"; then
+    refuse 'deployed runtime source metadata could not be read.'
+  fi
+  PluginDir="${PluginDir%.}"
+  [[ -n "$PluginDir" ]] || refuse 'deployed runtime source metadata could not be read.'
   [[ -d "$PluginDir" ]] || refuse 'the deployed runtime source is unavailable.'
-  if ! deployed="$("$py" -I -c '
-import json, sys
-version = json.load(open(sys.argv[1]))["source"]["version"]
-if not isinstance(version, str) or not version:
-    raise ValueError("deployed runtime version is unavailable")
-print(version)
-' "$Manifest")"; then refuse 'deployed runtime version could not be read.'; fi
+  if ! deployed="$(LC_ALL=C awk -f "$query" -v mode=string \
+      -v query_path=$'source\034version' <<<"$deploymentDocument" && printf .)"; then
+    refuse 'deployed runtime version metadata could not be read.'
+  fi
+  deployed="${deployed%.}"
+  [[ -n "$deployed" ]] || refuse 'deployed runtime version metadata could not be read.'
   if ! current="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$PluginDir/pyproject.toml" |
       sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"; then
     refuse 'selected payload version is unavailable.'

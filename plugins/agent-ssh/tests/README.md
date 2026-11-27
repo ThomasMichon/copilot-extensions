@@ -30,3 +30,20 @@ This packet qualifies foreground command admission, not full project
 environment selection, durable UV distribution, readiness import isolation,
 first-use provisioning or installed-host continuity. The existing first-use
 driver and pinned/custom-root/nested-owner refusals retain their contracts.
+
+## POSIX bootstrap metadata
+
+```text
+tools/run-tests payload-invocation --test-file tests/test_ssh_metadata_source.py --allow-explicit-tiers
+```
+
+The backend-free metadata packet reads raw and materialized hooks using poisoned
+Python/UV commands and an inert driver. It distinguishes invoked-reader ownership
+from the manifest-selected payload, exercises current markers, cold/stale actions,
+holds, invalid documents, decoded newlines and atomic manifest replacement.
+Each repeated current check performs two native field queries and no interpreter
+or driver launch. The existing native workflow requires all 56 metadata controls
+on Ubuntu and macOS, with 22 retained handoff/routing controls additionally on
+Linux, without skips. Actual driver submission remains Linux/Bash-qualified;
+macOS retains its existing refusal. These are isolated source controls, not
+SSH connectivity, installed rollout or complete hook-latency qualification.
