@@ -1,0 +1,9 @@
+{
+  "comment": "Select prepared UV-managed installer Python for early cell lifecycle actions without ambient Python fallback",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

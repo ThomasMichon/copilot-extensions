@@ -4,30 +4,34 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 VERSION = "1.2.3"
+OwnedRunner = tuple[list[tuple[list[str], dict[str, Any]]], ModuleType]
 
 
 @pytest.fixture
-def helper(monkeypatch):
+def helper(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.syspath_prepend(str(SCRIPTS))
     spec = importlib.util.spec_from_file_location("cell_installer_test_subject", SCRIPTS / "cell_installer.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 @pytest.fixture
-def payload(tmp_path):
+def payload(tmp_path: Path) -> Path:
     root = tmp_path / "payload"
     root.mkdir()
     (root / "plugin.json").write_text(json.dumps({"name": "agent-machines", "version": VERSION}))
@@ -36,7 +40,7 @@ def payload(tmp_path):
     return root
 
 
-def test_release_hash_binds_copied_content_and_membership(helper, payload, tmp_path):
+def test_release_hash_binds_copied_content_and_membership(helper: Any, payload: Path, tmp_path: Path) -> None:
     expected = helper.payload_identity(payload, VERSION)
     copied = tmp_path / "snapshot"
     shutil.copytree(payload, copied)
@@ -51,7 +55,9 @@ def test_release_hash_binds_copied_content_and_membership(helper, payload, tmp_p
 
 
 @pytest.mark.parametrize("filename", ("plugin.json", "pyproject.toml"))
-def test_release_hash_rejects_replaced_version_without_source_metadata(helper, payload, filename):
+def test_release_hash_rejects_replaced_version_without_source_metadata(
+    helper: Any, payload: Path, filename: str,
+) -> None:
     path = payload / filename
     path.write_text(path.read_text().replace(VERSION, "9.9.9"))
     assert not (payload / "runtime-source.json").exists()
@@ -59,7 +65,7 @@ def test_release_hash_rejects_replaced_version_without_source_metadata(helper, p
         helper.payload_identity(payload, VERSION)
 
 
-def test_release_hash_excludes_only_root_publication_owner(helper, payload):
+def test_release_hash_excludes_only_root_publication_owner(helper: Any, payload: Path) -> None:
     expected = helper.payload_identity(payload, VERSION)
     nested = payload / "nested"
     nested.mkdir()
@@ -67,7 +73,7 @@ def test_release_hash_excludes_only_root_publication_owner(helper, payload):
     assert helper.payload_identity(payload, VERSION) != expected
 
 
-def test_release_hash_also_binds_source_identity_metadata(helper, payload):
+def test_release_hash_also_binds_source_identity_metadata(helper: Any, payload: Path) -> None:
     expected = helper.payload_identity(payload, VERSION)
     metadata = payload / "runtime-source.json"
     metadata.write_text('{"source":"first"}')
@@ -81,7 +87,7 @@ def test_release_hash_also_binds_source_identity_metadata(helper, payload):
     "__pycache__/cached.pyc", ".venv/cached.py", ".git/config", "build/generated.py",
     "dist/generated.whl", "project.egg-info/metadata", "nested/snapshot-provenance.json",
 ))
-def test_release_hash_binds_generated_and_cached_bytes(helper, payload, relative):
+def test_release_hash_binds_generated_and_cached_bytes(helper: Any, payload: Path, relative: str) -> None:
     expected = helper.payload_identity(payload, VERSION)
     path = payload / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +101,9 @@ def test_release_hash_binds_generated_and_cached_bytes(helper, payload, relative
 
 
 @pytest.mark.parametrize("directory", (False, True))
-def test_release_hash_rejects_linked_payload_inputs(helper, payload, directory, monkeypatch):
+def test_release_hash_rejects_linked_payload_inputs(
+    helper: Any, payload: Path, directory: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     link = payload / "linked"
     if directory:
         link.mkdir()
@@ -109,8 +117,12 @@ def test_release_hash_rejects_linked_payload_inputs(helper, payload, directory, 
         helper.payload_identity(payload, VERSION)
 
 
-def test_release_hash_propagates_incomplete_inventory(helper, payload, monkeypatch):
-    def incomplete(*_args, onerror, **_kwargs):
+def test_release_hash_propagates_incomplete_inventory(
+    helper: Any, payload: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def incomplete(
+        *_args: Any, onerror: Callable[[OSError], None], **_kwargs: Any,
+    ) -> Iterator[None]:
         onerror(PermissionError("controlled incomplete walk"))
         yield
 
@@ -120,27 +132,30 @@ def test_release_hash_propagates_incomplete_inventory(helper, payload, monkeypat
 
 
 @pytest.fixture
-def owned_runner(monkeypatch):
-    calls = []
+def owned_runner(monkeypatch: pytest.MonkeyPatch) -> OwnedRunner:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=7, stdout="result\n", stderr="diagnostic\n")
 
     package = ModuleType("agent_procutil")
     module = ModuleType("agent_procutil.owned_process")
-    module.run_caller_owned = run
+    monkeypatch.setattr(module, "run_caller_owned", run, raising=False)
     monkeypatch.setitem(sys.modules, "agent_procutil", package)
     monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", module)
     return calls, module
 
 
-def _request(payload):
+def _request(payload: Path) -> dict[str, Any]:
     return {"argv": ["host", "-File", "init.ps1"], "cwd": str(payload.parent),
             "payload": str(payload), "timeout": 480}
 
 
-def test_watchdog_uses_whole_tree_owner_and_preserves_output(helper, payload, owned_runner, capsys, monkeypatch):
+def test_watchdog_uses_whole_tree_owner_and_preserves_output(
+    helper: Any, payload: Path, owned_runner: OwnedRunner,
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv(helper.HASH_ENV, raising=False)
     calls, _ = owned_runner
     assert helper.watchdog(_request(payload)) == 7
@@ -156,39 +171,48 @@ def test_watchdog_uses_whole_tree_owner_and_preserves_output(helper, payload, ow
     assert output.err == "diagnostic\n"
 
 
-def test_watchdog_refuses_an_inherited_changed_payload(helper, payload, owned_runner, monkeypatch):
+def test_watchdog_refuses_an_inherited_changed_payload(
+    helper: Any, payload: Path, owned_runner: OwnedRunner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv(helper.HASH_ENV, "a" * 64)
     with pytest.raises(RuntimeError, match="Payload changed"):
         helper.watchdog(_request(payload))
     assert owned_runner[0] == []
 
 
-def test_watchdog_timeout_is_failure_after_owned_retirement(helper, payload, owned_runner, capsys, monkeypatch):
+def test_watchdog_timeout_is_failure_after_owned_retirement(
+    helper: Any, payload: Path, owned_runner: OwnedRunner,
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv(helper.HASH_ENV, raising=False)
 
-    def expired(argv, **kwargs):
+    def expired(argv: list[str], **kwargs: Any) -> None:
         raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
 
-    owned_runner[1].run_caller_owned = expired
+    monkeypatch.setattr(owned_runner[1], "run_caller_owned", expired)
     assert helper.watchdog(_request(payload)) == 124
     assert "WATCHDOG" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("timeout", (0, -1, float("nan"), float("inf"), True))
-def test_watchdog_refuses_unbounded_deadlines(helper, payload, timeout, owned_runner):
+def test_watchdog_refuses_unbounded_deadlines(
+    helper: Any, payload: Path, timeout: float, owned_runner: OwnedRunner,
+) -> None:
     request = {**_request(payload), "timeout": timeout}
     with pytest.raises(ValueError, match="finite and positive"):
         helper.watchdog(request)
     assert owned_runner[0] == []
 
 
-def test_worker_binds_original_caller_before_payload_identity(helper, payload, monkeypatch, owned_runner):
+def test_worker_binds_original_caller_before_payload_identity(
+    helper: Any, payload: Path, monkeypatch: pytest.MonkeyPatch, owned_runner: OwnedRunner,
+) -> None:
     admitted = False
     events = []
     package = sys.modules["agent_procutil"]
     transport = ModuleType("agent_procutil._shell_caller_owned")
 
-    def serve(callback, **lifetime):
+    def serve(callback: Callable[[], int], **lifetime: Any) -> int:
         nonlocal admitted
         assert lifetime == {"owner_pid": 123, "owner_birth": "birth", "nonce": "nonce"}
         events.append("admitted")
@@ -197,12 +221,12 @@ def test_worker_binds_original_caller_before_payload_identity(helper, payload, m
 
     real_identity = helper.payload_identity
 
-    def identity(root, version):
+    def identity(root: Path, version: str) -> Any:
         assert admitted, "payload I/O ran before original-caller custody"
         events.append("hashed")
         return real_identity(root, version)
 
-    transport.serve = serve
+    monkeypatch.setattr(transport, "serve", serve, raising=False)
     monkeypatch.setattr(package, "_shell_caller_owned", transport, raising=False)
     monkeypatch.setitem(sys.modules, transport.__name__, transport)
     monkeypatch.setattr(helper, "payload_identity", identity)
@@ -213,7 +237,7 @@ def test_worker_binds_original_caller_before_payload_identity(helper, payload, m
     assert events == ["admitted", "hashed"]
 
 
-def test_snapshot_control_launches_disable_bytecode_writes(monkeypatch):
+def test_snapshot_control_launches_disable_bytecode_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     sh = (SCRIPTS / "init.sh").read_text(encoding="utf-8")
     ps = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
     for source in (sh, ps):
@@ -225,7 +249,7 @@ def test_snapshot_control_launches_disable_bytecode_writes(monkeypatch):
     assert '"$py" -I -B "$vr"' in sh
     assert "@('-I', '-B', $vr," in ps
     assert '"$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py"' in sh
-    assert "$python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py')" in ps
+    assert "$python -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py')" in ps
     assert sh.count('"$VENV_PYTHON" -B -c \'import agent_machines\'') == 2
     assert ps.count("$VenvPython -B -c 'import agent_machines'") == 2
     spec = importlib.util.spec_from_file_location(
@@ -241,7 +265,10 @@ def test_snapshot_control_launches_disable_bytecode_writes(monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux exact-birth process-group qualification")
-def test_watchdog_retires_actual_build_descendant(helper, payload, tmp_path, monkeypatch, capsys):
+def test_watchdog_retires_actual_build_descendant(
+    helper: Any, payload: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.delenv(helper.HASH_ENV, raising=False)
     witness = tmp_path / "descendant.json"
     child = (
