@@ -777,13 +777,14 @@ def test_remote_observation_rejects_late_evidence_with_one_shared_deadline(
 
 @pytest.mark.parametrize("represented", [False, True])
 def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
-    monkeypatch: pytest.MonkeyPatch, represented: bool,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], represented: bool,
 ) -> None:
     import argparse
 
     package(monkeypatch, "_send_bridge")
     adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
     load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    load(monkeypatch, "_send_bridge.managed_message_cli", BRIDGE + "managed_message_cli.py")
     calls: list[tuple[Any, ...]] = []
     row = {
         "status": "running", "session_id": "native",
@@ -795,7 +796,15 @@ def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
         calls.append(("resolve", handle, scope))
         return {"bridge": row}
 
-    client = SimpleNamespace(resolve_bridge=resolve)
+    def accept(session_id: str, prompt: str, **options: Any) -> dict[str, Any]:
+        calls.append(("managed", session_id, prompt, options))
+        return {
+            "queue_id": 7, "session_id": session_id, "native_session_id": "native",
+            "idempotency_key": options["idempotency_key"], "queued": True,
+            "duplicate": False, "delivery_state": "queued", "turn_index": None,
+        }
+
+    client = SimpleNamespace(resolve_bridge=resolve, submit_managed_message=accept)
 
     def get_client(**options: Any) -> Any:
         assert options == {"ensure": False, "propagate_errors": True}
@@ -803,7 +812,7 @@ def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
 
     core = SimpleNamespace(
         _get_client=get_client, _caller_id_for=lambda _args: "caller",
-        _submit_and_stream=lambda *args, **kwargs: calls.append(("managed", args, kwargs)),
+        _submit_and_stream=lambda *_args, **_kwargs: pytest.fail("legacy turn admission"),
         _deliver_to_live_session=lambda *args: calls.append(("registered", args)),
     )
     for name, value in {
@@ -819,21 +828,23 @@ def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
         ),
     }.items():
         monkeypatch.setitem(sys.modules, "_send_bridge." + name, value)
-    args = argparse.Namespace(target="workspace", bridge=True, idempotency_key="original")
+    args = argparse.Namespace(target="workspace", bridge=True, idempotency_key="original", json=True)
     adapter.send(args)
     assert calls[0] == ("resolve", "workspace", {"local_only": True, "project": "demo"})
     assert len(calls) == 2
-    actual = calls[1][1]
-    bound = actual[1]
-    assert actual[0] is client and actual[2:] == (
-        "native" if represented else "managed", "work",
-    )
-    assert bound is not args and bound.idempotency_key == "original"
     if represented:
+        actual = calls[1][1]
+        bound = actual[1]
+        assert actual[0] is client and actual[2:] == ("native", "work")
+        assert bound is not args and bound.idempotency_key == "original"
         assert bound.expected_session_id == "native" and bound.exact_session
     else:
-        assert bound.expected_native_session_id == "native" and bound.no_resume
-        assert calls[1][2] == {"caller_id": "caller"}
+        assert calls[1] == ("managed", "managed", "work", {
+            "idempotency_key": "original", "expected_native_session_id": "native", "caller_id": "caller",
+        })
+        receipt = json.loads(capsys.readouterr().out)
+        assert receipt["outcome"] == "queued" and receipt["queue_id"] == 7
+        assert receipt["bridge"]["managed_session_id"] == "managed"
     assert not hasattr(args, "expected_session_id")
     assert not hasattr(args, "expected_native_session_id")
 

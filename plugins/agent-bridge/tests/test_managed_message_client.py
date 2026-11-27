@@ -33,7 +33,7 @@ def test_missing_capability_refuses_before_mutation(
 
 @pytest.mark.parametrize("fault", [
     "none", "disconnect", "draining", "wrong-target", "wrong-key", "bad-state", "shape", "interrupt",
-    "deadline",
+    "deadline", "error-shape",
 ])
 def test_exact_one_attempt_preserves_original_operation_and_unknown_effect_fence(
     monkeypatch: pytest.MonkeyPatch, fault: str,
@@ -68,6 +68,8 @@ def test_exact_one_attempt_preserves_original_operation_and_unknown_effect_fence
             raise KeyboardInterrupt
         if fault == "deadline":
             raise ReadDeadlineExpired("POST response budget exhausted")
+        if fault == "error-shape":
+            raise BridgeClientError(500, {"code": []})
         if fault == "shape":
             return {}
         return {

@@ -97,7 +97,7 @@ async def health(request: Request) -> dict[str, Any]:
             "retained_worktree_resume": 1,
             "retained_keyed_native_admission": 1,
             "target_inventory": 1,
-            "bridge_inventory": 2,
+            "bridge_inventory": 3,
             "live_exact_send": 1,
             "result_native_identity": 1,
             "remote_native_result": 1,

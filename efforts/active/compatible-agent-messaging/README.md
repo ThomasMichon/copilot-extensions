@@ -212,6 +212,26 @@ rollout is claimed by this draft.
 
 ## Journal
 
+### 2026-11-25 - Local managed CLI adoption
+
+- The managed provider/client expansion merged in #14693 after current-head
+  approval and required CI. Original receipts, actual-client/native fences,
+  legacy-only context handoff and atomic terminal settlement remain its owners.
+- Six controlled CLI failures established that ordinary selection still refused
+  stopped/idle managed targets or bypassed durable acceptance through the legacy
+  native-bound turn API. Local managed sends now use the capability-selected
+  durable queue, retaining exact owner/native IDs and an original supplied or
+  generated operation key. Known retained managed owners do not need a live
+  carrier or implicit resume.
+- Ten focused CLI controls and the 138-test parser/client/provider packet pass,
+  including original-key unknown outcomes, no lifecycle fallback, registered
+  stale-target acceptance and unchanged explicit-host behavior. Whole-file
+  strict typing passes for four changed Python files on Linux and Windows.
+- This is the local managed CLI slice, not complete #14606 acceptance. Dormant
+  conversations without a registered/managed input owner, remote managed
+  forwarding and full command-form qualification remain outstanding. No live
+  queue repair, installed adoption or rollout is claimed.
+
 ### 2026-11-25 - Managed producer expansion
 
 - The represented-provider repair merged in #14655. Its current-head review

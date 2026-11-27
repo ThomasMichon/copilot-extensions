@@ -653,18 +653,41 @@ An HTTP or connection failure during selection returns `refused_unavailable`
 with reason `bridge_selection_unavailable` and exit code 69, before any admission.
 This includes the real client's initial health and compatibility preflight.
 
-The selected row must identify a running conversation and a current admission
-owner. Retained managed history and metadata-only rows cannot accept a prompt.
+The selected row must identify an existing conversation and a durable input
+owner. A retained managed owner may accept input while its carrier is stopped,
+busy or unavailable; a running inventory observation is not required.
 This operation never ensures a daemon, hydrates metadata, resumes a dormant
-conversation or creates a replacement. A running inventory observation does not
-authorize submission by itself: the existing owner checks again at admission.
+conversation or creates a replacement. Metadata-only rows without an input
+owner are not fabricated into managed conversations.
 
-For a managed conversation, the existing native-bound turn API checks the native
-ID under its turn lock and refuses stopped, replaced or busy targets. Keyed
-sends also require the existing `native_send_no_resume: 1` contract. For a
+Default listings still omit non-live anchor conversations. Local exact selection
+checks the supported `bridge_inventory: 3` retained-managed projection before
+accepting a version-2 match, so identically named live and stopped anchors
+across projects remain ambiguous. A pre-request version-3 capability refusal
+preserves a prior provider's positive version-2 selection; other expansion
+failures do not silently select the earlier row. Missing targets still require
+the supported expansion. Explicit-host behavior is unchanged. The coordinator
+keeps its authoritative SSH/machine normalization and the same project, machine,
+namespace and ambiguity checks. A writable idle owner remains eligible even
+when its carrier is unavailable or its summary says `at_rest`; that summary is
+not a read-only-history marker. Read-only and ended history cannot become input
+owners. A prior provider refuses unsupported expansion before mutation. This
+does not broaden default listings, hydrate native history, resolve profile names
+or follow a successor.
+
+For a managed conversation, `durable_managed_messages: 1` selects the existing
+`pending_prompts` queue through `BridgeClient.submit_managed_message`. The CLI
+retains the selected managed/native IDs and an original supplied or generated
+operation key. It performs one durable acceptance attempt, not immediate
+native-bound turn submission. Queue acceptance never resumes a stopped target;
+the existing ACP consumer checks native identity when it can deliver. An older
+provider without the capability refuses before mutation, without fallback to
+turn admission. The [managed input contract](managed-message-acceptance.md)
+defines original receipt recovery and terminal outcomes. For a
 registered conversation, the existing inbox API receives `exact_session: true`
-and the identical raw `expected_session_id`; its transactional enqueue refuses
-aliases, expiry and supersession. An admitted exact message remains with its
+and the identical raw `expected_session_id`; its transactional enqueue retains
+the exact destination independently of receiver freshness. Aliases and
+supersession remain independently checked. An accepted exact message remains with its
 original native session during later rollover, rather than move to a successor.
 Inbox admission does not prove SDK delivery or model-facing consumption.
 An enrolled inbox's known pre-admission refusal returns the typed
@@ -672,8 +695,9 @@ An enrolled inbox's known pre-admission refusal returns the typed
 missing JSON result or an unknown-admission claim. Other HTTP admission errors
 that have no recognized refusal contract report unknown admission in
 `--bridge` mode and retain the original binding; legacy error handling is unchanged.
-This also applies to managed HTTP 404/409 errors: the exact adapter preserves
-the native owner's known refusal messages, not a blanket status-only refusal.
+This also applies to managed HTTP 404/409 errors: the client recognizes only
+the durable owner's exact missing-target and key-conflict outcomes, not a
+blanket status-only refusal.
 For registered sends, only the inbox owner's `live session not found` message
 proves the corresponding HTTP 404 refusal; other 404 responses remain unknown.
 Unkeyed native-bound admission makes one POST without automatic retry, including
@@ -694,15 +718,21 @@ This exact send consumer accepts ordinary prompts, prompt files/stdin, JSON,
 force/queue, alternate delivery/kind, explicit delivery/reply waits, startup,
 receipt and settlement modes before connecting. Explicit sender/reply-to fields
 apply only to a registered inbox; managed targets refuse them. Existing commands
-retain those specialized contracts. Managed sends still use their existing
-turn/stream result, and registered sends retain their existing message receipt.
-These two admission models remain distinct; changing the ordinary selector
-default does not make inbox admission a completed managed turn.
+retain those specialized contracts. Managed sends return their queue ID, original key, native binding and current
+delivery state immediately, including without `--no-wait`; acceptance is not a
+completed turn or SDK delivery. Registered sends retain their existing message
+receipt. Explicit legacy/specialized managed send modes keep their turn/stream
+behavior rather than silently changing those independent contracts.
 
 A lost or invalid admission response reports `outcome: unknown`, not permission
 to retry. JSON retains the selected native/owner binding in `bridge` and the
 original `idempotency_key` when supplied. Observe the original operation through
 its existing receipt owner; do not resend to a new key or successor.
+If selection succeeds but the client's submission preflight fails before any
+acceptance POST, local no-write evidence instead produces `refused_unavailable`
+with reason `managed_message_not_attempted`. This does not turn a post-attempt
+failure into a retry permit; unconfirmed writes retain the original unknown
+outcome and receipt identity.
 `tests/test_bridge_send_cli.py` exercises the real parser, client and private
 API owners, including refusal races, exact input retention, rollback and lost
 responses. These contained checks do not certify installed adoption.

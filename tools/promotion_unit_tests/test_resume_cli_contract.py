@@ -189,7 +189,7 @@ def bridge_resume(
     module.__dict__["RemoteBridgeError"] = RuntimeError
     monkeypatch.setitem(sys.modules, module.__name__, module)
     boundary.health.update(
-        protocol_version=52, capabilities={"bridge_inventory": 2, "worktree_exact_resume": 1},
+        protocol_version=52, capabilities={"bridge_inventory": 3, "worktree_exact_resume": 1},
     )
     report: dict[str, Any] = {
         "version": 1, "complete": True, "sources": {},
@@ -206,7 +206,11 @@ def bridge_resume(
             if path == "/health":
                 return boundary.health.copy()
             assert path == "/api/v1/bridges"
-            return report
+            expanded = (kwargs.get("params") or {}).get("include_retained_managed") == "true"
+            result = {key: value for key, value in report.items() if key != "_retained_bridges"}
+            if expanded and "_retained_bridges" in report:
+                result["bridges"] = report["_retained_bridges"]
+            return {**result, "identity_version": 3 if expanded else 2}
         assert path.endswith("/exact")
         if boundary.failures:
             raise boundary.failures.pop(0)
@@ -298,7 +302,13 @@ def test_bridge_resume_unavailable_selection_has_no_lifecycle_effect(
         bridge_resume["bridges"] = []
         bridge_resume["complete"] = fault != "incomplete"
     elif fault == "ambiguous":
-        bridge_resume["bridges"] *= 2
+        bridge_resume["_retained_bridges"] = [
+            *bridge_resume["bridges"],
+            {
+                **bridge_resume["bridges"][0], "project": "another-project",
+                "managed_session_id": "another-owner", "session_id": "another-native",
+            },
+        ]
     else:
         bridge_resume["bridges"][0]["worktree_id" if fault == "standalone" else "session_id"] = None
     with pytest.raises(SystemExit) as refused:
@@ -311,6 +321,23 @@ def test_bridge_resume_unavailable_selection_has_no_lifecycle_effect(
         "no-native": "bridge_resume_unavailable",
     }[fault]
     assert all(call[0] == "GET" for call in boundary.calls)
+    if fault in {"absent", "incomplete"}:
+        assert any(
+            call[1] == "/api/v1/bridges"
+            and call[2]["params"].get("include_retained_managed") == "true"
+            for call in boundary.calls
+        )
+        boundary.health["capabilities"]["bridge_inventory"] = 2
+        boundary.calls.clear()
+        with pytest.raises(SystemExit) as prior:
+            boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+        assert prior.value.code == 1
+        assert json.loads(capsys.readouterr().out)["reason"] == "bridge_resume_unavailable"
+        assert all(call[0] == "GET" for call in boundary.calls)
+        assert not any(
+            (call[2].get("params") or {}).get("include_retained_managed") == "true"
+            for call in boundary.calls
+        )
 
 
 @pytest.mark.parametrize("capability", [None, False, 0, "1"])
@@ -352,7 +379,7 @@ def test_bridge_resume_retains_original_identity_after_refusal_or_unknown(
     assert len([call for call in boundary.calls if call[0] == "POST"]) == 1
 
 
-@pytest.mark.parametrize("stage", [1, 2], ids=["selection", "exact-resume"])
+@pytest.mark.parametrize("stage", [1, 3], ids=["selection", "exact-resume"])
 def test_bridge_resume_health_deadline_remains_structured_without_post_or_retry(
     boundary: ResumeBoundary, bridge_resume: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch, capsys: Any, stage: int,
@@ -377,7 +404,7 @@ def test_bridge_resume_health_deadline_remains_structured_without_post_or_retry(
     assert result["reason"] == "bridge_resume_unavailable"
     assert result["requested_target"] == "worktree-123"
     assert "health negotiation deadline expired" in result["error"]
-    if stage == 2:
+    if stage == 3:
         assert result["worktree_id"] == "worktree-123"
         assert result["native_session_id"] == "native-123"
     assert health_checks == stage
@@ -416,11 +443,14 @@ def test_bridge_resume_real_response_read_failure_is_json_without_resume_or_retr
             health_checks += 1
         requests.append((request.get_method(), request.full_url))
         assert request.get_method() == "GET"
-        value = bridge_resume if inventory else boundary.health
+        value = {
+            **bridge_resume,
+            "identity_version": 3 if "include_retained_managed=true" in request.full_url else 2,
+        } if inventory else boundary.health
         stalled = (
             stage == "health" and health_checks == 1
             or stage == "inventory" and inventory
-            or stage == "exact-health" and not inventory and health_checks == 3
+            or stage == "exact-health" and not inventory and health_checks == 4
         )
 
         class Response(io.BytesIO):
@@ -463,7 +493,7 @@ def test_bridge_resume_real_response_read_failure_is_json_without_resume_or_retr
     else:
         assert "native_session_id" not in result
     assert failed_reads == 1
-    assert len(requests) == {"health": 1, "inventory": 3, "exact-health": 4}[stage]
+    assert len(requests) == {"health": 1, "inventory": 3, "exact-health": 6}[stage]
 
 
 @pytest.mark.parametrize("cli", [False, True], ids=["acp", "cli"])
@@ -1007,6 +1037,7 @@ def test_plain_resume_scope_does_not_need_the_explicit_bridge_alias(
     assert json.loads(capsys.readouterr().out)["acp_session_id"] == "native-123"
     assert [call[2]["params"] for call in boundary.calls if call[1] == "/api/v1/bridges"] == [
         {"local_only": "true"},
+        {"local_only": "true", "include_retained_managed": "true"},
     ]
 
 

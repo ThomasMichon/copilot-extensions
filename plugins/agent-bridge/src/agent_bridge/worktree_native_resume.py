@@ -53,13 +53,17 @@ async def list_targets(request: Request, refresh: bool = False) -> dict[str, Any
 async def list_bridges(
     request: Request, project: str | None = None, machine: str | None = None,
     namespace: str | None = None, status: str | None = None, live: bool = False,
-    hosts: str | None = None, local_only: bool = False,
+    hosts: str | None = None, local_only: bool = False, include_retained_managed: bool = False,
 ) -> dict[str, Any]:
     from .bridge_inventory import inventory
     from .bridge_fleet_inventory import fleet_inventory
     from .remote_errors import RemoteBridgeError
 
     scope = dict(project=project, machine=machine, namespace=namespace, status=status, live=live)
+    if include_retained_managed:
+        if hosts is not None:
+            raise HTTPException(400, detail="retained managed expansion is a local coordinator lookup")
+        scope["include_retained_managed"] = True
     if hosts is not None:
         if local_only:
             raise HTTPException(400, detail="local_only cannot select remote hosts")

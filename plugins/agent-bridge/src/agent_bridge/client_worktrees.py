@@ -30,17 +30,33 @@ class InventoryClientMixin:
         from .bridge_inventory import BridgeSelectionError, select_bridge
         from .client import BridgeClientError
 
-        report = InventoryClientMixin._list_bridges(
-            self,
-            project=project, machine=machine, namespace=namespace,
-            all_projects=all_projects, hosts=hosts, local_only=local_only, identity_version=2,
-        )
-        try:
-            return select_bridge(report, handle)
-        except BridgeSelectionError as error:
-            raise BridgeClientError(
-                error.status, {"reason": error.reason, "selector": handle},
-            ) from error
+        selected: dict[str, Any] | None = None
+        for retained in (False, True) if not hosts else (False,):
+            try:
+                report = InventoryClientMixin._list_bridges(
+                    self, project=project, machine=machine, namespace=namespace,
+                    all_projects=all_projects, hosts=hosts, local_only=local_only,
+                    identity_version=3 if retained else 2, include_retained_managed=retained,
+                )
+            except BridgeClientError as error:
+                if (
+                    retained and selected is not None and error.status == 426
+                    and getattr(error, "_bridge_inventory_attempted", None) is False
+                ):
+                    return selected
+                raise
+            try:
+                result = select_bridge(report, handle)
+            except BridgeSelectionError as error:
+                if not retained and not hosts and error.status in (404, 503):
+                    continue
+                raise BridgeClientError(
+                    error.status, {"reason": error.reason, "selector": handle},
+                ) from error
+            if retained or hosts:
+                return result
+            selected = result
+        raise AssertionError("exact Bridge resolution has no remaining projection")
 
     def list_bridges(
         self: InventoryClient, *, project: str | None = None, machine: str | None = None,
@@ -57,6 +73,7 @@ class InventoryClientMixin:
         namespace: str | None = None, status: str | None = None, live: bool = False,
         all_projects: bool = False, hosts: list[str] | None = None, local_only: bool = False,
         identity_version: int = 1,
+        include_retained_managed: bool = False,
     ) -> dict[str, Any]:
         from .bridge_fleet_inventory import validate_report
         from .client import BridgeClientError
@@ -71,17 +88,32 @@ class InventoryClientMixin:
                 "live": "true" if live else None,
                 "hosts": ",".join(hosts) if hosts else None,
                 "local_only": "true" if local_only else None,
+                "include_retained_managed": "true" if include_retained_managed else None,
             }.items() if value is not None
         }
         send = protocol_floored_request(
             self, PLUGIN_READINESS_PROTOCOL_VERSION,
-            capabilities={"bridge_inventory": identity_version},
+            capabilities={"bridge_inventory": max(identity_version, 3 if include_retained_managed else 1)},
         )
+        attempted = False
+
+        def mark_attempt() -> None:
+            nonlocal attempted
+            attempted = True
+
         try:
-            return validate_report(send(
+            report = validate_report(send(
                 "GET", "/api/v1/bridges", params=params or None,
                 request_timeout=(15.0 * ((len(hosts) + 3) // 4) + 10.0) if hosts else None,
+                _on_request=mark_attempt,
             ))
+            version = report.get("identity_version")
+            if include_retained_managed and (type(version) is not int or version < 3):
+                raise ValueError("retained managed inventory is unconfirmed")
+            return report
+        except BridgeClientError as error:
+            setattr(error, "_bridge_inventory_attempted", attempted)
+            raise
         except ValueError as error:
             raise BridgeClientError(502, "Bridge conversation inventory is unconfirmed") from error
 

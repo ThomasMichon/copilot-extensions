@@ -56,13 +56,16 @@ def submit(client: Any, session_id: str, message: ManagedMessage) -> dict[str, A
             raise unknown()
         return result
     except BridgeClientError as exc:
-        if not attempted or (isinstance(exc.detail, dict) and (exc.status, exc.detail.get("code")) in {
+        # Preserve exception types while exposing local evidence of no write attempt.
+        setattr(exc, "_managed_message_attempted", attempted)
+        if not attempted or (isinstance(exc.detail, dict) and (exc.status, exc.detail.get("code")) in (
             (404, "session_not_found"), (409, "managed_message_key_conflict"),
-        }):
+        )):
             raise
         raise unknown() from exc
     except (BridgeConnectionError, OSError, http.client.HTTPException, UnicodeError, json.JSONDecodeError,
             KeyboardInterrupt, ReadDeadlineExpired) as exc:
+        setattr(exc, "_managed_message_attempted", attempted)
         if not attempted:
             raise
         raise unknown() from exc
