@@ -123,7 +123,7 @@ def _isolated_payload(directory: Path) -> Path:
     package = payload / "src" / module
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
-    materialize_bootstrap(payload)
+    materialize_bootstrap(payload, source=PLUGIN)
     return payload
 
 
@@ -363,8 +363,11 @@ def test_native_adapter_uses_one_canonical_finite_owner() -> None:
         assert "Remove-InstallRuntimeContent" not in text
         assert "remove_install_runtime_content" not in text
         assert "command_lifecycle" not in text
-        assert "libs/installer-engine" not in text
-        assert "libs\\installer-engine" not in text
+        binding = (
+            "$helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'" if extension == "ps1" else
+            'helper="$SCRIPT_DIR/installer_engine_uninstall.py"'
+        )
+        assert binding in text and text.count("installer_engine_uninstall.py") == 1
 
 
 @pytest.mark.parametrize(

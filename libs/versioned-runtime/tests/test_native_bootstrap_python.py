@@ -90,7 +90,7 @@ function Invoke-Hidden {{
         (ConvertTo-Json -Compress ([string]{_quote(base)})) + '; '
     $captured=''
     $output=Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
-        '-I','-S','-B','-c',($prefix+$code),$ArgList[-2],$ArgList[-1]
+        '-I','-S','-B','-c',($prefix+$code),$ArgList[-3],$ArgList[-2],$ArgList[-1]
     ) -Environment $Environment -ErrorOutput ([ref]$captured)
     $ErrorOutput.Value=$captured
     return $output
@@ -183,7 +183,7 @@ function Invoke-Hidden {{
     if ($FilePath -cne {path_literal}) {{ throw 'Unicode selection was corrupted' }}
     $code={_quote(prefix)}+$ArgList[[array]::IndexOf($ArgList,'-c')+1]
     return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
-        '-I','-S','-B','-c',$code,$ArgList[-2],$ArgList[-1]
+        '-I','-S','-B','-c',$code,$ArgList[-3],$ArgList[-2],$ArgList[-1]
     ) -Environment $Environment -ErrorOutput $ErrorOutput
 }}
 $selected=Resolve-NativeBootstrapPython -Root {_quote(tmp_path / 'runtime')}

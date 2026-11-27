@@ -1,27 +1,29 @@
 """Containers exercise real native removal and live broker refusal."""
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import venv
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-path = PLUGIN.parent / "agent-machines/tests/test_legacy_runtime_uninstall.py"
-spec = importlib.util.spec_from_file_location("containers_legacy_native_cases", path)
-cases = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(cases)
-cases.PLUGIN = PLUGIN
+_package = ModuleType("_containers_legacy_native_cases")
+_package.__path__ = [str(PLUGIN.parent / "agent-machines/tests")]
+sys.modules[_package.__name__] = _package
+cases = importlib.import_module(_package.__name__ + ".test_legacy_runtime_uninstall")
+setattr(cases, "PLUGIN", PLUGIN)
 
 test_native_absent_uninstall_creates_nothing = cases.test_native_absent_uninstall_creates_nothing
 test_native_uninstall_rejects_unsupported_options_without_mutation = (
@@ -156,6 +158,7 @@ except KeyboardInterrupt:
         record = json.loads(endpoint.read_text(encoding="utf-8"))
         # Windows venv redirectors launch the actual broker in a base child.
         # Attribute its PID through this owned script's pipe, not the launcher.
+        assert process.stdout is not None
         handshake = json.loads(process.stdout.readline())
         assert record["pid"] == handshake["pid"]
         assert Path(handshake["executable"]) == python
