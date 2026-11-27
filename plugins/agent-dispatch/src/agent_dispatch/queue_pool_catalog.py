@@ -7,7 +7,7 @@ import math
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .pool_instances import PoolInstanceDefinition, ordered_pool_instances
 from .queue_pool_cohort import (
@@ -46,7 +46,7 @@ def require_pool_queue_identity(conn: sqlite3.Connection, expected: str | None) 
     ).fetchone()["identity"]
     if expected is not None and _identity(expected, "queue identity") != identity:
         raise TaskError("pool publication queue identity changed; refusing another queue")
-    return identity
+    return str(identity)
 
 
 @dataclass(frozen=True)
@@ -170,9 +170,9 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
     def pool_registration_revision(self) -> int:
         """Take this before the owner's registry/declaration/override collection."""
         with self._connect() as conn:
-            return conn.execute(
+            return int(conn.execute(
                 "SELECT registration_revision FROM pool_catalog_clock WHERE singleton = 1"
-            ).fetchone()["registration_revision"]
+            ).fetchone()["registration_revision"])
 
     def begin_pool_publication(
         self, machine: str, env: str, publisher_id: str, *,
@@ -384,6 +384,14 @@ class QueuePoolCatalogMixin(QueuePoolCohortMixin):
         with self._connect() as conn:
             conn.execute("BEGIN")
             return self._pool_catalog_from_conn(conn, now=ts)
+
+    def pool_starvation(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        """Inspection only: full pools held entirely by tasks that stopped progressing."""
+        from .queue_pool_starvation import starved_pools
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            return starved_pools(conn, self._pool_catalog_from_conn(conn, now=ts).definitions, now=ts)
 
     def task_pool_assignment(self, task_id: str) -> PoolAssignment | None:
         """Inspect retained placement; this does not reserve or accept work."""
