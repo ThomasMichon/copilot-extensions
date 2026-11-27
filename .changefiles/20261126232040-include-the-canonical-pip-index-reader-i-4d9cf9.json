@@ -1,0 +1,9 @@
+{
+  "comment": "Include the canonical pip index reader in standalone Machines installer materialization.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
