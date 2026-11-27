@@ -1670,15 +1670,14 @@ def _reconcile_pr(
     """Persist one authority-matched provider observation and claim transition."""
     if active is None or not _pr_needs_reconcile(record, active):
         return None
-    prcfg = config.default_repo.pr
-    api_base = getattr(prcfg, "api_base", "") or ""
-    from .finalize_open_pr_gate import trusted_target
-    target = trusted_target(active, prcfg, record.repo or "")
+    from .finalize_open_pr_gate import tracked_read_target
+    target = tracked_read_target(active, config.default_repo, record.repo or "")
     if not target:
         # Unresolvable, or not provably this PR at the configured provider and
         # authority: keep the local state rather than confirm an unrelated PR.
         return None
-    provider, target_repo = target
+    provider, target_repo, prcfg = target
+    api_base = getattr(prcfg, "api_base", "") or ""
     try:
         from . import providers
 

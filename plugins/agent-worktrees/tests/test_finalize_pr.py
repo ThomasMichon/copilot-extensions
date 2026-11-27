@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+import json
+import socket
+import subprocess
+
 import pytest
 
 from pr_test_helpers import _git
@@ -32,6 +37,57 @@ class TestPRFinalize(PRWorkflowSetup):
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is True, err
         assert err is None
+
+    @pytest.mark.parametrize(("remote_repo", "status", "finalized"), [
+        ("Project/_git/repo", "completed", True),
+        ("Project/_git/repo", "active", False),
+        ("Other/_git/repo", "completed", False),
+    ])
+    def test_direct_repo_manually_tracked_ado_pr(
+        self, pr_repo, tmp_path, monkeypatch, remote_repo, status, finalized,
+    ):
+        from agent_worktrees import finalize as fin
+        from agent_worktrees.providers import azure_devops
+        from machine_transport import detect_platform
+
+        config, wid, checkout, _ = pr_repo
+        repo = replace(config.default_repo, pr=cfg.PRConfig())
+        config = replace(config, repos={config.repo_name: repo},
+                         platform=detect_platform(), machine=socket.gethostname())
+        project = tmp_path / "receiving"
+        ledger = project / "worktrees"
+        ledger.mkdir(parents=True)
+        (cfg.tracking_dir() / f"{wid}.yaml").rename(ledger / f"{wid}.yaml")
+        monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
+        monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: ledger)
+        monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+        head = _git("rev-parse", "HEAD", cwd=checkout)
+        _git("push", "origin", "HEAD:master", cwd=checkout)
+        _git("fetch", "origin", cwd=checkout)
+        _git("remote", "set-url", "origin", f"https://example@dev.azure.com/example/{remote_repo}", cwd=checkout)
+        monkeypatch.setattr(git_ops, "fetch", lambda *a, **k: True)  # already fetched from the fixture
+        url = "https://example.visualstudio.com/Project/_git/repo/pullrequest/7"
+        result = pr_ops.set_pr(wid, url=url, number=7, provider="azure-devops",
+                               branch=f"worktree/{wid}", state="open")
+        assert result["success"]
+        reads = []
+
+        def transport(args, **kw):
+            reads.append(args)
+            assert args[:3] == ["az", "repos", "pr"] and args[3] == "show"
+            assert args[args.index("--id") + 1] == "7"
+            assert args[args.index("--organization") + 1] == "https://example.visualstudio.com"
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({
+                "status": status, "lastMergeSourceCommit": {"commitId": head},
+                "targetRefName": "refs/heads/master",
+            }), stderr="")
+
+        monkeypatch.setattr(azure_devops, "run_cli", transport)
+        assert fin.validate_and_finalize(wid, config, retain_checkout=True) is finalized
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert (rec.status == "finalized") is finalized
+        assert bool(reads) is (remote_repo == "Project/_git/repo")
 
     @pytest.mark.parametrize(
         "disposition", ["retained", "live-process", "unsupported-platform", "failed-removal", "removed"],
