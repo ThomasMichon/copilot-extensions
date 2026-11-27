@@ -220,6 +220,23 @@ attributed descriptions, not current-code inspection, native acceptance or
 authority to resume a held incident, source or resource operation. Unselected
 originals receive no semantic or content-admission credit.
 
+The [maintenance intake and finite-delivery study](journal/2026/11.27-maintenance-intake-and-finite-delivery-keepers.md)
+qualifies and reads thirty-two whole current requests and all 76 discussions.
+It preserves the finite watchdog, full-title and capture-validation deliveries
+without treating them as whole incident, binding or native acceptance.
+The targeted maintenance/version search also distinguishes genuinely unfinished
+adoption, compatibility and source experiments from obsolete deployment tasks.
+No whole-request completion or new accepted transfer is established.
+
+Only those thirty-two frozen outcome/gap pairs become current-retained.
+At the unchanged retained 23:59:55 counting observation, effective coverage
+remains 584: 480 pending, 49 current-retained, 38 prior-retained, five
+new-retained, six spent-open, five excluded and one coordination identity.
+Every first-six historical column, other node, owner and counting observation
+is unchanged. Descriptions and owner reports remain attributed evidence, not
+new current-code inspection, feature-test execution or installed acceptance.
+Unselected originals, source-review bodies and held sources remain unassessed.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,
