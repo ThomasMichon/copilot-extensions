@@ -63,4 +63,12 @@ def prepare_adopter_admission(
             shutil.copy2(origin, target)
     finally:
         sys.path[:] = previous
+    if plugin == "agent-worktrees":
+        for name in (
+            "agent-worktrees-update-entry.sh", "agent-worktrees-update-entry.ps1",
+        ):
+            shutil.copy2(source / "bin" / name, payload / "bin" / name)
+        shutil.copy2(
+            repo / "worktree-manager/bin/terminal-launch.ps1", payload / "bin/terminal-launch.ps1",
+        )
     assert changes and not any(line.startswith("SKIP") for line in changes), changes

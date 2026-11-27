@@ -40,6 +40,10 @@ on:
       - libs/payload-invocation/tests/test_ssh_ready_source.py
       - libs/payload-invocation/tests/test_logger_ready_source.py
       - libs/payload-invocation/tests/test_pull_requests_ready_source.py
+      - libs/payload-invocation/tests/test_worktrees_ready_source.py
+      - plugins/agent-worktrees/scripts/invoke-payload-runtime.sh
+      - plugins/agent-worktrees/scripts/invoke-payload-runtime.ps1
+      - plugins/agent-worktrees/tests/runtime_admission/*.py
       - plugins/agent-pull-requests/scripts/invoke-payload-runtime.sh
       - plugins/agent-pull-requests/scripts/invoke-payload-runtime.ps1
       - plugins/agent-pull-requests/scripts/argument-transport.ps1
@@ -1832,6 +1836,72 @@ jobs:
       PULL_REQUESTS_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *pull-requests-ready-steps
+
+  worktrees-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      WORKTREES_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &worktrees-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Worktrees commands without workspace or terminal effects
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_worktrees_ready_source.py --allow-explicit-tiers
+          -k "${{ env.WORKTREES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/worktrees-ready
+      - name: Require all Worktrees admission controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.WORKTREES_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/worktrees-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==22 and len({c.attrib['name'] for c in cases})==22;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='worktrees_command_admission'];
+          assert len(reports)==22 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and len(r['samples_seconds'])==(1 if r['scenario'].startswith('missing-') else 2)
+          and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else 2)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'worktrees_command_admission':reports},sort_keys=True))"
+      - name: Retain Worktrees readiness isolation through the native dispatcher
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_readiness_dispatcher_imports.py --allow-explicit-tiers
+          -k "agent-worktrees and ${{ env.WORKTREES_QUALIFICATION_SHELL }} and not legacy"
+          --junit-dir qualification-evidence/worktrees-readiness
+      - name: Require every retained Worktrees readiness control without skips
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/worktrees-readiness').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
+  worktrees-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      WORKTREES_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *worktrees-ready-steps
+
+  worktrees-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      WORKTREES_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *worktrees-ready-steps
 
   machines-ready-admission-windows:
     runs-on: windows-latest

@@ -269,16 +269,53 @@ profile_home() {
 }
 
 resolve_runtime() {
-    local AGENT_RT_RESOLVE_TRACE_MODE=ready
+    local AGENT_RT_RESOLVE_TRACE_MODE=ready result
     AGENT_RT_PY=""
     if [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]]; then
         export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="agent-worktrees"
     fi
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    set +e
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
+    result=$?
+    set -e
+    if [[ "$result" -ne 0 ]]; then
+        printf '[agent-worktrees] runtime resolver failed; update the owning installation.\n' >&2
+        exit 126
+    fi
+    if [[ -n "$AGENT_RT_PY" ]]; then
+        AGENT_RT_PY="$(admit_runtime_python "$AGENT_RT_PY")" || exit 126
+    fi
 }
+
+admit_runtime_python() (
+    local expected="$1" provider="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    local capture="$SCRIPT_DIR/native_capture.sh" uv
+    # First-use resolution keeps its lock/traps in the caller, not this helper.
+    trap - EXIT INT TERM
+    exec 5>&- 6>&- 7>&- 8>&- 9>&-
+    if [[ ! -f "$capture" ]]; then
+        capture="$PAYLOAD_ROOT/../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    fi
+    if [[ ! -f "$provider" || ! -f "$capture" ]]; then
+        printf '%s\n' '[agent-worktrees] application runtime admission support is unavailable; use explicit setup.' >&2
+        return 126
+    fi
+    uv="$(command -v uv)" || {
+        printf '%s\n' '[agent-worktrees] uv is unavailable; prepare the command prerequisites through explicit setup.' >&2
+        return 126
+    }
+    . "$capture"
+    if ! capture_native_process 10 "$BASH" -c \
+        '. "$1"; resolve_uv_runtime_python "$2" "$3"' \
+        worktrees-runtime-admission "$provider" "$expected" "$uv"; then
+        printf '%s\n' '[agent-worktrees] application runtime admission failed; use explicit setup.' >&2
+        return 126
+    fi
+    printf '%s\n' "$__native_capture_output"
+)
 
 run_runtime() {
     if [[ -n "$CONTEXT" ]]; then
