@@ -522,12 +522,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [maintenance intake and finite-delivery keepers](journal/2026/11.27-maintenance-intake-and-finite-delivery-keepers.md)
+record thirty-two whole current requests and all 76 discussions. Explicit
+finite source completions receive credit without completing their independent
+parents; deployment/version terminology alone does not make a request obsolete.
+Only those current outcome/gap fields change. Counting, existing acceptance,
+ownership and all five Plan/eleven global Validation gates remain unchanged.
+
 The [lifetime and venue-selector study](journal/2026/11.27-lifetime-and-venue-selector-boundaries.md)
 retains whole #2464/#2549/#2551/#2612/#2680 requests and all fourteen
 discussions. Four attributed lifetime prerequisites do not complete the
 accepted parent, and policy, incident, mapping and venue-registration outcomes
 remain distinct. Only five current outcome/gap fields change; the retained
 count remains 584, with no new census, final unit or source disposition.
+The reviewed recording merged in #14867.
 
 The [portable-installer and declaration study](journal/2026/11.27-portable-installer-and-declaration-boundaries.md)
 retains whole #2295/#2307/#2312/#2320 requests and all fifteen discussions
