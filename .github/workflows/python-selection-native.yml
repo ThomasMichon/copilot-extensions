@@ -68,6 +68,10 @@ on:
       - libs/payload-invocation/tests/test_machines_manifest_source.py
       - libs/payload-invocation/tests/test_machines_cell_bootstrap_source.py
       - libs/payload-invocation/tests/test_machines_installer_bootstrap_source.py
+      - libs/payload-invocation/tests/test_machines_uninstall_bootstrap_source.py
+      - libs/payload-invocation/tests/test_machines_legacy_uninstall_source.py
+      - libs/payload-invocation/tests/test_machines_uninstall_metadata_source.py
+      - tools/test_uninstall_path_candidates.py
       - libs/payload-invocation/tests/test_machines_cell_output_source.py
       - plugins/agent-machines/scripts/init.sh
       - plugins/agent-machines/scripts/init.ps1
@@ -75,8 +79,14 @@ on:
       - plugins/agent-machines/scripts/cell-lifecycle-bootstrap.ps1
       - plugins/agent-machines/scripts/installer-bootstrap.sh
       - plugins/agent-machines/scripts/installer-bootstrap.ps1
+      - plugins/agent-machines/scripts/legacy-uninstall.sh
+      - plugins/agent-machines/scripts/legacy-uninstall.ps1
+      - plugins/agent-machines/scripts/uninstall-profile.json
       - plugins/agent-machines/tests/test_installer_bootstrap.py
       - plugins/agent-machines/tests/test_installer_index.py
+      - plugins/agent-machines/tests/test_uninstall_bootstrap.py
+      - plugins/agent-machines/tests/test_legacy_runtime_uninstall.py
+      - plugins/agent-machines/tests/legacy_uninstall_fixture.py
       - plugins/agent-machines/tests/test_cell_lifecycle_bootstrap.py
       - plugins/agent-machines/tests/test_installer_native_output_ps1.py
       - libs/installation-context/json-query.awk
@@ -2185,6 +2195,65 @@ jobs:
           cases=[c for p in Path('qualification-evidence/machines-first-use').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==3 and len({c.attrib['name'] for c in cases})==3;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify prepared-only legacy removal with real finite ownership
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        env:
+          UNINSTALL_SELECTOR: ${{ runner.os == 'Windows' && 'pwsh or powershell' || 'bash' }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_uninstall_bootstrap_source.py --allow-explicit-tiers
+          -k "${{ env.UNINSTALL_SELECTOR }}"
+          --junit-dir qualification-evidence/machines-uninstall-bootstrap
+      - name: Require real removal, durable preservation and refusal without skips
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/machines-uninstall-bootstrap').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=20 if os.name=='nt' else 10;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          assert os.name!='nt' or all(sum(host in c.attrib['name'] for c in cases)==10
+          for host in ('powershell','pwsh'));
+          reports=[json.loads(p.attrib['value']) for c in cases for p in c.findall('./properties/property')
+          if p.attrib.get('name')=='machines_uninstall_bootstrap'];
+          assert len(reports)==(4 if os.name=='nt' else 2);
+          assert all(r['network']=='disabled' and r['uv_calls']==6 and r['managed_lookups']==2
+          and r['process_observation']==('native-current-user' if os.name=='nt' else 'fixture-owned')
+          and len(r['samples_seconds'])==2 and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'machines_uninstall_bootstrap':reports},sort_keys=True))"
+      - name: Retain original idle removal and all six custody refusal controls
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_legacy_uninstall_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/machines-retained-removal
+      - name: Require retained removal and custody assertions without skips
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/machines-retained-removal').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=8 if os.name=='nt' else 7;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Retain activated-runtime metadata shadow and broken-candidate controls
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        env:
+          METADATA_SELECTOR: ${{ runner.os == 'Windows' && 'agent-machines' || 'agent-machines and not test_windows_legacy_uninstall' }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_uninstall_metadata_source.py --allow-explicit-tiers
+          -k "${{ env.METADATA_SELECTOR }}" --junit-dir qualification-evidence/machines-uninstall-metadata
+      - name: Require each supported Machines metadata selection case without skips
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL == 'bash'
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/machines-uninstall-metadata').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          expected=8 if os.name=='nt' else 4;
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
 
   machines-ready-admission-linux:
