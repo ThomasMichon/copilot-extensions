@@ -101,7 +101,7 @@ without repair. Actual installer entrypoints select Python before source
 identity for installation and stamping, with an inert legacy-policy decision
 that never inspects the host account. Invalid cell context/deadline inputs do
 not prepare prerequisites.
-Configured UV installation and unmanaged destinations are exercised through
+Configured UV installation, unmanaged and XDG destinations are exercised through
 inert acquisition followed by a fresh prepared-only discovery invocation.
 Native legacy stamps publish their actual launcher without UV lookup; POSIX
 retains its existing no-flock transaction prerequisite through an explicit
@@ -117,7 +117,9 @@ environment restoration. This does not install application dependencies or
 qualify a production update, service/task PATH, SAC-enforcing deployment or
 installed adoption.
 
-The existing native workflow requires all 34 applicable Bash controls on
-Linux/macOS and all 40 controls on each Windows PowerShell host, without skips.
+The existing native workflow requires all 38 applicable Bash controls on
+Linux/macOS and all 46 controls on each Windows PowerShell host, without skips.
+The Windows packet retains real self-stage success and exit-124 cleanup with
+materialized bootstrap support and fixture-owned inert preparation.
 Windows Git Bash is not an installer target. Large copied UV fixture binaries
 are released after each case so the packet retains the existing scratch cap.

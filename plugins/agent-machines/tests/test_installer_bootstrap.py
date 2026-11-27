@@ -27,7 +27,7 @@ pytestmark = [
 
 @pytest.fixture
 def bootstrap(lifecycle: LifecycleFixture) -> Iterator[LifecycleFixture]:
-    for name in ("UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL"):
+    for name in ("UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL", "XDG_BIN_HOME", "XDG_DATA_HOME"):
         lifecycle.env.pop(name, None)
     scripts = lifecycle.payload / "scripts"
     for suffix in ("sh", "ps1"):
@@ -38,7 +38,8 @@ def bootstrap(lifecycle: LifecycleFixture) -> Iterator[LifecycleFixture]:
             assert executable
             (lifecycle.tools / name).symlink_to(executable)
     yield lifecycle
-    for root in (lifecycle.tools, lifecycle.home / ".local/bin", lifecycle.home / "uv destination"):
+    for root in (lifecycle.tools, lifecycle.home / ".local/bin",
+                 lifecycle.home / "uv destination", lifecycle.home / "bin"):
         for name in ("uv", "uv.exe", "unavailable-uv", "unavailable-uv.exe"):
             (root / name).unlink(missing_ok=True)
 
@@ -136,7 +137,9 @@ def test_inspect_refuses_without_fallback_or_acquisition(
     assert snapshot(bootstrap.payload.parents[1]) == before
     calls = bootstrap.calls.read_text().splitlines() if bootstrap.calls.exists() else []
     assert not any("install" in call or "pip" in call for call in calls)
-    assert not (bootstrap.home / ".local").exists()
+    assert not (bootstrap.home / ".local/bin").exists()
+    assert not (bootstrap.home / "acquired").exists()
+    assert not (bootstrap.home / "prepared").exists()
 
 
 def _inert_preparation(fixture: LifecycleFixture, *, missing_uv: bool) -> Path:
@@ -224,12 +227,17 @@ def test_prepare_reaches_declared_managed_python_without_ambient_interpreter(
 
 @pytest.mark.parametrize("host", ["bash", "pwsh", "powershell"])
 @pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
-@pytest.mark.parametrize("setting", ["UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL"])
+@pytest.mark.parametrize("setting", [
+    "UV_INSTALL_DIR", "UV_UNMANAGED_INSTALL", "XDG_BIN_HOME", "XDG_DATA_HOME",
+])
 def test_prepare_and_inspect_discover_uv_at_configured_destination(
     bootstrap: LifecycleFixture, setting: str,
 ) -> None:
     directory = bootstrap.home / "uv destination"
     bootstrap.env[setting] = str(directory)
+    if setting == "XDG_DATA_HOME":
+        directory.mkdir()
+        directory = directory.parent / "bin"
     if setting == "UV_UNMANAGED_INSTALL":
         bootstrap.env["UV_INSTALL_DIR"] = str(bootstrap.home / "unused destination")
     acquisition = _inert_preparation(bootstrap, missing_uv=True)

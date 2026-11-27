@@ -29,7 +29,8 @@ admission, source identity or the Windows cell watchdog. Missing UV uses
 Astral's official user-local prerequisite installer and its durable command
 exposure, not ambient Python or a private runtime's UV copy. Acquisition and
 discovery share the configured `UV_UNMANAGED_INSTALL` or `UV_INSTALL_DIR`
-destination, otherwise explicitly using the user-local `.local/bin`.
+destination, otherwise honoring `XDG_BIN_HOME` or `XDG_DATA_HOME/../bin` before
+the user-local `.local/bin` default.
 Slot validation and source-qualified stamping only inspect already-prepared
 prerequisites. Native legacy POSIX `stamp` and PowerShell `stamp-binstub`
 avoid eager UV selection while retaining their original transaction/admission

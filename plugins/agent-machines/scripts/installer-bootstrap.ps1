@@ -3,6 +3,8 @@ param([switch]$PrepareUv)
 function Get-MachinesInstallerUvDirectory {
     $directory = if ($env:UV_UNMANAGED_INSTALL) { $env:UV_UNMANAGED_INSTALL } elseif ($env:UV_INSTALL_DIR) {
         $env:UV_INSTALL_DIR
+    } elseif ($env:XDG_BIN_HOME) { $env:XDG_BIN_HOME } elseif ($env:XDG_DATA_HOME) {
+        Join-Path $env:XDG_DATA_HOME '../bin'
     } else {
         $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
         Join-Path $userHome '.local/bin'

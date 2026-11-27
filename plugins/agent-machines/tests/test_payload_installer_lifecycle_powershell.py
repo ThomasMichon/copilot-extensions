@@ -1,11 +1,14 @@
 """Bounded, offline helper lifecycle coverage against real PowerShell source."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 import ctypes
 import json
 import os
+import runpy
 import shutil
 import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,6 +17,8 @@ import pytest
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
+REPO = PLUGIN.parents[1]
+Sandbox = tuple[Path, str, dict[str, str]]
 HOSTS = [
     path for path in (
         Path(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -90,7 +95,7 @@ try {
 
 
 @pytest.fixture(params=HOSTS, ids=lambda host: host.stem)
-def sandbox(tmp_path: Path, request):
+def sandbox(tmp_path: Path, request: pytest.FixtureRequest) -> Sandbox:
     env = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_", "AGENT_MACHINES_", "FIXTURE_"))
@@ -116,21 +121,23 @@ def sandbox(tmp_path: Path, request):
 
 
 def _alive(pid: int) -> bool:
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.OpenProcess.restype = ctypes.c_void_p
-    kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-    handle = kernel.OpenProcess(0x100000, False, pid)
-    if not handle:
-        return False
-    try:
-        return kernel.WaitForSingleObject(handle, 0) == 258
-    finally:
-        kernel.CloseHandle(handle)
+    if sys.platform == "win32":
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.OpenProcess(0x100000, False, pid)
+        if not handle:
+            return False
+        try:
+            return bool(kernel.WaitForSingleObject(handle, 0) == 258)
+        finally:
+            kernel.CloseHandle(handle)
+    raise RuntimeError("Process observation requires Windows")
 
 
 def _owned(root: Path, env: dict[str, str]) -> set[int]:
-    pids = set()
+    pids: set[int] = set()
     for name in ("pids", "descendant.pid"):
         path = root / name
         if path.exists():
@@ -143,14 +150,14 @@ def _owned(root: Path, env: dict[str, str]) -> set[int]:
 
 
 @contextmanager
-def _run(sandbox, *, timeout: int = 18):
+def _run(sandbox: Sandbox, *, timeout: int = 18) -> Iterator[subprocess.CompletedProcess[str]]:
     root, host, env = sandbox
     process = subprocess.Popen(
         [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "driver.ps1")],
         env=env, cwd=root, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         encoding="utf-8", errors="replace",
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
         try:
@@ -184,7 +191,7 @@ def _run(sandbox, *, timeout: int = 18):
     ("scenario", "expected"), (("37", 37), ("0", 0), ("launch", 73), ("read", 73)),
 )
 def test_cleanup_does_not_replace_result_or_original_exception(
-    sandbox, scenario: str, expected: int,
+    sandbox: Sandbox, scenario: str, expected: int,
 ) -> None:
     root, _, env = sandbox
     env["FIXTURE_DELETE_FAILURE"] = "1"
@@ -229,7 +236,7 @@ def test_cleanup_does_not_replace_result_or_original_exception(
     ids=lambda host: host.stem,
 )
 def test_real_init_stages_and_watchdog_preserves_124(
-    sandbox, sleep: str, deadline: str, expected: int,
+    sandbox: Sandbox, sleep: str, deadline: str, expected: int,
 ) -> None:
     root, host, env = sandbox
     timeout = 30
@@ -245,6 +252,27 @@ def test_real_init_stages_and_watchdog_preserves_124(
     scripts = payload / "scripts"
     probe = scripts / "installation-context" / "legacy-entrypoint-probe.ps1"
     probe.parent.mkdir(parents=True)
+    previous = sys.path[:]
+    try:
+        owner = runpy.run_path(str(REPO / "tools/materialize_installer_engine.py"))
+        for origin, target in owner["derived_file_pairs"](
+            REPO, root / "materialized", copied_consumer=(PLUGIN, payload),
+        ):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(origin, target)
+    finally:
+        sys.path[:] = previous
+    bootstrap = scripts / "installer-bootstrap.ps1"
+    bootstrap.write_text(
+        (PLUGIN / "scripts/installer-bootstrap.ps1").read_text(encoding="utf-8")
+        + "\nfunction Initialize-MachinesBootstrap {\n"
+        "    param([string]$Operation, [int]$TimeoutMilliseconds)\n"
+        "    $script:MachinesInstallerSelection = [pscustomobject]@{\n"
+        "        Python=$env:FIXTURE_BOOTSTRAP_PYTHON\n"
+        "    }\n}\n",
+        encoding="utf-8",
+    )
+    env["FIXTURE_BOOTSTRAP_PYTHON"] = sys.executable
     # Governance is outside this lifecycle contract; its stub runs in-process
     # so nested PowerShell cold starts cannot consume the watchdog smoke budget.
     # The helper, staged child, watchdog and owned-process checks remain real.
@@ -301,7 +329,7 @@ def test_real_init_stages_and_watchdog_preserves_124(
             assert "WATCHDOG-KILL" in log and f"child pid {record['child_pid']}" in log
 
 
-def test_helper_waits_for_child_not_owned_descendant(sandbox) -> None:
+def test_helper_waits_for_child_not_owned_descendant(sandbox: Sandbox) -> None:
     root, _, env = sandbox
     env["FIXTURE_DESCENDANT"] = "1"
     (root / "descendant.ps1").write_text(r"""
@@ -352,7 +380,7 @@ exit 0
     ids=("utf8", "utf8-bom", "utf16-le", "utf16-be", "utf32-le", "utf32-be"),
 )
 def test_live_capture_preserves_split_boms_and_multibyte_characters(
-    sandbox, encoding: str, bom: bytes,
+    sandbox: Sandbox, encoding: str, bom: bytes,
 ) -> None:
     root, _, env = sandbox
     (root / "driver.ps1").write_text(

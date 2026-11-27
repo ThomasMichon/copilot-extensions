@@ -12,11 +12,13 @@ _package.__path__ = [str(_tests)]
 sys.modules[_package.__name__] = _package
 _source = importlib.import_module(_package.__name__ + ".test_installer_bootstrap")
 _index = importlib.import_module(_package.__name__ + ".test_installer_index")
+_staging = importlib.import_module(_package.__name__ + ".test_payload_installer_lifecycle_powershell")
 pytestmark = _source.pytestmark
 installer_python = _source.installer_python
 lifecycle = _source.lifecycle
 bootstrap = _source.bootstrap
 installer = _source.installer
+sandbox = _staging.sandbox
 test_inspect_reuses_managed_bootstrap_without_acquisition = (
     _source.test_inspect_reuses_managed_bootstrap_without_acquisition
 )
@@ -49,4 +51,7 @@ test_application_constructor_uses_independent_managed_requirement = (
 )
 test_native_index_adapter_retains_user_and_site_precedence = (
     _index.test_native_index_adapter_retains_user_and_site_precedence
+)
+test_real_init_stages_and_watchdog_preserves_124 = (
+    _staging.test_real_init_stages_and_watchdog_preserves_124
 )

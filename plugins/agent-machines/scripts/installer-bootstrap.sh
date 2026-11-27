@@ -13,7 +13,11 @@ _machines_installer_support() {
 }
 
 _machines_uv_install_dir() {
-    local directory="${UV_UNMANAGED_INSTALL:-${UV_INSTALL_DIR:-$HOME/.local/bin}}"
+    local directory="${UV_UNMANAGED_INSTALL:-${UV_INSTALL_DIR:-${XDG_BIN_HOME:-}}}"
+    if [[ -z "$directory" ]]; then
+        directory="$HOME/.local/bin"
+        [[ -z "${XDG_DATA_HOME:-}" ]] || directory="$XDG_DATA_HOME/../bin"
+    fi
     [[ "$directory" == /* ]] || directory="$PWD/$directory"
     printf '%s\n' "$directory"
 }
