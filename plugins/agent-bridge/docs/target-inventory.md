@@ -660,9 +660,13 @@ This operation never ensures a daemon, hydrates metadata, resumes a dormant
 conversation or creates a replacement. Metadata-only rows without an input
 owner are not fabricated into managed conversations.
 
-Default listings still omit non-live anchor conversations. When an exact local
-managed/native ID is absent from that projection, `bridge_inventory: 3` permits
-one retained-managed expansion of the existing inventory read. The coordinator
+Default listings still omit non-live anchor conversations. Local exact selection
+checks the supported `bridge_inventory: 3` retained-managed projection before
+accepting a version-2 match, so identically named live and stopped anchors
+across projects remain ambiguous. A pre-request version-3 capability refusal
+preserves a prior provider's positive version-2 selection; other expansion
+failures do not silently select the earlier row. Missing targets still require
+the supported expansion. Explicit-host behavior is unchanged. The coordinator
 keeps its authoritative SSH/machine normalization and the same project, machine,
 namespace and ambiguity checks. A writable idle owner remains eligible even
 when its carrier is unavailable or its summary says `at_rest`; that summary is

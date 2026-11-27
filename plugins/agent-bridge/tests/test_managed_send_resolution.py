@@ -22,6 +22,69 @@ from agent_bridge.worktree_native_resume import router as inventory_router
 from test_session_manager import _patch_acp as _patch_acp, _patch_spawn as _patch_spawn
 
 
+@pytest.mark.parametrize("project,version,expected,broken", [
+    (None, 3, None, None), ("project-a", 3, "managed-a", None),
+    ("project-b", 3, "managed-b", None), (None, 2, "managed-a", None),
+    ("project-a", 3, None, 503), ("project-a", 3, None, 426),
+    ("project-a", 3, None, 502),
+])
+def test_live_and_stopped_anchor_handle_collision_uses_negotiated_projection(
+    monkeypatch: pytest.MonkeyPatch, project: str | None, version: int, expected: str | None,
+    broken: int | None,
+) -> None:
+    from agent_bridge.bridge_inventory import project_bridges
+    from test_bridge_inventory import sources, workspace
+
+    targets = []
+    for suffix, live in (("a", True), ("b", False)):
+        item = workspace("shared-anchor", project=f"project-{suffix}", live=live)
+        item["worktree"].update(kind="anchor", path=f"/work/project-{suffix}")
+        targets.extend([item, {
+            "kind": "managed", "handle": f"managed-{suffix}", "session": {
+                "session_id": f"managed-{suffix}", "acp_session_id": f"native-{suffix}",
+                "worktree_id": "shared-anchor", "project": f"project-{suffix}",
+                "machine": "host-a", "target_dir": item["worktree"]["path"],
+                "target_type": "local", "mode": "acp", "read_only": False,
+                "status": "idle" if live else "stopped",
+            },
+        }])
+    expanded_reads = []
+
+    def request(method: str, path: str, **options: Any) -> Any:
+        assert method == "GET"
+        if path == "/health":
+            return {"protocol_version": HTTP_PROTOCOL_VERSION, "capabilities": {
+                "bridge_inventory": version,
+            }}
+        assert path == "/api/v1/bridges"
+        params = options.get("params") or {}
+        expanded = params.get("include_retained_managed") == "true"
+        expanded_reads.append(expanded)
+        if expanded and broken in (426, 503):
+            raise BridgeClientError(broken, "expanded read failed after negotiation")
+        report = project_bridges(
+            targets, sources(), project=params.get("project"), include_retained_managed=expanded,
+        )
+        if expanded and broken == 502:
+            report["identity_version"] = 2
+        return report
+
+    client = BridgeClient("http://fixture.invalid", "fixture")
+    monkeypatch.setattr(client, "_request", request)
+    if expected is None:
+        with pytest.raises(BridgeClientError) as error:
+            client.resolve_bridge("shared-anchor", project=project, all_projects=project is None)
+        assert error.value.status == (broken or 409)
+        if broken is None:
+            assert error.value.detail["reason"] == "ambiguous_bridge_selector"
+    else:
+        selected = client.resolve_bridge(
+            "shared-anchor", project=project, all_projects=project is None,
+        )["bridge"]
+        assert (selected["managed_session_id"] or selected["retained_managed_session_id"]) == expected
+    assert (True in expanded_reads) is (version >= 3)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope,accepted,status,transport,inventory_version", [
     (["--all-projects"], True, "stopped", "local", 3),
