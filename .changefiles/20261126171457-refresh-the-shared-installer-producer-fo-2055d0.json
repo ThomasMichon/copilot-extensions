@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the shared installer producer for Worktrees native admission capture support",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

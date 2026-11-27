@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in, content-free containers.lifecycle.v1 consumer telemetry for copilot launch and attach paths",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

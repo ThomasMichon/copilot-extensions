@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh shared source-materialization identity for the Pull Requests native admission support declaration.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

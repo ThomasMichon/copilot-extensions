@@ -1,9 +1,0 @@
-{
-  "comment": "Use the declared prepared managed bootstrap for POSIX focus guidance readers",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

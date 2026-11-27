@@ -1,9 +1,0 @@
-{
-  "comment": "Keep shared native source-transaction fixtures complete for managed Machines bootstrap selection and wheel defaults.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "dev"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the updated installer support materializer used for Machines lifecycle bootstrap closure",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
