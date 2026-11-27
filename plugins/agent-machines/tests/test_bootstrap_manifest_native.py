@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import time
 from typing import Any
@@ -232,6 +233,7 @@ def test_native_manifest_stale_retains_publication_and_launch_owner(
     "syntax", "duplicate", "case-ambiguous", "invalid-utf8", "schema-bool",
     "dirty-string", "source-nonstring", "wrong-context", "wrong-runtime",
     "wrong-selected-version", "wrong-marker", "runtime-not-executable",
+    "newline-context", "newline-runtime", "newline-interpreter",
 ])
 def test_native_namespaced_manifest_refuses_invalid_without_fallback(
     bootstrap: ManifestFixture, invalid: str,
@@ -253,6 +255,12 @@ def test_native_namespaced_manifest_refuses_invalid_without_fallback(
         (bootstrap.root / "current-version").write_text("other\n", encoding="utf-8")
     elif invalid == "runtime-not-executable":
         Path(bootstrap.manifest["runtime"]["interpreter"]).chmod(0o644)
+    elif invalid == "newline-context":
+        bootstrap.manifest["installation"]["context"] += "\n"
+    elif invalid == "newline-runtime":
+        bootstrap.manifest["runtime"]["path"] += "\n"
+    elif invalid == "newline-interpreter":
+        bootstrap.manifest["runtime"]["interpreter"] += "\n"
     bootstrap.write()
     if invalid == "syntax":
         bootstrap.manifest_path.write_text("{", encoding="utf-8")
@@ -314,4 +322,65 @@ def test_native_stale_manifest_cannot_bypass_publication(
     bootstrap.write()
     result, _ = bootstrap.run(status=3)
     assert "Runtime publication refused" in result.stderr
+    assert not bootstrap.calls.exists()
+
+
+@pytest.mark.parametrize("namespaced", [False, True])
+@pytest.mark.parametrize("field", ["version", "path"])
+def test_native_manifest_preserves_source_identity_newlines(
+    bootstrap: ManifestFixture, namespaced: bool, field: str,
+) -> None:
+    if namespaced:
+        _namespaced(bootstrap)
+    bootstrap.manifest["source"][field] += "\n"
+    bootstrap.write()
+    result, _ = bootstrap.run()
+    if not namespaced and field == "path":
+        assert result.stderr == ""
+        assert not bootstrap.calls.exists()
+    else:
+        assert "reconciling in background" in result.stderr
+        bootstrap.launched()
+
+
+@pytest.mark.parametrize("namespaced", [False, True])
+def test_native_manifest_uses_one_snapshot_during_replacement(
+    bootstrap: ManifestFixture, namespaced: bool,
+) -> None:
+    if namespaced:
+        _namespaced(bootstrap)
+    replacement = bootstrap.home / "replacement.json"
+    other_payload = bootstrap.home / "other payload"
+    (other_payload / "scripts").mkdir(parents=True)
+    shutil.copy2(bootstrap.payload / "scripts/init.sh", other_payload / "scripts/init.sh")
+    (other_payload / "pyproject.toml").write_text('version = "2.0.0"\n', encoding="utf-8")
+    replacement_doc = json.loads(bootstrap.manifest_path.read_bytes())
+    replacement_doc["source"]["version"] = "0.9.0"
+    replacement_doc["source"]["path"] = str(other_payload)
+    replacement.write_text(json.dumps(replacement_doc), encoding="utf-8")
+    awk = shutil.which("awk")
+    move = shutil.which("mv")
+    assert awk is not None and move is not None
+    tool = Path(bootstrap.env["PATH"]) / "awk"
+    tool.unlink()
+    _executable(
+        tool,
+        '#!/bin/sh\nreplace=0\nfor argument do\n'
+        '  if [ "$argument" = "query_path=source$(printf \'\\034\')version" ]; then replace=1; fi\n'
+        f'done\n{shlex.quote(awk)} "$@"\ncode=$?\n'
+        f'if [ "$replace" = 1 ] && [ -f {shlex.quote(str(replacement))} ]; then\n'
+        f'  {shlex.quote(move)} {shlex.quote(str(replacement))} '
+        f'{shlex.quote(str(bootstrap.manifest_path))}\nfi\nexit "$code"\n',
+    )
+    result, _ = bootstrap.run()
+    assert result.stderr == ""
+    assert not bootstrap.calls.exists()
+    assert not replacement.exists(), "atomic replacement seam was not exercised"
+    assert json.loads(bootstrap.manifest_path.read_bytes()) == replacement_doc
+
+
+def test_native_manifest_refuses_literal_nul_before_capture(bootstrap: ManifestFixture) -> None:
+    bootstrap.manifest_path.write_bytes(b'{"source":{"path":"\0"}}')
+    result, _ = bootstrap.run()
+    assert "manifest contains NUL" in result.stderr
     assert not bootstrap.calls.exists()

@@ -52,6 +52,10 @@ native JSON reader from source and materialized inputs. Its inert status,
 publication and installer owners isolate legacy/namespaced manifest admission:
 current and stale versions, strict schema/UTF-8/duplicate-key refusal,
 runtime/current-marker coherence, first-use ordering and publication denial.
+Newline-suffixed context/runtime/source fields retain their identity, atomic
+replacement between queries cannot mix manifest generations, and literal NUL
+is refused before Bash capture. The adapter retains the source module's
+POSIX skip and T2/process/filesystem marks.
 Every Python/UV command and the addressed runtime are poisoned; these checks
 must neither start Python nor prepare an interpreter. Repeated current-path
 samples are recorded without increasing the existing fifteen-second outer cap.

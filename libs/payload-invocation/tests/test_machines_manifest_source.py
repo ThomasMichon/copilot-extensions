@@ -11,6 +11,7 @@ _package = ModuleType("_machines_manifest_source")
 _package.__path__ = [str(_tests)]
 sys.modules[_package.__name__] = _package
 _source = importlib.import_module(_package.__name__ + ".test_bootstrap_manifest_native")
+pytestmark = _source.pytestmark
 packaged_command = _source.packaged_command
 bootstrap = _source.bootstrap
 test_native_manifest_current_is_quiet_without_python = (
@@ -33,4 +34,13 @@ test_native_governance_refusal_precedes_manifest_reader = (
 )
 test_native_stale_manifest_cannot_bypass_publication = (
     _source.test_native_stale_manifest_cannot_bypass_publication
+)
+test_native_manifest_preserves_source_identity_newlines = (
+    _source.test_native_manifest_preserves_source_identity_newlines
+)
+test_native_manifest_uses_one_snapshot_during_replacement = (
+    _source.test_native_manifest_uses_one_snapshot_during_replacement
+)
+test_native_manifest_refuses_literal_nul_before_capture = (
+    _source.test_native_manifest_refuses_literal_nul_before_capture
 )

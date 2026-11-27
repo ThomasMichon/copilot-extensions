@@ -25,6 +25,8 @@ See the [inert command controls](tests/README.md) for qualification and limits.
 
 The POSIX session-start manifest check uses the installation-context native JSON
 reader, as its governance check already does. It does not start Python or UV.
+All fields use one native byte-preserving snapshot; decoded path/version captures
+retain trailing linefeeds rather than selecting another identity.
 Malformed, duplicate/case-ambiguous-key and invalid-UTF-8 manifests cannot trigger
 publication. First-use stamping, cell admission and the existing installer launch
 owner remain unchanged; the PowerShell counterpart continues to read JSON natively.

@@ -233,36 +233,46 @@ if [ ! -f "$Manifest" ]; then
   exit 0
 fi
 
+manifestDocument=""
+# EOF preserves the whole snapshot; finding the NUL delimiter refuses it.
+if IFS= read -r -d '' manifestDocument 2>/dev/null < "$Manifest"; then
+  echo "[agent-machines] deploy manifest contains NUL; skipping reconcile." >&2
+  exit 0
+fi
 manifest_value() {
-  LC_ALL=C awk -f "$query" -v mode="$1" -v query_path="$2" "$Manifest" 2>/dev/null
+  LC_ALL=C awk -f "$query" -v mode="$1" -v query_path="$2" <<<"$manifestDocument" 2>/dev/null
 }
 manifest_string() {
-  local value
-  value="$(manifest_value string "$1")" && [ -n "$value" ] || return 1
-  printf '%s' "$value"
+  local captured
+  # Retain trailing linefeeds and assign in the caller's scope.
+  captured="$(manifest_value string "$2" && printf .)" || return 1
+  captured="${captured%.}"
+  [ -n "$captured" ] || return 1
+  printf -v "$1" '%s' "$captured"
 }
 
 if [ "$ContextSelected" = 1 ]; then
   valid_manifest() {
+    local field
     [ "$(manifest_value type schema_version)" = number ] &&
     [ "$(manifest_value get schema_version)" = 4 ] &&
-    [ "$(manifest_string service)" = agent-machines ] &&
-    [ "$(manifest_string "$(jsonPath source repo)")" = copilot-extensions ] &&
-    [ "$(manifest_string "$(jsonPath source plugin)")" = agent-machines ] &&
-    manifest_string "$(jsonPath source kind)" >/dev/null &&
+    manifest_string field service && [ "$field" = agent-machines ] &&
+    manifest_string field "$(jsonPath source repo)" && [ "$field" = copilot-extensions ] &&
+    manifest_string field "$(jsonPath source plugin)" && [ "$field" = agent-machines ] &&
+    manifest_string field "$(jsonPath source kind)" &&
     [ "$(manifest_value type "$(jsonPath source dirty)")" = boolean ] &&
-    [ "$(manifest_string "$(jsonPath runtime kind)")" = python ] &&
-    manifest_string "$(jsonPath runtime selectedBy kind)" >/dev/null &&
-    manifest_string "$(jsonPath runtime selectedBy path)" >/dev/null &&
-    [ "$(manifest_string "$(jsonPath installation marketplaceId)")" = "$ContextMarketplaceId" ] &&
-    [ "$(manifest_string "$(jsonPath installation pluginId)")" = agent-machines ] &&
-    [ "$(manifest_string "$(jsonPath installation context)")" = "$ContextPath" ] &&
-    deployed="$(manifest_string "$(jsonPath source version)")" &&
-    sourcePath="$(manifest_string "$(jsonPath source path)")" &&
-    activeVersion="$(manifest_string "$(jsonPath runtime version)")" &&
-    runtimePath="$(manifest_string "$(jsonPath runtime path)")" &&
-    runtimeInterpreter="$(manifest_string "$(jsonPath runtime interpreter)")" &&
-    selectedByVersion="$(manifest_string "$(jsonPath runtime selectedBy version)")"
+    manifest_string field "$(jsonPath runtime kind)" && [ "$field" = python ] &&
+    manifest_string field "$(jsonPath runtime selectedBy kind)" &&
+    manifest_string field "$(jsonPath runtime selectedBy path)" &&
+    manifest_string field "$(jsonPath installation marketplaceId)" && [ "$field" = "$ContextMarketplaceId" ] &&
+    manifest_string field "$(jsonPath installation pluginId)" && [ "$field" = agent-machines ] &&
+    manifest_string field "$(jsonPath installation context)" && [ "$field" = "$ContextPath" ] &&
+    manifest_string deployed "$(jsonPath source version)" &&
+    manifest_string sourcePath "$(jsonPath source path)" &&
+    manifest_string activeVersion "$(jsonPath runtime version)" &&
+    manifest_string runtimePath "$(jsonPath runtime path)" &&
+    manifest_string runtimeInterpreter "$(jsonPath runtime interpreter)" &&
+    manifest_string selectedByVersion "$(jsonPath runtime selectedBy version)"
   }
   valid_manifest || {
     echo "[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback." >&2
@@ -302,8 +312,9 @@ if [ "$ContextSelected" = 1 ]; then
   exit 0
 fi
 
-deployed="$(manifest_value string "$(jsonPath source version)" || true)"
-pluginDir="$(manifest_string "$(jsonPath source path)")" || exit 0
+deployed=""
+manifest_string deployed "$(jsonPath source version)" || true
+manifest_string pluginDir "$(jsonPath source path)" || exit 0
 [ -n "$pluginDir" ] && [ -d "$pluginDir" ] || exit 0
 
 current="$deployed"

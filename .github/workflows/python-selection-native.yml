@@ -1951,7 +1951,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/machines-manifest').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==44 and len({c.attrib['name'] for c in cases})==44;
+          assert len(cases)==64 and len({c.attrib['name'] for c in cases})==64;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           samples=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='native_manifest_seconds'];
