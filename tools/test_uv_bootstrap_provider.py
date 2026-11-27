@@ -201,6 +201,45 @@ def test_posix_bootstrap_rejects_malformed_requests_before_uv(
     assert "UV_MUST_NOT_RUN" not in result.stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Controlled Windows-address adapter on POSIX")
+@pytest.mark.parametrize("selection", ["executable", "missing", "relative"])
+def test_bootstrap_normalizes_windows_address_before_executable_validation(
+    tmp_path: Path, selection: str,
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    request = tmp_path / "request.txt"
+    request.write_text("cpython@3.11.18\n", encoding="ascii")
+    python = tmp_path / "managed python.exe"
+    if selection == "executable":
+        python.touch(mode=0o700)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    uv = tools / "uv"
+    uv.write_text(
+        '#!/bin/sh\nif [ "$1" = --version ]; then printf "uv 0.12.6\\n"; '
+        'else printf "%s\\n" "$NATIVE_RESULT"; fi\n',
+        encoding="utf-8",
+    )
+    uv.chmod(0o700)
+    result = subprocess.run(
+        [bash, "-c",
+         'OSTYPE=msys; cygpath() { '
+         '[[ "$#" == 3 && "$1" == -au && "$2" == -- && "$3" == "$NATIVE_RESULT" ]] || return 96; '
+         'printf "%s\\n" "$ADDRESSED"; }; '
+         '. "$1"; resolve_uv_bootstrap_python "$2" Inspect',
+         "bootstrap", str(PROVIDER.with_suffix(".sh")), str(request)],
+        capture_output=True, text=True, timeout=15,
+        env={
+            **os.environ, "PATH": str(tools) + os.pathsep + os.defpath,
+            "NATIVE_RESULT": "relative/python.exe" if selection == "relative" else r"C:\managed python.exe",
+            "ADDRESSED": str(python),
+        },
+    )
+    assert result.returncode == (0 if selection == "executable" else 1), result.stderr
+    assert result.stdout == (str(python) + "\n" if selection == "executable" else "")
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX bootstrap provider")
 def test_real_posix_lookup_ignores_config_without_changing_caller(tmp_path: Path) -> None:
     uv = shutil.which("uv")
@@ -738,7 +777,8 @@ if ($env:UV_CONFIG_FILE -cne 'missing-relative.toml' -or $env:UV_NO_CONFIG -cne 
     assert not (tmp_path / "empty-python").exists()
 
 
-def test_provider_is_materialized_only_to_declared_native_consumer(tmp_path: Path) -> None:
+@pytest.mark.parametrize("suffix", [".ps1", ".sh"])
+def test_provider_is_materialized_only_to_declared_native_consumer(tmp_path: Path, suffix: str) -> None:
     candidate = tmp_path / "candidate"
     scripts = candidate / "plugins/agent-worktrees/scripts"
     scripts.mkdir(parents=True)
@@ -747,21 +787,22 @@ def test_provider_is_materialized_only_to_declared_native_consumer(tmp_path: Pat
         source = source_scripts / name
         if source.is_file():
             shutil.copyfile(source, scripts / name)
-    before = PROVIDER.read_bytes()
+    provider = PROVIDER.with_suffix(suffix)
+    before = provider.read_bytes()
     log = materializer.materialize_derived_files(
         candidate, canonical_root=ROOT,
         copied_consumer=(ROOT / "plugins/agent-worktrees", candidate / "plugins/agent-worktrees"),
-        file_names=frozenset({"bootstrap-uv.ps1"}),
+        file_names=frozenset({provider.name}),
     )
     assert log and not any(line.startswith("SKIP") for line in log), log
-    assert (scripts / "bootstrap-uv.ps1").read_bytes() == before
-    assert PROVIDER.read_bytes() == before
-    assert not (candidate / "plugins/agent-codespaces/scripts/bootstrap-uv.ps1").exists()
-    (scripts / "bootstrap-uv.ps1").write_text("foreign candidate\n")
+    assert (scripts / provider.name).read_bytes() == before
+    assert provider.read_bytes() == before
+    assert not (candidate / "plugins/agent-codespaces/scripts" / provider.name).exists()
+    (scripts / provider.name).write_text("foreign candidate\n")
     refused = materializer.materialize_derived_files(
         candidate, canonical_root=ROOT,
         copied_consumer=(ROOT / "plugins/agent-worktrees", candidate / "plugins/agent-worktrees"),
-        file_names=frozenset({"bootstrap-uv.ps1"}),
+        file_names=frozenset({provider.name}),
     )
     assert refused and all(line.startswith("SKIP") for line in refused), refused
-    assert (scripts / "bootstrap-uv.ps1").read_text() == "foreign candidate\n"
+    assert (scripts / provider.name).read_text() == "foreign candidate\n"

@@ -123,3 +123,50 @@ The Windows packet retains real self-stage success and exit-124 cleanup with
 materialized bootstrap support and fixture-owned inert preparation.
 Windows Git Bash is not an installer target. Large copied UV fixture binaries
 are released after each case so the packet retains the existing scratch cap.
+
+## Prepared-only legacy uninstall
+
+`test_uninstall_bootstrap.py`, exposed through
+`test_machines_uninstall_bootstrap_source.py`, exercises both raw and
+materialized helpers under poisoned ambient Python and selectors. Actual
+finite removal preserves durable/unknown bytes and persistent lease inodes,
+and is idempotent. Separate controls require live-generation-lease refusal,
+missing-UV refusal before helper entry, and rejection of an interpreter within
+the removal root. No acquisition or production-root removal is performed.
+
+The native lane requires ten no-skip cases on each POSIX Bash host and
+ten on each Windows PowerShell host. Both Windows shell packets run in the
+existing Windows Bash carrier job, which has headroom, rather than enlarging
+the original eight-minute PowerShell jobs. This does not add a Windows Bash
+installer contract. POSIX PowerShell is useful for isolated selection/refusal
+controls, but is not a native shell for the finite removal protocol.
+Each raw/materialized success report records actual removal and subsequent
+idempotent-call durations, with six UV calls and two managed lookups across
+the pair. These synthetic-state observations are not full installation or
+tail-latency measurements.
+The retained legacy suite materializes the same provider/request/capture and
+engine closure, supplies a prepared managed store, and makes setup acquisition
+inert in held-transaction fixtures. Its host roster matches the finite protocol:
+POSIX Bash and native Windows PowerShell. Lease-refusal snapshots are read before
+acquisition and after release, never through an actively byte-locked Windows file.
+The source adapter `test_machines_legacy_uninstall_source.py` additionally requires
+the original idle-cleanup/idempotence and all six held-custody controls in those
+same native carriers: seven cases per POSIX host and eight on Windows.
+The existing activated-runtime metadata matrix also receives the canonical
+bootstrap closure and a controlled prepared UV directory for Machines.
+`test_machines_uninstall_metadata_source.py` retains four Bash metadata cases
+per POSIX host and eight Bash/PowerShell metadata cases on Windows, covering
+shadowed installed runtimes, broken/aliased candidates and unavailable UV.
+Windows Bash normalizes the declared helper's lookup address through the
+existing canonical converter; this metadata boundary does not expand the
+full Bash installer platform contract.
+
+Full local POSIX deletion can refuse when a current-user process is not
+inspectable. That existing fail-closed observation boundary is not relaxed or
+reported as a pass. The copied POSIX fixture observes only its own inspector
+for the newly created inert module namespace; filesystem removal and native
+leases remain real. Windows keeps its actual current-user process census.
+An additional unavailable-census control requires refusal without runtime
+mutation on every native host. Production inspection is unchanged, and the
+POSIX global-census path remains separately unqualified. No root, service,
+credential or process repair is a fixture prerequisite.
