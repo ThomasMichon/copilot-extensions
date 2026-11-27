@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in, content-free worktrees.lifecycle.v1 consumer telemetry for finite lifecycle and PR-activity CLI runs",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

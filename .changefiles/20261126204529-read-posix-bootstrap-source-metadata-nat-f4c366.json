@@ -1,9 +1,0 @@
-{
-  "comment": "Read POSIX bootstrap source metadata natively from one manifest snapshot",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

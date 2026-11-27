@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare native managed-Python prerequisites before Machines installer admission and preserve prepared-only stamp and independent application construction.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

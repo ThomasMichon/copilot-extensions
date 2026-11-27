@@ -1,9 +1,0 @@
-{
-  "comment": "Read POSIX bootstrap drift metadata natively without ambient Python",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

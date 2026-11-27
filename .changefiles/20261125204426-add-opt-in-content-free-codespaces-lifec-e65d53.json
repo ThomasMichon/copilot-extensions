@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in, content-free codespaces.lifecycle.v1 consumer telemetry for remote worker launch and connect stages",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Admit selected completed Worktrees command runtimes through prepared UV before foreground, readiness, cache and boot-trace execution",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

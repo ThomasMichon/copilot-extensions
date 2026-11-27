@@ -1,9 +1,0 @@
-{
-  "comment": "Use prepared managed Python for finite legacy uninstall without ambient discovery.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

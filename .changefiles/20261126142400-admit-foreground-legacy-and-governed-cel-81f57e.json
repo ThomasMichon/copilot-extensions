@@ -1,9 +1,0 @@
-{
-  "comment": "Admit foreground Legacy and governed-cell commands through prepared managed Python, preserving strict selection and native argument transport.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

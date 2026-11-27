@@ -1,9 +1,0 @@
-{
-  "comment": "Journal content-free hook.lifecycle.v1 sessionStart records when consumer telemetry is admitted, drain them through the next finite command's admitted route, re-render the stale hook read policy, and align a Windows native-hook test with the PowerShell entries.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

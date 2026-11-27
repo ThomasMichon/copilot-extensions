@@ -1,9 +1,0 @@
-{
-  "comment": "Restart the supervisor's dormant-body grace window on every suspension, including an unobserved resume and re-suspend between sweeps.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

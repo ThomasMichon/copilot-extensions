@@ -1,9 +1,0 @@
-{
-  "comment": "Keep synthetic bootstrap-driver acknowledgements independent of PowerShell JSON module startup during native qualification",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

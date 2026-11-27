@@ -1,9 +1,0 @@
-{
-  "comment": "Materialize the Containers standalone installer capture and governed-feed helper closure.",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-maintainer",
-      "type": "patch"
-    }
-  ]
-}
