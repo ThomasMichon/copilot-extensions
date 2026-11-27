@@ -66,6 +66,12 @@ on:
       - libs/payload-invocation/tests/test_machines_provisioning_source.py
       - libs/payload-invocation/tests/test_machines_health_source.py
       - libs/payload-invocation/tests/test_machines_manifest_source.py
+      - libs/payload-invocation/tests/test_machines_cell_bootstrap_source.py
+      - plugins/agent-machines/scripts/init.sh
+      - plugins/agent-machines/scripts/init.ps1
+      - plugins/agent-machines/scripts/cell-lifecycle-bootstrap.sh
+      - plugins/agent-machines/scripts/cell-lifecycle-bootstrap.ps1
+      - plugins/agent-machines/tests/test_cell_lifecycle_bootstrap.py
       - libs/installation-context/json-query.awk
       - libs/installation-context/tests/test_json_query_bytes.py
       - plugins/agent-machines/scripts/bootstrap-check.sh
@@ -2087,6 +2093,31 @@ jobs:
           and r['uv_calls']==(0 if r['scenario'].startswith('missing-') else 2)
           and all(v>0 for v in r['samples_seconds']) for r in reports);
           print(json.dumps({'machines_command_admission':reports},sort_keys=True))"
+      - name: Qualify prepared-only cell lifecycle installer ingress
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL != 'bash'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_cell_bootstrap_source.py --allow-explicit-tiers
+          -k "${{ env.MACHINES_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/machines-cell-bootstrap
+      - name: Require cell lifecycle controls and offline work reports without skips
+        if: runner.os != 'Windows' || env.MACHINES_QUALIFICATION_SHELL != 'bash'
+        env:
+          QUALIFIED_SHELL: ${{ env.MACHINES_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/machines-cell-bootstrap').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==20 and len({c.attrib['name'] for c in cases})==20;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='machines_cell_bootstrap'];
+          assert len(reports)==10 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and r['bootstrap_python']=='3.11.18'
+          and r['uv_calls']==2 and len(r['samples_seconds'])==2
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'machines_cell_bootstrap':reports},sort_keys=True))"
       - name: Retain native health capability and rollback assertions
         run: >-
           python tools/run-plugin-tests.py payload-invocation

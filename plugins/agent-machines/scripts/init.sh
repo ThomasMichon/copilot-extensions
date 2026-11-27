@@ -437,15 +437,10 @@ if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall || "$ACTION" == ce
         _fail 'Cell lifecycle actions must be explicit, not inherited'
         exit 2
     }
-    # Management uses an existing Python, never a repaired/deleted cell runtime.
-    for lifecycle_python in python3 python; do
-        if command -v "$lifecycle_python" >/dev/null 2>&1; then
-            cd "$HOME"
-            exec "$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
-        fi
-    done
-    _fail 'Cell lifecycle management requires an existing Python 3.10+ interpreter'
-    exit 1
+    . "$SCRIPT_DIR/cell-lifecycle-bootstrap.sh"
+    lifecycle_python="$(_resolve_cell_lifecycle_python)" || exit $?
+    cd "$HOME"
+    exec "$lifecycle_python" -I -B "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
 fi
 
 # Cell-local slot actions authorize themselves from the explicit context

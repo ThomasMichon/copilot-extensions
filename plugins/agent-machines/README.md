@@ -519,7 +519,15 @@ unfinished publication and never removes a pre-existing snapshot.
 `cell-deactivate`, `cell-repair`, and `cell-uninstall` (PowerShell:
 `scripts\init.ps1 -Action cell-attribute-legacy`, `cell-retire-legacy`,
 `cell-deactivate`, `cell-repair`, or `cell-uninstall`) use the same
-stdlib-only management engine and an existing Python 3.10+ interpreter. They
+stdlib-only management engine and the prepared UV-managed installer interpreter.
+The early entrypoints inspect the canonical
+`installer-instance-python-version.txt` request, independently of the cell's
+selected application runtime. Source checkouts reference the canonical
+Installer Engine; release payloads contain the provider, request and native
+capture support. Selection has a finite thirty-second work budget and does not
+download Python, install UV or fall back to PATH Python. Missing prerequisites
+require explicit setup. Lifecycle authorization and state checks remain in the
+existing management engine. They
 never self-provision a toolchain or trust an inherited context/action.
 
 Legacy attribution requires these explicit inputs:
