@@ -107,6 +107,37 @@ all declared keepers remain OPEN. The numerical equality with the frozen
 later verified departures and the intervening #14826/#14832 arrivals
 separately. No other pending row gains semantic or content admission.
 
+## Complete current roster and bounded source relations
+
+The [later scope-boundary study](journal/2026/11.26-scope-boundaries-and-current-roster.md)
+qualifies and reads three whole current requests and nine discussions.
+#12274 retains actual ordinary-writer/legacy closeout after #14020's new
+attachment-capture prerequisite. #13818 retains all three offline preparation
+gaps explicitly excluded by #13819. #6925 retains its explicit bounded phase
+contract and released acceptance, distinct from #14634's described default
+inactivity timer; the original #6928 proposal remains OPEN. Two #11248 parent
+relations remain incompletely assessed. No source completion follows.
+
+A complete equal-pass observation at **2026-11-26 20:31:04
+America/Los_Angeles** measures 584 whole OPEN: 276 original-cohort and 308
+inflow identities. Arrival #14847 is the only change from the preceding
+583-open observation; there is no departure or campaign disposition.
+All declared keepers remain OPEN.
+
+The typed frame now separately records three post-snapshot metadata rows
+#14826/#14832/#14847. Its effective current coverage is the union of those
+rows and the unchanged frozen 583 identities, minus audited frozen departures
+#11805/#13753: exactly 584 unique current identities. The declared Coordinator
+research role applies to both sets; every current row has a reviewed or
+explicit pending outcome and gap. The three arrivals remain body-unread
+metadata, not newly admitted or semantically assessed content.
+
+This resolves the global **coverage-roster recording** criterion, which
+expressly allows pending outcomes. It does not resolve ongoing graph
+maintenance, semantic relations, current vision/effort correspondence,
+accepted receiving, source fulfillment, final observation or resource custody.
+No historical researcher or product owner is replaced.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
@@ -123,12 +154,14 @@ No cleanup, finalization or resource transfer was performed.
 
 ## Parent gates and documentation impact
 
-This refresh supports two bounded parent recording results: the original
+This refresh supports three bounded parent recording results: the original
 metric-and-journal checkpoint has been met with subsequent continuation
 guidance preserved, and the operational ledger reconstructs the current
 research frontier, owned publication flows, stopped schedules and retained
-obligations. It does not resolve the other semantic, acceptance,
-disposition or final-observation gates from metadata alone.
+obligations. The later exact identity proof resolves current roster recording
+with explicit pending outcomes. Five Plan and eleven actual global Validation
+items remain OPEN; metadata does not resolve their semantic, acceptance,
+disposition or final-observation conditions.
 
 The parent remains Active. This is below-altitude research/tracker
 documentation and typed evidence only. Product behavior, test policy,
