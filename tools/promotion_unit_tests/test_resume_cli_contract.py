@@ -189,7 +189,7 @@ def bridge_resume(
     module.__dict__["RemoteBridgeError"] = RuntimeError
     monkeypatch.setitem(sys.modules, module.__name__, module)
     boundary.health.update(
-        protocol_version=52, capabilities={"bridge_inventory": 2, "worktree_exact_resume": 1},
+        protocol_version=52, capabilities={"bridge_inventory": 3, "worktree_exact_resume": 1},
     )
     report: dict[str, Any] = {
         "version": 1, "complete": True, "sources": {},
@@ -206,7 +206,8 @@ def bridge_resume(
             if path == "/health":
                 return boundary.health.copy()
             assert path == "/api/v1/bridges"
-            return report
+            expanded = (kwargs.get("params") or {}).get("include_retained_managed") == "true"
+            return {**report, "identity_version": 3 if expanded else 2}
         assert path.endswith("/exact")
         if boundary.failures:
             raise boundary.failures.pop(0)
@@ -311,6 +312,23 @@ def test_bridge_resume_unavailable_selection_has_no_lifecycle_effect(
         "no-native": "bridge_resume_unavailable",
     }[fault]
     assert all(call[0] == "GET" for call in boundary.calls)
+    if fault in {"absent", "incomplete"}:
+        assert any(
+            call[1] == "/api/v1/bridges"
+            and call[2]["params"].get("include_retained_managed") == "true"
+            for call in boundary.calls
+        )
+        boundary.health["capabilities"]["bridge_inventory"] = 2
+        boundary.calls.clear()
+        with pytest.raises(SystemExit) as prior:
+            boundary.invoke("--json", "resume", "worktree-123", "--bridge")
+        assert prior.value.code == 1
+        assert json.loads(capsys.readouterr().out)["reason"] == "bridge_resume_unavailable"
+        assert all(call[0] == "GET" for call in boundary.calls)
+        assert not any(
+            (call[2].get("params") or {}).get("include_retained_managed") == "true"
+            for call in boundary.calls
+        )
 
 
 @pytest.mark.parametrize("capability", [None, False, 0, "1"])
