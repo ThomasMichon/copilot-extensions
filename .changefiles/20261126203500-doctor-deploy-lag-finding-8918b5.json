@@ -1,5 +1,5 @@
 {
-  "comment": "`agent-dispatch doctor` reports an advisory `deploy_lag` block: running coordinator vs installed payload vs release channel, with unreadable versions reported as unknown.",
+  "comment": "`agent-dispatch doctor` reports an advisory `deploy_lag` block: running coordinator vs selected runtime (local coordinators only), runtime vs installed payload, and payload vs release channel, with unreadable or unorderable versions reported as unknown.",
   "changes": [
     {
       "plugin": "agent-dispatch",
