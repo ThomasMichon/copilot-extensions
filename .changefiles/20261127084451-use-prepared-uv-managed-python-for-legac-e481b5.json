@@ -1,0 +1,9 @@
+{
+  "comment": "Use prepared uv-managed Python for legacy uninstall and its transaction helper without ambient interpreter fallback",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

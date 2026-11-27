@@ -381,6 +381,10 @@ _header()  { echo ""; echo "=== $* ==="; }
 # -- Helpers ---------------------------------------------------------------
 
 _bootstrap_python() {
+    if [[ "${ACTION:-}" == uninstall ]]; then
+        _uninstall_python
+        return
+    fi
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
     # venv exists (e.g. the pre-build toss). Only returns a PATH interpreter or
     # a completed active runtime; an incomplete target slot is never trusted to

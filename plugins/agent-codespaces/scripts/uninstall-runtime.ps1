@@ -1,56 +1,49 @@
 function Get-UninstallPython {
-    # Uninstall must not use construction's provisioning or installed-runtime fallback.
-    $probe = @'
-import sys
-from pathlib import Path
-assert sys.version_info >= (3, 11)
-root = Path(sys.argv[1]).absolute()
-assert ".." not in root.parts
-roots = (root, root.resolve())
-paths = (sys.argv[2], sys.executable, sys.prefix, sys.base_prefix,
-         getattr(sys, "_base_executable", sys.executable))
-for value in paths:
-    path = Path(value).absolute()
-    for actual in (path, path.resolve(strict=True)):
-        assert all(not actual.is_relative_to(boundary) for boundary in roots)
-print(Path(sys.executable).resolve(strict=True))
-'@
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
+    if (-not (Get-Command Resolve-NativeBootstrapPython -CommandType Function -ErrorAction SilentlyContinue)) {
+        . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     }
-    # Listing installed launcher targets cannot provision a missing interpreter.
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
-                    $candidates += $match.Groups[1].Value
-                }
-            }
-        } catch { }
+    $support = $PSScriptRoot
+    if ([IO.File]::ReadAllLines((Join-Path $PSScriptRoot 'install.sh')) -ccontains
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"') {
+        $support = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../libs/installer-engine'))
     }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-B', '-c', $probe, $InstallDir, $candidate
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-                return $selected.Trim()
-            }
-        } catch { }
+    $reader = Get-Command Resolve-NativeBootstrapPython -CommandType Function
+    if (-not $reader.Parameters.ContainsKey('InvokeCaptured')) {
+        throw 'Native bootstrap reader lacks bounded capture; restore the owning payload.'
     }
-    return $null
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $captureSupport = if (Test-Path -LiteralPath (Join-Path $support 'bootstrap-capture.ps1')) {
+            $support
+        } else {
+            Join-Path $PSScriptRoot '_bootstrap_python'
+        }
+        . (Join-Path $captureSupport 'bootstrap-capture.ps1')
+    }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $budget = 30000
+    $capture = {
+        param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+        $remaining = $budget - $clock.ElapsedMilliseconds
+        if ($remaining -le 1) { throw [TimeoutException]::new('WATCHDOG: uninstall bootstrap deadline.') }
+        $cleanup = [int][Math]::Min(3000, [Math]::Max(1, [Math]::Floor($remaining / 4)))
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                -Environment $Environment -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
+        }
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+            -InputText '' -ErrorOutput ([ref]$diagnostic) `
+            -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic }
+    }
+    return Resolve-NativeBootstrapPython -Action uninstall -Root $InstallDir `
+        -BootstrapDirectory $support -InvokeCaptured $capture
 }
 
 function Invoke-StatePreservingUninstall {
     param([switch]$Preview, [switch]$AdmissionOnly)
     $python = Get-UninstallPython
-    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure; nothing removed' }
+    if (-not $python) { throw 'Uninstall requires the prepared uv-managed bootstrap Python outside runtime and prefix closure; nothing removed' }
     if (Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq $OwnerTaskName }) {
         throw 'Uninstall refuses Connection Owner service custody; runtime and transports left intact'
     }
