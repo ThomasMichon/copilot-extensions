@@ -2799,6 +2799,15 @@ back at the request limit, so the check was skipped rather than risk
 analyzing an incomplete page. Neither verdict is ever auto-repaired -- see
 [ThomasMichon/copilot-extensions#2884](https://github.com/ThomasMichon/copilot-extensions/issues/2884).
 
+Every run also adds an advisory `deploy_lag` block comparing the running
+coordinator version (from `/health`), the installed payload (the
+`current-version` runtime marker, else this CLI's own version) and, when a
+release-channel reader is available, the channel's latest version.
+`restart_pending.status: behind` means the running coordinator is older than
+the installed payload; `update_pending.status: behind` means an update is
+pending. An unreadable version is `unknown`, never `current`; doctor takes no
+restart or update action itself.
+
 ### Recovering a shadowed live session (`agent-dispatch reattach`)
 
 `doctor --check-live-sessions` can *find* an `earlier_attempt_live` session

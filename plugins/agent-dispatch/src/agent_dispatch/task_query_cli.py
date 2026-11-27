@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from typing import Any, Protocol, cast
 
 from .client import DispatchError
 from .handoff_claim_release import is_handoff_task
@@ -15,11 +16,19 @@ from .loop_commands import _resolve_cli_module
 from .queue_common import worker_id_for
 
 
-def _core():
-    return _resolve_cli_module()
+class _Core(Protocol):
+    def _emit(self, payload: Any) -> int: ...
+    def _browse_peer(self, *args: Any, **kwargs: Any) -> int: ...
+    def _consume_already_spent(self, task_id: str, task: dict[str, Any]) -> int: ...
+    def _consume_retired(self, task_id: str, task: dict[str, Any]) -> int: ...
+    def __getattr__(self, name: str) -> Any: ...
 
 
-def _core_helper(name: str, local):
+def _core() -> _Core:
+    return cast(_Core, _resolve_cli_module())
+
+
+def _core_helper(name: str, local: Any) -> Any:
     """Prefer a monkeypatched ``agent_dispatch.__main__`` helper when present."""
 
     candidate = getattr(_core(), name, None)
@@ -53,7 +62,7 @@ _BOARD_GROUPS = (
 _BOARD_TERMINAL = frozenset({"Submitted", "Completed", "Abandoned"})
 
 
-def _board_group(task: dict) -> str:
+def _board_group(task: dict[str, Any]) -> str:
     """The display group for a task on the picker board (see ``_BOARD_GROUPS``).
 
     A **concluded** status (submitted / completed / abandoned / dead_letter)
@@ -224,9 +233,12 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             if stuck_queued:
                 payload["examined"] += len(stuck_queued)
                 payload["diagnoses"].extend(d.as_dict() for d in stuck_queued)
+        from . import doctor_deploy_lag
+
+        payload["deploy_lag"] = doctor_deploy_lag.gather(c)
     return _core()._emit(payload)
 
-def _board_activity(task: dict, *, now: float | None = None) -> str | None:
+def _board_activity(task: dict[str, Any], *, now: float | None = None) -> str | None:
     """Independent live-execution badge for the picker task board.
 
     Lifecycle ``group`` answers where the task is (Blocked/Queued/Started/etc.).
@@ -237,14 +249,14 @@ def _board_activity(task: dict, *, now: float | None = None) -> str | None:
     if activity not in {"ACTIVE", "STALLED"}:
         return None
     try:
-        observed = float(task.get("activity_updated_at"))
+        observed = float(cast(Any, task.get("activity_updated_at")))
         current = time.time() if now is None else float(now)
     except (TypeError, ValueError):
         return None
     ttl = getattr(_core(), "_BOARD_ACTIVITY_TTL_SECONDS", _BOARD_ACTIVITY_TTL_SECONDS)
     return activity if current - observed <= ttl else None
 
-def _board_sort_key(task: dict) -> tuple:
+def _board_sort_key(task: dict[str, Any]) -> tuple[Any, ...]:
     group_fn = _core_helper("_board_group", _board_group)
     groups = getattr(_core(), "_BOARD_GROUPS", _BOARD_GROUPS)
     grp = group_fn(task)
@@ -257,7 +269,7 @@ def _board_sort_key(task: dict) -> tuple:
         ts = 0.0
     return (prio, -ts)
 
-def _board_keep(task: dict, cutoff: float) -> bool:
+def _board_keep(task: dict[str, Any], cutoff: float) -> bool:
     """Keep an active task always; keep a terminal (completed/abandoned) task only
     when its terminal timestamp is at/after ``cutoff`` (the recency window), so the
     board shows *recently* finished work without unbounded growth."""
@@ -330,9 +342,9 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
             tasks = list(tasks_by_id.values())
             def _relay_fetch_many(
                 refs: list[tuple[str, str]]
-            ) -> dict[tuple[str, str], dict | None]:
+            ) -> dict[tuple[str, str], dict[str, Any] | None]:
                 try:
-                    return c.worktree_status_relays(refs)
+                    return cast("dict[tuple[str, str], dict[str, Any] | None]", c.worktree_status_relays(refs))
                 except DispatchError:
                     return {}
 
@@ -354,7 +366,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     with _core()._client(args) as c:
         tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit,
                        category=getattr(args, "category", None))
-    from .queue import machine_matches
+    from .queue_common import machine_matches
 
     inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
     if steer_only:
@@ -415,13 +427,13 @@ def _cmd_payload(args: argparse.Namespace) -> int:
         return 0
     return _core()._emit(result)
 
-def _task_is_handoff(task: dict) -> bool:
+def _task_is_handoff(task: dict[str, Any]) -> bool:
     """Shared by the initial-snapshot check and the refreshed-re-fetch check
     below so both apply the identical classification rather than drifting apart."""
     return is_handoff_task(task)
 
 def _fence_consumer_session(
-    c, task_id: str, owner: str, *, expected_generation: int | None
+    c: Any, task_id: str, owner: str, *, expected_generation: int | None
 ) -> int | None:
     """Bind this invocation's durable per-session identity exclusively to
     ``task_id`` via a generation-fenced CAS.
@@ -482,7 +494,7 @@ def _fence_consumer_session(
         return 1
     return None
 
-def _consume_already_spent(task_id: str, task: dict) -> int:
+def _consume_already_spent(task_id: str, task: dict[str, Any]) -> int:
     """Refuse to replay a spent handoff baton.
 
     Prints a clear STOP notice (read by the successor agent in place of the
@@ -505,7 +517,7 @@ def _consume_already_spent(task_id: str, task: dict) -> int:
     )
     return 3
 
-def _consume_retired(task_id: str, task: dict) -> int:
+def _consume_retired(task_id: str, task: dict[str, Any]) -> int:
     """Refuse to deliver a retired (abandoned) handoff baton.
 
     A handoff is abandoned for several reasons: a newer handoff for the same
