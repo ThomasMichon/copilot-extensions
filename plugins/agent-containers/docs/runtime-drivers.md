@@ -328,15 +328,11 @@ capabilities.
 
 ## agent-bridge integration
 
-The resolver publishes `venue.driver` for driver-backed members. agent-bridge's
-pre-launch repository-hosting check normally runs `docker inspect`/`docker
-exec` itself; for a venue with `driver` it runs the same Docker-shaped commands
-through `agent-containers runtime-proxy --fleet <venue.fleet> inspect|exec ...`,
-which reaches the member through its driver with the same instance pinning and
-refuses anything that is not a driver member. `--fleet` limits discovery to
-that fleet's driver, so another runtime can neither delay the check nor answer
-for the same id. An agent-bridge without this support fails closed
-(its Docker inspection cannot find the member) rather than skipping the check.
+For deterministic `<prefix>-<n>` names, namespace resolution uses exact driver inspection instead of inventory. It checks every driver fleet that can own the name and refuses conflicting results, including a distinct Docker container with that name. A single inspection does not establish bare ID ownership.
+
+For driver members, Bridge sends the Docker-shaped hosting checks through `agent-containers runtime-proxy`. When exactly one configured driver fleet owns the name, the provider advertises `venue.runtime_proxy` version 1. Bridge passes `--fleet`, `--member`, `--expected-runtime`, and the full instance ID. The proxy rechecks ownership, driver registration, and Docker name collisions without listing fleet members. Bridge runs the responding provider with its declared installation and config settings, including unset overrides, and removes `PYTHONPATH` and `PYTHONHOME` as the runtime gate does.
+
+A stale or ambiguous binding fails without retrying as a bare ID. Older Bridge or Containers versions without binding support retain the inventory-based proxy path; `--fleet` limits that inventory to the selected fleet. Bridge versions without proxy support fail the hosting check rather than skipping it.
 
 Driver-exec members (no `ssh_transport`) publish no `container` block, since
 its presence selects agent-bridge's SSH Session Host. Their venue instead
@@ -351,11 +347,7 @@ the guest `agent-worktrees agent-policy check`, and adds no guest-side
 member. Without that variable, as with an older bridge, the wrapper keeps the
 guest check.
 
-Standalone entry points that receive a member name or instance id in a fresh
-process (`session-host-state`, `session-host-cleanup`, `runtime-proxy`)
-enumerate driver fleets first so the handle routes to its driver; a
-recreated member's previous instance id is inspected through the member name
-and reported as missing.
+Standalone entry points without a provider binding (`session-host-state`, `session-host-cleanup`, and bare-ID `runtime-proxy`) use inventory to establish routing. A recreated member's previous instance ID is reported as missing.
 
 Driver fleets are listed concurrently under one overall deadline (60s for
 inventory, 20s for targeted discovery, which fits agent-bridge's 30s provider

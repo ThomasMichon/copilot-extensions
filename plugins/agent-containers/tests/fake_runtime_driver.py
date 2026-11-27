@@ -10,6 +10,7 @@ Knobs (environment):
   FAKE_DRIVER_CAPS      JSON object returned as ``capabilities``.
   FAKE_DRIVER_FAIL      ``<verb>:<code>`` -- fail that verb with that code.
   FAKE_DRIVER_PROTOCOL  protocolVersion to answer with (default 1).
+  FAKE_DRIVER_EXEC_STDOUT  return this stdout after identity checks, without a guest process.
 
 Leading options (set in a manifest command):
   --root <dir>          use ``<dir>`` instead of ``$FAKE_DRIVER_ROOT``.
@@ -31,24 +32,25 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, TextIO, cast
 
 ROOT = Path(os.environ["FAKE_DRIVER_ROOT"])
 STATE = ROOT / "state.json"
 
 
-def _load() -> dict:
+def _load() -> dict[str, Any]:
     if STATE.exists():
-        return json.loads(STATE.read_text())
+        return cast("dict[str, Any]", json.loads(STATE.read_text()))
     return {"members": {}, "calls": [], "next_id": 1}
 
 
-def _save(state: dict) -> None:
+def _save(state: dict[str, Any]) -> None:
     temporary = STATE.with_suffix(".tmp")
     temporary.write_text(json.dumps(state, indent=2))
     os.replace(temporary, STATE)
 
 
-def _respond(payload: dict, code: int = 0) -> int:
+def _respond(payload: dict[str, Any], code: int = 0) -> int:
     version = int(os.environ.get("FAKE_DRIVER_PROTOCOL", "1"))
     print(json.dumps({"protocolVersion": version, **payload}))
     return code
@@ -58,7 +60,7 @@ def _error(code: str, message: str) -> int:
     return _respond({"ok": False, "error": {"code": code, "message": message}}, 1)
 
 
-def _member_view(name: str, member: dict) -> dict:
+def _member_view(name: str, member: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name, "id": member["id"], "fleet": member["fleet"],
         "instance": member["instance"], "state": member["state"],
@@ -82,13 +84,13 @@ def _host_cwd(name: str, workdir: str | None) -> Path:
     return path
 
 
-def _lock_state():
+def _lock_state() -> TextIO:
     """Serialize concurrent invocations (parallel fleet listings) portably.
 
     The descriptor is not inherited, so ``exec-stream`` releases it on exec.
     """
     handle = open(ROOT / "state.lock", "a+")
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         handle.seek(0)
@@ -214,6 +216,9 @@ def main(argv: list[str]) -> int:
         _save(state)
         return _respond({"ok": True})
     if verb == "exec":
+        if "FAKE_DRIVER_EXEC_STDOUT" in os.environ:
+            return _respond({"ok": True, "exitCode": 0,
+                             "stdout": os.environ["FAKE_DRIVER_EXEC_STDOUT"], "stderr": ""})
         env = os.environ.copy()
         env.update(request.get("env") or {})
         env["FAKE_MEMBER_USER"] = request.get("user") or ""

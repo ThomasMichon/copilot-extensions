@@ -607,14 +607,24 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
-    config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=True, size=3)
     fleet.reconcile_up(config, "example")
+    members = fake.state()["members"]
+    assert len(members) > 1
+    before = len(fake.state()["calls"])
+    runtime_drivers.clear_bindings()
 
     monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
     monkeypatch.setattr(resolver, "prepare_ssh_config", lambda *args: pytest.fail(
         "a driver-exec member must receive no SSH preparation"))
 
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+    calls = fake.state()["calls"][before:]
+    assert [call["verb"] for call in calls] == ["inspect", "capabilities"]
+    assert calls[0]["request"]["name"] == "example-1"
+    assert calls[0]["request"]["fleet"] == "example"
+    assert runtime_drivers.owner_of("example-2") is None
+    assert runtime_drivers.owner_of(members["example-1"]["id"]) is None
     assert spec["spawn_command"][-3:] == ["exec", "--stdio", "example-1"]
     member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
     # No SSH / Session Host projection: the venue declares the portable
@@ -637,6 +647,41 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     assert asyncio.run(resolver.ContainerResolver().target_repo("example-1")) == "example-repo"
     asyncio.run(resolver.ContainerResolver().ensure_ready("example-1"))
 
+
+def test_namespace_resolve_refuses_conflict_and_invalid_identity(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    runtime_drivers.clear_bindings()
+    monkeypatch.setenv("FAKE_DRIVER_FAIL", "inspect:conflict")
+    with pytest.raises(RuntimeError, match="inspect failed \\(conflict\\)"):
+        asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+
+    monkeypatch.delenv("FAKE_DRIVER_FAIL")
+    state = fake.state()
+    state["members"]["example-1"]["id"] = "invalid"
+    (fake.root / "state.json").write_text(json.dumps(state))
+    with pytest.raises(RuntimeError, match="inspect failed \\(protocol_error\\)"):
+        asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+    assert runtime_drivers.owner_of("example-1") is None
+
+
+def test_namespace_resolve_refuses_two_owning_driver_fleets(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other_root = tmp_path / "other-runtime"
+    config = _two_driver_config(tmp_path, monkeypatch, fake, ["--root", str(other_root)])
+    config.fleets["slow"].name_prefix = "example"
+    for name in ("example", "slow"):
+        driver = runtime_drivers.driver_for_fleet(config, name, config.fleets[name])
+        driver.provision(name="example-1", workspace_folder="/workspace", exec_user="vscode")
+    runtime_drivers.clear_bindings()
+    monkeypatch.setattr(resolver, "load_config", lambda: config)
+
+    with pytest.raises(RuntimeError, match="more than one runtime driver"):
+        asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+    assert runtime_drivers.owner_of("example-1") is None
 
 def test_scoped_provider_keeps_fleet_checkout_for_later_calls(
     fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -718,9 +763,13 @@ def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
     from ssh_manager import SSHConfig
 
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
-    config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=False, size=2)
     fleet.reconcile_up(config, "example")
-    member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    state = fake.state()
+    instance = state["members"]["example-1"]["id"]
+    state["members"]["example-2"]["id"] = instance
+    (fake.root / "state.json").write_text(json.dumps(state))
+    runtime_drivers.clear_bindings()
     prepared: list[str] = []
     monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
 
@@ -732,16 +781,23 @@ def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
 
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
 
-    assert prepared == [f"example-1.{member.container_id}"]
+    assert prepared == [f"example-1.{instance}"]
     container = spec["container"]
     assert container["ssh"]["host_alias"] == "fixture"
     assert container["acp_command"]
-    assert container["instance_id"] == member.container_id
+    assert container["instance_id"] == instance
     assert container["portable_receiving_policy"] == {"version": 1}
     assert container["provider_command"] == ["/payload/bin/agent-containers"]
     assert "portable_receiving_policy" not in spec["venue"]
     assert spec["venue"]["transport"] == "ssh"
     assert spec["venue"]["capabilities"]["session_host"] is True
+    assert runtime_drivers.owner_of(instance) is None
+    assert _route(f"example-1.{instance}").instance_id == instance
+
+    lifecycle.list_containers(config)
+    asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+    with pytest.raises(RuntimeError, match="more than one runtime"):
+        runtime_drivers.owner_of(instance)
 
 
 def test_resolver_fails_closed_on_missing_relay_capability(
@@ -1134,6 +1190,40 @@ def test_runtime_proxy_serves_bridge_hosting_checks(
                      "/bin/sh", "-c", "echo policy-ok"]) == 0
     assert capsys.readouterr().out == "policy-ok\n"
     assert cli.main(["runtime-proxy", "inspect", "plain-1"]) == 1  # never a Docker fallback
+
+
+def test_bound_proxy_verifies_current_fleet_registration_and_collisions(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    runtime = runtime_drivers.runtime_identity("example-1")
+    instance = fake.state()["members"]["example-1"]["id"]
+    before = len(fake.state()["calls"])
+    runtime_drivers.clear_bindings()
+
+    def command(fleet_name: str, expected_runtime: str, target: str) -> list[str]:
+        return ["runtime-proxy", "--fleet", fleet_name, "--member", "example-1",
+                "--expected-runtime", expected_runtime, "inspect", target]
+
+    for args, error in [
+        (command("wrong", runtime, instance), "unique configured runtime-driver fleet"),
+        (command("example", runtime + "0", instance), "Runtime registration changed"),
+        (command("example", runtime, instance[:-1]), "requires an exact member name and instance ID"),
+    ]:
+        assert cli.main(args) == 1
+        assert error in capsys.readouterr().err
+
+    monkeypatch.setattr(runtime_drivers, "_docker_id_for_name", lambda name: "d" * 64)
+    assert cli.main(command("example", runtime, instance)) == 1
+    assert "distinct Docker container" in capsys.readouterr().err
+
+    config.fleets["overlap"] = driver_fleet(name_prefix="example")
+    monkeypatch.setattr(config_module, "load_config", lambda *, strict=False: config)
+    assert cli.main(command("example", runtime, instance)) == 1
+    assert "unique configured runtime-driver fleet" in capsys.readouterr().err
+    assert len(fake.state()["calls"]) == before
 
 
 @pytest.mark.parametrize("denied", [False, True])
@@ -1661,6 +1751,9 @@ def test_fresh_scoped_lookup_refuses_a_docker_name_collision(
     runtime_drivers.clear_bindings()  # a fresh exec / Session Host process
     with pytest.raises(RuntimeError, match="distinct Docker container"):
         resolver.resolve_live_exec_target("example-1", config=load_config(strict=True))
+    runtime_drivers.clear_bindings()
+    with pytest.raises(RuntimeError, match="distinct Docker container"):
+        asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
     runtime_drivers.clear_bindings()
     assert cli.main(["session-host-prepare", "example-1"]) == 1
     assert "distinct Docker container" in capsys.readouterr().err
