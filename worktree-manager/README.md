@@ -65,6 +65,11 @@ reporting, but do not impose an execution timeout: CPU contention alone is not
 evidence of an unusable installation. Cancellation and owned-child cleanup
 remain active. Installer readiness and background service deadlines are unchanged.
 
+An in-place remote launch exits the Picker before connecting over SSH. On POSIX,
+the Manager replaces its process with the interactive SSH client rather than
+retaining a Python parent for the session's lifetime. Windows retains its
+foreground child/wait behavior. Target-side launch admission remains unchanged.
+
 ## Prepared application installation
 
 To see why a target does or does not need Fleet Manager, run this with
