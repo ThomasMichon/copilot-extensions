@@ -61,3 +61,31 @@ must neither start Python nor prepare an interpreter. Repeated current-path
 samples are recorded without increasing the existing fifteen-second outer cap.
 This is manifest-reader qualification, not an end-to-end installation-policy
 or first-use provisioning pass. The PowerShell-native reader is unchanged.
+
+## Early cell-lifecycle installer ingress
+
+`test_cell_lifecycle_bootstrap.py`, exposed by
+`test_machines_cell_bootstrap_source.py`, exercises all five early lifecycle
+actions through the real `init.sh`/`init.ps1` entrypoints with an inert helper.
+Raw and materialized inputs retain the canonical Installer Engine request and
+capture closure. Prepared CPython 3.11.18 is selected through real UV despite
+poisoned ambient Python and foreign selectors; repeated calls preserve helper
+arguments, stdin, both output streams, exit status, working directory and bytes.
+Missing UV, provider, request, capture support or prepared interpreter must
+refuse before helper entry without acquisition or ambient fallback.
+
+The existing native jobs require all twenty applicable controls and ten
+repeated work reports per supported installer shell, without skips. `init.sh`
+is qualified on Linux/macOS, and `init.ps1` on both Windows PowerShell hosts;
+this is not a new Windows Git Bash installer contract. These fixtures perform
+no actual repair, uninstall, attribution, deactivation or retirement and do
+not qualify cold setup, installed adoption or the lifecycle engine's separate
+authorization/deletion protocol.
+The same Windows jobs also require all five retained construction, real staged
+stamp and lifecycle-refusal controls through `test_machines_cell_output_source.py`.
+The lifecycle fixture invokes the complete installer with real parameter binding,
+materialized bootstrap support and prepared UV rather than a Python-only
+command-lookup shim or an extracted preamble with missing defaults.
+The original lifecycle error, bytes and no-state-mutation assertions remain
+unchanged. The isolated construction fixture supplies the installer's empty
+wheel-option defaults before its extracted function definitions.

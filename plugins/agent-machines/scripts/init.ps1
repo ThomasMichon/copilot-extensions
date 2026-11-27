@@ -111,11 +111,11 @@ if ($Action -in @('cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cel
             $lifecycleArgs += @("--$($names[$key])", [string]$value)
         }
     }
-    $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $python) { throw 'Cell lifecycle management requires an existing Python 3.10+ interpreter' }
+    . (Join-Path $PSScriptRoot 'cell-lifecycle-bootstrap.ps1')
+    $python = Get-CellLifecyclePython
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    & $python.Source -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
+    & $python -I -B (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
     exit $LASTEXITCODE
 }
 
