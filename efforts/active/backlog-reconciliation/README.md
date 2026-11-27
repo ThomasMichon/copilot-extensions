@@ -523,12 +523,14 @@ the non-public approval conversation.
 ## Plan
 
 The [obsolete same-generation test report](journal/2026/11.27-obsolete-same-generation-test-report.md)
-proposes conditional `NOT_PLANNED` retirement of #6538 after reviewed intent,
+records #6538's `NOT_PLANNED` retirement after reviewed intent #14887,
 current qualification and independently audited acknowledgment/reason/original
 preservation. Qualified source history deliberately replaced its recovery
-assertion; current source correspondence does not diagnose the historical
-timeout or establish installed acceptance. No issue effect or new census is
-claimed, and all five Plan and eleven global Validation items remain OPEN.
+assertion; this is not a historical timeout fix or installed acceptance.
+Two complete equal-identity scans at 09:54:40 America/Los_Angeles measure
+582 whole OPEN: 274 original-cohort and 308 inflow. Exactly #6538 departs
+with no arrivals or unrelated departures. All five Plan and eleven global
+Validation items remain OPEN.
 
 The [five incomplete-attempt status records](journal/2026/11.27-five-incomplete-attempt-status-records.md)
 were delivered completely into OPEN #4783 after reviewed intent #14881.
@@ -6110,9 +6112,11 @@ parent/global gates or declare the Active effort complete.
 
 The [obsolete-report delivery gates](journal/2026/11.27-obsolete-same-generation-test-report.md#delivery-gates)
 separate qualified report evidence and deliberate source-contract replacement
-from reviewed intent, current pre-effect qualification, acknowledged proper-reason
-retirement and actual outcome recording. #6538 remains OPEN at proposal time;
-no technical completion, native operation or source/custody release follows.
+from reviewed intent, current pre-effect qualification and acknowledged
+proper-reason retirement. Independent provider and whole-original readbacks
+verify #6538 `NOT_PLANNED` with its exact disclosed acknowledgment; the actual
+outcome recording still requires normal review. No technical completion,
+native operation or source/custody release follows.
 
 The [four-publication-case delivery gates](journal/2026/11.25-publisher-guards-and-explicit-keepers.md#delivery-gates)
 are settled: reviewed publication, whole accepted receiving and independently
