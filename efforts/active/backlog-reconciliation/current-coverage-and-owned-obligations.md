@@ -425,6 +425,25 @@ categories, historical columns and observations are unchanged.
 No new census, issue effect, source/copy clearance, product execution,
 installed completion or custody transfer follows.
 
+## Native reports and conditional input acceptance
+
+The [four-case study](journal/2026/11.27-native-reports-and-conditional-inputs.md)
+qualifies actual native report publishers before reading #6330/#5939.
+The exact payload-stdin test remains and the current source module is still
+1,963 lines; neither a historical green run nor an old metric proves
+fulfillment or obsolescence. #4122 retains its safe generated-input choice
+through the moved identity-policy component, and #688 preserves all
+credit/precondition/F3-E and remote-Windows provider clauses.
+The #5352 guidance lead remains current-retained without a node change or
+another coverage-refresh credit.
+
+Only four outcome/gap pairs change: one pending and two prior-retained
+become current-retained, and one existing current gap is refined.
+The same retained 582 identities have 402 pending, 130 current-retained
+and 33 prior-retained; other categories, historical fields and observations
+are unchanged. No census, issue effect, product execution or custody transfer
+is claimed.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

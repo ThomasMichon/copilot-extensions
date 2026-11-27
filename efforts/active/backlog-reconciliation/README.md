@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [native-report and conditional-input study](journal/2026/11.27-native-reports-and-conditional-inputs.md)
+retains four whole current requests and nine discussions. Actual native
+publishers qualify two automation reports before reading; the current test source and
+still-large module remain distinct from fulfilled or obsolete targets.
+The moved input-policy path preserves #4122's safe-exclusion-or-disposition
+choice, and #688's complete provider/credit/F3-E contract remains.
+Only four outcome/gap pairs change; the unchanged #5352 lead adds no coverage
+delta. The retained 582 identities have 402 pending and 130 current-retained.
+No issue disposition, new census, product execution or parent completion follows.
+
 The [current-delivery and fleet-naming comparison](journal/2026/11.27-current-delivery-and-fleet-naming.md)
 reads whole #2173/#78 and all five discussions. #2173 retains all 74
 unchecked delivery and finite-provider clauses despite historical aggregator
@@ -530,6 +540,7 @@ stem to the materializer, preserving the precise ID-first naming gap.
 Only those two outcome/gap pairs change; the retained 582-identity observation
 now has 403 pending and 127 current-retained. No issue disposition, new census,
 product execution or parent-gate completion is claimed.
+The reviewed recording merged in #14894.
 
 The [legacy-target and retained-acceptance crosswalk](journal/2026/11.27-legacy-targets-and-retained-acceptance.md)
 records 37 whole current originals and 267 discussions, distinguishing
