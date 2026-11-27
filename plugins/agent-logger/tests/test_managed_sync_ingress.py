@@ -346,8 +346,12 @@ def test_sync_support_materializes_and_retires_finitely(
         candidate, canonical_root=ROOT, copied_consumer=(SCRIPTS.parent, candidate), file_names=names,
     )
     assert log and not any(line.startswith("SKIP") for line in log), log
+    canonical = {
+        "bootstrap-uv.sh": ROOT / "libs/installer-engine/bootstrap-uv.sh",
+        "native_owned.sh": ROOT / "libs/agent-procutil/src/agent_procutil/native_owned.sh",
+    }
     for name in names:
-        assert (candidate / "scripts" / name).read_bytes() == (SCRIPTS / name).read_bytes()
+        assert (candidate / "scripts" / name).read_bytes() == canonical[name].read_bytes()
     monkeypatch.syspath_prepend(str(ROOT / "libs/installer-engine"))
     uninstall = importlib.import_module("installer_engine_uninstall")
     profile = uninstall.profile_for(SCRIPTS.parent, "agent-logger")

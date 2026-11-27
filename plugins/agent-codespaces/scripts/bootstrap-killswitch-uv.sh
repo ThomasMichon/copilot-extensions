@@ -100,6 +100,9 @@ resolve_uv_bootstrap_python() (
     local python
     python="$(invoke_uv_bootstrap_environment "$uv_path" python find --no-project --system --managed-python \
         --no-python-downloads "$requirement")" || return
+    case "${OSTYPE:-}" in
+        msys*|cygwin*) python="$(_uv_runtime_posix_address "$python")" || return 1 ;;
+    esac
     [[ "$python" == /* && "$python" != *$'\n'* && "$python" != *$'\r'* && -x "$python" ]] || {
         printf 'uv did not select one existing absolute bootstrap Python executable.\n' >&2
         return 1
