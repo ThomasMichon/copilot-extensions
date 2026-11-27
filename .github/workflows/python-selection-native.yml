@@ -130,6 +130,17 @@ on:
       - plugins/agent-containers/scripts/runtime-gate.sh
       - plugins/agent-containers/scripts/runtime-gate.ps1
       - plugins/agent-containers/scripts/bootstrap-python.ps1
+      - plugins/agent-containers/scripts/init.sh
+      - plugins/agent-containers/scripts/init.ps1
+      - plugins/agent-containers/scripts/installer-bootstrap.sh
+      - plugins/agent-containers/scripts/installer-bootstrap.ps1
+      - plugins/agent-containers/scripts/runtime-construction.sh
+      - plugins/agent-containers/scripts/runtime-construction.ps1
+      - plugins/agent-containers/scripts/runtime_profile.py
+      - plugins/agent-containers/tests/test_installer_bootstrap.py
+      - plugins/agent-containers/tests/test_installer_index.py
+      - plugins/agent-containers/tests/test_installer_bootstrap_python.py
+      - plugins/agent-containers/tests/test_runtime_profile.py
       - plugins/agent-containers/tests/managed_command_fixture.py
       - plugins/agent-containers/tests/test_managed_command_gate.py
       - plugins/agent-containers/scripts/legacy-uninstall.sh
@@ -949,6 +960,34 @@ jobs:
           assert all(r['bound_uv_on_path'] is False and r['service_started'] is False
           and r['seconds']>0 for r in reports)"
 
+      - &containers-installer
+        name: Qualify Containers native setup seed, source readers and construction
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python tools/run-plugin-tests.py agent-containers
+          --test-file tests/test_installer_bootstrap.py --allow-explicit-tiers
+          -k "${{ runner.os == 'Windows' && 'powershell or pwsh' || 'bash' }}"
+          --junit-dir qualification-evidence/containers-installer
+      - &containers-installer-proof
+        name: Require all installer controls and repeated seed reports
+        if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/containers-installer').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          shells={'pwsh','powershell'} if os.name=='nt' else {'bash'};
+          expected=(19 if os.name=='nt' else 18)*len(shells);
+          assert len(cases)==expected and len({c.attrib['name'] for c in cases})==expected;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='containers_installer_seed'];
+          assert len(reports)==4*len(shells) and {r['shell'] for r in reports}==shells;
+          assert {r['operation'] for r in reports}=={'Prepare','Inspect'};
+          assert {r['materialized'] for r in reports}=={False,True};
+          assert all(r['network']=='disabled' and len(r['samples_seconds'])==2
+          and r['uv_calls']==(8 if r['shell']=='bash' and r['operation']=='Prepare' else 6)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'containers_installer_seed':reports},sort_keys=True))"
       - &containers-removal-bootstrap
         name: Qualify prepared-only Containers removal without ambient Python
         if: github.job == 'index-engine-uv-windows' || (runner.os != 'Windows' && startsWith(github.job, 'containers-ready-admission-'))
@@ -1678,6 +1717,22 @@ jobs:
       - *command-native-python
       - *command-native-uv
       - *command-native-interpreters
+      - *containers-installer
+      - *containers-installer-proof
+      - name: Qualify Containers feed selection in the actual payload context
+        if: runner.os != 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-containers
+          --test-file tests/test_installer_index.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/containers-installer-index
+      - name: Require all twelve caller, payload, site and explicit-file feed controls
+        if: runner.os != 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/containers-installer-index').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==12 and len({c.attrib['name'] for c in cases})==12;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Containers command admission
         run: >-
           python tools/run-plugin-tests.py payload-invocation

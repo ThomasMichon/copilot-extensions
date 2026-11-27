@@ -93,6 +93,31 @@ origin as a separate bounded item, sharing only its fixture-owned installed
 slot and restoring every moved resource. This preserves every refusal control
 without accumulating nine child probes in one item deadline.
 
+## Standalone installer Python
+
+Explicit `scripts/init.sh` install/init/provision and the matching PowerShell
+actions establish UV 0.8.0+ and the canonical exact installer helper before
+reading source identity. Missing UV uses Astral's user-local prerequisite setup
+and durable command exposure; it does not require Manager, winget, ambient
+Python or pip, or a private runtime-local UV download. Source checkouts reference
+the canonical providers; released payloads carry their own materialized closure.
+Source stamping only inspects prepared prerequisites and never acquires them.
+Ordinary non-Source stamping retains its existing native path.
+
+The helper request is independent of the application's Python 3.11 request.
+The existing profile constructor builds through managed UV on POSIX and the
+canonical managed signed-venv helper on Windows. It never falls back to ambient
+Python/`py` or an unrestricted stdlib venv. Closed-wheel installation retains
+its admitted Python/UV inputs. Profile intent, source target, immutable-slot
+reuse, construction/retention leases, health and activation remain unchanged.
+The POSIX governed-feed bridge reads pip configuration through its canonical
+helper without executing an ambient pip command.
+
+The isolated [installer controls](tests/test_installer_bootstrap.py) exercise
+raw and materialized prepared-only refusal, inert cold prerequisite acquisition,
+source-reader ordering and real managed application construction. They do not
+perform a production installation or qualify host fleet readiness.
+
 ## Legacy runtime removal
 
 Use `scripts/init.ps1 -Action uninstall -InstallDir <root>` or
@@ -116,8 +141,8 @@ through the existing native Job capture, with cleanup reserved inside it.
 The helper refuses a reader without that callback contract rather than
 downgrading to unbounded capture.
 Missing prerequisites refuse before finite helper entry. Prepare prerequisites
-through explicit installation management; this does not migrate the separate
-cold setup or native-stamp readers.
+through explicit installation management. These removal controls do not
+establish installed-host or native-stamp acceptance.
 
 The adapter passes its trusted `scripts/uninstall-profile.json` to canonical
 `installer_engine_uninstall.py`; it does not own a second custody or cleanup

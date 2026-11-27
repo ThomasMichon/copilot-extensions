@@ -36,6 +36,46 @@ filesystem metadata. Six POSIX controls retain successful admission and
 replaced-file/symlink refusal; native-flock behavior, persistent inode,
 legacy-receipt refusal and close-only lock lifetime are unchanged.
 
+## Native explicit setup
+
+`test_installer_bootstrap.py` runs eighteen cases per native shell across raw
+and materialized layouts. Repeated Inspect/Prepare samples record actual UV
+work and timing, with poisoned ambient Python and foreign selectors. Missing UV,
+the exact helper request or its prepared interpreter refuses without acquisition.
+The cold-UV control substitutes a fixture-owned inert downloader, not an actual
+network or user installation. Source-reader controls enter the real installer
+and stop after isolated identity selection; independent application construction
+creates and probes a real managed Python 3.11 environment without dependencies.
+
+The path-gated POSIX command jobs require all eighteen cases and four repeated
+reports without skips. The existing Windows Index/native-engine carrier runs
+both PowerShell hosts (38 cases, eight reports), leaving the near-full Containers
+Core job unchanged. Existing eight-minute budgets are preserved. These are native
+source boundaries, not complete installation latency, installed fleet readiness
+or production setup. `test_runtime_profile.py` separately retains profile intent,
+immutable reuse, failed-candidate cleanup, source mutation and source stamping.
+
+The prepared helper's native owners have different warm behavior: Bash Prepare
+reaches `uv python install`, while PowerShell reuses an existing exact interpreter
+without installation. The setup controls preserve those owner-specific work
+counts rather than requiring a redundant Windows acquisition.
+
+Twelve POSIX `test_installer_index.py` controls compare caller and payload UV
+defaults through the actual canonical pip reader, retaining both relative and
+absolute caller site prefixes and explicit pip configuration files. Relative
+`PIP_CONFIG_FILE` paths remain caller-relative even when a different file exists
+in the payload. The reader runs in the same payload context as
+dependency installation, so an unrelated caller's default cannot suppress the
+governed pip bridge or replace a payload's own default.
+
+The raw constructor fixture retains its existing local `installer-engine.ps1`;
+bootstrap support still belongs to the canonical helper/request owner rather
+than that file's presence. The additional per-PowerShell-host control executes
+the constructor's actual environment block. Null selection overrides must remove
+keys, not retain empty strings: newer Core/.NET retains those empty values and
+UV rejects an empty boolean selector. The native Windows packet also builds
+the real managed environment under both PowerShell hosts.
+
 ## Prepared-only finite removal
 
 `test_uninstall_bootstrap.py` invokes the real isolated legacy helpers with
