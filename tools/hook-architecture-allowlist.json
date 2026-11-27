@@ -84,10 +84,6 @@
       "status": "pending-conversion",
       "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
     },
-    "plugins/agent-machines/scripts/bootstrap-check.sh": {
-      "status": "pending-conversion",
-      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
-    },
     "plugins/agent-machines/scripts/write-session-guidance.ps1": {
       "status": "pending-conversion",
       "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."

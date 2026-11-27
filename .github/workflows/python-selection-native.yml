@@ -55,6 +55,12 @@ on:
       - libs/payload-invocation/tests/test_machines_ready_source.py
       - libs/payload-invocation/tests/test_machines_provisioning_source.py
       - libs/payload-invocation/tests/test_machines_health_source.py
+      - libs/payload-invocation/tests/test_machines_manifest_source.py
+      - libs/installation-context/json-query.awk
+      - libs/installation-context/tests/test_json_query_bytes.py
+      - plugins/agent-machines/scripts/bootstrap-check.sh
+      - plugins/agent-machines/scripts/installation-context/json-query.awk
+      - plugins/agent-machines/tests/test_bootstrap_manifest_native.py
       - plugins/agent-machines/scripts/invoke-payload-runtime.sh
       - plugins/agent-machines/scripts/invoke-payload-runtime.ps1
       - plugins/agent-machines/tests/managed_command_fixture.py
@@ -1927,6 +1933,47 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 8
     steps: *dispatch-focus-steps
+
+  machines-native-manifest-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps: &machines-manifest-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - name: Qualify native Machines manifest reads without Python or UV launches
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_machines_manifest_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/machines-manifest
+      - name: Require actual manifest controls and repeated current-path samples without skips
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/machines-manifest').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==66 and len({c.attrib['name'] for c in cases})==66;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          samples=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='native_manifest_seconds'];
+          assert len(samples)==4 and all(len(s)==2 and all(v>0 for v in s) for s in samples);
+          print(json.dumps({'native_manifest_seconds':samples},sort_keys=True))"
+      - name: Retain native JSON byte, Unicode and malformed-surrogate controls
+        run: >-
+          python tools/run-plugin-tests.py installation-context
+          --test-file tests/test_json_query_bytes.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/native-json
+      - name: Require every canonical native JSON control without skips
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/native-json').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==161 and len({c.attrib['name'] for c in cases})==161;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
+  machines-native-manifest-macos:
+    runs-on: macos-latest
+    timeout-minutes: 8
+    steps: *machines-manifest-steps
 
   worktrees-ready-admission-linux:
     runs-on: ubuntu-latest
