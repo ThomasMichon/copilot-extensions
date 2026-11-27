@@ -1,4 +1,4 @@
-# Containers command-admission controls
+# Containers native admission and removal controls
 
 The [suite testing guide](../../../TESTING.md) owns runner and isolation
 mechanics. `test_managed_command_gate.py` runs actual Bash and PowerShell gates
@@ -35,3 +35,45 @@ transaction check on both Containers and Machines. It compares native
 filesystem metadata. Six POSIX controls retain successful admission and
 replaced-file/symlink refusal; native-flock behavior, persistent inode,
 legacy-receipt refusal and close-only lock lifetime are unchanged.
+
+## Prepared-only finite removal
+
+`test_uninstall_bootstrap.py` invokes the real isolated legacy helpers with
+prepared managed 3.11.18, private UV, poisoned PATH Python and inherited selector
+hints. A repeated removal/idempotent pair retains durable/unknown bytes and
+requires four actual UV calls with two acquisition-free managed lookups.
+Missing UV refuses before helper/transaction entry; unavailable process
+observation refuses without changing original runtime bytes. The POSIX utility
+PATH retains `ps` for the existing guardian's real process-group settlement,
+but omits flock so the same admitted interpreter exercises the fd-lock path.
+
+The retained suite keeps real cleanup, all six kernel-custody variants and
+actual responsive/stale broker and SSH-closure refusals. Its shared fixture
+materializes the actual selected consumer, not Machines' different closure.
+POSIX filesystem controls use a closed inert module and fixture-owned
+observation, with an explicit unavailable-census negative control. They do
+not qualify the production global process census; Windows retains its actual
+current-user census. No production observer, lease or cleanup policy changes.
+
+The path-gated native workflow requires 19 focused cases on each POSIX host
+and 37 on Windows without skips: prepared-only/refusal, retained cleanup/kernel/
+transport and activated-runtime metadata selection. Both Windows PowerShell
+hosts run in the existing Index/native-engine carrier, whose spare budget
+avoids extending the nearly full Containers Core job. This is a carrier, not
+an Index implementation change or a full Windows Bash installer contract.
+No runner or eight-minute job limit is added or enlarged.
+
+Windows additionally requires stalled version/find selection to retire both
+the actual selector root and its child before the calling PowerShell host
+exits, under both shell engines. Those fixture deadlines are reduced from
+thirty to eight seconds, never enlarged. A real selected venv inside the root
+must refuse before the finite helper runs even though its actual base is
+external; fixture-only observation records the real probe's original prefixes.
+An older reader without the callback contract refuses before invocation.
+
+Reproduce the repeated work report with
+`tools/run-tests payload-invocation --test-file tests/test_containers_uninstall_bootstrap_source.py --allow-explicit-tiers --junit-dir <owned-output>`.
+`containers_uninstall_bootstrap` records both elapsed samples, actual UV work,
+offline operation and the process-observation scope. Those fixture timings are
+not complete installation teardown or native tail measurements. No Docker,
+Podman, production installation or service operation is part of these controls.

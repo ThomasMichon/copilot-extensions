@@ -699,13 +699,32 @@ assets or permit an incomplete packaged payload to borrow source support.
 It only inspects an already prepared UV-managed interpreter; inspection,
 readiness and removal never acquire Python or fall back to PATH Python,
 `py`, execution aliases or system installation directories. Selection overrides
-remain child-scoped and the existing native capture owner is unchanged.
+remain child-scoped. The optional `InvokeCaptured` callback uses the existing
+UV capture contract (`FilePath`, `ArgList`, child `Environment`, and one
+`ExitCode`/`Stdout`/`Stderr` result). It supplies both selection and the
+interpreter probe, so callers can retain one finite clock and their existing
+contained cleanup owner across the whole read. Omitting it retains the existing
+native capture path; the reader introduces no process supervisor.
 UV output is captured as UTF-8 even under a legacy Windows console code page,
 so a Unicode managed-storage path is not decoded using the console default.
-Removal additionally requires the resolved physical base outside both the
-requested root and its resolved target. Missing prerequisites refuse admission
+Removal and broker removal validate UV's original lexical/resolved selection,
+`sys.executable`, `sys.prefix`, `sys.base_prefix` and the base executable
+outside both the requested root and its resolved target before returning the
+physical base. Those removal probes retain normal prefix discovery rather than
+suppressing it with `-S`; inspection keeps its existing isolated probe flags.
+A venv inside the removal root cannot hide behind an external base.
+Missing prerequisites refuse admission
 before the installer driver runs. Explicit wheel/bootstrap inputs retain their
 existing separate admission paths.
+
+Containers' legacy removal supplies its existing native Job capture with a
+thirty-second whole-selection/probe deadline and cleanup reserved inside it.
+Its composed payload uses the capture assets already declared by Invocation;
+raw source uses the selected canonical bootstrap directory. Before depending
+on the callback contract it checks the actual co-located reader's parameter
+metadata and refuses unsupported older readers without an unbounded downgrade.
+Existing callers need no new argument; co-publish the updated reader before
+migrating a caller, and roll back its helper/reader pair together.
 
 The focused `runtime-source` selection
 `--test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers`
