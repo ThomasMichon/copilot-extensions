@@ -232,7 +232,10 @@ explicit installer is the first production caller. It caches the selection
 for that installer process before entering the existing construction owner.
 The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
-isolation; it still installs before its lookup. Both providers are declared assets of that consumer; raw development
+isolation; it still installs before its lookup. Under MSYS/Cygwin, it normalizes
+UV's native Windows result through the existing path adapter before checking
+that the selected executable is absolute and available.
+Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
 Isolated selection suppresses UV configuration discovery and clears an explicit
 `UV_CONFIG_FILE` in the child, so relative or malformed project configuration

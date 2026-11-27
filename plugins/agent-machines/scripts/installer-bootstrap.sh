@@ -65,9 +65,6 @@ _machines_select_bootstrap() (
     fi
     export PATH="${uv%/*}:$PATH"
     python="$(resolve_uv_bootstrap_python "$support/installer-instance-python-version.txt" "$operation")" || return
-    case "${OSTYPE:-}" in
-        msys*|cygwin*) python="$(_uv_runtime_posix_address "$python")" || return ;;
-    esac
     invoke_uv_bootstrap_environment "$python" -I -S -B -c \
         'import sys; sys.exit(sys.version_info < (3, 10))' </dev/null || return
     printf '%s\n%s\n' "$uv" "$python"
