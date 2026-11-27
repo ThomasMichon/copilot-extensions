@@ -14,6 +14,7 @@ import json
 import os
 import platform
 import re
+import signal
 import subprocess as subprocess
 import sys
 import threading
@@ -633,7 +634,21 @@ def _run_direct_launch_fallback(
             if not isinstance(ssh_alias, str) or not isinstance(remote_cmd, str):
                 output.err("Remote launch plan is missing ssh handoff details.")
                 return 1
-            proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])  # headless-guard: allow interactive SSH in caller's console
+            argv = ["ssh", "-t", ssh_alias, remote_cmd]
+            if os.name != "nt":
+                if on_handoff is not None:
+                    on_handoff()
+                previous = {}
+                try:
+                    for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+                        signum = getattr(signal, name, None)
+                        if signum is not None:
+                            previous[signum] = signal.signal(signum, signal.SIG_DFL)
+                    os.execvp(argv[0], argv)
+                finally:
+                    for signum, handler in previous.items():
+                        signal.signal(signum, handler)
+            proc = subprocess.Popen(argv)  # headless-guard: allow interactive SSH in caller's console
             return _wait_for_launch_child(proc, on_handoff=on_handoff)
         if action != "exec":
             output.err(f"Unknown launch action: {action}")

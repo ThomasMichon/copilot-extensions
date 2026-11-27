@@ -6,14 +6,20 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 from typing import Any, NoReturn
 
 import pytest
 
-from agent_worktrees import agent_policy, config, launch_execution
+from agent_worktrees import agent_policy, launch_execution
 from agent_worktrees import normalized_backend as backend
 from agent_remote_driver.headed import caller
+
+
+@pytest.fixture(autouse=True)
+def isolated_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
 
 
 @pytest.mark.parametrize("identity", [[], ["--resume=existing"], ["--session-id", "selected"]])
@@ -21,7 +27,6 @@ def test_recordless_handoff_preserves_argv_and_rechecks_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, identity: list[str],
 ) -> None:
     observed: list[str] = []
-    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(agent_policy, "require", lambda cwd: observed.append(cwd))
     monkeypatch.setenv(launch_execution.NATIVE_HINT_ENV, "stale-record-correlation")
     command = ["copilot", "--model", "--resume=not-an-identity", *identity, "-i", "quoted '\nseed"]
@@ -34,7 +39,7 @@ def test_recordless_handoff_preserves_argv_and_rechecks_policy(
         assert argv == [*expected, f"-C={kwargs['cwd']}"]
         assert kwargs["environment"].get(launch_execution.NATIVE_HINT_ENV) is None
         attempt = kwargs["attempt_directory"]
-        assert attempt.parent == tmp_path / "launch-attempts"
+        assert attempt.parent == tmp_path
         assert kwargs["state_file"] == attempt / "headed.json"
         assert (attempt / "runtime").is_dir()
         kwargs["admit"]()
@@ -47,15 +52,62 @@ def test_recordless_handoff_preserves_argv_and_rechecks_policy(
     assert not list(tmp_path.rglob("*.yaml"))
 
 
-def test_recordless_refuses_an_existing_non_directory_storage_parent(
+def test_recordless_refuses_unusable_execution_staging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / "launch-attempts").write_text("not a directory", encoding="utf-8")
-    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+    staging = tmp_path / "not-a-directory"
+    staging.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(staging))
     monkeypatch.setattr(agent_policy, "require", lambda _: None)
     monkeypatch.setattr(caller, "execute", lambda *_a, **_kw: pytest.fail("unsafe storage execution"))
-    with pytest.raises(ValueError, match="storage is not private"):
+    with pytest.raises(ValueError, match="Could not prepare recordless execution staging"):
         backend.launch(["copilot"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes")
+@pytest.mark.parametrize("mode", [0o775, 0o777])
+def test_resume_does_not_require_private_launch_storage_or_ancestors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int,
+) -> None:
+    shared = tmp_path / "shared"
+    root = shared / "installation"
+    parent = root / "launch-attempts"
+    parent.mkdir(parents=True)
+    for path in (shared, root, parent):
+        path.chmod(mode)
+    before = {path: path.stat().st_mode for path in (shared, root, parent)}
+    from agent_worktrees import config
+    monkeypatch.setattr(config, "install_dir", lambda: root)
+    monkeypatch.setattr(agent_policy, "require", lambda _: None)
+
+    def execute(argv: list[str], **kwargs: Any) -> tuple[int, bool]:
+        assert "--resume=existing" in argv
+        attempt = kwargs["attempt_directory"]
+        assert not attempt.is_relative_to(shared)
+        assert (attempt / "runtime").is_dir()
+        assert attempt.stat().st_mode & 0o077 == 0
+        assert (attempt / "runtime").stat().st_mode & 0o077 == 0
+        return 0, True
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert backend.launch(["copilot", "--resume=existing"]) == 0
+    assert {path: path.stat().st_mode for path in before} == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX sticky directory semantics")
+def test_executable_staging_rejects_a_replaceable_temporary_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staging = tmp_path / "shared-temporary"
+    staging.mkdir()
+    staging.chmod(0o777)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(staging))
+    with pytest.raises(ValueError, match="Could not prepare recordless execution staging"):
+        backend._attempt_directory()
+    assert not list(staging.iterdir())
+    staging.chmod(0o1777)
+    attempt = backend._attempt_directory()
+    assert attempt.parent == staging and (attempt / "runtime").is_dir()
 
 
 @pytest.mark.parametrize("arguments", [
@@ -119,7 +171,9 @@ def test_repository_refusal_precedes_any_recordless_core_preparation(
     def refuse(_cwd: str) -> NoReturn:
         raise ValueError("repository hosting disabled")
     monkeypatch.setattr(agent_policy, "require", refuse)
-    monkeypatch.setattr(config, "install_dir", lambda: pytest.fail("storage before admission"))
+    monkeypatch.setattr(
+        tempfile, "gettempdir", lambda: pytest.fail("storage before admission"),
+    )
     monkeypatch.setattr(caller, "execute", lambda *_a, **_kw: pytest.fail("launch before admission"))
     with pytest.raises(ValueError, match="hosting disabled"):
         backend.launch(["copilot"])
@@ -146,7 +200,6 @@ def test_matching_directory_and_selector_shaped_values_keep_original_argv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
     observed: list[str] = []
     monkeypatch.setattr(agent_policy, "require", observed.append)
     command = ["copilot", "-C", ".", "--model", "-C=not-a-directory", "--resume=selected"]
@@ -169,7 +222,6 @@ def test_selected_failure_never_replays_the_direct_backend(
     capsys: pytest.CaptureFixture[str],
     outcome: str,
 ) -> None:
-    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(agent_policy, "require", lambda _: None)
     monkeypatch.setattr(
         subprocess, "Popen", lambda *_a, **_kw: pytest.fail("direct fallback after selection"),

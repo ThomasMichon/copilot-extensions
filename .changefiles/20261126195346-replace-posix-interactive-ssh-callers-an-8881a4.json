@@ -1,0 +1,13 @@
+{
+  "comment": "Replace POSIX interactive SSH callers and remove cache-permission gating from recordless resume",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

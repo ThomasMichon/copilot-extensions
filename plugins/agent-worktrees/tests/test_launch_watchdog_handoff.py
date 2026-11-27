@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,6 +90,11 @@ def test_direct_handoff_disarms_before_child_wait(
 
     monkeypatch.setattr(manager_launch_cli, "_resolve_direct_launch_plan", resolve)
     monkeypatch.setattr(manager_launch_cli.subprocess, "Popen", spawn)
+    if action == "remote":
+        # Windows retains the child/wait path; POSIX replacement is tested separately.
+        monkeypatch.setattr(
+            manager_launch_cli, "os", SimpleNamespace(**{**vars(os), "name": "nt"}),
+        )
     if blocking:
         with pytest.raises(_BlockedWait):
             main.cmd_launch(["--resume=fixture"])

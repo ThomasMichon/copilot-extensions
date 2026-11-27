@@ -10,7 +10,9 @@ Copilot; :func:`execute` runs a harmless argv.
 from __future__ import annotations
 
 import sys
+import os
 import shutil
+import signal
 import subprocess
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -118,6 +120,66 @@ def test_remote_action_composes_to_ssh_handoff() -> None:
     ]
     assert le.muxed is False
     assert le.session is None
+    assert le.replace_process
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_posix_remote_handoff_replaces_picker_without_a_waiting_parent(
+    monkeypatch: pytest.MonkeyPatch, fails: bool,
+) -> None:
+    plan = _exec_plan(action="remote", raw={
+        "ssh_alias": "example-ssh", "remote_command": "example --worktree-id existing",
+    })
+    composed = launcher.compose_launch(plan)
+    monkeypatch.setattr(launcher, "_windows_host", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: pytest.fail("waiting Python parent"))
+    monkeypatch.setattr(os, "chdir", lambda *_a: pytest.fail("remote handoff changed cwd"))
+
+    def replace(executable: str, argv: list[str], env: dict[str, str]) -> None:
+        assert executable == "ssh" and argv == composed.argv and env == composed.env
+        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+            if (signum := getattr(signal, name, None)) is not None:
+                assert signal.getsignal(signum) == signal.SIG_DFL
+        if fails:
+            raise FileNotFoundError("SSH unavailable")
+        raise SystemExit(17)
+
+    monkeypatch.setattr(os, "execvpe", replace)
+    previous = {
+        signum: signal.signal(signum, signal.SIG_IGN)
+        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ")
+        if (signum := getattr(signal, name, None)) is not None
+    }
+    try:
+        with pytest.raises(FileNotFoundError if fails else SystemExit):
+            launcher.execute(composed)
+        assert all(signal.getsignal(signum) == signal.SIG_IGN for signum in previous)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process replacement")
+@pytest.mark.parametrize("signal_exit", [False, True])
+def test_native_remote_handoff_keeps_the_callers_pid(signal_exit: bool) -> None:
+    shell = shutil.which("sh")
+    if shell is None:
+        pytest.skip("native POSIX shell unavailable")
+    child = "echo $$; kill -s PIPE $$" if signal_exit else "echo $$; exit 17"
+    program = (
+        "import os\n"
+        "from worktree_manager.launcher import LaunchExec, execute\n"
+        "print(os.getpid(), flush=True)\n"
+        f"execute(LaunchExec(kind='exec', argv=[{shell!r}, '-c', {child!r}], "
+        "cwd=None, env=dict(os.environ), muxed=False, exit_code=0, session=None, "
+        "replace_process=True))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == (-getattr(signal, "SIGPIPE") if signal_exit else 17), result.stderr
+    before, after = result.stdout.splitlines()
+    assert before == after
 
 
 @pytest.mark.parametrize("command,allowed", [
@@ -195,6 +257,7 @@ def test_remote_creation_yields_picker_before_foreground_ssh(monkeypatch: pytest
     monkeypatch.setattr(process_priority, "restore_normal_process_priority", lambda: None)
     monkeypatch.setattr(terminal_launch, "validate", lambda: None)
     monkeypatch.setattr(entrypoint, "_resolve_for", resolve)
+    monkeypatch.setattr(launcher, "_windows_host", lambda: True)
     monkeypatch.setattr(subprocess, "run", execute)
     assert entrypoint._run_production_picker("example") == 0
     assert events == ["picker-exited", "packaged", "ssh"]
