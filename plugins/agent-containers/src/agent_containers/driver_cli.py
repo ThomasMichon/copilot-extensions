@@ -26,7 +26,7 @@ def cmd_runtime_proxy(args: argparse.Namespace) -> int:
     from . import lifecycle, runtime_drivers
     from .bound_proxy import bound_proxy_route
     from .config import load_config
-    from .routed_exec import _parse_docker_exec, _run_exec, run_routed
+    from .routed_exec import _parse_docker_exec, _run_exec
 
     argv = list(args.argv[1:] if args.argv[:1] == ["--"] else args.argv)
     inspect = len(argv) == 2 and argv[0] == "inspect"
@@ -67,12 +67,11 @@ def cmd_runtime_proxy(args: argparse.Namespace) -> int:
         return 0
     assert parsed is not None
     payload = sys.stdin.read() if parsed.interactive else None
-    done = (
-        _run_exec(parsed, route, input_text=payload, timeout=600) if route is not None
-        else run_routed(["docker", *argv], input_text=payload, timeout=600)
-    )
-    if done is None:
+    if route is None:
+        route = runtime_drivers.owner_of(parsed.target)
+    if route is None:
         raise RuntimeError("runtime-proxy exec target is not a runtime-driver member")
+    done = _run_exec(parsed, route, input_text=payload, timeout=600)
     sys.stdout.write(done.stdout)
     sys.stderr.write(done.stderr)
     return done.returncode

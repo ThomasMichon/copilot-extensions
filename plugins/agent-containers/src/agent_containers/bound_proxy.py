@@ -7,18 +7,11 @@ from .config import ContainersConfig
 from .external_driver import _ID_RE, _MEMBER_RE
 
 
-def _proxy_fleets(config: ContainersConfig, name: str) -> list[str]:
-    return [
-        key for key, fleet in config.fleets.items()
-        if fleet.driver and routing._owns(key, fleet, name)
-    ]
-
-
 def proxy_binding(
     config: ContainersConfig, name: str, fleet: str, driver: routing.RuntimeDriver,
 ) -> dict[str, int | str] | None:
     """Advertise exact proxy support only for uniquely owned namespaces."""
-    if _proxy_fleets(config, name) != [fleet]:
+    if list(routing._owning_driver_fleets(config, name)) != [fleet]:
         return None
     return {"version": 1, "execution_runtime": routing._driver_identity(driver)}
 
@@ -29,9 +22,10 @@ def bound_proxy_route(
     """Re-establish ownership in a fresh proxy process before any driver effect."""
     if not _MEMBER_RE.fullmatch(name) or not _ID_RE.fullmatch(instance_id):
         raise RuntimeError("Bound runtime proxy requires an exact member name and instance ID")
-    if _proxy_fleets(config, name) != [fleet]:
+    owning = routing._owning_driver_fleets(config, name)
+    if list(owning) != [fleet]:
         raise RuntimeError(f"'{name}' no longer has a unique configured runtime-driver fleet")
-    driver = routing.driver_for_fleet(config, fleet, config.fleets[fleet])
+    driver = routing.driver_for_fleet(config, fleet, owning[fleet])
     if routing._driver_identity(driver) != runtime:
         raise routing.RetiredIncarnation(f"Runtime registration changed for '{name}'; resolve it again")
     docker_id = routing._docker_id_for_name(name)

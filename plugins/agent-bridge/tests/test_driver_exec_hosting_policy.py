@@ -184,6 +184,7 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
         '"""Unrelated fixture package without a CLI."""\n', encoding="utf-8",
     )
     monkeypatch.setenv("PYTHONPATH", str(other_src))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "bridge-python-home"))
     before = len(state["calls"])
     assert (await query_provider_policy(target, operation="launch"))["allowed"]
     state = json.loads(state_path.read_text())
@@ -193,11 +194,6 @@ async def test_bound_hosting_reaches_real_proxy_without_inventory(
                call["request"]["id"] == "000000000001" for call in calls)
     assert not slow.exists()
     assert os.environ["AGENT_CONTAINERS_HOME"] != str(provider_home)
-
-    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "bridge-python-home"))
-    assert (await query_provider_policy(target, operation="launch"))["allowed"]
-    state = json.loads(state_path.read_text())
-    assert [call["verb"] for call in state["calls"][before:]] == ["inspect", "exec"] * 2
 
     target.venue["runtime_proxy"] = {
         **binding, "provider_environment": {**binding["provider_environment"], "PYTHONPATH": "foreign"},

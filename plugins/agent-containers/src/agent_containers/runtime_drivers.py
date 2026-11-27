@@ -614,6 +614,11 @@ def _owns(fleet_name: str, fleet: FleetConfig, member: str) -> bool:
     return member.startswith(prefix) and member[len(prefix):].isdigit()
 
 
+def _owning_driver_fleets(config: ContainersConfig, member: str) -> dict[str, FleetConfig]:
+    return {key: fleet for key, fleet in config.fleets.items()
+            if fleet.driver and _owns(key, fleet, member)}
+
+
 def _driver_fleets(
     config: ContainersConfig, *, fleet: str | None = None, member: str | None = None,
 ) -> dict[str, FleetConfig]:
@@ -621,13 +626,7 @@ def _driver_fleets(
     if fleet is not None:
         return {fleet: fleets[fleet]} if fleet in fleets else {}
     if member:
-        owning = {
-            name: f for name, f in fleets.items()
-            if member.startswith(f.prefix(name) + "-")
-            and member[len(f.prefix(name)) + 1:].isdigit()
-        }
-        if owning:
-            return owning
+        return _owning_driver_fleets(config, member) or fleets
     return fleets
 
 
@@ -818,11 +817,7 @@ def scoped_member(
     the name ambiguous, exactly as the full inventory would.
     """
     reconcile(config)
-    fleets = {
-        fleet_name: fleet for fleet_name, fleet in config.fleets.items()
-        if fleet.driver and name.startswith(fleet.prefix(fleet_name) + "-")
-        and name[len(fleet.prefix(fleet_name)) + 1:].isdigit()
-    }
+    fleets = _owning_driver_fleets(config, name)
     if not fleets:
         return False, None
     failures: dict[str, str] = {}

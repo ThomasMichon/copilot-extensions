@@ -373,8 +373,13 @@ class ExternalDriver(RuntimeDriver):
     def lookup_member(self, name: str, *, timeout: float) -> DockerContainerInfo | None:
         if not _MEMBER_RE.fullmatch(name):
             return None  # not a valid protocol member name
+        return self._read_member(name, None, timeout=timeout)
+
+    def _read_member(
+        self, name: str, instance_id: str | None, *, timeout: float | None = None,
+    ) -> DockerContainerInfo | None:
         try:
-            response = self.call("inspect", self._identity(name, None), timeout=timeout)
+            response = self.call("inspect", self._identity(name, instance_id), timeout=timeout)
         except DriverError as exc:
             if exc.code == "not_found":
                 return None
@@ -385,13 +390,12 @@ class ExternalDriver(RuntimeDriver):
         self, name: str, instance_id: str | None = None,
     ) -> DockerContainerInfo | None:
         try:
-            response = self.call("inspect", self._identity(name, instance_id))
+            info = self._read_member(name, instance_id)
         except DriverError as exc:
-            if exc.code in ("not_found", "conflict"):
+            if exc.code == "conflict":
                 return None
             raise
-        info = self._member_or_error("inspect", response.get("member"), name)
-        if instance_id and info.container_id != instance_id:
+        if info is None or instance_id and info.container_id != instance_id:
             return None
         # A single inspection cannot establish ownership of an unqualified ID.
         bind_member(self, info, include_bare_id=False)
