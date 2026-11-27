@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [daemon/installer/pivot comparison](journal/2026/11.27-daemon-installer-and-pivot-boundaries.md)
+retains three independently qualified current originals and all thirteen
+discussions. #5353 keeps its specific combined-path attribution gap, #5356
+credits actual transactional admission and bounded worker handling without
+claiming the original standalone orphan-UV diagnosis, and #5555 preserves
+complete four-pivot/renderer acceptance and actual Worktrees continuation.
+Old shared-input holds and withdrawn comparisons are not retroactively cleared.
+Only those three outcome/gap pairs change; the retained 581 identities have
+394 pending and 137 current-retained. No issue, native or custody effect follows.
+
 The [adoption and helper-readiness comparison](journal/2026/11.27-adoption-and-helper-readiness.md)
 retains two complete current requests and all ten discussions. #356 preserves
 complete guided adoption and actual custody after the earlier unqualified
@@ -531,6 +541,9 @@ choice against a concrete current POSIX status/deployment mismatch.
 Only those two outcome/gap pairs change; the retained 581-identity observation
 has 397 pending and 134 current-retained. No issue effect, fresh census,
 native operation, source-copy clearance or parent completion follows.
+The six-file recording merged in #14903 with genuine current-head approval,
+all actual required checks and exact source reconciliation; the parent
+remains Active after its recorded return.
 
 The [generated-copy receiving outcome](generated-runtime-copy-receiving.md)
 records reviewed #14899 intent, complete direct intake to OPEN #5939 and
