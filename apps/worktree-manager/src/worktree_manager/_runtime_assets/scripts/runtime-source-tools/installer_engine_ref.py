@@ -72,7 +72,9 @@ STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-worktrees": ("native_capture.sh",),
     "plugins/agent-mcp": ("native_capture.sh",),
     "plugins/agent-containers": ("native_capture.sh",),
-    "plugins/agent-machines": ("runtime_launcher.py", "native_capture.sh"),
+    "plugins/agent-machines": (
+        "runtime_launcher.py", "native_capture.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
     "plugins/budget-guidance": (
         "bootstrap_uv_capture.py",
     ),
