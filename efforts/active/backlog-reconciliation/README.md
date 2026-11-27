@@ -523,12 +523,15 @@ the non-public approval conversation.
 ## Plan
 
 The [five incomplete-attempt status records](journal/2026/11.27-five-incomplete-attempt-status-records.md)
-propose complete direct receiving in OPEN #4783 before the separate #5621
-automation status token may retire `NOT_PLANNED`. The verified producer's
-original and four updates are untrusted reports, not fixes or execution
-authority. All five distinct outcomes, existing receiver clauses, underlying
-test ownership, actual source restrictions and native limits remain.
-No tracker effect or new counting observation has occurred.
+were delivered completely into OPEN #4783 after reviewed intent #14881.
+The separate #5621 automation status token then retired `NOT_PLANNED`,
+with a disclosed acknowledgment and independent proper-reason and whole
+original/update preservation readbacks. All fifteen direct attempt records,
+existing receiver clauses, test ownership and source/native limits remain;
+none is promoted to a successful repair. Two complete equal-identity scans
+at 08:27:06 America/Los_Angeles measure 583 whole OPEN: 275 original-cohort
+and 308 inflow, with exactly #5621 departing and no arrivals or unrelated
+departures. #4783/#5747/#5590/#7556 and all parent gates remain OPEN.
 
 The [entrypoint alternatives and source-authority study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md)
 compares ten admitted whole current requests and all 48 discussions. It
