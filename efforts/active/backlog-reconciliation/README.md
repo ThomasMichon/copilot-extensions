@@ -522,12 +522,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [lifetime and venue-selector study](journal/2026/11.27-lifetime-and-venue-selector-boundaries.md)
+retains whole #2464/#2549/#2551/#2612/#2680 requests and all fourteen
+discussions. Four attributed lifetime prerequisites do not complete the
+accepted parent, and policy, incident, mapping and venue-registration outcomes
+remain distinct. Only five current outcome/gap fields change; the retained
+count remains 584, with no new census, final unit or source disposition.
+
 The [portable-installer and declaration study](journal/2026/11.27-portable-installer-and-declaration-boundaries.md)
 retains whole #2295/#2307/#2312/#2320 requests and all fifteen discussions
 against bounded older source deliveries. Exact incumbent mapping, native
 all-consumer, lossless-path and real-descriptor/update requirements remain;
 no unchanged source trace, experiment or completion-check unit is renewed.
 Only four current outcome/gap fields change; the retained count remains 584.
+The reviewed recording merged in #14865.
 
 The [seeded-launch and counting-identity study](journal/2026/11.27-seeded-launch-and-counting-identity-delta.md)
 retains #14325's owner-held installed acceptance after released source fixes
