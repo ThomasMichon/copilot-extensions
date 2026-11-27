@@ -87,6 +87,14 @@ construction/launcher work.
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 
+The POSIX session-start drift check reads its published version through the
+payload's native JSON reader, without starting Python/UV or preparing an
+interpreter. It preserves document bytes and trailing-linefeed version identity;
+malformed/NUL metadata refuses before the existing installation-driver handoff.
+First stamp, current selection, opt-out/pin/platform and acknowledgement checks
+are unchanged. PowerShell already reads this metadata natively.
+See the [inert bootstrap controls](tests/README.md#native-posix-drift-metadata).
+
 Default native `uninstall` removes only explicitly named runtime code and
 selectors. Operator configuration, databases, adoption/account bindings, locks,
 SSH configuration, sockets, logs and unknown entries remain in the install

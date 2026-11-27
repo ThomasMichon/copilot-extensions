@@ -40,15 +40,19 @@ InstallDir="$HOME/.agent-codespaces"
 Manifest="$InstallDir/deploy-manifest.json"
 installer_action=stamp
 if [[ -f "$Manifest" ]]; then
-  # Drift retains its metadata reader; a first stamp needs no Python.
-  py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
-  if ! deployed="$("$py" -I -c '
-import json, sys
-version = json.load(open(sys.argv[1]))["source"]["version"]
-if not isinstance(version, str) or not version:
-    raise ValueError("deployed runtime version is unavailable")
-print(version)
-' "$Manifest")"; then refuse 'deployed runtime metadata could not be read.'; fi
+  query="$ScriptDir/installation-context/json-query.awk"
+  [[ -f "$query" ]] || refuse 'native deployed runtime metadata reader is unavailable.'
+  deploymentDocument=""
+  # EOF keeps the complete document; a NUL delimiter refuses malformed JSON.
+  if IFS= read -r -d '' deploymentDocument 2>/dev/null < "$Manifest"; then
+    refuse 'deployed runtime metadata contains NUL.'
+  fi
+  if ! deployed="$(LC_ALL=C awk -f "$query" -v mode=string \
+      -v query_path=$'source\034version' <<<"$deploymentDocument" && printf .)"; then
+    refuse 'deployed runtime metadata could not be read.'
+  fi
+  deployed="${deployed%.}"
+  [[ -n "$deployed" ]] || refuse 'deployed runtime metadata could not be read.'
   if ! current="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$PluginDir/pyproject.toml" |
       sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"; then
     refuse 'owning payload version is unavailable.'
