@@ -2802,10 +2802,12 @@ analyzing an incomplete page. Neither verdict is ever auto-repaired -- see
 Every run also adds an advisory `deploy_lag` block comparing four versions:
 the running coordinator (`/health`), this host's selected runtime (the
 `current-version` marker), this host's installed plugin payload
-(`plugin.json`) and, when a release-channel reader is available, the
+(`plugin.json` under `AGENT_DISPATCH_PAYLOAD_ROOT`, else
+`COPILOT_PLUGIN_ROOT`) and, when a release-channel reader is available, the
 channel's latest version. `restart_pending: behind` means the coordinator is
 older than the runtime (checked only when `/health` identifies a process on
-this host; a shared or failover coordinator reports `unknown`);
+this host that this installation's routing table records; a shared, failover
+or other-installation coordinator reports `unknown`);
 `install_pending: behind` means a payload update awaits runtime installation;
 `update_pending: behind` means a newer channel release exists. Versions are
 ordered with PEP 440 rules; an unreadable version, or two builds of one

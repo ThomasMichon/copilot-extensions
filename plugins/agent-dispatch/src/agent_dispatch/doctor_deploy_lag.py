@@ -13,8 +13,10 @@ four versions and reports where they diverge:
   reader for it is available.
 
 ``running`` is compared with ``runtime`` only when the coordinator is verified
-to be a process on this host; a shared, explicit or failover coordinator runs
-another installation, so that comparison is ``unknown``.
+to belong to this installation: a process on this host whose pid and start time
+are recorded in this installation's own routing table. A shared, explicit,
+failover or same-host-but-other-installation coordinator makes that comparison
+``unknown``.
 
 It is read-only and takes no action: no restart and no update. Any version it
 cannot read or order is reported as ``unknown``, never as current.
@@ -31,13 +33,15 @@ from typing import Any
 from packaging.version import InvalidVersion, Version
 
 ChannelReader = Callable[[], "str | None"]
-PAYLOAD_ROOT_ENV = "COPILOT_PLUGIN_ROOT"
+# The launcher shim's plugin-specific root wins over the generic hook variable.
+PAYLOAD_ROOT_ENVS = ("AGENT_DISPATCH_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT")
 
 
 def _default_payload_root() -> Path:
-    override = os.environ.get(PAYLOAD_ROOT_ENV)
-    if override:
-        return Path(override)
+    for name in PAYLOAD_ROOT_ENVS:
+        override = os.environ.get(name)
+        if override:
+            return Path(override)
     return Path.home() / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-dispatch"
 
 
@@ -57,8 +61,6 @@ def _compare(older_label: str, older: str | None, newer_label: str, newer: str |
     try:
         old_v, new_v = Version(older), Version(newer)
     except InvalidVersion:
-        if older == newer:
-            return {"status": "current", "detail": f"{older_label} matches {newer_label} ({older})"}
         return {"status": "unknown", "detail": f"cannot order {older_label} {older} against {newer_label} {newer}"}
     if old_v == new_v:
         return {"status": "current", "detail": f"{older_label} matches {newer_label} ({older})"}
@@ -75,7 +77,7 @@ def deploy_lag(
     running: str | None,
     runtime: str | None,
     payload: str | None,
-    coordinator_local: bool,
+    coordinator_owned: bool,
     channel_reader: ChannelReader | None = None,
 ) -> dict[str, Any]:
     """Build the advisory deploy-lag block from already-gathered versions."""
@@ -93,8 +95,8 @@ def deploy_lag(
 
     restart = (
         _compare("running", running, "runtime", runtime)
-        if coordinator_local
-        else {"status": "unknown", "detail": "coordinator is not a verified process on this host"}
+        if coordinator_owned
+        else {"status": "unknown", "detail": "coordinator is not verified as this installation's process"}
     )
     install = _compare("runtime", runtime, "payload", payload)
     update = (
@@ -112,7 +114,7 @@ def deploy_lag(
     return {
         "advisory": True,
         "versions": {"running": running, "runtime": runtime, "payload": payload, "channel": channel},
-        "coordinator_local": coordinator_local,
+        "coordinator_owned": coordinator_owned,
         "restart_pending": restart,
         "install_pending": install,
         "update_pending": update,
@@ -135,13 +137,38 @@ def _is_local_process(slot: Any) -> bool:
         return False
 
 
+def _recorded_in_routing(slot: Any, routing_root: Path) -> bool:
+    """True when this installation's routing table records the slot's process."""
+    if not isinstance(slot, dict):
+        return False
+    try:
+        from zdd import routing
+
+        table = routing.read_table(routing_root) or {}
+    except Exception:  # noqa: BLE001 - unreadable table means unverified
+        return False
+    for role in ("active", "previous"):
+        entry = table.get(role) if isinstance(table, dict) else None
+        if not isinstance(entry, dict) or entry.get("pid") != slot.get("pid"):
+            continue
+        recorded = entry.get("process_start_time")
+        if recorded is None or recorded == slot.get("process_start_time"):
+            return True
+    return False
+
+
+def _is_owned_coordinator(slot: Any, routing_root: Path) -> bool:
+    return _is_local_process(slot) and _recorded_in_routing(slot, routing_root)
+
+
 def gather(
     client: Any,
     *,
     install_root: Path | None = None,
+    routing_root: Path | None = None,
     payload_root: Path | None = None,
     channel_reader: ChannelReader | None = None,
-    is_local: Callable[[Any], bool] = _is_local_process,
+    is_owned: Callable[[Any, Path], bool] = _is_owned_coordinator,
 ) -> dict[str, Any]:
     """Read the versions and return :func:`deploy_lag`'s block."""
     from .self_update import read_current_version
@@ -152,13 +179,15 @@ def gather(
         health = {}
     running = health.get("version") or None
     if install_root is None:
+        from .config import routing_dir
         from .install_paths import install_dir
 
         install_root = install_dir()
+        routing_root = routing_root or routing_dir()
     return deploy_lag(
         running=running,
         runtime=read_current_version(install_root) or None,
         payload=read_payload_version(payload_root or _default_payload_root()),
-        coordinator_local=is_local(health.get("slot")),
+        coordinator_owned=is_owned(health.get("slot"), routing_root or install_root),
         channel_reader=channel_reader,
     )
