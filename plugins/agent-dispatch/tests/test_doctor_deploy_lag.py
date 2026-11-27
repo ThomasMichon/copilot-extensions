@@ -125,6 +125,8 @@ def test_local_coordinator_of_another_installation_is_not_owned(monkeypatch: Any
     assert lag._is_owned_coordinator(slot, install_b) is True
     assert lag._is_owned_coordinator(slot, install_a) is False
     assert lag._is_owned_coordinator({**slot, "process_start_time": "999"}, install_b) is False
+    tables[install_b] = {"active": {"pid": 4242}}
+    assert lag._is_owned_coordinator(slot, install_b) is False
 
     (install_a / "current-version").write_text("1.2.4\n", encoding="utf-8")
 

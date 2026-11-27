@@ -151,8 +151,9 @@ def _recorded_in_routing(slot: Any, routing_root: Path) -> bool:
         entry = table.get(role) if isinstance(table, dict) else None
         if not isinstance(entry, dict) or entry.get("pid") != slot.get("pid"):
             continue
+        # A legacy entry without a start time cannot rule out PID reuse.
         recorded = entry.get("process_start_time")
-        if recorded is None or recorded == slot.get("process_start_time"):
+        if recorded is not None and recorded == slot.get("process_start_time"):
             return True
     return False
 
