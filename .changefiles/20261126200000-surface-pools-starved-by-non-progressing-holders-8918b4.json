@@ -1,0 +1,9 @@
+{
+  "comment": "Surface full pools held only by tasks that stopped progressing while permitted work waits: a coordinator `GET /pool-starvation` read and a stalled attention item per starved pool.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

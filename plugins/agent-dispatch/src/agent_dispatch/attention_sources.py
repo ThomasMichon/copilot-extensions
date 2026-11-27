@@ -84,7 +84,8 @@ def _task_item(task: dict[str, Any], read_at: str,
     by a ``--token`` argument) means no action could, so none is offered."""
     task_id, title = str(task.get("id") or ""), ac.one_line(task.get("title"), 120)
     status = task.get("status")
-    card = task.get("card") if isinstance(task.get("card"), dict) else {}
+    raw_card = task.get("card")
+    card: dict[str, Any] = raw_card if isinstance(raw_card, dict) else {}
     if not task_id:
         return None
     handoff = is_handoff_task(task)
@@ -131,6 +132,10 @@ DEFAULT_STALLED_AFTER = 1800.0
 #: Seconds an unclaimed handoff baton may wait for a successor (``0`` turns it off).
 HANDOFF_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_HANDOFF_AFTER_SECS"
 DEFAULT_HANDOFF_AFTER = 600.0
+#: Seconds permitted work may wait on a pool held only by non-progressing tasks.
+POOL_STARVED_AFTER_ENV = "AGENT_DISPATCH_ATTENTION_POOL_STARVED_AFTER_SECS"
+DEFAULT_POOL_STARVED_AFTER = 600.0
+POOL_ENTITY = "x.dispatch.pool"
 #: Seconds, from the start of a dispatch read (its task list included), within
 #: which every per-lane backlog read must *finish*, inside the source's own
 #: deadline. A lane that can't, or whose read fails, counts toward
@@ -207,9 +212,10 @@ def pending_handoff_tokens(worktree: str, timeout: float = HANDOFF_PENDING_TIMEO
     if not isinstance(pending, list):
         return None
     tokens = [p.get("token") if isinstance(p, dict) else None for p in pending]
-    if not all(isinstance(t, str) and t for t in tokens):
+    valid = [t for t in tokens if isinstance(t, str) and t]
+    if len(valid) != len(tokens):
         return None
-    return set(tokens)
+    return set(valid)
 
 
 class _PendingHandoffs:
@@ -287,6 +293,30 @@ def _queue_item(repo: str, backlog: dict[str, Any], read_at: str,
     }
 
 
+def _pool_item(pool: dict[str, Any], read_at: str,
+               cli: tuple[str, ...] | None) -> dict[str, Any] | None:
+    """A full pool whose every running holder stopped progressing (suspended,
+    submitted or finished) while permitted work waits: nothing drains it until
+    those holders are cooled, so it is stalled sooner than a slow lane."""
+    after = _threshold(POOL_STARVED_AFTER_ENV, DEFAULT_POOL_STARVED_AFTER)
+    age = pool.get("oldest_queued_age")
+    holders = [h for h in pool.get("holders") or [] if isinstance(h, dict)]
+    if not after or not isinstance(age, (int, float)) or age <= after or not holders:
+        return None
+    ref = f"{pool.get('registration_id')}@{pool.get('machine')}/{pool.get('env')}"
+    statuses = ", ".join(sorted({str(h.get("task_status")) for h in holders}))
+    reason = (f"pool {ref} is full of tasks that stopped progressing ({len(holders)} {statuses}); "
+              f"{pool.get('queued', 0)} queued wait (oldest {age:.0f}s)")
+    return {
+        "schema": ac.SCHEMA, "entity": POOL_ENTITY, "entity_ref": ref, "lifecycle_state": None,
+        "display_state": "stalled", "severity": ac.SEVERITY["stalled"], "reason": ac.one_line(reason),
+        "created_at": None, "updated_at": read_at, "confidence": "reported",
+        "actions": [{"verb": "show", "argv": [*cli, "show", str(h.get("task_id"))]} for h in holders]
+        if cli else [],
+        "source": "dispatch", "id": ac.make_id("dispatch", POOL_ENTITY, ref), "also": [],
+    }
+
+
 def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                   limit: int = DISPATCH_READ_LIMIT,
                   cli: tuple[str, ...] | None = ("agent-dispatch",),
@@ -308,17 +338,30 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
                                    pending_lookup or pending_handoff_tokens, machine)
         lanes = sorted({t["repo"] for t in tasks
                         if t.get("repo") and t.get("status") in ("queued", "claimed", "started")})
-        backlogs, unread = {}, 0
+        backlogs, unread, starvation = {}, 0, False
         for repo in lanes:
             if time.monotonic() + _LANE_REQUEST_TIMEOUT > started + backlog_budget:
                 unread += 1
                 continue
             try:
-                backlogs[repo] = (client.health(repo=repo) or {}).get("backlog") or {}
+                health = client.health(repo=repo) or {}
             except (DispatchError, httpx.HTTPError, OSError, ValueError):
                 unread += 1
+                continue
+            backlogs[repo] = health.get("backlog") or {}
+            starvation = starvation or health.get("pool_starvation") == 1
+        pools: list[dict[str, Any]] = []
+        if starvation:
+            if time.monotonic() + _LANE_REQUEST_TIMEOUT > started + backlog_budget:
+                unread += 1
+            else:
+                try:
+                    pools = list(client.pool_starvation() or [])
+                except (DispatchError, httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
+                    unread += 1
     items = pending.keep(items, started + backlog_budget)
     items += [i for i in (_queue_item(r, b, read_at, cli) for r, b in backlogs.items()) if i]
+    items += [i for i in (_pool_item(p, read_at, cli) for p in pools if isinstance(p, dict)) if i]
     uncertain = unread + (1 if len(tasks) >= limit else 0)
     return {"items": items, "status": "uncertain" if uncertain else "ok", "uncertain": uncertain,
             "read_at": read_at}
@@ -328,7 +371,7 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
 
 
 def registry_path() -> Path:
-    from .config import install_dir
+    from .install_paths import install_dir
 
     return install_dir() / "attention-sources.json"
 
@@ -390,12 +433,12 @@ def read_command(name: str, spec: dict[str, Any], read_at: str,
     """Run one command source and translate its envelope (never guessing). It
     runs from the registry's own directory, so neither its command nor a relative
     argument can resolve against the checkout the read happens to run in."""
-    if run is None:
-        from .procutil import run_background_capture as run
-    from .procutil import OutputLimitExceeded
+    from .procutil import OutputLimitExceeded, run_background_capture
+
+    runner: Callable[..., Any] = run if run is not None else run_background_capture
 
     try:
-        done = run(spec["argv"], timeout=spec["timeout"], cwd=str(registry_path().parent),
+        done = runner(spec["argv"], timeout=spec["timeout"], cwd=str(registry_path().parent),
                    max_output=MAX_OUTPUT)
     except OutputLimitExceeded:
         return ac.command_failure(f"wrote more than {MAX_OUTPUT} characters of output; stopped")
@@ -500,7 +543,7 @@ def collect(readers: dict[str, Callable[[str], dict[str, Any]]], *, timeouts: di
     for thread in threads.values():
         thread.start()
     deadlines = {n: started + timeouts.get(n, DEFAULT_TIMEOUT) for n in names}
-    for name in sorted(names, key=deadlines.get):
+    for name in sorted(names, key=lambda n: deadlines[n]):
         threads[name].join(max(0.0, deadlines[name] - time.monotonic()))
     for name in names:
         done = outcomes.get(name)

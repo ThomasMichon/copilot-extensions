@@ -108,6 +108,10 @@ class DispatchClient(HandoffClaimClientMixin, RelevanceCloseoutClientMixin, Rele
         options: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}  # repo scopes `backlog`
         return cast(dict[str, Any], self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None, **options)))
 
+    def pool_starvation(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
+        options: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get("/pool-starvation", **options))["pools"])
+
     def get(
         self, task_id: str, *, native_restart_policy: bool = False,
         obligation_assignment_event_id: int | None = None,
