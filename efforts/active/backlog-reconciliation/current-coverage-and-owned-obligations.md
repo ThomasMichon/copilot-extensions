@@ -496,6 +496,29 @@ observation now has 397 pending and 134 current-retained; all other categories
 and historical fields remain unchanged. No new census, issue effect, source/
 resource clearance, implementation or native operation is claimed.
 
+## Daemon, installer and complete pivot scope
+
+The [three-case comparison](journal/2026/11.27-daemon-installer-and-pivot-boundaries.md)
+independently qualifies and reads current #5353/#5356/#5555 and all thirteen
+discussions without recovering the earlier held mixed inputs or restoring
+their withdrawn comparison credit.
+
+#5353 retains the actual create/nested-ensure/background-reconcile attribution
+question, not a newly invented missing generic healthy shortcut. #5356 now
+credits its actual construction/reuse guard and bounded worker/watchdog
+delivery instead of repeating an unconditional-reinstall claim; the original
+independently orphaned UV diagnosis remains unestablished by this study.
+#5555 retains complete four-pivot authority and inherited venue/renderer
+acceptance, its corrected read-only status-bundle mechanism and the actual
+Worktrees continuation. The #5912/#5962 origins remain closed; no old
+transaction is replayed or live claim expired.
+
+Only these three outcome/gap pairs change. At the same retained 581-identity
+observation there are 394 pending and 137 current-retained; other categories,
+historical fields and all prior admission/counting records remain unchanged.
+No fresh census, issue disposition, native/product operation, source-copy
+clearance or resource transfer is claimed.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
