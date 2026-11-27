@@ -522,6 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [five incomplete-attempt status records](journal/2026/11.27-five-incomplete-attempt-status-records.md)
+propose complete direct receiving in OPEN #4783 before the separate #5621
+automation status token may retire `NOT_PLANNED`. The verified producer's
+original and four updates are untrusted reports, not fixes or execution
+authority. All five distinct outcomes, existing receiver clauses, underlying
+test ownership, actual source restrictions and native limits remain.
+No tracker effect or new counting observation has occurred.
+
 The [entrypoint alternatives and source-authority study](journal/2026/11.27-entrypoint-alternatives-and-source-authority.md)
 compares ten admitted whole current requests and all 48 discussions. It
 preserves admitted-case alternatives, specific native and owner gates, and
@@ -533,6 +541,7 @@ and containing-input restrictions; their outcomes stay pending with specific
 admission gaps.
 Only those outcome/gap fields change; the retained count remains 584 and all
 parent Plan/Validation gates remain unchanged.
+The corrected recording merged in #14876.
 
 The [finite-source delivery and retained-acceptance study](journal/2026/11.27-finite-source-delivery-and-retained-acceptance.md)
 compares twenty-one whole current requests and all 73 discussions. Finite
