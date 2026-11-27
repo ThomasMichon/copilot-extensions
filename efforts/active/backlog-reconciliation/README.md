@@ -522,6 +522,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [whole-inflow diagnostic study](journal/2026/11.26-inflow-diagnostics-and-doctor-boundaries.md)
+retains three actual requests after complete qualified intake, bounded doctor
+source comparison and verified automation-origin/run metadata. Only their
+post-snapshot outcomes change; no final unit, issue effect, new census or
+parent criterion resolves.
+
 The [source boundaries and current roster](journal/2026/11.26-scope-boundaries-and-current-roster.md)
 retain whole #12274/#13818/#6925 requests against partial, explicitly excluded
 or policy-different sources, plus two incompletely assessed parent relations.
@@ -7007,7 +7013,8 @@ incumbent parent check state remains unchanged.
   disposition, without resetting body/source allowances or other owners' holds.
   The [bounded retained-record audit](journal/2026/11.26-scope-boundaries-and-current-roster.md#bounded-retained-verification-audit)
   distinguishes candidate verification, continuation and disposition records;
-  historical coverage and class attribution remain unresolved.
+  its recording merged in #14856, while historical coverage and class
+  attribution remain unresolved.
   The [owner-gone source completion](journal/2026/11.23-owner-gone-lane-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
   retains the unchanged whole original, full roster, actual source-review/
   required-CI and eight current-file results, exact live acknowledgment and

@@ -120,6 +120,22 @@
     {"issue": 6030, "source_pr": 11248, "relation": "complete-new-source-correspondence-unestablished", "new_whole_original_read": false, "outcome": "KEEP_OPEN"},
     {"issue": 1303, "source_pr": 11248, "relation": "metadata-only-umbrella-association", "new_whole_original_read": false, "outcome": "KEEP_OPEN"}
   ],
+  "later_inflow_research": {
+    "observed_local": "2026-11-26T22:42:05.877196-08:00",
+    "journal": "../journal/2026/11.26-inflow-diagnostics-and-doctor-boundaries.md",
+    "whole_originals": [14826, 14832, 14847],
+    "whole_issue_discussions": {"14826": 0, "14832": 0, "14847": 1},
+    "complete_collaborator_roster": 15,
+    "verified_repository_report_producer_issue": 14826,
+    "source_pr": 14850,
+    "source_relation": "configured-channel-correspondence-unestablished",
+    "source_review_bodies_read": false,
+    "final_verification_units_started": 0,
+    "source_issue_effects": 0,
+    "product_or_native_execution": false,
+    "counting_observations_and_frozen_identity_rows_unchanged": true,
+    "other_pending_rows_gain_content_or_semantic_admission": false
+  },
   "oldest_pending_current_qualification": {
     "issue": 54,
     "created_at_local": "2026-07-16T23:20:27-07:00"
@@ -154,9 +170,9 @@
     "research_gap"
   ],
   "post_snapshot_metadata_nodes": [
-    [14826, "inflow", "automation", null, false, null, "pending", "automation-producer-and-authored-union-qualification"],
-    [14832, "inflow", "member", null, false, null, "pending", "current-authored-union-and-whole-request"],
-    [14847, "inflow", "member", null, false, null, "pending", "current-authored-union-and-whole-request"]
+    [14826, "inflow", "automation", null, false, null, "retained-new", "failed-frozen-native-step-cause-and-fulfillment-unestablished"],
+    [14832, "inflow", "member", null, false, null, "retained-new", "distinct-structured-pr-read-diagnostics-source-fulfillment-unestablished"],
+    [14847, "inflow", "member", null, false, null, "retained-current", "configured-channel-correspondence-unestablished"]
   ],
   "nodes": [
     [54, "original", "member", 7, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
