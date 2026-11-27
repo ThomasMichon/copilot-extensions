@@ -1,24 +1,52 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import importlib
 import builtins
 import io
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
+def _copy_runtime_closure(scripts: Path) -> None:
+    for path in SCRIPTS.glob("versioned_runtime*.py"):
+        shutil.copyfile(path, scripts / path.name)
+
+
+def _materialize_construction(scripts: Path) -> None:
+    _copy_runtime_closure(scripts)
+    for name in (
+        "runtime-construction.sh", "runtime-construction.ps1",
+        "installer-bootstrap.sh", "installer-bootstrap.ps1",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    previous = sys.path[:]
+    try:
+        repo = SCRIPTS.parents[2]
+        owner = runpy.run_path(str(repo / "tools/materialize_installer_engine.py"))
+        for source, target in owner["derived_file_pairs"](
+            repo, scripts.parent / "materialized", copied_consumer=(SCRIPTS.parent, scripts.parent),
+        ):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    finally:
+        sys.path[:] = previous
+
+
 @pytest.mark.parametrize("isolated", [False, True], ids=["safe-path", "isolated"])
-def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, isolated):
+def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path: Path, isolated: bool) -> None:
     staged = tmp_path / "staged payload" / "scripts"
     staged.mkdir(parents=True)
     for name in (
@@ -28,6 +56,7 @@ def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, is
         "versioned_runtime_publication.py",
     ):
         shutil.copyfile(SCRIPTS / name, staged / name)
+    _copy_runtime_closure(staged)
     foreign = tmp_path / "foreign"
     foreign.mkdir()
     (foreign / "versioned_runtime.py").write_text(
@@ -37,7 +66,7 @@ def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, is
         [sys.executable, *(["-I"] if isolated else []), str(staged / "runtime_profile.py"), "--help"],
         cwd=foreign, env={**os.environ, "PYTHONSAFEPATH": "1", "PYTHONPATH": str(foreign)},
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "--profile" in result.stdout
@@ -45,15 +74,15 @@ def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, is
 
 
 @pytest.fixture
-def profiles(monkeypatch):
+def profiles(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(SCRIPTS))
     return importlib.import_module("runtime_profile")
 
 
 @pytest.mark.parametrize("profile", [None, "base", "provider-exec"])
 def test_application_profile_cli_reads_existing_intent_without_payload_or_writes(
-    profiles, tmp_path, monkeypatch, capsys, profile,
-):
+    profiles: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], profile: str | None,
+) -> None:
     root = tmp_path / "runtime"
     if profile is not None:
         root.mkdir()
@@ -75,8 +104,8 @@ def test_application_profile_cli_reads_existing_intent_without_payload_or_writes
 
 @pytest.mark.parametrize("case", ["changed-policy", "construction-argument"])
 def test_application_profile_cli_refuses_unknown_policy_or_construction(
-    profiles, tmp_path, monkeypatch, capsys, case,
-):
+    profiles: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], case: str,
+) -> None:
     if case == "changed-policy":
         (tmp_path / profiles.PROFILE_FILE).write_text(json.dumps({
             "schema": profiles.PROFILE_SCHEMA, "version": 1, "profile": "foreign",
@@ -90,7 +119,7 @@ def test_application_profile_cli_refuses_unknown_policy_or_construction(
 
 
 @pytest.fixture
-def payload(tmp_path, profiles):
+def payload(tmp_path: Path, profiles: ModuleType) -> Path:
     root = tmp_path / "payload"
     root.mkdir()
     (root / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="utf-8")
@@ -104,12 +133,12 @@ def payload(tmp_path, profiles):
 
 
 @pytest.fixture
-def commands(monkeypatch, profiles):
-    calls = []
+def commands(monkeypatch: pytest.MonkeyPatch, profiles: ModuleType) -> list[list[str]]:
+    calls: list[list[str]] = []
 
-    def run(arguments, *, cwd):
+    def run(arguments: list[str], *, cwd: Path) -> None:
         calls.append(arguments)
-        if "venv" in arguments:
+        if "venv" in arguments or any(Path(arg).stem == "runtime-construction" for arg in arguments):
             slot = Path(arguments[-1])
             python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             python.parent.mkdir(parents=True, exist_ok=True)
@@ -119,12 +148,12 @@ def commands(monkeypatch, profiles):
     return calls
 
 
-def _provision(profiles, root, payload, **kwargs):
+def _provision(profiles: ModuleType, root: Path, payload: Path, **kwargs: Any) -> dict[str, Any]:
     kwargs.setdefault("uv", "fixture-uv")
-    return profiles.provision(root, payload, python=sys.executable, **kwargs)
+    return cast(dict[str, Any], profiles.provision(root, payload, python=sys.executable, **kwargs))
 
 
-def _install_command(commands):
+def _install_command(commands: list[list[str]]) -> list[str]:
     return next(
         call for call in commands
         if any(Path(argument).name == "installer_dependency_policy.py" for argument in call)
@@ -132,8 +161,8 @@ def _install_command(commands):
 
 
 @pytest.fixture(params=["repository-policy", "configuration-layers"])
-def repository_policy(payload: Path, request) -> Path:
-    name = request.param
+def repository_policy(payload: Path, request: pytest.FixtureRequest) -> Path:
+    name: str = request.param
     module_name = name.replace("-", "_")
     library = payload / "libs" / name
     library.mkdir(parents=True, exist_ok=True)
@@ -192,8 +221,8 @@ def test_repository_policy_content_participates_in_each_profile_input_layout(
 
 @pytest.mark.guard
 def test_fresh_profile_is_base_and_completed_slot_is_reused(
-    profiles, payload, commands, tmp_path
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path
+) -> None:
     root = tmp_path / "runtime"
     first = _provision(profiles, root, payload, uv="fixture-uv")
     assert first["profile"] == "base"
@@ -218,8 +247,8 @@ def test_fresh_profile_is_base_and_completed_slot_is_reused(
 
 
 def test_explicit_profile_switch_and_update_preserve_intent(
-    profiles, payload, commands, tmp_path
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path
+) -> None:
     root = tmp_path / "runtime"
     base = _provision(profiles, root, payload)
     provider = _provision(profiles, root, payload, requested="provider-exec")
@@ -234,18 +263,19 @@ def test_explicit_profile_switch_and_update_preserve_intent(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows uses signed stdlib copies")
 def test_windows_uv_profile_preserves_copies_without_seeding(
-    profiles, payload, commands, tmp_path,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path,
+) -> None:
     _provision(profiles, tmp_path / "runtime", payload, uv="fixture-uv")
-    create = next(call for call in commands if "venv" in call)
-    assert create[:5] == [sys.executable, "-m", "venv", "--copies", "--without-pip"]
+    create = next(call for call in commands if "-VenvDir" in call)
+    assert Path(create[3]).name == "runtime-construction.ps1"
+    assert create[4:6] == ["-Uv", "fixture-uv"]
     assert all(call[:2] != ["fixture-uv", "venv"] for call in commands)
     assert _install_command(commands)[4:6] == ["fixture-uv", "--"]
 
 
 def test_missing_uv_refuses_before_runtime_or_profile_changes(
-    profiles, payload, commands, tmp_path,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path,
+) -> None:
     root = tmp_path / "runtime"
     with pytest.raises(RuntimeError, match="unrestricted pip fallback"):
         _provision(profiles, root, payload, uv=None)
@@ -253,7 +283,7 @@ def test_missing_uv_refuses_before_runtime_or_profile_changes(
     assert commands == []
 
 
-def test_switch_back_to_base_reuses_unchanged_slot(profiles, payload, commands, tmp_path):
+def test_switch_back_to_base_reuses_unchanged_slot(profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path) -> None:
     root = tmp_path / "runtime"
     base = _provision(profiles, root, payload)
     _provision(profiles, root, payload, requested="provider-exec")
@@ -265,14 +295,14 @@ def test_switch_back_to_base_reuses_unchanged_slot(profiles, payload, commands, 
 
 
 def test_requested_provider_failure_never_falls_back_or_changes_active_slot(
-    profiles, payload, commands, monkeypatch, tmp_path
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     root = tmp_path / "runtime"
     _provision(profiles, root, payload)
     previous = (root / "current-version").read_bytes()
     run = profiles._run
 
-    def failing(arguments, *, cwd):
+    def failing(arguments: list[str], *, cwd: Path) -> None:
         if str(payload) + "[provider-exec]" in arguments:
             raise RuntimeError("fixture provider install failed")
         run(arguments, cwd=cwd)
@@ -286,8 +316,8 @@ def test_requested_provider_failure_never_falls_back_or_changes_active_slot(
 
 
 def test_native_profile_policy_refusal_retains_selected_runtime(
-    profiles, tmp_path,
-):
+    profiles: ModuleType, tmp_path: Path,
+) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("native UV is unavailable")
@@ -302,6 +332,7 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
         "versioned_runtime_publication.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
+    _materialize_construction(scripts)
     (payload / "plugin.json").write_text(
         json.dumps({
             "name": "agent-containers", "version": "1.0.0",
@@ -334,7 +365,7 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
             "--python", sys.executable, "--uv", uv, "--profile", "provider-exec",
         ],
         capture_output=True, text=True, timeout=30, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert completed.returncode != 0
     assert "direct remote dependencies lack release-age evidence" in completed.stderr
@@ -347,8 +378,8 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
 
 @pytest.mark.parametrize("stage", ["venv", "install", "health", "fingerprint"])
 def test_failed_profile_construction_discards_before_releasing_ownership_and_retries(
-    profiles, payload, commands, monkeypatch, tmp_path, stage,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str,
+) -> None:
     root = tmp_path / "runtime"
     previous = _provision(profiles, root, payload)
     selector = (root / "current-version").read_bytes()
@@ -356,10 +387,10 @@ def test_failed_profile_construction_discards_before_releasing_ownership_and_ret
     completed = marker.read_bytes()
     run = profiles._run
 
-    def failing(arguments, *, cwd):
+    def failing(arguments: list[str], *, cwd: Path) -> None:
         run(arguments, cwd=cwd)
         if (
-            (stage == "venv" and "venv" in arguments)
+            (stage == "venv" and any(Path(arg).stem == "runtime-construction" for arg in arguments))
             or (stage == "install" and any(
                 Path(argument).name == "installer_dependency_policy.py" for argument in arguments
             ))
@@ -385,15 +416,15 @@ def test_failed_profile_construction_discards_before_releasing_ownership_and_ret
 
 
 def test_reused_profile_health_failure_never_discards_completed_slot(
-    profiles, payload, commands, monkeypatch, tmp_path,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root = tmp_path / "runtime"
     installed = _provision(profiles, root, payload)
     marker = Path(installed["venv"]) / ".install-complete.json"
     before = marker.read_bytes()
     run = profiles._run
 
-    def failing(arguments, *, cwd):
+    def failing(arguments: list[str], *, cwd: Path) -> None:
         if "-c" in arguments:
             raise RuntimeError("fixture health failure")
         run(arguments, cwd=cwd)
@@ -410,8 +441,8 @@ def test_reused_profile_health_failure_never_discards_completed_slot(
 
 
 def test_same_version_source_change_refuses_immutable_rebuild(
-    profiles, payload, commands, tmp_path
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path
+) -> None:
     root = tmp_path / "runtime"
     installed = _provision(profiles, root, payload)
     marker = Path(installed["venv"]) / ".install-complete.json"
@@ -422,7 +453,7 @@ def test_same_version_source_change_refuses_immutable_rebuild(
     assert marker.read_bytes() == before
 
 
-def _prepare_source(profiles, payload, commit="a" * 40):
+def _prepare_source(profiles: ModuleType, payload: Path, commit: str="a" * 40) -> Any:
     (payload / "plugin.json").write_text(
         json.dumps({"name": "agent-containers", "version": "1.0.0"}), encoding="utf-8",
     )
@@ -439,8 +470,8 @@ def _prepare_source(profiles, payload, commit="a" * 40):
 
 @pytest.mark.parametrize("profile", ["base", "provider-exec"])
 def test_source_generation_preserves_profile_package_and_unchanged_reuse(
-    profiles, payload, commands, tmp_path, profile,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path, profile: str,
+) -> None:
     identity = _prepare_source(profiles, payload)
     root = tmp_path / "runtime"
     first = _provision(profiles, root, payload, requested=profile)
@@ -462,8 +493,8 @@ def test_source_generation_preserves_profile_package_and_unchanged_reuse(
 
 @pytest.mark.parametrize("stage", ["lease", "health", "activation"])
 def test_source_mutation_refuses_before_selecting_candidate(
-    profiles, payload, commands, tmp_path, monkeypatch, stage,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
     from contextlib import contextmanager
 
     root = tmp_path / "runtime"
@@ -473,14 +504,14 @@ def test_source_mutation_refuses_before_selecting_candidate(
     marker = Path(previous["venv"]) / ".install-complete.json"
     before = marker.read_bytes()
 
-    def mutate():
+    def mutate() -> None:
         (payload / "runtime-source.json").unlink()
 
     if stage == "lease":
         lease = profiles.runtime.construction_lease
 
         @contextmanager
-        def changed(*args, **kwargs):
+        def changed(*args: Any, **kwargs: Any) -> Iterator[Any]:
             with lease(*args, **kwargs) as held:
                 mutate()
                 yield held
@@ -489,21 +520,21 @@ def test_source_mutation_refuses_before_selecting_candidate(
     elif stage == "health":
         health = profiles._health
 
-        def changed(*args, **kwargs):
+        def changed_health(*args: Any, **kwargs: Any) -> None:
             health(*args, **kwargs)
             mutate()
 
-        monkeypatch.setattr(profiles, "_health", changed)
+        monkeypatch.setattr(profiles, "_health", changed_health)
     else:
         retain = profiles.runtime.retention_lease
 
         @contextmanager
-        def changed(*args, **kwargs):
+        def changed_retention(*args: Any, **kwargs: Any) -> Iterator[Any]:
             with retain(*args, **kwargs) as held:
                 mutate()
                 yield held
 
-        monkeypatch.setattr(profiles.runtime, "retention_lease", changed)
+        monkeypatch.setattr(profiles.runtime, "retention_lease", changed_retention)
     with pytest.raises(RuntimeError, match="source identity changed"):
         _provision(profiles, root, payload, expected_source_version=identity.runtime_version)
     assert (root / "current-version").read_bytes() == selected
@@ -511,8 +542,8 @@ def test_source_mutation_refuses_before_selecting_candidate(
 
 
 def test_prepared_source_cannot_substitute_missing_owned_library(
-    profiles, payload, commands, tmp_path,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path,
+) -> None:
     missing = payload / "libs" / profiles.LIBRARIES[0]
     shutil.rmtree(missing)
     ambient = payload.parent.parent / "libs" / profiles.LIBRARIES[0]
@@ -525,8 +556,8 @@ def test_prepared_source_cannot_substitute_missing_owned_library(
 
 
 def test_source_stamp_retains_full_assembly_after_original_is_unavailable(
-    profiles, payload, commands, tmp_path,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path,
+) -> None:
     identity = _prepare_source(profiles, payload)
     snapshot = profiles.stamp_source(tmp_path / "runtime", payload, identity.runtime_version)
     assert profiles.stamp_source(tmp_path / "runtime", payload, identity.runtime_version) == snapshot
@@ -540,8 +571,8 @@ def test_source_stamp_retains_full_assembly_after_original_is_unavailable(
 
 @pytest.mark.parametrize("operation", ["stamp", "provision"])
 def test_source_handoff_refuses_valid_receipt_change_with_unchanged_generation(
-    profiles, payload, commands, tmp_path, operation,
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path, operation: str,
+) -> None:
     root = tmp_path / "runtime"
     _provision(profiles, root, payload)
     before = {path.relative_to(root): path.read_bytes()
@@ -573,8 +604,8 @@ def test_source_handoff_refuses_valid_receipt_change_with_unchanged_generation(
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("receipt_change", [False, True])
 def test_native_source_stamp_publishes_only_verified_complete_snapshot(
-    profiles, payload, tmp_path, host, receipt_change,
-):
+    profiles: ModuleType, payload: Path, tmp_path: Path, host: str, receipt_change: bool,
+) -> None:
     if host == "powershell" and os.name != "nt":
         pytest.skip("Windows PowerShell unavailable")
     if host == "bash" and os.name == "nt":
@@ -583,6 +614,7 @@ def test_native_source_stamp_publishes_only_verified_complete_snapshot(
     if shell is None:
         pytest.skip(f"{host} unavailable")
     shutil.copytree(SCRIPTS, payload / "scripts")
+    _materialize_construction(payload / "scripts")
     if receipt_change:
         # The POSIX install-lock functions live in the sourced transaction helper.
         entry = payload / "scripts" / (
@@ -638,7 +670,7 @@ def test_native_source_stamp_publishes_only_verified_complete_snapshot(
         try:
             result = subprocess.run(
                 arguments, cwd=home, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=15,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
             )
         except subprocess.TimeoutExpired:
             output.seek(0)
@@ -666,14 +698,14 @@ def test_native_source_stamp_publishes_only_verified_complete_snapshot(
 
 
 def test_relative_install_root_and_payload_use_the_callers_directory(
-    profiles, payload, commands, tmp_path, monkeypatch
-):
+    profiles: ModuleType, payload: Path, commands: list[list[str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     caller = tmp_path / "caller"
     caller.mkdir()
     monkeypatch.chdir(caller)
     result = _provision(profiles, Path("runtime"), Path("..") / "payload")
     assert Path(result["venv"]).is_relative_to(caller / "runtime")
-    create = next(call for call in commands if "venv" in call)
+    create = next(call for call in commands if any(Path(arg).stem == "runtime-construction" for arg in call))
     assert Path(create[-1]).is_absolute()
     install = _install_command(commands)
     assert str(payload) in install
@@ -683,8 +715,8 @@ def test_relative_install_root_and_payload_use_the_callers_directory(
 
 @pytest.mark.parametrize("paramiko", [False, True])
 def test_legacy_selected_runtime_preserves_installed_ssh_capability(
-    profiles, tmp_path, paramiko
-):
+    profiles: ModuleType, tmp_path: Path, paramiko: bool
+) -> None:
     root = tmp_path / "runtime"
     slot = profiles.runtime.slot(root, "0.9.0")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -709,13 +741,13 @@ def test_legacy_selected_runtime_preserves_installed_ssh_capability(
      "version": True, "profile": "base"},
     [],
 ])
-def test_invalid_durable_profile_fails_closed(profiles, tmp_path, value):
+def test_invalid_durable_profile_fails_closed(profiles: ModuleType, tmp_path: Path, value: object) -> None:
     (tmp_path / "runtime-profile.json").write_text(json.dumps(value))
     with pytest.raises(RuntimeError):
         profiles.selected_profile(tmp_path)
 
 
-def test_package_failure_reports_only_bounded_sanitized_tail(profiles, tmp_path, capsys):
+def test_package_failure_reports_only_bounded_sanitized_tail(profiles: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     script = (
         "import sys; "
         "print('\\n'.join('line-' + str(i) for i in range(60))); "
@@ -733,13 +765,13 @@ def test_package_failure_reports_only_bounded_sanitized_tail(profiles, tmp_path,
 
 @pytest.mark.parametrize("missing", ["paramiko", "bcrypt"])
 def test_missing_provider_dependency_is_explicit_and_does_not_hide_broken_installs(
-    monkeypatch, missing
-):
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
     from agent_containers import provider_ssh
 
     original = builtins.__import__
 
-    def blocked(name, *args, **kwargs):
+    def blocked(name: str, *args: Any, **kwargs: Any) -> Any:
         if name == "paramiko":
             raise ModuleNotFoundError(f"No module named {missing}", name=missing)
         return original(name, *args, **kwargs)
@@ -747,16 +779,16 @@ def test_missing_provider_dependency_is_explicit_and_does_not_hide_broken_instal
     monkeypatch.setattr(builtins, "__import__", blocked)
     if missing == "paramiko":
         with pytest.raises(RuntimeError, match="provider-exec profile"):
-            provider_ssh._serve_ssh(None, stdin=io.BytesIO(), stdout=io.BytesIO())
+            provider_ssh._serve_ssh(cast(Any, None), stdin=io.BytesIO(), stdout=io.BytesIO())
     else:
         with pytest.raises(ModuleNotFoundError, match="bcrypt"):
-            provider_ssh._serve_ssh(None, stdin=io.BytesIO(), stdout=io.BytesIO())
+            provider_ssh._serve_ssh(cast(Any, None), stdin=io.BytesIO(), stdout=io.BytesIO())
 
 
 @pytest.mark.parametrize("profile", ["base", "provider-exec"])
 def test_native_bootstrap_accepts_current_profile_without_reconcile(
-    tmp_path, monkeypatch, profile
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str
+) -> None:
     shell = shutil.which("pwsh" if os.name == "nt" else "bash")
     if shell is None:
         pytest.skip("native installer shell unavailable")
@@ -802,32 +834,33 @@ def test_native_bootstrap_accepts_current_profile_without_reconcile(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 5.1 native stderr contract")
-def test_signed_python_probe_continues_after_unavailable_candidate(tmp_path):
+def test_signed_python_probe_uses_managed_selection_without_ambient_launcher(tmp_path: Path) -> None:
     shell = Path(os.environ["SystemRoot"]) / (
         "System32/WindowsPowerShell/v1.0/powershell.exe"
     )
     if not shell.is_file():
         pytest.skip("Windows PowerShell 5.1 unavailable")
-    source = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
-    start = source.index("$signedBase = $null")
-    end = source.index("$profileArgs = @(", start)
-    probe = source[start:end]
+    engine = SCRIPTS.parents[2] / "libs/installer-engine/installer-engine.ps1"
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
     command = (
-        "$ErrorActionPreference = 'Stop'; "
-        "$script:candidates = @(); "
-        "function py { "
-        "  $script:candidates += $args[0]; "
-        "  if ($args[0] -eq '-3.13') { "
-        "    & $env:ComSpec /c 'echo unavailable 1>&2 & exit /b 103'; "
-        "  } else { "
-        f"    '{sys.executable}'; $global:LASTEXITCODE = 0; "
-        "  } "
-        "}; "
+        "$ErrorActionPreference = 'Stop';\n"
+        f". {quote(engine)}\n"
+        "function py { throw 'ambient launcher was invoked' }\n"
+        "function fixture-uv { $script:arguments=@($args) }\n"
+        "function Invoke-NativeCapture { param([scriptblock]$Command)\n"
+        " & $Command\n"
+        f" [pscustomobject]@{{ExitCode=0;Output={quote(sys.executable)}}}\n"
+        "}\n"
         "function Get-AuthenticodeSignature { [pscustomobject]@{Status='Valid'} }; "
-        f"{probe}\n"
-        "if (($script:candidates -join ',') -ne '-3.13,-3.12') { throw 'probe stopped early' }; "
+        "$selected=Get-InstallerManagedSignedBasePython -MinimumVersion ([version]'3.11') "
+        "-PythonVersion '3.11' -UvCommand 'fixture-uv'\n"
+        "if (($script:arguments -join ' ') -ne "
+        "'python find --managed-python --no-project --system --no-python-downloads 3.11') "
+        "{ throw 'managed application selection was not used' }\n"
         "if ($ErrorActionPreference -ne 'Stop') { throw 'preference not restored' }; "
-        f"if ($signedBase -ne '{sys.executable}') {{ throw 'candidate not selected' }}"
+        f"if ($selected -ne {quote(sys.executable)}) {{ throw 'candidate not selected' }}"
     )
     result = subprocess.run(
         [str(shell), "-NoProfile", "-Command", command],
@@ -837,7 +870,7 @@ def test_signed_python_probe_continues_after_unavailable_candidate(tmp_path):
 
 
 @pytest.fixture(scope="module")
-def native_docker_probe(tmp_path_factory):
+def native_docker_probe(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if os.name != "nt":
         pytest.skip("Windows native executable output contract")
     compiler = Path(os.environ["SystemRoot"]) / (
@@ -873,7 +906,7 @@ class DockerProbe {
     executable = directory / "docker.exe"
     result = subprocess.run(
         [str(compiler), "/nologo", f"/out:{executable}", str(source)],
-        capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return executable
@@ -884,14 +917,14 @@ class DockerProbe {
 @pytest.mark.parametrize("exit_code", [0, 23], ids=["success", "failure"])
 @pytest.mark.parametrize("lines", [1, 4096], ids=["small", "pipe-capacity"])
 def test_docker_preflight_preserves_native_diagnostics_and_outcome(
-    tmp_path, native_docker_probe, shell_name, human_utf8, exit_code, lines,
-):
+    tmp_path: Path, native_docker_probe: Path, shell_name: str, human_utf8: bool, exit_code: int, lines: int,
+) -> None:
     shell = shutil.which(shell_name)
     if shell is None:
         pytest.skip(f"{shell_name} unavailable")
     source = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
     start = source.index("if (Get-Command docker -ErrorAction SilentlyContinue) {")
-    end = source.index("\n# Check for uv", start)
+    end = source.index("\n# -- 1. Create directories", start)
     helpers = "\n".join(
         line for line in source.splitlines()
         if line.startswith(("function Write-Ok ", "function Write-Warn ", "function Write-Step "))
@@ -925,7 +958,7 @@ def test_docker_preflight_preserves_native_diagnostics_and_outcome(
     }
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-        env=env, capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        env=env, capture_output=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert receipt.read_text(encoding="utf-8-sig").splitlines() == ["--version"]
@@ -947,7 +980,7 @@ def test_docker_preflight_preserves_native_diagnostics_and_outcome(
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX installer boundary")
 @pytest.mark.parametrize("exit_code", [0, 23], ids=["success", "failure"])
 @pytest.mark.parametrize("lines", [1, 4096], ids=["small", "pipe-capacity"])
-def test_posix_docker_preflight_preserves_diagnostics_and_outcome(tmp_path, exit_code, lines):
+def test_posix_docker_preflight_preserves_diagnostics_and_outcome(tmp_path: Path, exit_code: int, lines: int) -> None:
     shell = shutil.which("bash")
     if shell is None:
         pytest.skip("Bash unavailable")
@@ -1004,17 +1037,21 @@ def test_posix_docker_preflight_preserves_diagnostics_and_outcome(tmp_path, exit
 
 
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
-def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_path, extension):
+def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_path: Path, extension: str) -> None:
+    shell: str
     if extension == "ps1":
         if os.name != "nt":
             pytest.skip("native Windows PowerShell staging contract")
-        shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        if not shell.is_file():
+        shell = str(
+            Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        )
+        if not Path(shell).is_file():
             pytest.skip("Windows PowerShell 5.1 unavailable")
     else:
-        shell = shutil.which("bash")
-        if os.name == "nt" or shell is None:
+        found = shutil.which("bash")
+        if os.name == "nt" or found is None:
             pytest.skip("native POSIX staging contract")
+        shell = found
     home = tmp_path / "home"
     home.mkdir()
     caller = tmp_path / "caller"
@@ -1056,7 +1093,7 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
                COPILOT_EXTENSIONS_TEST_CONTAINED="1", COPILOT_PLUGIN_INSTALL_DEADLINE_SEC="20")
     completed = subprocess.run(
         arguments, cwd=caller, env=env, capture_output=True, text=True, timeout=30,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     root, profile, action, force, origin = receipt.read_text(encoding="utf-8-sig").splitlines()
@@ -1071,13 +1108,13 @@ def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_p
 
 @pytest.mark.parametrize("escape", [False, True])
 def test_native_health_requires_all_helper_code_inside_the_immutable_slot(
-    profiles, tmp_path, escape,
-):
+    profiles: ModuleType, tmp_path: Path, escape: bool,
+) -> None:
     root = tmp_path / "runtime"
     subprocess.run(
         [sys.executable, "-m", "venv", "--copies", "--without-pip", str(root)],
         check=True, capture_output=True, text=True, timeout=15,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     site = root / (
