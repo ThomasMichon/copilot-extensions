@@ -970,7 +970,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-containers
           --test-file tests/test_installer_bootstrap.py --allow-explicit-tiers
-          -k "${{ env.CONTAINERS_QUALIFICATION_SHELL }}"
+          -k "${{ env.CONTAINERS_QUALIFICATION_SHELL == 'powershell' && 'powershell.exe' || env.CONTAINERS_QUALIFICATION_SHELL }}"
           --junit-dir qualification-evidence/containers-installer
       - &containers-installer-proof
         name: Require all installer controls and repeated seed reports
