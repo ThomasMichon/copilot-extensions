@@ -13,17 +13,22 @@ from types import ModuleType
 
 import pytest
 
+from .legacy_uninstall_fixture import materialize_bootstrap
+from .managed_command_fixture import prepared_python_inputs
+
 PLUGIN = Path(__file__).resolve().parents[1]
 ROOT = PLUGIN.parents[1]
 HOSTS = [
     path for path in (
-        shutil.which("pwsh"),
+        shutil.which("pwsh") if os.name == "nt" else None,
         str(Path(os.environ.get("SystemRoot", r"C:\Windows"))
             / "System32/WindowsPowerShell/v1.0/powershell.exe") if os.name == "nt" else None,
     ) if path and Path(path).is_file()
 ]
 if os.name != "nt" and shutil.which("bash"):
-    HOSTS.append(shutil.which("bash"))
+    bash = shutil.which("bash")
+    assert bash is not None
+    HOSTS.append(bash)
 
 
 def _environment(home: Path) -> dict[str, str]:
@@ -32,7 +37,10 @@ def _environment(home: Path) -> dict[str, str]:
     home.mkdir(exist_ok=True)
     env.update(HOME=str(home), USERPROFILE=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
                COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC="1", GIT_OPTIONAL_LOCKS="0")
-    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+    uv, python, store = prepared_python_inputs("cpython@3.11.18")
+    env.update(UV_PYTHON_INSTALL_DIR=str(store), UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never")
+    env.pop("MACHINES_TEST_CENSUS_UNAVAILABLE", None)
+    env["PATH"] = os.pathsep.join((str(uv.parent), str(python.parent), env.get("PATH", "")))
     return env
 
 
@@ -115,6 +123,7 @@ def _isolated_payload(directory: Path) -> Path:
     package = payload / "src" / module
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
+    materialize_bootstrap(payload)
     return payload
 
 
@@ -122,6 +131,7 @@ def _component(name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "legacy_native_test_" + name, PLUGIN / "scripts" / (name + ".py"),
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -289,10 +299,11 @@ def test_every_native_publisher_refuses_held_transaction(
     tmp_path: Path, host: str, action: str,
 ) -> None:
     env = _environment(tmp_path / "home")
+    payload = _isolated_payload(tmp_path)
     root = Path(env["HOME"]) / ".agent-machines" if action == "stamp-binstub" else (
         tmp_path / "runtime"
     )
-    durable = _fixture(root)
+    durable = _fixture(root, payload=payload)
     lock = root / ".install.lock"
     # The holder exits on stdin EOF; no unknown process or process-name killing.
     script = (
@@ -307,8 +318,9 @@ def test_every_native_publisher_refuses_held_transaction(
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
+        assert holder.stdout is not None
         assert holder.stdout.readline().strip() == "held"
-        result = _run(host, root, env, action=action)
+        result = _run(host, root, env, action=action, payload=payload)
         assert result.returncode != 0, result.stdout + result.stderr
         assert "transaction lock" in result.stdout + result.stderr
         assert {name: (root / name).read_bytes() for name in durable} == durable
@@ -452,10 +464,12 @@ def test_posix_publishers_refuse_real_held_transaction(
 
     env = _environment(tmp_path / "home")
     env["COPILOT_EXT_NO_FLOCK"] = "1" if fallback else "0"
+    payload = _isolated_payload(tmp_path)
     root = tmp_path / "runtime"
-    _fixture(root)
+    _fixture(root, payload=payload)
     host = shutil.which("bash")
-    helper = PLUGIN / "scripts/legacy-transaction.sh"
+    assert host is not None
+    helper = payload / "scripts/legacy-transaction.sh"
     script = (
         f". {shlex.quote(str(helper))}; INSTALL_DIR={shlex.quote(str(root))}; "
         "_enter_install_lock || exit 1; trap _exit_install_lock EXIT; "
@@ -467,8 +481,9 @@ def test_posix_publishers_refuse_real_held_transaction(
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
+        assert holder.stdout is not None
         assert holder.stdout.readline().strip() == "held"
-        result = _run(host, root, env, action=action)
+        result = _run(host, root, env, action=action, payload=payload)
         assert result.returncode != 0
         assert "transaction lock" in result.stdout + result.stderr
         assert not (root / "snapshots").exists()

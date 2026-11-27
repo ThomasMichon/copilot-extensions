@@ -6,6 +6,9 @@ import pytest
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
+        "markers", "guard: retained structural contracts, not unit eligibility",
+    )
+    config.addinivalue_line(
         "markers", "installation_context_smoke: bounded installation-context contracts",
     )
     config.addinivalue_line(

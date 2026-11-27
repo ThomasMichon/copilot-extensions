@@ -1,11 +1,11 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"702fb62704efb6db71b2961439a4a78f7f642020753a2633c7fb07a7cb1d2a54","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/agent-dispatch/session-guidance.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.21.76-dev1","renderedBytes":1013,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance","template":"instructions/session-guidance.instructions.md","templateBytes":244,"templateSha256":"8969f4b96dfa1febf513b11827a4e94d6f0db32ea775a8c7b3610474b4668dd4","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"702fb62704efb6db71b2961439a4a78f7f642020753a2633c7fb07a7cb1d2a54","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/agent-dispatch/session-guidance.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.21.77-dev1","renderedBytes":1013,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance","template":"instructions/session-guidance.instructions.md","templateBytes":244,"templateSha256":"8969f4b96dfa1febf513b11827a4e94d6f0db32ea775a8c7b3610474b4668dd4","version":1} -->
 
 
 Read `instructions/agent-dispatch/session-guidance.instructions.md` in this
 session's already-disclosed session folder, if it exists, and treat its
 contents as authoritative for this session. Its absence is not an error.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"d4ed18708869c94166d60877f0ebaa2278f386dfd7096048e0f69b2f1f13981f"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"ba21bf2487c689881ac1cc44e15d8860c661afa6ee9351340377d7fd9ad914dc"} -->

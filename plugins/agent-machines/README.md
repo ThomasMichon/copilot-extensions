@@ -44,6 +44,14 @@ existing installer deadline rather than renewing the downstream watchdog.
 The PowerShell self-stage default remains an output-inactivity watchdog;
 caller-supplied deadlines retain elapsed-time enforcement or explicit disable.
 
+Legacy uninstall also inspects that prepared managed helper rather than
+enumerating ambient Python or launcher installations. Its original lexical
+and resolved executable/prefix checks still require an interpreter outside
+the removal root. POSIX passes the same admitted interpreter to its existing
+no-flock transaction path. Missing prerequisites refuse without acquisition;
+the canonical finite-removal owner, live leases and durable-state preservation
+are unchanged. Generic native-stamp transaction prerequisites remain separate.
+
 The POSIX session-start manifest check uses the installation-context native JSON
 reader, as its governance check already does. It does not start Python or UV.
 All fields use one native byte-preserving snapshot; decoded path/version captures
