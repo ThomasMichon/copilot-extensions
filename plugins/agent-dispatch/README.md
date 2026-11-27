@@ -17,6 +17,12 @@ application entry without acquisition or a new self-provision attempt. Current,
 last-known-good and newest-complete selection, configuration-only telemetry,
 readiness isolation and native argument/stdio/exit behavior remain unchanged.
 
+The POSIX focus-guidance contributor reuses the payload's declared, prepared
+managed bootstrap interpreter for its isolated JSON readers. It never searches
+PATH for Python or acquires an interpreter. Missing prerequisites retain its
+quiet unavailable result; the existing opt-in, native PowerShell contributor
+and session-writer deadline remain unchanged.
+
 `telemetry hourly --hour YYYY-MM-DDTHH:00:00Z` exports a bounded, privacy-reduced
 hour from the existing retained telemetry namespace without starting the
 coordinator, capture or a schedule. Its selected runtime ships the optional
