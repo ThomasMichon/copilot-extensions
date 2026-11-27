@@ -79,6 +79,63 @@ def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
     }
 
 
+def _withdraw_declared_registrations(args: argparse.Namespace, owner: str) -> dict[str, Any]:
+    """Remove coordinator registrations materialized from ``owner``'s declarations.
+
+    The supervisor daemon withdraws dropped declarations only from its in-memory
+    publication ledger, so rows published by an earlier daemon generation (or
+    while no daemon is running) would otherwise outlive the pointer and keep
+    running as ordinary store registrations. Only ``declared:<owner>:*`` ids are
+    touched; unreachable coordinators are reported, never fatal.
+    """
+    from .registrar_reconcile import DECLARED_ID_PREFIX
+
+    prefix = f"{DECLARED_ID_PREFIX}:{owner}:"
+    result: dict[str, Any] = {"owner": owner, "removed": [], "failed": []}
+    try:
+        with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
+            rows = client.list_registrations(include_paused=True)
+            for rid in sorted(str(row.get("id") or "") for row in rows):
+                if not rid.startswith(prefix):
+                    continue
+                try:
+                    client.remove_registration(rid)
+                except Exception as exc:  # noqa: BLE001 - report per-row, keep going
+                    result["failed"].append({"id": rid, "error": str(exc)})
+                else:
+                    result["removed"].append(rid)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - pointer removal already succeeded
+        result["status"] = "coordinator_unavailable"
+        result["error"] = str(exc) or type(exc).__name__
+        return result
+    result["status"] = "partial" if result["failed"] else "ok"
+    return result
+
+
+def _remove_pointer_and_registrations(args: argparse.Namespace, rd: Any) -> dict[str, Any]:
+    """``registrar remove``: drop the pointer and withdraw what it materialized."""
+    pointers = rd.load_pointers()
+    target = next((p for p in pointers if p.name == args.name), None)
+    owner = getattr(args, "owner", None) or (target.effective_owner() if target else None)
+    removed = rd.remove_pointer(args.name)
+    payload: dict[str, Any] = {"removed": removed}
+    if getattr(args, "keep_registrations", False) or owner is None:
+        return payload
+    if not removed and not getattr(args, "owner", None):
+        return payload
+    sharing = sorted(
+        p.name for p in pointers if p.name != args.name and p.effective_owner() == owner
+    )
+    if sharing:
+        payload["registrations"] = {
+            "owner": owner, "status": "skipped", "removed": [], "failed": [],
+            "reason": f"owner still declared by pointer(s): {', '.join(sharing)}",
+        }
+        return payload
+    payload["registrations"] = _withdraw_declared_registrations(args, owner)
+    return payload
+
+
 def _cmd_registrar(args: argparse.Namespace) -> int:
     """Manage registrar discovery pointers and read the declared profile set."""
     from . import registrar_discovery as rd
@@ -182,7 +239,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
         if args.registrar_command == "list":
             return _core()._emit([p.to_dict() for p in rd.load_pointers()])
         if args.registrar_command == "remove":
-            return _core()._emit({"removed": rd.remove_pointer(args.name)})
+            return _core()._emit(_remove_pointer_and_registrations(args, rd))
         if args.registrar_command == "discover":
             decls = rd.discover()
             return _core()._emit([summarize(d) for d in decls])

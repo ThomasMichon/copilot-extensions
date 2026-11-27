@@ -40,8 +40,22 @@ def register_registrar_commands(sub) -> None:
     rp = reg_sub.add_parser("doctor", help="audit trusted pointers and attributed registrar.d candidates")
     rp.add_argument("--json", action="store_true", help="emit exhaustive structured registrar findings")
     rp.set_defaults(func=_core()._cmd_registrar)
-    rp = reg_sub.add_parser("remove", help="remove a discovery pointer by name")
+    rp = reg_sub.add_parser(
+        "remove",
+        help="remove a discovery pointer by name and withdraw the declared:<owner>:* "
+        "coordinator registrations its declarations materialized",
+    )
     rp.add_argument("name", help="the pointer name to remove")
+    rp.add_argument(
+        "--owner",
+        help="provenance owner whose declared registrations to withdraw (default: the "
+        "removed pointer's effective owner). Also withdraws orphans left by an earlier "
+        "remove when the pointer no longer exists.",
+    )
+    rp.add_argument(
+        "--keep-registrations", action="store_true",
+        help="only remove the pointer; leave its published registrations in the coordinator",
+    )
     rp.set_defaults(func=_core()._cmd_registrar)
     rp = reg_sub.add_parser("discover", help="read + aggregate the declared profile set across all pointers (rejects duplicate profile names across sources)")
     rp.set_defaults(func=_core()._cmd_registrar)

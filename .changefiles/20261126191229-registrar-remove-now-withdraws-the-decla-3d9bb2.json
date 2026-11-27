@@ -1,0 +1,9 @@
+{
+  "comment": "registrar remove now withdraws the declared:<owner>:* coordinator registrations the removed pointer materialized (with --owner for orphan cleanup and --keep-registrations to opt out)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

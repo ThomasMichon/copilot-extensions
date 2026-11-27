@@ -1572,6 +1572,14 @@ verification before replacement. Legacy setup writers cannot downgrade a named
 pointer back to a checkout path; changing a named target requires an explicit
 registered repository name.
 
+`agent-dispatch registrar remove <name>` drops the pointer and withdraws the
+`declared:<owner>:*` coordinator registrations its declarations materialized
+(its effective owner), so a removed source stops running even when the
+supervisor daemon that published those rows has since restarted. Unrelated
+registrations are untouched; removal is skipped while another pointer still
+shares the same owner. `--owner <owner>` withdraws orphans left by an earlier
+remove, and `--keep-registrations` removes only the pointer.
+
 Named resources require the optional agent-worktrees integration's
 `repos find <name> --registered-only --json` contract. Missing, malformed or
 duplicate registrations, absent local checkouts and older peers fail explicitly;
