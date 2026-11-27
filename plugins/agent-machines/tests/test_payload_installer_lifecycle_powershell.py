@@ -252,6 +252,10 @@ def test_real_init_stages_and_watchdog_preserves_124(
     scripts = payload / "scripts"
     probe = scripts / "installation-context" / "legacy-entrypoint-probe.ps1"
     probe.parent.mkdir(parents=True)
+    shutil.copytree(
+        PLUGIN / "scripts", scripts, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
     previous = sys.path[:]
     try:
         owner = runpy.run_path(str(REPO / "tools/materialize_installer_engine.py"))
@@ -314,7 +318,7 @@ def test_real_init_stages_and_watchdog_preserves_124(
             if (smoke_home / "reconcile.err.log").exists() else "",
             "stdout": result.stdout, "stderr": result.stderr,
         }
-        assert result.returncode == expected, diagnostics
+        assert result.returncode == expected, json.dumps(diagnostics, ensure_ascii=True)
         assert result.stdout == ""
         assert (smoke_home / "smoke.json").is_file(), diagnostics
         record = json.loads((smoke_home / "smoke.json").read_text(encoding="utf-8-sig"))
