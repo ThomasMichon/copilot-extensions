@@ -140,6 +140,8 @@ function Get-BootstrapPython {{ {_quote(sys.executable)} }}
 function Get-PayloadHash {{ 'fixture-hash' }}
 $VersionedRuntime = $true
 $InstallDir = {_quote(root)}
+$PluginDir = {_quote(tmp_path)}
+$Force = $false
 $LinkDir = Join-Path $InstallDir '.venv'
 $SrcVersion = '2.0.0'
 {text[start:end]}
@@ -168,8 +170,8 @@ exit 0
     ]
     assert "native detail caf\u00e9" in result.stderr.decode("utf-8")
     if native_exit == 0:
-        assert called.read_text(encoding="utf-8-sig") == "called"
         assert result.stdout.decode("utf-8").strip() == "completed"
+        assert called.read_text(encoding="utf-8-sig") == "called"
     else:
         assert not called.exists()
         assert "Canonical construction adapter is unavailable" in result.stdout.decode("utf-8")
