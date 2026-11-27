@@ -80,6 +80,7 @@ NATIVE_SOURCE_ALIASES = {
     "plugins/budget-guidance": {"pip-index-config": "installer_pip_index.py"},
 }
 NATIVE_SUPPORT_FILES = {
+    "plugins/agent-pull-requests": ("native_capture.sh",),
     "plugins/agent-ssh": ("native_capture.sh",),
     "plugins/agent-logger": (
         "bootstrap-uv.sh", "native_owned.sh", "native_capture.sh",

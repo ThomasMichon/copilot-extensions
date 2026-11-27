@@ -39,6 +39,15 @@ on:
       - libs/payload-invocation/tests/test_containers_ready_source.py
       - libs/payload-invocation/tests/test_ssh_ready_source.py
       - libs/payload-invocation/tests/test_logger_ready_source.py
+      - libs/payload-invocation/tests/test_pull_requests_ready_source.py
+      - plugins/agent-pull-requests/scripts/invoke-payload-runtime.sh
+      - plugins/agent-pull-requests/scripts/invoke-payload-runtime.ps1
+      - plugins/agent-pull-requests/scripts/argument-transport.ps1
+      - libs/agent-procutil/src/agent_procutil/private_paths.ps1
+      - plugins/agent-pull-requests/scripts/cell_invoke.py
+      - plugins/agent-pull-requests/tests/managed_command_fixture.py
+      - plugins/agent-pull-requests/tests/test_managed_command_gate.py
+      - plugins/agent-pull-requests/tests/test_cell_invocation.py
       - libs/payload-invocation/tests/test_machines_ready_source.py
       - libs/payload-invocation/tests/test_machines_provisioning_source.py
       - libs/payload-invocation/tests/test_machines_health_source.py
@@ -1767,6 +1776,62 @@ jobs:
       LOGGER_QUALIFICATION_SHELL: bash
     timeout-minutes: 8
     steps: *logger-ready-steps
+
+  pull-requests-ready-admission-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [powershell, pwsh]
+    env:
+      PULL_REQUESTS_QUALIFICATION_SHELL: ${{ matrix.host }}
+    timeout-minutes: 8
+    steps: &pull-requests-ready-steps
+      - *command-native-checkout
+      - *command-native-python
+      - *command-native-uv
+      - *command-native-interpreters
+      - name: Qualify prepared Pull Requests commands without provider or host effects
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_pull_requests_ready_source.py --allow-explicit-tiers
+          -k "${{ env.PULL_REQUESTS_QUALIFICATION_SHELL }}"
+          --junit-dir qualification-evidence/pull-requests-ready
+      - name: Require all Pull Requests admission controls and repeated reports without skips
+        env:
+          QUALIFIED_SHELL: ${{ env.PULL_REQUESTS_QUALIFICATION_SHELL }}
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/pull-requests-ready').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==24 and len({c.attrib['name'] for c in cases})==24;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='pull_requests_command_admission'];
+          assert len(reports)==24 and {r['shell'] for r in reports}=={os.environ['QUALIFIED_SHELL']};
+          assert {r['materialized'] for r in reports}=={False,True};
+          positive={'current','lkg','newest','cell','long-body','cell-long-body'};
+          assert all(r['network']=='disabled' and r['runtime_python']=='3.10.20'
+          and r['bootstrap_python']==('3.11.18' if r['scenario'].startswith('cell') else None)
+          and len(r['samples_seconds'])==(2 if r['scenario'] in positive else 1)
+          and r['uv_calls']==(4 if r['scenario'] in {'cell','cell-long-body'} else 2 if r['scenario'] in positive
+          or r['scenario']=='cell-changed' else 1 if r['scenario'].startswith('cell-') else 0)
+          and all(v>0 for v in r['samples_seconds']) for r in reports);
+          print(json.dumps({'pull_requests_command_admission':reports},sort_keys=True))"
+
+  pull-requests-ready-admission-linux:
+    runs-on: ubuntu-latest
+    env:
+      PULL_REQUESTS_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *pull-requests-ready-steps
+
+  pull-requests-ready-admission-macos:
+    runs-on: macos-latest
+    env:
+      PULL_REQUESTS_QUALIFICATION_SHELL: bash
+    timeout-minutes: 8
+    steps: *pull-requests-ready-steps
 
   machines-ready-admission-windows:
     runs-on: windows-latest

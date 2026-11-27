@@ -1,7 +1,101 @@
 # Installation driver contract: pull-requests-first-use-v1
 $ErrorActionPreference = 'Stop'
-$forward = @($args)
+$forward = [string[]]@($args)
 $mode = & (Join-Path $PSScriptRoot 'payload-mode.ps1')
+$OutputEncoding = New-Object Text.UTF8Encoding($false)
+
+function Get-AdmittedRuntimePython([string]$Interpreter) {
+    try {
+        $supportRoot = Join-Path $PSScriptRoot '_bootstrap_python'
+        . (Join-Path $supportRoot 'bootstrap-uv.ps1')
+        $windowsCapture = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+        if ($windowsCapture) {
+            . (Join-Path $supportRoot 'bootstrap-capture.ps1')
+        } else {
+            . (Join-Path $supportRoot 'versioned_runtime_native.ps1')
+        }
+        $capture = {
+            param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment)
+            if ($windowsCapture) {
+                return Invoke-BootstrapOwnedCapture -FilePath $FilePath -ArgList $ArgList `
+                    -Environment $Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            }
+            $diagnostic = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+                -InputText '' -ErrorOutput ([ref]$diagnostic) `
+                -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $diagnostic
+            }
+        }
+        $selected = Resolve-UvRuntimePython -ExpectedPython $Interpreter -InvokeCaptured $capture
+        if ($selected.Status -cne 'selected') {
+            throw 'Prepared UV prerequisites are unavailable; use explicit installation management.'
+        }
+        return $selected.Python
+    } catch {
+        [Console]::Error.WriteLine("[agent-pull-requests] application runtime admission failed: $($_.Exception.Message)")
+        exit 126
+    }
+}
+
+function Invoke-PythonEntry {
+    param([string]$Python, [string]$Target, [switch]$ScriptEntry, [string[]]$Arguments)
+    $argumentFile = $null
+    try {
+        $ErrorActionPreference = 'Stop'
+        . (Join-Path $PSScriptRoot 'argument-transport.ps1')
+        $json = ConvertTo-Json -InputObject @($Arguments) -Compress
+        $argumentFile = New-PullRequestsArgumentFile $json
+        $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argumentFile))
+        $encodedTarget = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Target))
+        $entry = @'
+import base64,json,os,runpy,subprocess,sys
+os.environ.pop('PYTHONHOME',None)
+os.environ.pop('PYTHONPATH',None)
+os.environ['PYTHONUTF8']='1'
+target,path=(base64.b64decode(value).decode('utf-8') for value in sys.argv[1:3])
+try:
+    with open(path,encoding='utf-8') as stream:
+        arguments=json.load(stream)
+    if not isinstance(arguments,list) or not all(isinstance(value,str) for value in arguments):
+        raise ValueError('Argument transport requires an array of strings')
+    os.unlink(path)
+    os.rmdir(os.path.dirname(path))
+except (OSError,ValueError) as error:
+    print('Argument transport refused: '+str(error),file=sys.stderr)
+    raise SystemExit(126)
+if sys.argv[3]=='script':
+    sys.argv=[target,'--']+arguments
+    runpy.run_path(target,run_name='__main__')
+else:
+    try:
+        result=subprocess.run(
+            [sys.executable,'-m',target,*arguments],env=os.environ.copy(),
+            stdin=sys.stdin,stdout=sys.stdout,stderr=sys.stderr,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
+        )
+    except OSError as error:
+        print('Application dispatch refused: '+str(error),file=sys.stderr)
+        raise SystemExit(126)
+    raise SystemExit(result.returncode)
+'@
+        $ErrorActionPreference = 'Continue'
+        if ($ScriptEntry) {
+            & $Python -I -c $entry $encodedTarget $encodedPath script
+        } else {
+            & $Python -I -B -X utf8 -c $entry $encodedTarget $encodedPath module
+        }
+        $invocationExit = $LASTEXITCODE
+    } catch {
+        [Console]::Error.WriteLine("[agent-pull-requests] argument transport refused: $($_.Exception.Message)")
+        $invocationExit = 126
+    } finally {
+        if ($argumentFile) { Remove-PullRequestsArgumentFile $argumentFile }
+    }
+    exit $invocationExit
+}
+
 if ($mode -ceq 'legacy') {
     $env:AGENT_RT_ROOT = Join-Path $env:USERPROFILE '.agent-pull-requests'
     $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
@@ -37,20 +131,17 @@ if ($mode -ceq 'legacy') {
         . $resolver -TraceMode ready
     }
     if (-not $AgentRtPy) { throw 'Owning installer returned without a resolvable runtime' }
-    $ErrorActionPreference = 'Continue'
-    & $AgentRtPy -m agent_pull_requests @forward
-    exit $LASTEXITCODE
+    $AgentRtPy = Get-AdmittedRuntimePython $AgentRtPy
+    Invoke-PythonEntry -Python $AgentRtPy -Target 'agent_pull_requests' -Arguments $forward
 }
 if ($mode -cne 'cell') { throw 'Native installation admission returned an unknown mode' }
-$python = $null
-foreach ($candidate in @('python3', 'python')) {
-    $command = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($command -and $command.Source -notmatch 'WindowsApps') {
-        & $command.Source -I -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>$null
-        if ($LASTEXITCODE -eq 0) { $python = $command.Source; break }
-    }
+try {
+    $python = & (Join-Path $PSScriptRoot '_bootstrap_python\select.ps1') `
+        -Operation Inspect -TimeoutMilliseconds 10000
+    if (-not $python) { throw 'Prepared command bootstrap Python is unavailable.' }
+} catch {
+    [Console]::Error.WriteLine("[agent-pull-requests] command bootstrap Python admission failed: $($_.Exception.Message)")
+    exit 126
 }
-if (-not $python) { throw 'Governed invocation requires an existing Python 3.10+ interpreter' }
-$ErrorActionPreference = 'Continue'
-& $python -I (Join-Path $PSScriptRoot 'cell_invoke.py') -- @forward
-exit $LASTEXITCODE
+Invoke-PythonEntry -Python $python -Target (Join-Path $PSScriptRoot 'cell_invoke.py') `
+    -ScriptEntry -Arguments $forward
