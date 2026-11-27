@@ -789,13 +789,13 @@ directories and searches it before configured anchors for both related selection
 and reflected payloads, even when that checkout has no venue-provider config.
 Container and local Dev Box preparation read related selections from the
 Worktrees owner's layered `agent-worktrees related list --json --repo <root>`
-view for each searched root, in the same order. That view applies the owner's
-own precedence across plugin-contributed, canonical, harness, machine and
-knowledge layers, so an empty `related: {}` checkout file no longer hides a
-declaration made in another layer. The first root whose matching entry declares
-plugins wins. When the owner is unavailable, refuses, or predates the
-`plugins` field in that output, selection falls back to reading each root's
-`.agent-worktrees/related.yaml` directly, as before.
+view for each searched root, in order. That view applies the owner's precedence
+across plugin-contributed, canonical, harness, machine and knowledge layers.
+The first root whose view has a matching entry decides the selection, and an
+empty selection there is authoritative. A root whose owner is unavailable,
+refuses, times out or omits `plugins` falls back to that root's committed
+`.agent-worktrees/related.yaml`. CodeSpace and SSH plans read the committed
+files directly.
 
 The existing Bridge-owned request provenance records whether controller
 context was explicit or inherited from affinity. An inherited ID remains

@@ -65,7 +65,7 @@ def _isolate_runtime_dirs(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_layered_related_view(monkeypatch):
+def _isolate_layered_related_view(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never read the machine's live agent-worktrees related view in unit tests.
 
     Tests that cover the layered lane patch ``_read_layered_related`` themselves.

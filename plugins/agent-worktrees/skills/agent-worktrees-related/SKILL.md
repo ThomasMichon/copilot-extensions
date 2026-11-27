@@ -203,8 +203,6 @@ related --conduct                        Emit merged session-start guidance
 
 `list --json` and `show --json` describe the grafted entry, including its
 normalized `plugins` selections (`source`, `enable`, optional `allow_missing`).
-agent-bridge reads `plugins` from `list --json` to stage related-repository
-plugins into container and local Dev Box workers.
 
 `related --conduct` is the dynamic source used by the `session-conduct` hook.
 It combines all configured repos from the normal config loader (committed

@@ -9,20 +9,22 @@ own ``codespacePlugins`` (owned by agent-codespaces).
 
 agent-worktrees is not importable from the bridge daemon venv. The legacy
 lane is a minimal, guarded YAML read of the committed files. The layered lane
-(:func:`declared_related_plugins`) first asks the agent-worktrees CLI for its
-grafted ``related list --json`` view, so plugin-contributed, canonical and
+(:func:`declared_related_plugins`, used by container and local Dev Box
+preparation) first asks the agent-worktrees CLI for its grafted
+``related list --json`` view, so plugin-contributed, canonical and
 machine/knowledge layers are honored with agent-worktrees' own precedence.
-Every function fails safe -- any error yields an empty result, never an
-exception into the dispatch path.
+Unavailable or unreadable sources fail safe to an empty result. A declared
+``allow_missing`` that is not a boolean raises ``ValueError`` so a malformed
+selection is refused rather than silently dropped.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -44,7 +46,7 @@ def _platform_keys() -> tuple[str, ...]:
     return ("linux", "wsl")
 
 
-def _load_yaml(path: Path) -> dict | None:
+def _load_yaml(path: Path) -> dict[str, Any] | None:
     try:
         if not path.is_file():
             return None
@@ -113,7 +115,7 @@ def control_plane_anchors() -> list[Path]:
     return anchors
 
 
-def _entry_repos(entry: dict) -> list[str]:
+def _entry_repos(entry: dict[str, Any]) -> list[str]:
     """The venue repos an entry maps to (locus.codespace/container ``repo``)."""
     locus = entry.get("locus")
     if not isinstance(locus, dict):
@@ -231,51 +233,54 @@ def related_plugins_for_repo(
     project = _registered_project(repo.strip()) if match_registered_remote else None
     targets = {target, *([project.lower()] if project else [])}
     for anchor in (anchors if anchors is not None else control_plane_anchors()):
-        data = _load_yaml(anchor / _RELATED_REL)
-        if not data:
-            continue
-        related = data.get("related")
-        if not isinstance(related, dict):
-            continue
-        for key, entry in related.items():
-            if not isinstance(entry, dict):
-                continue
-            # YAML may deserialize an unquoted key as a non-string (int,
-            # bool, etc.) -- a real registry key is always a string, so
-            # skip a non-string key entirely rather than coercing it (which
-            # could create an unintended match, e.g. a repo literally named
-            # "42" matching an int key 42) while still avoiding the .lower()
-            # crash that would otherwise drop every later entry's plugins.
-            if isinstance(key, str) and key.lower() in targets:
-                return _parse_plugin_items(entry.get("plugins"))
-            if any(r.lower() == target for r in _entry_repos(entry)):
-                return _parse_plugin_items(entry.get("plugins"))
+        refs = _legacy_anchor_plugins(anchor, targets, target)
+        if refs is not None:
+            return refs
     return []
+
+
+def _legacy_anchor_plugins(anchor: Path, targets: set[str], target: str) -> list[PluginRef] | None:
+    """The first matching entry's plugins in ``anchor``'s file; ``None`` without a match."""
+    data = _load_yaml(anchor / _RELATED_REL)
+    related = data.get("related") if data else None
+    if not isinstance(related, dict):
+        return None
+    for key, entry in related.items():
+        if not isinstance(entry, dict):
+            continue
+        # YAML may deserialize an unquoted key as a non-string (int,
+        # bool, etc.) -- a real registry key is always a string, so
+        # skip a non-string key entirely rather than coercing it (which
+        # could create an unintended match, e.g. a repo literally named
+        # "42" matching an int key 42) while still avoiding the .lower()
+        # crash that would otherwise drop every later entry's plugins.
+        if isinstance(key, str) and key.lower() in targets:
+            return _parse_plugin_items(entry.get("plugins"))
+        if any(r.lower() == target for r in _entry_repos(entry)):
+            return _parse_plugin_items(entry.get("plugins"))
+    return None
 
 
 _LAYERED_TIMEOUT_SECONDS = 60
 
 
-def _read_layered_related(anchor: Path) -> list[dict] | None:
+def _read_layered_related(anchor: Path) -> list[dict[str, Any]] | None:
     """Grafted related entries for ``anchor`` from ``agent-worktrees related list``.
 
-    ``None`` when the owner CLI is unavailable, refuses, or returns no entry
-    list. The entries carry ``plugins`` only from an agent-worktrees release
-    that publishes them; callers treat a missing key as unsupported.
+    ``None`` when the owner CLI is unavailable, refuses, times out, or returns
+    no entry list. The owner's whole command tree is bounded, so a child that
+    keeps the output pipes open cannot outlive the timeout.
     """
     try:
-        from agent_procutil import no_window_kwargs
-
+        from .provider_process import run_captured
         from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 
         prefix = _agent_worktrees_launch_prefix()
         if not prefix:
             return None
-        proc = subprocess.run(
+        proc = run_captured(
             [*prefix, "related", "list", "--json", "--repo", str(anchor)],
-            capture_output=True, text=True, stdin=subprocess.DEVNULL,
-            timeout=_LAYERED_TIMEOUT_SECONDS, env=_agent_worktrees_environment(),
-            **no_window_kwargs(),
+            _LAYERED_TIMEOUT_SECONDS, errors="replace", env=_agent_worktrees_environment(),
         )
         if proc.returncode:
             log.warning("Layered related view unavailable (exit %s)", proc.returncode)
@@ -287,40 +292,43 @@ def _read_layered_related(anchor: Path) -> list[dict] | None:
     return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
 
 
-def layered_related_plugins_for_repo(repo: str | None, anchors: list[Path]) -> list[PluginRef]:
-    """Related-repo plugins from agent-worktrees' grafted view of ``anchors``.
+def _layered_entry(rows: list[dict[str, Any]], target: str) -> dict[str, Any] | None:
+    """The entry named ``target``, else the first whose venue repo is ``target``."""
+    for row in rows:
+        name = row.get("name")
+        if isinstance(name, str) and name.lower() == target:
+            return row
+    return next((row for row in rows if any(r.lower() == target for r in _entry_repos(row))), None)
 
-    Matches the entry name first, then ``locus.codespace.repo`` /
-    ``locus.container.repo`` (case-insensitive), like the legacy lane. The
-    first anchor whose view declares ``plugins`` for the match wins. ``[]``
-    when no view is available, nothing matches, or the owner predates the
-    ``plugins`` field.
-    """
-    if not repo:
-        return []
-    target = repo.strip().casefold()
-    for anchor in anchors:
-        rows = _read_layered_related(anchor)
-        if not rows:
-            continue
-        entry = next((
-            row for row in rows
-            if isinstance(row.get("name"), str) and row["name"].casefold() == target
-        ), None) or next((
-            row for row in rows if any(r.casefold() == target for r in _entry_repos(row))
-        ), None)
-        if entry is not None and "plugins" in entry:
-            refs = _parse_plugin_items(entry["plugins"])
-            if refs:
-                return refs
-    return []
+
+def _supported_view(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """``rows`` when the owner's view publishes ``plugins`` for every entry."""
+    return rows if rows and all("plugins" in row for row in rows) else None
 
 
 def declared_related_plugins(repo: str | None, anchors: list[Path]) -> list[PluginRef]:
-    """Layered related plugins for ``repo``, else the legacy ``related.yaml`` lane.
+    """Related-repo plugins for ``repo`` from each anchor's layered view, in order.
 
-    The layered view is authoritative when it declares plugins. The legacy
-    fallback keeps older agent-worktrees owners and a hand-written
-    ``<anchor>/.agent-worktrees/related.yaml`` working.
+    A view that publishes ``plugins`` is authoritative for its anchor: the
+    matching entry's selection is returned even when empty, and a view with no
+    matching entry moves on to the next anchor. An anchor whose owner is
+    unavailable or predates the ``plugins`` field uses its committed
+    ``related.yaml``; when no anchor has a layered view this is exactly
+    :func:`related_plugins_for_repo`. ``[]`` when nothing matches.
     """
-    return layered_related_plugins_for_repo(repo, anchors) or related_plugins_for_repo(repo, anchors=anchors)
+    if not repo:
+        return []
+    target = repo.strip().lower()
+    views = [(anchor, _supported_view(_read_layered_related(anchor))) for anchor in anchors]
+    if all(rows is None for _anchor, rows in views):
+        return related_plugins_for_repo(repo, anchors=anchors)
+    for anchor, rows in views:
+        if rows is not None:
+            entry = _layered_entry(rows, target)
+            if entry is not None:
+                return _parse_plugin_items(entry["plugins"])
+            continue
+        refs = _legacy_anchor_plugins(anchor, {target}, target)
+        if refs is not None:
+            return refs
+    return []

@@ -288,9 +288,17 @@ async def _registered_target_binding(repository: str) -> dict:
 
 async def venue_plugin_plan(
     target: dict, *, caller=None, controller_cwd: str | None = None, codespace: bool = False,
+    layered_related: bool = False,
 ) -> dict:
-    """Select current-controller plugins independently of the receiver transport."""
-    from .related_plugins import control_plane_anchors, declared_related_plugins, is_harness_plugin
+    """Select current-controller plugins independently of the receiver transport.
+
+    ``layered_related`` reads related selections from the Worktrees owner's
+    layered view (container preparation); CodeSpace and SSH plans keep the
+    committed ``related.yaml`` lane.
+    """
+    from .related_plugins import (
+        control_plane_anchors, declared_related_plugins, is_harness_plugin, related_plugins_for_repo,
+    )
     from .session_host.container_transport import _run_provider
     from .transport import _reresolve_stale_interpreter
 
@@ -312,7 +320,10 @@ async def venue_plugin_plan(
         spec["source"]: spec for spec in specs if not is_harness_plugin(spec["source"])
     }
     if target.get("repo"):
-        refs = await asyncio.to_thread(declared_related_plugins, target["repo"], roots)
+        if layered_related and not (target.get("plugin_plan") or codespace):
+            refs = await asyncio.to_thread(declared_related_plugins, target["repo"], roots)
+        else:
+            refs = related_plugins_for_repo(target["repo"], anchors=roots)
         for ref in refs:
             spec = ref.selection()
             if not is_harness_plugin(spec["source"]):
@@ -375,9 +386,10 @@ async def prepare_venue_plugins(
     target: dict, transport, workspace: str, *, prelude: str = "", remote_env: str | None = None,
     caller=None, controller_cwd: str | None = None,
 ) -> list[str]:
+    codespace = getattr(transport, "boundary", None) == "codespace"
     plan = await venue_plugin_plan(
         target, caller=caller, controller_cwd=controller_cwd,
-        codespace=getattr(transport, "boundary", None) == "codespace",
+        codespace=codespace, layered_related=not codespace,
     )
     environment = f". {shlex.quote(remote_env)};\n" if remote_env else ""
     script = environment + prelude + "\n" + build_prepare_script(plan, workspace)
