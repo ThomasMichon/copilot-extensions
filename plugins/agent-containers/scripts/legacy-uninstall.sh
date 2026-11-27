@@ -11,7 +11,33 @@ if [[ ! -f "$helper" ]]; then
     exit 1
 fi
 _uninstall_external_python() {
-    local root="${1:?runtime root required}" candidate selected probe
+    local root="${1:?runtime root required}" candidate selected probe support="$SCRIPT_DIR" capture
+    if [[ ! -e "$support/bootstrap-uv.sh" && ! -L "$support/bootstrap-uv.sh" &&
+        ! -e "$support/installer-instance-python-version.txt" &&
+        ! -L "$support/installer-instance-python-version.txt" ]]; then
+        support="$(CDPATH= cd -- "$SCRIPT_DIR/../../../libs/installer-engine" && pwd -P)" || return 1
+    fi
+    capture="$SCRIPT_DIR/native_capture.sh"
+    [[ -f "$capture" ]] ||
+        capture="$SCRIPT_DIR/../../../libs/agent-procutil/src/agent_procutil/native_capture.sh"
+    [[ -f "$support/bootstrap-uv.sh" && -f "$support/installer-instance-python-version.txt" &&
+        -f "$capture" ]] || {
+        printf '%s\n' 'Prepared uninstall bootstrap support is unavailable; restore the owning payload.' >&2
+        return 1
+    }
+    . "$capture" || return 1
+    candidate="$(
+        unset BASH_ENV ENV
+        exec 5>&- 6>&- 7>&- 8>&- 9>&-
+        if capture_native_process 30 "$BASH" --noprofile --norc -c '
+            . "$1/bootstrap-uv.sh" || exit
+            resolve_uv_bootstrap_python "$1/installer-instance-python-version.txt" Inspect
+        ' containers-uninstall-bootstrap "$support"; then
+            printf '%s' "$__native_capture_output"
+        else
+            exit $?
+        fi
+    )" || return 1
     probe='import sys
 from pathlib import Path
 assert sys.version_info >= (3, 10)
@@ -25,18 +51,10 @@ for value in paths:
     for actual in (path, path.resolve(strict=True)):
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
-    while IFS= read -r candidate; do
-        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
-        case "${OSTYPE:-}" in
-            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
-        esac
-        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
-        [[ -n "$selected" && -x "$selected" ]] || continue
-        printf '%s' "$selected"
-        return 0
-    done < <(type -aP python3 python 2>/dev/null)
-    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
-    return 1
+    case "$candidate" in "$root"/*|*WindowsApps*) return 1 ;; esac
+    selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || return 1
+    [[ -n "$selected" && -x "$selected" ]] || return 1
+    printf '%s' "$selected"
 }
 python="$(_uninstall_external_python "$root")" || exit 1
 [[ -n "$python" ]] || { printf '%s\n' 'Legacy uninstall requires an existing external Python 3.10+ interpreter' >&2; exit 1; }
@@ -45,6 +63,7 @@ arguments=(-I -B "$helper" --payload-root "$(dirname -- "$SCRIPT_DIR")" \
     --profile "$SCRIPT_DIR/uninstall-profile.json")
 "$python" "${arguments[@]}" --check
 [[ -d "$root" ]] || exit 0
+export COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON="$python"
 . "$SCRIPT_DIR/legacy-transaction.sh"
 INSTALL_DIR="$root"
 _enter_install_lock || { printf '%s\n' 'Could not acquire the install transaction lock; refusing to proceed unlocked' >&2; exit 1; }

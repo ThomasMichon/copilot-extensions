@@ -81,14 +81,12 @@ function Resolve-NativeBootstrapPython {
         [string]$Action = 'inspect',
         [string]$Root = '',
         [string]$BootstrapDirectory = $PSScriptRoot,
-        [AllowEmptyString()][string]$UvPath
+        [AllowEmptyString()][string]$UvPath,
+        [scriptblock]$InvokeCaptured
     )
     . (Join-Path $BootstrapDirectory 'bootstrap-uv.ps1')
-    $uvOptions = @{}
-    if ($PSBoundParameters.ContainsKey('UvPath')) { $uvOptions.UvPath = $UvPath }
-    $selection = Resolve-UvBootstrapPython `
-        -RequestFile (Join-Path $BootstrapDirectory 'installer-instance-python-version.txt') `
-        -Operation Inspect -IsolateSelection @uvOptions -InvokeCaptured {
+    if (-not $InvokeCaptured) {
+        $InvokeCaptured = {
             param($FilePath, $ArgList, $Environment)
             $nativeError = ''
             $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
@@ -98,6 +96,12 @@ function Resolve-NativeBootstrapPython {
                 ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $nativeError
             }
         }
+    }
+    $uvOptions = @{}
+    if ($PSBoundParameters.ContainsKey('UvPath')) { $uvOptions.UvPath = $UvPath }
+    $selection = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $BootstrapDirectory 'installer-instance-python-version.txt') `
+        -Operation Inspect -IsolateSelection @uvOptions -InvokeCaptured $InvokeCaptured
     if ($selection.Status -ne 'selected') { return $null }
     $probe = @'
 import json,sys
@@ -107,25 +111,32 @@ python = Path(sys._base_executable).resolve(strict=True)
 if sys.argv[1].lower() in {'uninstall', 'broker-remove'}:
     root = Path(sys.argv[2]).absolute()
     assert '..' not in root.parts
-    assert all(not python.is_relative_to(boundary) for boundary in (root, root.resolve()))
+    roots = (root, root.resolve())
+    paths = (sys.argv[3], sys.executable, sys.prefix, sys.base_prefix,
+             getattr(sys, '_base_executable', sys.executable))
+    for value in paths:
+        path = Path(value).absolute()
+        for actual in (path, path.resolve(strict=True)):
+            assert all(not actual.is_relative_to(boundary) for boundary in roots)
 print(json.dumps(str(python)))
 '@
     $probe = $probe.Replace('MINIMUM_MINOR', [string]$MinimumMinor)
     $discoveryEnvironment = Get-UvBootstrapEnvironment
     $discoveryEnvironment.PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false'
-    try {
-        $nativeError = ''
-        $selected = Invoke-Hidden -FilePath $selection.Python -ArgList @(
-            '-I', '-S', '-B', '-c', $probe, $Action, $Root
-        ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-        if ($LASTEXITCODE -eq 0) {
-            $python = ($selected | Out-String) | ConvertFrom-Json
+    $probeFlags = @('-I', '-S', '-B')
+    if ($Action -in @('uninstall', 'broker-remove')) { $probeFlags = @('-I', '-B') }
+    $observed = & $InvokeCaptured -FilePath $selection.Python -ArgList (
+        $probeFlags + @('-c', $probe, $Action, $Root, $selection.Python)
+    ) -Environment $discoveryEnvironment
+    if ($observed.ExitCode -eq 0) {
+        try {
+            $python = ($observed.Stdout | Out-String) | ConvertFrom-Json
             if ($python -and [IO.Path]::IsPathRooted($python) -and
                 $python -notmatch '[\\/]WindowsApps[\\/]' -and [IO.File]::Exists($python)) {
                 return $python
             }
-        }
-    } catch { }
+        } catch { }
+    }
     return $null
 }
 

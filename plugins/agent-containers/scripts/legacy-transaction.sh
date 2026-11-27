@@ -45,13 +45,25 @@ _exit_install_lock() {
 
 _python_install_fd_lock() {
     local timeout="$1" candidate python=""
-    while IFS= read -r candidate; do
-        case "$candidate" in "$INSTALL_DIR"/*|*WindowsApps*) continue ;; esac
-        if "$candidate" -I -B -S -c 'import fcntl' >/dev/null 2>&1; then
-            python="$candidate"
-            break
-        fi
-    done < <(type -aP python3 python 2>/dev/null)
+    if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON+x}" ]]; then
+        candidate="$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON"
+        case "$candidate" in
+            "$INSTALL_DIR"/*|*WindowsApps*) return 1 ;;
+            /*) ;;
+            *) return 1 ;;
+        esac
+        [[ -x "$candidate" ]] &&
+            "$candidate" -I -B -S -c 'import fcntl' >/dev/null 2>&1 || return 1
+        python="$candidate"
+    else
+        while IFS= read -r candidate; do
+            case "$candidate" in "$INSTALL_DIR"/*|*WindowsApps*) continue ;; esac
+            if "$candidate" -I -B -S -c 'import fcntl' >/dev/null 2>&1; then
+                python="$candidate"
+                break
+            fi
+        done < <(type -aP python3 python 2>/dev/null)
+    fi
     [[ -n "$python" ]] || {
         printf '%s\n' 'Transaction admission requires native flock or an existing Python with fcntl.flock; no provisioning attempted' >&2
         return 1
