@@ -522,12 +522,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [seeded-launch and counting-identity study](journal/2026/11.27-seeded-launch-and-counting-identity-delta.md)
+retains #14325's owner-held installed acceptance after released source fixes
+and #14857's verified failed native report. The complete 23:59:55 observation
+remains 584 OPEN, but #14857's arrival offsets the external #14823 departure.
+Historical observations and every remaining parent gate are preserved; neither
+equal counts nor an external closure supplies campaign completion credit.
+
 The [oldest-pending delivery study](journal/2026/11.26-oldest-pending-and-partial-deliveries.md)
 retains whole #542/#1138/#1419 requests against five attributed partial or
 different-contract deliveries, correcting stale no-delivery assertions without
 claiming full acceptance. Sixteen complete reference screens do not admit
 other originals or prove semantic completion. Only three current outcome
 columns change; counting, ownership and every parent gate remain.
+The reviewed recording merged in #14861.
 
 The [whole-inflow diagnostic study](journal/2026/11.26-inflow-diagnostics-and-doctor-boundaries.md)
 retains three actual requests after complete qualified intake, bounded doctor
