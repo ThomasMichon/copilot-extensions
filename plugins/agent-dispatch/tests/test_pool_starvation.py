@@ -12,8 +12,8 @@ from tests.test_pool_placement import current_task, place, pool, publish, record
 q = placement_controls.q
 
 
-def held(q: TaskQueue, *, suspend: bool) -> str:
-    publish(q, pool())
+def held(q: TaskQueue, *, suspend: bool, others: tuple[str, ...] = ()) -> str:
+    publish(q, pool(), *(pool(name) for name in others))
     t = task(q)
     reservation, _ = place(q, t)
     record_native(q, reservation)
@@ -56,3 +56,26 @@ def test_the_coordinator_advertises_and_serves_pool_starvation(q: TaskQueue) -> 
     assert client.get("/health").json()["pool_starvation"] == 1
     (starved,) = client.get("/pool-starvation").json()["pools"]
     assert [h["task_id"] for h in starved["holders"]] == [holder]
+
+
+def test_work_not_yet_due_is_not_waiting(q: TaskQueue) -> None:
+    held(q, suspend=True)
+    task(q, not_before=5000)
+    assert q.pool_starvation(now=1000) == []
+    assert len(q.pool_starvation(now=5000)) == 1
+
+
+def test_work_retained_by_another_pool_does_not_wait_on_this_one(q: TaskQueue) -> None:
+    holder = held(q, suspend=True, others=("other",))
+    full = q.task_pool_assignment(holder)
+    assert full is not None
+    retry = task(q)
+    assert len(q.pool_starvation(now=1000)) == 1
+    elsewhere = "other" if full.registration_id == "worker" else "worker"
+    with q._connect() as conn:
+        conn.execute(
+            "INSERT INTO task_pool_assignments (task_id, registration_id, machine, env,"
+            " reservation_key, task_generation, catalog_revision) VALUES (?, ?, 'host-a', 'linux', 'r-retry', 0, 1)",
+            (retry.id, elsewhere),
+        )
+    assert q.pool_starvation(now=1000) == []

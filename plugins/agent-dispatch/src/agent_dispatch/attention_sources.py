@@ -351,7 +351,7 @@ def read_dispatch(client_factory: Callable[[], Any], read_at: str,
             backlogs[repo] = health.get("backlog") or {}
             starvation = starvation or health.get("pool_starvation") == 1
         pools: list[dict[str, Any]] = []
-        if starvation:
+        if starvation and _threshold(POOL_STARVED_AFTER_ENV, DEFAULT_POOL_STARVED_AFTER):
             if time.monotonic() + _LANE_REQUEST_TIMEOUT > started + backlog_budget:
                 unread += 1
             else:

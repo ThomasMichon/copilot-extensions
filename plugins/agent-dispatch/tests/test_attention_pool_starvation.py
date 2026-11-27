@@ -61,9 +61,14 @@ def test_a_pool_held_only_by_stopped_tasks_is_one_stalled_pool_item(
 
 
 def test_a_zero_threshold_turns_pool_starvation_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Unasked(_Client):
+        def pool_starvation(self) -> builtins.list[dict[str, Any]]:
+            raise AssertionError("a disabled detector must not read pool starvation")
+
     monkeypatch.setenv(srcs.POOL_STARVED_AFTER_ENV, "0")
-    result = srcs.read_dispatch(lambda: _Client([_starved(99999)]), T1)
+    result = srcs.read_dispatch(lambda: Unasked([_starved(99999)]), T1)
     assert not [i for i in result["items"] if i["entity"] == srcs.POOL_ENTITY]
+    assert result["status"] == "ok"
 
 
 def test_a_failed_pool_starvation_read_is_uncertain_not_failed() -> None:

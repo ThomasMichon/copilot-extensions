@@ -28,13 +28,25 @@ def starved_pools(
     accounting = ReservationAccountability(conn)
     queued = [
         Task._from_row(row) for row in conn.execute(
-            "SELECT * FROM tasks WHERE status = ? AND hold_reason IS NULL AND awaiting_steer = 0",
-            (Status.QUEUED,),
+            "SELECT * FROM tasks WHERE status = ? AND hold_reason IS NULL AND awaiting_steer = 0"
+            " AND not_before <= ?",
+            (Status.QUEUED, now),
         )
     ]
+    # Placement never moves a task off its retained pool, so it waits only there.
+    retained = {
+        row["task_id"]: (row["registration_id"], row["machine"], row["env"])
+        for row in conn.execute(
+            "SELECT task_id, registration_id, machine, env FROM task_pool_assignments"
+            " WHERE assignment_released = 0",
+        )
+    }
     starved: list[dict[str, Any]] = []
     for pool in definitions:
-        waiting = [task for task in queued if _permits(pool, task)]
+        waiting = [
+            task for task in queued
+            if retained.get(task.id, pool.identity) == pool.identity and _permits(pool, task)
+        ]
         if not waiting:
             continue
         load = pool_lane_load(conn, pool.identity, accounting=accounting)
