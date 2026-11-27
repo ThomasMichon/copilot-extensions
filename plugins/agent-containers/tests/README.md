@@ -60,9 +60,11 @@ reaches `uv python install`, while PowerShell reuses an existing exact interpret
 without installation. The setup controls preserve those owner-specific work
 counts rather than requiring a redundant Windows acquisition.
 
-Eight POSIX `test_installer_index.py` controls compare caller and payload UV
+Twelve POSIX `test_installer_index.py` controls compare caller and payload UV
 defaults through the actual canonical pip reader, retaining both relative and
-absolute caller site prefixes. The reader runs in the same payload context as
+absolute caller site prefixes and explicit pip configuration files. Relative
+`PIP_CONFIG_FILE` paths remain caller-relative even when a different file exists
+in the payload. The reader runs in the same payload context as
 dependency installation, so an unrelated caller's default cannot suppress the
 governed pip bridge or replace a payload's own default.
 

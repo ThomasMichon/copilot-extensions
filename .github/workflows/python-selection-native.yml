@@ -1725,13 +1725,13 @@ jobs:
           python tools/run-plugin-tests.py agent-containers
           --test-file tests/test_installer_index.py --allow-explicit-tiers
           --junit-dir qualification-evidence/containers-installer-index
-      - name: Require all eight caller, payload and site feed controls
+      - name: Require all twelve caller, payload, site and explicit-file feed controls
         if: runner.os != 'Windows'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/containers-installer-index').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==8 and len({c.attrib['name'] for c in cases})==8;
+          assert len(cases)==12 and len({c.attrib['name'] for c in cases})==12;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Containers command admission
         run: >-

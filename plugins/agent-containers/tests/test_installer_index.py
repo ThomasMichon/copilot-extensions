@@ -23,6 +23,7 @@ HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 @pytest.mark.parametrize("materialized", [False, True], ids=["raw", "materialized"])
 @pytest.mark.parametrize("scenario", [
     "caller-default", "payload-default", "relative-site", "absolute-site",
+    "relative-config", "absolute-config",
 ])
 def test_index_selection_uses_payload_config_and_preserves_caller_site(
     seed: Removal, host: str, scenario: str,
@@ -54,6 +55,16 @@ def test_index_selection_uses_payload_config_and_preserves_caller_site(
         )
         if scenario == "payload-default":
             expected = "__absent__"
+    elif scenario.endswith("config"):
+        expected = "https://explicit.example.invalid/simple"
+        explicit = caller / "pip.conf"
+        explicit.write_text(f"[global]\nindex-url={expected}\n", encoding="utf-8")
+        (seed.payload / "pip.conf").write_text(
+            "[global]\nindex-url=https://unintended.example.invalid/simple\n", encoding="utf-8",
+        )
+        environment["PIP_CONFIG_FILE"] = (
+            "pip.conf" if scenario == "relative-config" else str(explicit)
+        )
     else:
         user = home / (
             "user-data/pip/pip.conf" if sys.platform == "darwin" else "user-config/pip/pip.conf"

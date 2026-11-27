@@ -333,6 +333,9 @@ _ensure_uv_index() {
     fi
     py="$(_source_python)" || return
     idx="$(
+        if [[ -n "${PIP_CONFIG_FILE:-}" && "$PIP_CONFIG_FILE" != /* ]]; then
+            export PIP_CONFIG_FILE="$PWD/$PIP_CONFIG_FILE"
+        fi
         cd -- "$PLUGIN_DIR" || exit
         "$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
             --uv "$CONTAINERS_UV" --site-prefix "$site_prefix" </dev/null
