@@ -36,7 +36,7 @@ def _producer_setup(directory: Path) -> str:
     text = INSTALLER.read_text(encoding="utf-8")
     start = text.index("Set-StrictMode -Version 2.0")
     end = text.index("# === install-contract:test-persistent-environment", start)
-    return text[start:end]
+    return "$WheelProfile = $WheelDirectory = $WheelPython = $WheelUv = $null\n" + text[start:end]
 
 
 def _copy_payload(target: Path) -> None:
@@ -231,20 +231,14 @@ def test_actual_lifecycle_refusal_retains_requested_error_encoding(
     script = payload / "scripts" / "lifecycle-output.ps1"
     script.write_text(
         "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
-        "$Action = 'cell-repair'\n"
-        "$PSBoundParameters['Action'] = $Action\n"
-        "$PSBoundParameters['Context'] = $env:MACHINES_FIXTURE_CONTEXT\n"
-        "$PSBoundParameters['DurableHome'] = $env:MACHINES_FIXTURE_DURABLE\n"
-        "$PSBoundParameters['ExpectedMarketplaceId'] = 'fixture-market'\n"
-        "$PSBoundParameters['ExpectedPayloadRoot'] = $env:MACHINES_FIXTURE_PAYLOAD\n"
-        "$PSBoundParameters['ExpectedPayloadVersion'] = '1.0.0'\n"
-        "$PSBoundParameters['SnapshotId'] = '1.0.0'\n"
-        "$PSBoundParameters['RuntimeVersion'] = $env:MACHINES_FIXTURE_INVALID_VERSION\n"
-        "$PSBoundParameters['ExpectedNamespaceGeneration'] = '1'\n"
-        "$PSBoundParameters['ExpectedInstallGeneration'] = '1'\n"
-        "$PSBoundParameters['ExpectCurrentAbsent'] = [Management.Automation.SwitchParameter]$true\n"
-        "$PSBoundParameters['ExpectLastKnownGoodAbsent'] = [Management.Automation.SwitchParameter]$true\n"
-        + _producer_setup(script.parent),
+        "& (Join-Path $PSScriptRoot 'init.ps1') -Action cell-repair `\n"
+        "  -Context $env:MACHINES_FIXTURE_CONTEXT -DurableHome $env:MACHINES_FIXTURE_DURABLE `\n"
+        "  -ExpectedMarketplaceId fixture-market -ExpectedPayloadRoot $env:MACHINES_FIXTURE_PAYLOAD `\n"
+        "  -ExpectedPayloadVersion 1.0.0 -SnapshotId 1.0.0 `\n"
+        "  -RuntimeVersion $env:MACHINES_FIXTURE_INVALID_VERSION `\n"
+        "  -ExpectedNamespaceGeneration 1 -ExpectedInstallGeneration 1 `\n"
+        "  -ExpectCurrentAbsent -ExpectLastKnownGoodAbsent\n"
+        "exit $LASTEXITCODE\n",
         encoding="ascii",
     )
     durable = tmp_path / "uncreated-durable"

@@ -81,8 +81,11 @@ this is not a new Windows Git Bash installer contract. These fixtures perform
 no actual repair, uninstall, attribution, deactivation or retirement and do
 not qualify cold setup, installed adoption or the lifecycle engine's separate
 authorization/deletion protocol.
-The same Windows jobs also require both retained real lifecycle-refusal output
-modes through `test_machines_cell_output_source.py`. Those fixtures now carry
-materialized bootstrap support and real prepared UV rather than a Python-only
-command-lookup shim; the original lifecycle error, bytes and no-state-mutation
-assertions remain unchanged.
+The same Windows jobs also require all five retained construction, real staged
+stamp and lifecycle-refusal controls through `test_machines_cell_output_source.py`.
+The lifecycle fixture invokes the complete installer with real parameter binding,
+materialized bootstrap support and prepared UV rather than a Python-only
+command-lookup shim or an extracted preamble with missing defaults.
+The original lifecycle error, bytes and no-state-mutation assertions remain
+unchanged. The isolated construction fixture supplies the installer's empty
+wheel-option defaults before its extracted function definitions.

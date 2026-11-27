@@ -16,3 +16,9 @@ prepared_lifecycle_python = _source.prepared_lifecycle_python
 test_actual_lifecycle_refusal_retains_requested_error_encoding = (
     _source.test_actual_lifecycle_refusal_retains_requested_error_encoding
 )
+test_construction_shell_stderr_uses_requested_producer_encoding = (
+    _source.test_construction_shell_stderr_uses_requested_producer_encoding
+)
+test_actual_legacy_probe_and_staged_stamp_keep_requested_output = (
+    _source.test_actual_legacy_probe_and_staged_stamp_keep_requested_output
+)

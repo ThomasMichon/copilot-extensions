@@ -2127,13 +2127,13 @@ jobs:
           --test-file tests/test_machines_cell_output_source.py --allow-explicit-tiers
           -k "${{ env.MACHINES_QUALIFICATION_SHELL }}"
           --junit-dir qualification-evidence/machines-cell-output
-      - name: Require actual lifecycle refusal encoding with both output modes
+      - name: Require retained construction, stamp and lifecycle refusal encoding
         if: runner.os == 'Windows' && env.MACHINES_QUALIFICATION_SHELL != 'bash'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/machines-cell-output').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==2 and len({c.attrib['name'] for c in cases})==2;
+          assert len(cases)==5 and len({c.attrib['name'] for c in cases})==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Retain native health capability and rollback assertions
         run: >-
