@@ -522,12 +522,20 @@ the non-public approval conversation.
 
 ## Plan
 
+The [cleanup custody and bootstrap delta](journal/2026/11.27-cleanup-custody-and-current-bootstrap-delta.md)
+retains eleven whole requests and 21 discussions, plus three actual changed
+owner messages on the separate bootstrap parent. Finite source deliveries
+are credited without completing broader cleanup, migration or native outcomes.
+Two equal complete scans at 04:38:04 retain the same 584 identities; no issue
+effect, final unit or parent criterion resolves.
+
 The [maintenance intake and finite-delivery keepers](journal/2026/11.27-maintenance-intake-and-finite-delivery-keepers.md)
 record thirty-two whole current requests and all 76 discussions. Explicit
 finite source completions receive credit without completing their independent
 parents; deployment/version terminology alone does not make a request obsolete.
 Only those current outcome/gap fields change. Counting, existing acceptance,
 ownership and all five Plan/eleven global Validation gates remain unchanged.
+The reviewed recording merged in #14869.
 
 The [lifetime and venue-selector study](journal/2026/11.27-lifetime-and-venue-selector-boundaries.md)
 retains whole #2464/#2549/#2551/#2612/#2680 requests and all fourteen

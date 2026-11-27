@@ -237,6 +237,29 @@ is unchanged. Descriptions and owner reports remain attributed evidence, not
 new current-code inspection, feature-test execution or installed acceptance.
 Unselected originals, source-review bodies and held sources remain unassessed.
 
+The [cleanup custody and actual bootstrap delta](journal/2026/11.27-cleanup-custody-and-current-bootstrap-delta.md)
+reads eleven further whole current requests and all 21 discussions. Their
+complete runtime-data, portability, lifecycle, migration, custody, endpoint,
+native-parent and optional-cleanup outcomes remain OPEN. Three selected new
+or edited #13775 owner messages and the complete #14864 description preserve
+the actual finite Machines bootstrap/uninstall deliveries and newly claimed
+Containers ingress; they do not supply a whole-parent original/discussion read
+or complete the producer/adoption programme.
+
+At **2026-11-27 04:38:04 America/Los_Angeles**, two equal complete six-page
+scans with equal complete fifteen-member rosters again measure 584 OPEN:
+276 original-cohort and 308 inflow. There is no arrival or departure from the
+retained 23:59:55 set. This fresh observation is recorded separately; earlier
+counts, identity history and qualification are not rewritten.
+
+Only the eleven selected frozen outcome/gap pairs become current-retained.
+The same effective 584 identities now have 469 pending, 60 current-retained,
+38 prior-retained, five new-retained, six spent-open, five excluded and one
+coordination outcome. Every first-six historical column and other row remains.
+Actual source claims, test reports, complete issue reading and source/copy
+admission remain separate. No final unit, issue effect, product/native
+execution or resource operation follows.
+
 This resolves the global **coverage-roster recording** criterion, which
 expressly allows pending outcomes. It does not resolve ongoing graph
 maintenance, semantic relations, current vision/effort correspondence,
