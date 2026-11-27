@@ -8,6 +8,13 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [current coverage and owned-obligation frame](current-coverage-and-owned-obligations.md)
+indexes the later 583-identity counting snapshot without relabelling it as
+fresh semantic coverage. It separates 572 complete metadata/reference
+observations, historical roles, retained qualification gaps and a finite
+source-completion candidate. Empty provider closing connections do not
+establish that no completion claim exists.
+
 The [current inflow graph refresh](current-inflow-graph-refresh.md) requalifies
 584 legacy candidates and separates 71 unchanged semantic generations from
 six fresh lexical-retrieval originals after whole-reference exclusions.

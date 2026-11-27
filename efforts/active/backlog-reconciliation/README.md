@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current coverage and finite PSMux guidance](journal/2026/11.26-current-coverage-and-psmux-guidance.md)
+separates all 583 frozen counting identities from 572 metadata/reference
+observations, historical semantic roles and explicit retained gaps.
+The actual #13759 merge postdates the prior OPEN-PR judgment for #13753;
+whole source/current-documentation comparison supports one conditional
+finite-guidance candidate, not an installer or live-operation claim.
+Five distinct requests remain OPEN. The bounded metric/journal checkpoint
+and reconstructible-ledger recording gates are resolved; the other five
+Plan and twelve actual global Validation items remain OPEN.
+
 The [clock and preparation correspondence](journal/2026/11.26-clock-and-preparation-report-correspondence.md)
 records reviewed #14824, two separately spent passing final assessments
 and two independently audited `COMPLETED` reports. Ten tail records remain
@@ -529,7 +539,8 @@ OPEN. The finite 57-record navigation roster partitions into 19 audited
 dispositions and 38 retained records, not 38 unread originals. Two equal
 complete censuses measure 583 whole OPEN: two departures and one arrival,
 with no unrelated departure. Whole-queue graph, native/installed,
-source/resource and all actual parent Plan/Validation gates remain.
+source/resource and all actual parent Plan/Validation gates remain;
+the factual outcome merged in #14825.
 
 The [materialized Codespaces fixture correspondence](journal/2026/11.26-materialized-codespaces-fixture-correspondence.md)
 records reviewed #14819, five separately spent passing final assessments
@@ -5462,9 +5473,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   849 whole issues, 120 above fixed 729: two own inflow departures, no arrivals
   or external departures; 473 original-cohort issues remain open. No technical
   completion, claim/resource release, measurement execution or rollout follows.
-- [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
+- [x] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
+
+The [current coverage frame](current-coverage-and-owned-obligations.md)
+records the independently verified below-checkpoint observation and actual
+post-checkpoint continuation without inventing a lower target or declaring
+the remaining research/acceptance gates complete.
 
 The [head, venue and journal receiving unit](journal/2026/11.14-head-venue-and-journal-receivers.md)
 adds direct planned #3584/#3585 and #3507 acceptance to their existing ROOTs,
@@ -7052,8 +7068,12 @@ incumbent parent check state remains unchanged.
   The [fourth-wave register](roadmap-wave-4-dependencies.md) adds 36 scoped
   relationships, including three within-issue gates and several satisfied,
   interface or nonblocking rows rather than 36 missing hard prerequisites.
-- [ ] The operational ledger can reconstruct the next batch and live
+- [x] The operational ledger can reconstruct the next batch and live
   researchers, PRs, watches and schedule after native context rollover.
+  The [current coverage/obligation audit](current-coverage-and-owned-obligations.md#publication-state-is-not-resource-completion)
+  records the current research frontier, actual publication states and
+  separately retained closeout conditions without treating metadata states
+  as objective completion, release or authority to resume stopped flows.
 - [ ] The final whole-queue open count is at most 729; numerical progress never
   substitutes for requirement preservation.
 - [ ] No implementation, rollout, private identifiers or unreviewed policy
