@@ -4,6 +4,22 @@ Canonical component of [this same Active effort](README.md). This is not a child
 
 ## Validation Plan
 
+### Coordination-claim acceptance
+
+- [ ] Resolve every #14943
+      [Plan and local validation item](plan-assignment-startup.md#coordination-claims-and-explicit-execution)
+      at its declared tier. Source tests and a merged intent amendment are not
+      evidence of installed behavior.
+- [ ] In an authorized isolated running setup, record/claim/requeue/recover a
+      coordination-only task and verify zero allocation effects, alongside a
+      positively opted-in execution job that still starts normally. Preserve
+      real task, owner, review and capacity gates.
+- [ ] Reconcile any affected legacy registration against its real producer and
+      current custody/drain conditions, recording the supported disposition
+      without activating optional pools or disrupting existing execution.
+
+### Retained global acceptance
+
 - [ ] **G13203:** Resolve P13203 and both local V13203 clauses in the
   [captured-state liveness acceptance](plan-core-lifecycle.md#finite-captured-state-liveness-acceptance-from-13203)
   at their original deterministic queue/resolver tier, including unchanged

@@ -109,6 +109,14 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Coordination
 
+The #14943 coordination-claim slice is owned through its open source issue.
+Its owner may amend intent, implement and qualify that bounded non-allocation
+boundary through normal reviewed PRs. Incumbent allocation, retained-placement,
+submission, review, native-session and resource custodians keep their work;
+this is not reassignment of their open slices. Legacy configuration changes
+retain producer, current-owner, drain, review and deployment gates. This slice
+neither activates a pool nor appoints a generic execution body.
+
 The agent-proposed finite #13203 captured-state liveness intake retains
 the existing queue/liveness, native-session, wake, task/owner/generation,
 handoff and resource custodians. Planning owns documentation only.

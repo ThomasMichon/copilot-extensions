@@ -10,6 +10,13 @@
 - **Sub-issues:** #9709 (bounded assignment/startup documentation and repair design);
   #10267 (neutral-service managed lane admission)
 
+## Goal
+
+Make Dispatch task execution and review reliable without replacing its existing
+queue, supervisor, native-session, Worktrees or resource owners. Retain every
+existing Plan and Validation obligation, adding the bounded operator direction:
+"Tasks which represent work-lane claims don't need workers auto-allocated."
+
 ## Guiding Intent
 
 Make Dispatch task execution and review reliable without replacing its existing
@@ -128,6 +135,15 @@ checked credit, source-specific custodian and evidence tier remains binding.
 
 ## Request
 
+The bounded [#14943](https://github.com/ThomasMichon/copilot-extensions/issues/14943)
+amendment retains this operator direction: "Tasks which represent work-lane
+claims don't need workers auto-allocated." The operator accepted the proposed
+separation from explicit execution requests: "Sounds good. Make those updates".
+The implementation and validation design is recorded in the
+[coordination-claim slice](plan-assignment-startup.md#coordination-claims-and-explicit-execution).
+It extends this effort's scope without replacing its existing Guiding Intent,
+assignments or completion gates.
+
 The [current submission contract](submission-closeout-amendment.md) and
 [assignment/startup amendment](assignment-startup-amendment.md) govern the current
 work. The [original request](background.md#request) and
@@ -171,6 +187,12 @@ named accepted objective; a component's relocation does not complete it.
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 
 [Full retained checklist](plan-assignment-startup.md#continuing-slice---pool-owned-assignmentstartup-and-retry-eligibility).
+
+### Coordination claims and explicit execution
+
+- [ ] Resolve the bounded [#14943 Plan and local validation](plan-assignment-startup.md#coordination-claims-and-explicit-execution),
+      including its [global acceptance](validation.md#coordination-claim-acceptance).
+      This slice does not absorb unrelated lifecycle work or activate any pool.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 
@@ -219,6 +241,11 @@ COMPLETED/CONFIRMED terminology. Current work uses SUBMITTED/COMPLETED under the
 [task-conversation amendment](task-conversation-amendment.md); no old enum is restored.
 
 ## Journal
+
+2026-11-27: Proposed #14943's coordination-claim boundary in the vision and
+this existing effort before implementation. The slice owner owns that bounded
+change only; source tests, installed acceptance and legacy-lane disposition
+remain pending. No runtime, task, registration or service was changed.
 
 The proposed finite #13203 receiving amendment adds explicit captured-state
 verdict/stamp fencing and deterministic race/control acceptance to this same
