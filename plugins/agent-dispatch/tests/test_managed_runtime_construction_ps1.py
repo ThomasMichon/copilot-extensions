@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -148,13 +149,24 @@ def test_powershell_construction_uses_managed_default_without_ambient_python(
                 assert "19" in result.stderr
     uv_calls = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
     assert all(call[0] in {"python", "venv"} for call in uv_calls), uv_calls
+    # uv rejects --no-project on its read-only `python list` catalog probe
+    # (project files cannot steer that listing); every selecting call keeps it.
     assert all(
-        "--managed-python" in call and "--no-project" in call for call in uv_calls
+        "--managed-python" in call
+        and ("--no-project" in call or call[:2] == ["python", "list"])
+        for call in uv_calls
     ), uv_calls
     if scenario == "explicit":
         assert not uv_calls
     else:
         assert len(uv_calls) >= expected
+    if success and scenario != "explicit" and os.name == "nt":
+        # The venv home must be the exact managed patch, never uv's 3.11 junction.
+        exact = re.compile(r"3\.11\.\d+")
+        homes = [call[call.index("--python") + 1] for call in uv_calls
+                 if call[0] == "venv" and "--python" in call]
+        assert all(exact.fullmatch(home) for home in homes), uv_calls
+        assert any(exact.fullmatch(arg) for call in uv_calls for arg in call), uv_calls
     record_property("dispatch_powershell_construction_performance", json.dumps({
         "status": "measured", "scenario": scenario, "shell": shell, "expected": expected,
         "completed": len(samples), "samples_seconds": samples, "uv_calls": uv_calls,
