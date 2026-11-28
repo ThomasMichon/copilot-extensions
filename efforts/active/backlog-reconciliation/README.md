@@ -522,6 +522,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [startup, release and lease-refusal comparison](journal/2026/11.27-startup-release-lease-retentions.md)
+reads three complete current originals and all seventy-five discussions.
+The standalone planner repair and bounded release milestones receive actual
+credit without completing full-roster startup, the release programme or cold
+unbound-store refusal qualification. Three coverage outcome/gap pairs become
+specific current retentions without issue writes or completion units.
+The pending pointer advances to #3444; all primary gates and counts remain.
+
 The [phase, monitor, hosted and skill-review comparison](journal/2026/11.27-phase-monitor-hosted-skill-retentions.md)
 reads four complete current originals and all twenty-one discussions.
 Phase 10 keeps its parked-root and transactional-application boundaries;
@@ -530,6 +538,11 @@ lifecycle remains a final-OPEN keeper; and skill review retains its actual
 assigned loader/rubric contract. Four coverage outcome/gap pairs become
 specific current retentions without issue writes or completion units.
 The pending pointer advances to #3303; all primary gates and counts remain.
+
+The four-file comparison merged in #14936 after genuine current-head approval
+and actual required CI. Independent provider/source checks retain every
+authored blob, all four OPEN issues and all sixteen primary clauses. The
+existing agenda parent continues without a census or resource handback.
 
 The [uninstall, performance and activation comparison](journal/2026/11.27-uninstall-performance-activation-retentions.md)
 reads five complete current originals and all nineteen discussions.

@@ -467,8 +467,8 @@
     "content_admission_from_counting": false
   },
   "oldest_pending_current_qualification": {
-    "issue": 3303,
-    "created_at_local": "2026-09-22T15:50:54-07:00"
+    "issue": 3444,
+    "created_at_local": "2026-09-23T12:25:01-07:00"
   },
   "oldest_pending_definition": "Oldest identity in this frame's qualified-change-evidence class, not a claim that its original has never been read or that prior semantic research is invalid.",
   "creator_scope_legend": {
@@ -571,9 +571,9 @@
     [3194, "original", "excluded", null, false, "metadata-only", "excluded", "author-scope"],
     [3208, "original", "member", 2, true, "semantic-snapshot", "retained-current", "both-atomic-replacement-races-and-qualified-initial-selection-open"],
     [3296, "original", "member", 11, true, "semantic-snapshot", "retained-current", "independent-inference-identity-and-supported-launch-acceptance-open"],
-    [3303, "original", "member", 52, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
-    [3336, "original", "member", 126, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
-    [3342, "original", "member", 3, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [3303, "original", "member", 52, true, "semantic-snapshot", "retained-current", "full-roster-turn-activation-latency-and-inherited-readiness-after-bounded-planner-repair"],
+    [3336, "original", "member", 126, true, "semantic-snapshot", "retained-current", "remaining-release-cadence-no-churn-and-consumer-acceptance-after-bounded-complete-milestones"],
+    [3342, "original", "member", 3, true, "semantic-snapshot", "retained-current", "cold-unbound-store-refusal-and-identity-cost-not-caller-timeout-causation"],
     [3418, "original", "member", 10, true, "semantic-snapshot", "retained-current", "finite-wait-guard-delivered-whole-adopted-capture-and-topology-open"],
     [3444, "original", "member", 9, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [3511, "original", "member", 9, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
@@ -1892,6 +1892,24 @@
     "unchanged_native_SSH_source_producer": 14769,
     "native_skill_review_source_producers": [13169, 9496],
     "closed_unmerged_2849_body_or_candidate_revisited": false,
+    "tracker_effects": 0,
+    "final_completion_verification_units": 0,
+    "fresh_census": false,
+    "product_or_native_execution": false,
+    "all_other_nodes_and_historical_fields_preserved": true,
+    "source_copy_and_resource_holds_preserved": true
+  },
+  "later_startup_release_lease_retentions": {
+    "narrative": "../journal/2026/11.27-startup-release-lease-retentions.md",
+    "whole_current_originals": [3303, 3336, 3342],
+    "complete_discussions": 75,
+    "complete_collaborator_roster_members": 15,
+    "retained_open": [3303, 3336, 3342],
+    "inspected_source": "7e9cd8d487b97e356700cf1297b2623a2f9728f2",
+    "native_startup_effort_producer": 13299,
+    "bounded_standalone_planner_delivery": 10443,
+    "native_release_effort_producer": 13001,
+    "native_lease_source_producers": [11895, 11458, 1583],
     "tracker_effects": 0,
     "final_completion_verification_units": 0,
     "fresh_census": false,
