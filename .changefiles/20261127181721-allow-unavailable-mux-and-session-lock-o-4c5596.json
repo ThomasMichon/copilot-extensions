@@ -1,0 +1,9 @@
+{
+  "comment": "Allow unavailable mux and session-lock observations in current roster publications.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

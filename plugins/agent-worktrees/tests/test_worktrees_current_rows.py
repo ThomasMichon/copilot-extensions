@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import __main__ as core
-from agent_worktrees import git_ops, tracking
+from agent_worktrees import git_ops, sessions, tracking
 from agent_worktrees import worktrees_current_rows as current
 from agent_worktrees import worktrees_projection as projection
 
@@ -139,9 +139,44 @@ def test_worktrees_current_rows_real_engine_serialization_preserves_counts_and_g
 
 
 @pytest.mark.parametrize(
-    ("field", "value"), [("creation_nonce", True), ("head_yielded", "true")],
+    ("field", "value"), [
+        ("creation_nonce", True), ("head_yielded", "true"),
+        ("mux_observation_unavailable", "true"),
+        ("session_lock_observation_unavailable", "true"),
+    ],
 )
 def test_worktrees_current_rows_reject_invalid_current_identity_field_types(tmp_path, field, value):
     store = projection.WorktreesProjection(tmp_path / "current.sqlite3")
     with pytest.raises(projection.ProjectionError, match=f"field type: {field}"):
         store.publish("project", [{"id": "one", field: value}], observed_at=123)
+
+
+@pytest.mark.parametrize("unavailable", ["mux", "session", "both"])
+def test_worktrees_current_rows_publish_real_unavailable_observations(tmp_path, unavailable):
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(tmp_path),
+        repo="project", machine="host", platform="windows",
+        started_at="2026-10-13T00:00:00", last_resumed_at="2026-10-13T00:00:00",
+        resume_count=0, title="Current task", status="active", completed_at=None,
+        mux_live=True, mux_live_at="2026-10-13T00:00:00",
+    )
+    context = sessions.SessionContext()
+    if unavailable in {"session", "both"}:
+        context.unavailable_paths.add(sessions._normalize_path(str(tmp_path)))
+    row = core._worktree_to_dict(
+        record, current_only=True, session_ctx=context,
+        mux_info=sessions.MuxInfo(observed=unavailable not in {"mux", "both"}),
+    )
+    if unavailable in {"mux", "both"}:
+        assert row["mux_observation_unavailable"] is True
+        assert "mux_session" not in row
+        assert row["mux_last_known"]["present"] is True
+    if unavailable in {"session", "both"}:
+        assert row["session_lock_observation_unavailable"] is True
+        assert row["session_lock_live"] is None
+        assert row["ff_eligible"] is False
+    store = projection.WorktreesProjection(tmp_path / "current.sqlite3")
+    store.publish("project", [{"id": "previous"}], observed_at=1)
+    store.publish("project", [row], observed_at=123)
+    assert store.read("project")["worktrees"] == [row]
+    assert projection.read_advisory(tmp_path / "current.sqlite3", "project")["worktrees"] == [row]

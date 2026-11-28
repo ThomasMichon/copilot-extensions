@@ -52,6 +52,7 @@ caller_state delegate_finalizable delegate_finalizable_reason
 claims_summary claims_links claims_assets claims_link_count claims_links_complete claims_projection
 session_bare_orphan session_bound_live
 session_bridge_live fact_provenance mux_last_known
+mux_observation_unavailable session_lock_observation_unavailable
 """.split())
 _BOOL_FIELDS = frozenset("""
 execution_leg_live checkout_managed checkout_present picker_hidden follow_up paused
@@ -60,6 +61,7 @@ session_lock_live session_lock_stale live_intent_idle session_bare_orphan
 session_bound_live session_bridge_live head_yielded
 claims_links_complete
 delegate_finalizable
+mux_observation_unavailable session_lock_observation_unavailable
 """.split())
 _INT_FIELDS = frozenset("""
 resume_count session_count controller_revision ahead behind dirty mux_clients
