@@ -7,6 +7,16 @@ research, metadata observations and unresolved current qualification from
 being mistaken for one another. It is not a new semantic model, product
 work queue, source-admission exception or closure oracle.
 
+The [materializer and JSON-freeze comparison](journal/2026/11.27-materializer-and-json-freeze.md)
+adds two whole current reports and both discussions. Exact original/follow-up
+source and normal promoted composition correspondence support only a conditional
+#14310 completion, with final verification and acknowledged preservation gates
+still separate. #14423 retains its distinct unidentified JSON parser/input and
+correction gap. Two outcome/gap pairs change; at the retained 571-identity
+observation there are 364 pending, 155 current-retained and one candidate.
+No fresh census, tracker effect, product/native execution or ownership transfer
+follows.
+
 The [earlier-verifier input comparison](journal/2026/11.27-earlier-verifier-inputs.md)
 adds three whole current originals and all six discussions. #10651 retains
 its human keep-open condition and four independent failed inputs. Only the
