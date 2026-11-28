@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-27 - Materializer original/follow-up and normal promotion correspondence; distinct JSON failure retained](journal/2026/11.27-materializer-and-json-freeze.md)
+
 - [2026-11-27 - Two audited earlier verifier report retirements, unchanged human keeper and 571 whole open](journal/2026/11.27-earlier-verifier-inputs.md)
 
 - [2026-11-27 - Four audited verifier report retirements, all technical cases retained and 573 whole open](journal/2026/11.27-promotion-verifier-recurrences.md)

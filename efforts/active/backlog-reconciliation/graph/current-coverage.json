@@ -1072,11 +1072,11 @@
     [14306, "inflow", "member", null, false, null, "spent-open", "verification-class-spent"],
     [14308, "inflow", "member", 1, false, null, "pending", "qualified-change-evidence"],
     [14309, "inflow", "member", 1, false, null, "pending", "qualified-change-evidence"],
-    [14310, "inflow", "automation", 23, false, null, "pending", "qualified-change-evidence"],
+    [14310, "inflow", "automation", 23, false, null, "candidate", "whole-materializer-original-and-sibling-followup-normal-promotion-final-verification"],
     [14313, "inflow", "member", 3, false, null, "retained-current", "shared-owner-written-fleet-status-consumer-outcome-unestablished"],
     [14325, "inflow", "member", 4, false, null, "retained-current", "owner-retained-installed-startup-registration-and-certain-terminal-receipt"],
     [14336, "inflow", "member", 12, false, null, "pending", "qualified-change-evidence"],
-    [14423, "inflow", "automation", 2, false, null, "pending", "qualified-change-evidence"],
+    [14423, "inflow", "automation", 2, false, null, "retained-current", "literal-json-parser-input-and-delivering-correction-unidentified"],
     [14424, "inflow", "automation", 1, false, null, "pending", "qualified-change-evidence"],
     [14435, "inflow", "member", 9, false, null, "pending", "qualified-change-evidence"],
     [14461, "inflow", "member", 2, false, null, "pending", "qualified-change-evidence"],
@@ -1743,5 +1743,27 @@
     "technical_fixes_or_resource_transfers": 0,
     "all_other_nodes_and_historical_fields_preserved": true,
     "source_copy_and_resource_holds_preserved": true
+  },
+  "later_materializer_and_json_freeze_research": {
+    "narrative": "../journal/2026/11.27-materializer-and-json-freeze.md",
+    "whole_current_originals": [
+      14310,
+      14423
+    ],
+    "complete_discussions": 2,
+    "actual_repository_owned_report_origins_qualified": true,
+    "conditional_completed_candidate": 14310,
+    "primary_fulfilling_pr": 14349,
+    "incorporated_original_repair": 14339,
+    "normal_main_promotion": 14366,
+    "actual_successful_compose_job": 138266830326,
+    "specific_materializer_blob_in_Dev_candidate_Main": "d29de3380aa12be1770189543171f225f2f643d3",
+    "retained_json_failure": 14423,
+    "json_parser_input_and_correction": "UNIDENTIFIED",
+    "final_verification_not_yet_performed": true,
+    "tracker_effects": 0,
+    "fresh_census": false,
+    "product_or_native_execution": false,
+    "source_or_resource_ownership_reassigned": false
   }
 }

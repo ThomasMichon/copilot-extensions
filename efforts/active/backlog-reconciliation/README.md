@@ -522,6 +522,19 @@ the non-public approval conversation.
 
 ## Plan
 
+The [materializer and JSON-freeze comparison](journal/2026/11.27-materializer-and-json-freeze.md)
+qualifies and reads two complete reports and both discussions.
+#14310 is a conditional completion candidate only after matching the original
+multi-package notice defect and retained contained-sibling follow-up to
+#14339/#14349, exact corrected source/candidate/Main correspondence and an
+actual successful normal composition/publication witness in #14366.
+Separate final metadata verification and acknowledged provider/preservation
+audits remain gates. #14423 retains its distinct unidentified JSON parser/input
+and delivering-correction gap. Only two outcome/gap pairs change; the retained
+571-identity observation has 364 pending, 155 current-retained and one candidate.
+No fresh census, tracker effect, product/native execution or custody transfer
+follows from this proposal.
+
 The [earlier-verifier input comparison](journal/2026/11.27-earlier-verifier-inputs.md)
 qualifies and reads three whole originals and all six discussions.
 #10651 retains its explicit human keep-open condition and four distinct
@@ -546,6 +559,11 @@ America/Los_Angeles measure **571 whole OPEN: 274 original-cohort and
 unrelated departure. There are 366 pending, 154 current-retained and no
 conditional candidate from this slice. All parent Plan and global Validation
 gates remain OPEN.
+
+The five-file factual outcome merged in #14921 after genuine current-head
+approval and all actual required CI. Exact source reconciliation and parent
+return preserve those two dispositions, all nine receiver cases, the
+unchanged four-input human keeper and every remaining campaign gate.
 
 The [promotion-verifier recurrence comparison](journal/2026/11.27-promotion-verifier-recurrences.md)
 qualifies and reads six complete originals and all six discussions.
