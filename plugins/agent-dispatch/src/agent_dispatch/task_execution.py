@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .queue_records import TaskError
+
+if TYPE_CHECKING:
+    from .queue_common import Task
 
 ExecutionMode = Literal["legacy", "coordination", "delegated"]
 EXECUTION_MODES = ("legacy", "coordination", "delegated")
@@ -20,6 +23,32 @@ def execution_mode(value: object) -> ExecutionMode:
 
 def permits_allocation(task: Mapping[str, object]) -> bool:
     return task.get("execution_mode", "legacy") in ("legacy", "delegated")
+
+
+def require_spawn_intent(conn: sqlite3.Connection, task: Task) -> None:
+    from .queue_standing_schema import require_finite_execution_admission
+
+    require_finite_execution_admission(conn, task)
+    if task.execution_mode == "coordination":
+        raise TaskError("coordination task cannot allocate a worker")
+
+
+def require_matching_execution_intent(task: Task | None, mode: str) -> None:
+    if task is not None and mode != "legacy" and task.execution_mode != mode:
+        raise TaskError("dedup_key belongs to a task with different execution intent")
+
+
+def creation_contract_fields(
+    *, category: str, execution_mode: str, standing_parent_id: str | None,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    if category != "work":
+        fields["category"] = category
+    if execution_mode != "legacy":
+        fields["execution_mode"] = execution_mode
+    if standing_parent_id is not None:
+        fields["standing_parent_id"] = standing_parent_id
+    return fields
 
 
 def migrate_execution_intent(conn: sqlite3.Connection) -> None:

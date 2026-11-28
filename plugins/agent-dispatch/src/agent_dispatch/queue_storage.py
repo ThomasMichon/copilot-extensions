@@ -40,6 +40,7 @@ from .queue_producer_fences import (
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import Status, TaskError
 from .queue_dedup import find_live_dedup_task
+from .task_execution import creation_contract_fields, execution_mode as validate_execution_mode, require_matching_execution_intent
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -382,7 +383,6 @@ class QueueStorageMixin(StorageOwner):
             raise TaskError("standing_parent_id must be a bounded task id")
         from .task_categories import category_value
         category_value(category)
-        from .task_execution import execution_mode as validate_execution_mode
         validate_execution_mode(execution_mode)
         if not isinstance(require_verification, bool):
             raise TaskError("require_verification must be true/false")
@@ -462,12 +462,7 @@ class QueueStorageMixin(StorageOwner):
                 "goal": goal,
                 "done_criteria": done_criteria,
             }
-            if category != "work":
-                request_fields["category"] = category
-            if execution_mode != "legacy":
-                request_fields["execution_mode"] = execution_mode
-            if standing_parent_id is not None:
-                request_fields["standing_parent_id"] = standing_parent_id
+            request_fields.update(creation_contract_fields(category=category, execution_mode=execution_mode, standing_parent_id=standing_parent_id))
             request_hash = self._producer_request_hash(request_fields)
             compatible_request_hashes.add(request_hash)
             pre_exclusive_fields = dict(request_fields)
@@ -798,12 +793,7 @@ class QueueStorageMixin(StorageOwner):
                             "conflicting_task_status": accepted.status,
                         },
                     )
-                if (
-                    accepted is not None
-                    and execution_mode != "legacy"
-                    and accepted.execution_mode != execution_mode
-                ):
-                    raise TaskError("dedup_key belongs to a task with different execution intent")
+                require_matching_execution_intent(accepted, execution_mode)
                 if (
                     accepted is not None
                     and standing_parent_id is not None
