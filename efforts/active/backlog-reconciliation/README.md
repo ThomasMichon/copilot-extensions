@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [conditional and ordinary-operation comparison](journal/2026/11.27-conditional-and-ordinary-operation-boundaries.md)
+retains independently qualified current #5641/#5842/#5843 and all four
+discussions. Preserve the two measured performance triggers, three separate
+claim-custody gates and generic lost-carrier-response mutation uncertainty.
+Current ordinary acceptance ordering and caller-to-future retry traces retain
+concrete gaps while crediting narrower protections. Older held inputs and
+withdrawn comparisons remain unchanged; no issue or resource effect follows.
+Only three outcome/gap pairs change: the retained 582-identity observation
+has 391 pending and 140 current-retained, without a fresh census.
+
 The [SSH tenant-lifetime study](journal/2026/11.27-ssh-tenant-renewal-and-inflow.md)
 retains new #14902 after whole-original and current native-source qualification.
 The SSH path still places and releases its tenant without periodic renewal;
@@ -531,6 +541,9 @@ evidence, not a live reproduction. A complete equal two-pass observation at
 and 308 inflow. Only #14902 arrives; no issue departs or receives a disposition.
 The new post-snapshot row preserves complete renewal/cleanup acceptance,
 all earlier identities, historical fields and source/resource limits.
+The five-file recording merged in #14908 after genuine current-head approval
+and all actual required CI. Exact source reconciliation and parent return
+preserve OPEN #14902/#7556 and all remaining parent gates.
 
 The [daemon/installer/pivot comparison](journal/2026/11.27-daemon-installer-and-pivot-boundaries.md)
 retains three independently qualified current originals and all thirteen

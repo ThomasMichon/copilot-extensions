@@ -546,6 +546,33 @@ related-issue distinctions are attributed, not independently accepted
 receiving or duplicate judgments. Current vision/effort correspondence stays
 an explicit gap; no pending source or actual ownership is cleared.
 
+## Conditional and ordinary-operation boundaries
+
+The [three-case study](journal/2026/11.27-conditional-and-ordinary-operation-boundaries.md)
+independently qualifies and reads current #5641/#5842/#5843 and all four
+discussions. Actual copied-origin #5640/#1602/#4411 producers qualify
+metadata-only; their closed dispositions and settled intakes are not replayed.
+The older held inputs and withdrawn comparisons are not retroactively cleared.
+
+#5641 retains both measured performance triggers and empirical-method
+boundaries without a fresh UI scan or a global absence-of-trigger claim.
+#5842's current ordinary source still records terminal source acceptance
+before later consumer/resource completion; existing scope, reservation and
+source-owner-reference checks receive bounded credit while all three
+authorization/readiness/atomicity contracts remain separate.
+#5843's current caller-to-future path still retries reconnectable loss
+without stable ordinary request identity or recovered admission outcome.
+Epoch-owned settlement, keyed paths and receipt work are narrower progress,
+not proof that generic create and unkeyed-send uncertainty is resolved.
+
+Only the three outcome/gap pairs become current-retained. At the same
+retained 582-identity observation there are 391 pending and 140
+current-retained; other categories, all historical columns, five post-snapshot
+rows and counting observations remain unchanged. The other three
+producer-screened originals remain body-unread. There is no fresh census,
+issue disposition, test, native/product operation, source-copy clearance or
+custody transfer.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
