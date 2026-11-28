@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import pytest
+from typing import Any
 
 from agent_dispatch.satellite_work_intake import (
     DEFAULT_SPAWN_TIMEOUT_S,
     SatelliteWorkIntake,
+    _TaskLister,
 )
 
+Json = dict[str, Any]
 
 class FakeClock:
     def __init__(self, start: float = 1000.0) -> None:
@@ -32,26 +35,26 @@ class FakeClient:
     """A minimal stand-in for :class:`agent_dispatch.client.DispatchClient`:
     just enough ``list(**params)`` behavior to drive the loop deterministically."""
 
-    def __init__(self, *, active=None, queued=None):
+    def __init__(self, *, active: list[Json] | None=None, queued: list[Json] | None=None) -> None:
         self._active = active or []
         self._queued = queued or []
-        self.calls: list[dict] = []
+        self.calls: list[Json] = []
 
-    def list(self, **params):
+    def list(self, **params: Any) -> list[Json]:
         self.calls.append(params)
         if params.get("status") == "claimed,started":
             return list(self._active)
         if params.get("status") == "queued":
-            return list(self._queued)
+            return [{"execution_mode": "legacy", **task} for task in self._queued]
         return []
 
 
 def _loop(
-    client, *, spawned=None, project="test-project", **kwargs
-) -> tuple[SatelliteWorkIntake, list]:
+    client: _TaskLister, *, spawned: list[str] | None=None, project: str | None="test-project", **kwargs: Any
+) -> tuple[SatelliteWorkIntake, list[str]]:
     spawned = spawned if spawned is not None else []
 
-    def fake_spawn(task_id, **_kw):
+    def fake_spawn(task_id: str, **_kw: Any) -> FakeProc:
         spawned.append(task_id)
         return FakeProc(0)
 
@@ -66,7 +69,7 @@ def _loop(
     return loop, spawned
 
 
-def test_spawns_for_each_queued_task_up_to_capacity():
+def test_spawns_for_each_queued_task_up_to_capacity() -> None:
     # max_spawns_per_tick raised past the default of 1 -- this test is about
     # the CAPACITY math, not the per-tick attempt cap (see
     # test_spawn_attempts_capped_per_tick for that).
@@ -78,7 +81,7 @@ def test_spawns_for_each_queued_task_up_to_capacity():
     assert result["skipped_at_capacity"] is False
 
 
-def test_spawn_attempts_capped_per_tick():
+def test_spawn_attempts_capped_per_tick() -> None:
     # Spawn attempts run synchronously and are individually bounded by
     # spawn_timeout, but several in the same tick could still sum past the
     # federation directory's presence TTL and starve heartbeats -- default
@@ -93,7 +96,7 @@ def test_spawn_attempts_capped_per_tick():
     assert result["spawned"] == ["t2"]
 
 
-def test_no_capacity_when_already_at_active_cap():
+def test_no_capacity_when_already_at_active_cap() -> None:
     client = FakeClient(active=[{"id": "running"}], queued=[{"id": "t1"}])
     loop, spawned = _loop(client, max_concurrent=1)
     result = loop.tick()
@@ -104,7 +107,7 @@ def test_no_capacity_when_already_at_active_cap():
     assert all(c.get("status") != "queued" for c in client.calls)
 
 
-def test_recently_triggered_task_not_re_spawned_within_ttl():
+def test_recently_triggered_task_not_re_spawned_within_ttl() -> None:
     client = FakeClient(queued=[{"id": "t1"}])
     loop, spawned = _loop(client, max_concurrent=1, trigger_ttl=100.0)
     loop.tick()
@@ -115,12 +118,12 @@ def test_recently_triggered_task_not_re_spawned_within_ttl():
     assert spawned == ["t1"]
 
 
-def test_recently_triggered_task_reconsidered_after_ttl_expires():
+def test_recently_triggered_task_reconsidered_after_ttl_expires() -> None:
     client = FakeClient(queued=[{"id": "t1"}])
     clock = FakeClock()
     spawned: list[str] = []
 
-    def fake_spawn(task_id, **_kw):
+    def fake_spawn(task_id: str, **_kw: Any) -> FakeProc:
         spawned.append(task_id)
         return FakeProc(0)
 
@@ -140,7 +143,7 @@ def test_recently_triggered_task_reconsidered_after_ttl_expires():
     assert spawned == ["t1", "t1"]
 
 
-def test_recently_triggered_entry_cleared_once_observed_active():
+def test_recently_triggered_entry_cleared_once_observed_active() -> None:
     # t1 was triggered last tick and hasn't shown up as claimed/started yet
     # -- still counted (recent_triggers). Once the coordinator confirms it
     # active, the placeholder must be dropped so it doesn't ALSO keep
@@ -167,9 +170,9 @@ def test_recently_triggered_entry_cleared_once_observed_active():
     assert result["spawned"] == ["t2"]
 
 
-def test_active_list_failure_degrades_to_at_capacity():
+def test_active_list_failure_degrades_to_at_capacity() -> None:
     class BoomClient:
-        def list(self, **params):
+        def list(self, **params: Any) -> list[Json]:
             raise RuntimeError("coordinator unreachable")
 
     loop, spawned = _loop(BoomClient())
@@ -179,9 +182,9 @@ def test_active_list_failure_degrades_to_at_capacity():
     assert result["error"] == "list_failed"
 
 
-def test_queued_list_failure_degrades_to_empty_spawned():
+def test_queued_list_failure_degrades_to_empty_spawned() -> None:
     class PartialBoomClient:
-        def list(self, **params):
+        def list(self, **params: Any) -> list[Json]:
             if params.get("status") == "claimed,started":
                 return []
             raise RuntimeError("coordinator unreachable")
@@ -192,10 +195,10 @@ def test_queued_list_failure_degrades_to_empty_spawned():
     assert result["error"] == "list_failed"
 
 
-def test_spawn_exception_releases_the_slot_immediately():
+def test_spawn_exception_releases_the_slot_immediately() -> None:
     client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}])
 
-    def flaky_spawn(task_id, **_kw):
+    def flaky_spawn(task_id: str, **_kw: Any) -> FakeProc:
         if task_id == "t1":
             raise RuntimeError("embody failed to launch")
         return FakeProc(0)
@@ -208,13 +211,13 @@ def test_spawn_exception_releases_the_slot_immediately():
     assert result["spawned"] == ["t2"]
 
 
-def test_spawn_nonzero_returncode_counts_as_failure_not_success():
+def test_spawn_nonzero_returncode_counts_as_failure_not_success() -> None:
     # spawn_embodied_worker runs with check=False, so a failed
     # `agent-worktrees embody` invocation comes back as an ordinary
     # CompletedProcess with a nonzero returncode, not a raised exception.
     client = FakeClient(queued=[{"id": "t1"}, {"id": "t2"}])
 
-    def half_flaky_spawn(task_id, **_kw):
+    def half_flaky_spawn(task_id: str, **_kw: Any) -> FakeProc:
         return FakeProc(1) if task_id == "t1" else FakeProc(0)
 
     loop, _ = _loop(client, max_concurrent=1, max_spawns_per_tick=2)
@@ -225,7 +228,7 @@ def test_spawn_nonzero_returncode_counts_as_failure_not_success():
     assert "t1" not in loop._recent_triggers
 
 
-def test_list_calls_scoped_to_this_machine_and_capped_active_limit():
+def test_list_calls_scoped_to_this_machine_and_capped_active_limit() -> None:
     client = FakeClient(queued=[])
     loop, _ = _loop(client, max_concurrent=3)
     loop.tick()
@@ -243,21 +246,21 @@ def test_list_calls_scoped_to_this_machine_and_capped_active_limit():
     }
 
 
-def test_active_list_limit_covers_a_cap_above_the_endpoint_default():
+def test_active_list_limit_covers_a_cap_above_the_endpoint_default() -> None:
     client = FakeClient(queued=[])
     loop, _ = _loop(client, max_concurrent=500)
     loop.tick()
     assert client.calls[0]["limit"] == 500
 
 
-def test_queued_list_limit_matches_remaining_capacity_above_endpoint_default():
+def test_queued_list_limit_matches_remaining_capacity_above_endpoint_default() -> None:
     client = FakeClient(active=[], queued=[])
     loop, _ = _loop(client, max_concurrent=250)
     loop.tick()
     assert client.calls[1]["limit"] == 250
 
 
-def test_queued_list_limit_never_below_the_endpoint_default():
+def test_queued_list_limit_never_below_the_endpoint_default() -> None:
     # Even a small capacity must request at least the endpoint's own
     # default page size -- see the oldest-first fairness note.
     client = FakeClient(queued=[])
@@ -266,23 +269,23 @@ def test_queued_list_limit_never_below_the_endpoint_default():
     assert client.calls[1]["limit"] == 200
 
 
-def test_queued_discovery_pages_past_a_full_first_page():
+def test_queued_discovery_pages_past_a_full_first_page() -> None:
     # A response exactly as large as the requested limit is itself evidence
     # more rows may exist (the /tasks endpoint has no cursor/oldest-first
     # option) -- must keep paging with a larger limit rather than trusting
     # a single page, or an older task past that page could starve forever.
     class PagingClient:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            self.calls: list[Json] = []
             # 250 rows total: oldest (lowest created_at) first in id order,
             # newest-first is what the real endpoint would return, but this
             # fake only needs to prove the LIMIT keeps growing -- return
             # exactly `limit` rows until the true backlog (250) is covered.
-            self._all_queued = [
-                {"id": f"t{i}", "created_at": float(i)} for i in range(250)
+            self._all_queued: list[Json] = [
+                {"id": f"t{i}", "created_at": float(i), "execution_mode": "legacy"} for i in range(250)
             ]
 
-        def list(self, **params):
+        def list(self, **params: Any) -> list[Json]:
             self.calls.append(params)
             if params.get("status") == "claimed,started":
                 return []
@@ -300,21 +303,21 @@ def test_queued_discovery_pages_past_a_full_first_page():
     assert spawned == ["t0"]
 
 
-def test_queued_discovery_pages_bounded_by_a_hard_ceiling():
+def test_queued_discovery_pages_bounded_by_a_hard_ceiling() -> None:
     from agent_dispatch.satellite_work_intake import _QUEUE_DISCOVERY_MAX_LIMIT
 
     class AlwaysFullClient:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            self.calls: list[Json] = []
 
-        def list(self, **params):
+        def list(self, **params: Any) -> list[Json]:
             self.calls.append(params)
             if params.get("status") == "claimed,started":
                 return []
             limit = params["limit"]
             # Pathological/adversarial: always return exactly `limit` rows,
             # never signalling "end of backlog".
-            return [{"id": f"t{i}", "created_at": float(i)} for i in range(limit)]
+            return [{"id": f"t{i}", "created_at": float(i), "execution_mode": "legacy"} for i in range(limit)]
 
     client = AlwaysFullClient()
     loop, _ = _loop(client, max_concurrent=1)
@@ -325,7 +328,7 @@ def test_queued_discovery_pages_bounded_by_a_hard_ceiling():
     assert len(queued_calls) < 20
 
 
-def test_queued_discovery_pages_bounded_by_a_time_budget():
+def test_queued_discovery_pages_bounded_by_a_time_budget() -> None:
     # Row-count/page-size bounds alone don't cap wall-clock time: each
     # request can itself take up to DispatchClient's own HTTP timeout, so
     # several slow-but-responsive round trips could still sum well past the
@@ -335,16 +338,16 @@ def test_queued_discovery_pages_bounded_by_a_time_budget():
     clock = FakeClock()
 
     class SlowAlwaysFullClient:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            self.calls: list[Json] = []
 
-        def list(self, **params):
+        def list(self, **params: Any) -> list[Json]:
             self.calls.append(params)
             if params.get("status") == "claimed,started":
                 return []
             clock.advance(6.0)  # simulate a slow-but-responsive round trip
             limit = params["limit"]
-            return [{"id": f"t{i}", "created_at": float(i)} for i in range(limit)]
+            return [{"id": f"t{i}", "created_at": float(i), "execution_mode": "legacy"} for i in range(limit)]
 
     client = SlowAlwaysFullClient()
     loop = SatelliteWorkIntake(
@@ -363,7 +366,7 @@ def test_queued_discovery_pages_bounded_by_a_time_budget():
     assert len(queued_calls) == 2
 
 
-def test_queued_tasks_considered_oldest_first_within_the_page():
+def test_queued_tasks_considered_oldest_first_within_the_page() -> None:
     # The `/tasks` endpoint orders newest-first with no oldest-first option
     # -- this loop must re-sort the page itself so an older queued task
     # isn't starved behind a stream of newer ones inside the same response.
@@ -379,7 +382,7 @@ def test_queued_tasks_considered_oldest_first_within_the_page():
     assert spawned == ["old"]
 
 
-def test_queued_list_limit_padded_past_recently_triggered_count():
+def test_queued_list_limit_padded_past_recently_triggered_count() -> None:
     # If the first `capacity` rows the coordinator would otherwise return
     # are all already in `_recent_triggers` (still awaiting confirmation),
     # a request sized to exactly `capacity` could come back entirely
@@ -402,14 +405,14 @@ def test_queued_list_limit_padded_past_recently_triggered_count():
 
 
 @pytest.mark.parametrize("bad_value", [None, 0, -5, float("inf"), float("nan")])
-def test_spawn_timeout_normalized_to_default_on_bad_direct_construction(bad_value):
+def test_spawn_timeout_normalized_to_default_on_bad_direct_construction(bad_value: float | None) -> None:
     # A direct constructor caller (not just FederationRunner, which already
     # goes through config.satellite_spawn_timeout()'s own validation) must
     # never be able to forward an unbounded/invalid timeout straight to
     # subprocess.run -- every spawn attempt is documented as bounded.
-    captured = []
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw.get("timeout"))
         return FakeProc(0)
 
@@ -426,10 +429,10 @@ def test_spawn_timeout_normalized_to_default_on_bad_direct_construction(bad_valu
     assert captured == [DEFAULT_SPAWN_TIMEOUT_S]
 
 
-def test_spawn_timeout_passed_through_to_spawn_fn():
-    captured = []
+def test_spawn_timeout_passed_through_to_spawn_fn() -> None:
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw.get("timeout"))
         return FakeProc(0)
 
@@ -446,12 +449,12 @@ def test_spawn_timeout_passed_through_to_spawn_fn():
     assert captured == [15.0]
 
 
-def test_spawn_timeout_defaults_to_a_bounded_value():
+def test_spawn_timeout_defaults_to_a_bounded_value() -> None:
     from agent_dispatch.satellite_work_intake import DEFAULT_SPAWN_TIMEOUT_S
 
-    captured = []
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw.get("timeout"))
         return FakeProc(0)
 
@@ -464,13 +467,13 @@ def test_spawn_timeout_defaults_to_a_bounded_value():
     assert captured == [DEFAULT_SPAWN_TIMEOUT_S]
 
 
-def test_spawn_timeout_expiry_releases_the_slot():
+def test_spawn_timeout_expiry_releases_the_slot() -> None:
     # A hung `agent-worktrees embody` process is exactly what the bounded
     # timeout guards against -- subprocess.run raises TimeoutExpired, which
     # `_try_spawn` must treat like any other launch failure.
     client = FakeClient(queued=[{"id": "t1"}])
 
-    def hanging_spawn(task_id, **kw):
+    def hanging_spawn(task_id: str, **kw: Any) -> None:
         raise TimeoutError("embody did not return within the bound")
 
     loop = SatelliteWorkIntake(
@@ -485,7 +488,7 @@ def test_spawn_timeout_expiry_releases_the_slot():
     assert "t1" not in loop._recent_triggers
 
 
-def test_satellite_repo_scopes_the_discovery_queries():
+def test_satellite_repo_scopes_the_discovery_queries() -> None:
     client = FakeClient(queued=[])
     loop, _ = _loop(client, repo="private-downstream-repo")
     loop.tick()
@@ -493,15 +496,15 @@ def test_satellite_repo_scopes_the_discovery_queries():
     assert client.calls[1]["repo"] == "private-downstream-repo"
 
 
-def test_spawn_uses_the_discovered_tasks_own_repo_when_unscoped():
+def test_spawn_uses_the_discovered_tasks_own_repo_when_unscoped() -> None:
     # spawn_embodied_worker's seed only adds a --repo claim scope when it
     # receives a non-None repo; without one the spawned session's first
     # atomic claim is rejected outright (claim requires repo context or
     # --all-repos). When this loop discovers across every lane (self._repo
     # unset), the spawn must still carry the DISCOVERED task's own repo.
-    captured = []
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw["repo"])
         return FakeProc(0)
 
@@ -517,10 +520,10 @@ def test_spawn_uses_the_discovered_tasks_own_repo_when_unscoped():
     assert captured == ["org/some-repo"]
 
 
-def test_spawn_prefers_configured_repo_over_the_task_repo():
-    captured = []
+def test_spawn_prefers_configured_repo_over_the_task_repo() -> None:
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw["repo"])
         return FakeProc(0)
 
@@ -540,10 +543,10 @@ def test_spawn_prefers_configured_repo_over_the_task_repo():
 # -- project resolution -------------------------------------------------------
 
 
-def test_explicit_project_override_used_for_every_task():
-    captured = []
+def test_explicit_project_override_used_for_every_task() -> None:
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw["project"])
         return FakeProc(0)
 
@@ -559,16 +562,16 @@ def test_explicit_project_override_used_for_every_task():
     assert captured == ["explicit-project"]
 
 
-def test_project_derived_from_task_repo_when_unconfigured(monkeypatch):
+def test_project_derived_from_task_repo_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_dispatch.embody as embody_mod
 
-    captured = []
+    captured: list[Any] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         captured.append(kw["project"])
         return FakeProc(0)
 
-    def fake_project_for_task(task):
+    def fake_project_for_task(task: Json) -> str:
         return f"derived-{task['repo']}"
 
     monkeypatch.setattr(embody_mod, "project_for_task", fake_project_for_task)
@@ -581,15 +584,15 @@ def test_project_derived_from_task_repo_when_unconfigured(monkeypatch):
     assert captured == ["derived-acme"]
 
 
-def test_unresolvable_project_fails_the_spawn_and_releases_the_slot():
+def test_unresolvable_project_fails_the_spawn_and_releases_the_slot() -> None:
     # No explicit project, and the task carries no repo lane to derive one
     # from -- must degrade to a per-task spawn failure (never a silent
     # CWD-discovery fallback, since this loop runs from a daemon/service
     # context with no meaningful CWD).
     client = FakeClient(queued=[{"id": "t1"}])
-    spawn_calls = []
+    spawn_calls: list[str] = []
 
-    def fake_spawn(task_id, **kw):
+    def fake_spawn(task_id: str, **kw: Any) -> FakeProc:
         spawn_calls.append(task_id)
         return FakeProc(0)
 
@@ -602,6 +605,6 @@ def test_unresolvable_project_fails_the_spawn_and_releases_the_slot():
     assert "t1" not in loop._recent_triggers
 
 
-def test_requires_machine():
+def test_requires_machine() -> None:
     with pytest.raises(ValueError):
         SatelliteWorkIntake(FakeClient(), machine="")

@@ -67,6 +67,12 @@ using this mode for its machine-targeted work; a pre-contract satellite that
 launches directly without either store admission path is outside the supported
 mixed-version/rollback boundary.
 
+An upgraded intake also refuses direct launch when an older coordinator omits
+`execution_mode` from a task projection, reporting
+`execution_intent_unavailable`. Missing intent is not evidence that a retained
+coordination record is legacy execution. Explicit `legacy` projections from a
+capable coordinator remain eligible, preserving old stored tasks after upgrade.
+
 ## Coordinator, supervisor daemon and worker lanes
 
 Managed local startup checks the selected **execution harness**, not the task's

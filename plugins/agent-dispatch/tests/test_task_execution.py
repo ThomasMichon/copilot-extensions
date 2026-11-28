@@ -242,6 +242,32 @@ def test_satellite_coordination_uses_neither_spawn_nor_capacity() -> None:
     assert spawned == ["job"]
 
 
+@pytest.mark.parametrize("mode", [None, "legacy", "delegated"])
+def test_upgraded_satellite_refuses_missing_projection_intent(mode: str | None) -> None:
+    from agent_dispatch.satellite_work_intake import SatelliteWorkIntake
+
+    projected: Json = {"id": "retained-task"}
+    if mode is not None:
+        projected["execution_mode"] = mode
+
+    class IntakeClient:
+        def list(self, **params: Any) -> list[Json]:
+            return [] if params.get("status") == "claimed,started" else [projected]
+
+    spawned: list[str | None] = []
+
+    def spawn(task_id: str | None, **_: Any) -> None:
+        spawned.append(task_id)
+
+    intake = SatelliteWorkIntake(
+        IntakeClient(), machine="host-a", project="example", max_concurrent=1, spawn_fn=spawn,
+    )
+    result = intake.tick()
+    assert spawned == ([] if mode is None else ["retained-task"])
+    if mode is None:
+        assert result["error"] == "execution_intent_unavailable"
+
+
 @pytest.mark.parametrize("executing", [False, True])
 def test_satellite_coordination_does_not_hide_active_capacity(executing: bool) -> None:
     from agent_dispatch.satellite_work_intake import SatelliteWorkIntake

@@ -308,7 +308,11 @@ class SatelliteWorkIntake:
         queued = sorted(queued, key=lambda t: t.get("created_at") or 0.0)
         spawned: list[str] = []
         attempts = 0
+        missing_intent = False
         for task in queued:
+            if "execution_mode" not in task:
+                missing_intent = True
+                continue
             if not permits_allocation(task):
                 continue
             if capacity <= 0:
@@ -337,7 +341,10 @@ class SatelliteWorkIntake:
                 continue
             spawned.append(task_id)
             capacity -= 1
-        return {"spawned": spawned, "skipped_at_capacity": False}
+        result: Json = {"spawned": spawned, "skipped_at_capacity": False}
+        if missing_intent:
+            result["error"] = "execution_intent_unavailable"
+        return result
 
     def _try_spawn(self, task: Json) -> bool:
         """Trigger a spawn for ``task``; ``True`` only on a genuine launch.
