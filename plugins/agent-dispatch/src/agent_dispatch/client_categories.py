@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
+
+import httpx
 
 from .task_categories import category_value
 from .client_errors import DispatchError, DispatchUpgradeRequired
@@ -11,11 +14,13 @@ from .client_standing import standing_support
 from .queue_standing_schema import LEGACY_CLAIM_FENCE, STANDING_KIND
 
 _STANDING_FENCE = json.loads(LEGACY_CLAIM_FENCE)
+Json = dict[str, Any]
+TaskRows = list[Json]
 
 
-def _legacy_standing(task: dict) -> bool:
+def _legacy_standing(task: Json) -> bool:
     """Older coordinators omit ``kind`` but still serialize the claim fence."""
-    return task.get("kind", "finite") == STANDING_KIND or task.get("requires") == _STANDING_FENCE
+    return bool(task.get("kind", "finite") == STANDING_KIND or task.get("requires") == _STANDING_FENCE)
 
 
 def require_endpoint_categories(endpoint: str, *, token: str | None = None) -> None:
@@ -29,13 +34,20 @@ def require_endpoint_categories(endpoint: str, *, token: str | None = None) -> N
 
 
 class CategoryClientMixin:
+    if TYPE_CHECKING:
+        _http: httpx.Client
+        health: Callable[[], Json]
+        require_standing_charters: Callable[[], Json]
+        _unwrap: Callable[[httpx.Response], Any]
+        _control_headers: Callable[[], dict[str, str]]
+
     def require_task_categories(self) -> None:
         if self.health().get("task_categories") != 1:
             raise DispatchUpgradeRequired(
                 "coordinator lacks task category filtering/classification"
             )
 
-    def list(self, **params: Any) -> list[dict]:
+    def list(self, **params: Any) -> TaskRows:
         if params.get("dedup_key") is not None:
             conflicts = [
                 key
@@ -62,7 +74,7 @@ class CategoryClientMixin:
             legacy_finite = True
             params = {**params, "kind": None}
         clean = {k: v for k, v in params.items() if v is not None}
-        tasks = self._unwrap(self._http.get("/tasks", params=clean))
+        tasks = cast(TaskRows, self._unwrap(self._http.get("/tasks", params=clean)))
         if not legacy_finite:
             return tasks
         finite = [task for task in tasks if not _legacy_standing(task)]
@@ -74,7 +86,7 @@ class CategoryClientMixin:
             )
         return finite
 
-    def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> list[dict]:
+    def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> TaskRows:
         """Read [] or the exact key's current create-dedup occupant in one repo."""
         if not isinstance(repo, str) or not repo.strip():
             raise DispatchError(400, "dedup lookup requires a non-empty repo lane")
@@ -82,9 +94,9 @@ class CategoryClientMixin:
             raise DispatchError(400, "dedup lookup requires a non-empty dedup_key")
         if self.health().get("exact_dedup_lookup") != 1:
             raise DispatchUpgradeRequired("coordinator lacks exact repo-scoped dedup lookup")
-        return self._unwrap(
+        return cast(TaskRows, self._unwrap(
             self._http.get("/tasks", params={"repo": repo, "dedup_key": dedup_key})
-        )
+        ))
 
     def find(
         self,
@@ -93,7 +105,7 @@ class CategoryClientMixin:
         repo: str | None = None,
         limit: int = 50,
         category: str | None = None,
-    ) -> list[dict]:
+    ) -> TaskRows:
         return self.list(q=query, repo=repo, limit=limit, category=category)
 
     def sweep(
@@ -102,7 +114,7 @@ class CategoryClientMixin:
         repo: str | None = None,
         limit: int = 500,
         category: str | None = None,
-    ) -> list[dict]:
+    ) -> TaskRows:
         return self.list(sweep=True, repo=repo, limit=limit, category=category)
 
     def create(self, title: str, **kwargs: Any) -> dict:
@@ -122,14 +134,14 @@ class CategoryClientMixin:
         else:
             self.require_standing_charters()
         # Omitted/work requests retain the old wire shape for older peers.
-        return self._unwrap(self._http.post("/tasks", json={"title": title, **kwargs}))
+        return cast(Json, self._unwrap(self._http.post("/tasks", json={"title": title, **kwargs})))
 
     def classify_maintenance(self, **body: Any) -> dict:
         self.require_task_categories()
-        return self._unwrap(
+        return cast(Json, self._unwrap(
             self._http.post(
                 "/task-categories/classify",
                 json=body,
                 headers=self._control_headers(),
-            )
+            ))
         )

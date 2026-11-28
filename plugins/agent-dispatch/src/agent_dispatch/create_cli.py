@@ -6,13 +6,16 @@ import argparse
 import json
 import sys
 import uuid
+import subprocess
+from types import ModuleType
+from typing import Any, cast
 
 from .client import DispatchClient, DispatchError
 from .loop_commands import _resolve_cli_module
 
 
-def _core():
-    return _resolve_cli_module()
+def _core() -> ModuleType:
+    return cast(ModuleType, _resolve_cli_module())
 
 
 _REPO_UNRESOLVED = (
@@ -48,7 +51,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
                 400, "an explicit task authority cannot switch to another machine's queue; "
                 "enqueue with --target-machine and let that machine's supervisor acquire it",
             )
-        return _core()._dispatch_cross_machine(args, repo)
+        return cast(int, _core()._dispatch_cross_machine(args, repo))
     payload_inline = args.payload_inline
     if args.remote_create_envelope:
         if args.payload_file or args.payload_inline is not None:
@@ -180,10 +183,10 @@ def _cmd_create(args: argparse.Namespace) -> int:
         # Signal whether THIS call won the create-and-claim (mine now) or lost the
         # dedup race (the subject was already taken by someone else).
         won = task.get("owner") == claim_as and task.get("status") == "claimed"
-        return _core()._emit(_core()._enrich({**task, "claimed_by_me": won}))
+        return cast(int, _core()._emit(_core()._enrich({**task, "claimed_by_me": won})))
     if args.spawn and not args.proposed:
         _core()._spawn_worker_for(args, task)
-    return _core()._emit(_core()._enrich(task))
+    return cast(int, _core()._emit(_core()._enrich(task)))
 
 def _cmd_producer_fence(args: argparse.Namespace) -> int:
     """Inspect or atomically hand create authority to a producer generation."""
@@ -197,16 +200,16 @@ def _cmd_producer_fence(args: argparse.Namespace) -> int:
         return 2
     with _core()._client(args) as c:
         if args.producer_fence_command == "status":
-            return _core()._emit(c.producer_scope_status(repo, args.source))
+            return cast(int, _core()._emit(c.producer_scope_status(repo, args.source)))
         if args.producer_fence_command == "handoff":
-            return _core()._emit(
+            return cast(int, _core()._emit(
                 c.handoff_producer_scope(
                     repo,
                     args.source,
                     producer_id=args.producer_id,
                     expected_generation=args.expected_generation,
                     required_label=args.required_label,
-                )
+                ))
             )
     return 2
 
@@ -226,7 +229,7 @@ def _cmd_propose(args: argparse.Namespace) -> int:
         )
         return 2
     args.proposed = True
-    return _core()._cmd_create(args)
+    return cast(int, _core()._cmd_create(args))
 
 def _read_payload_file(path: str) -> str:
     """Read a payload file, or stdin when ``path`` is ``-``."""
@@ -269,7 +272,7 @@ def _dispatch_cross_machine(args: argparse.Namespace, repo: str) -> int:
         return result.returncode
     return 0
 
-def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
+def _spawn_worker_for(args: argparse.Namespace, task: dict[str, Any]) -> None:
     """Reserve the spawn atomically, then spawn a worker **exactly once**.
 
     The spawn is gated on an **atomic spawn reservation** taken from the
@@ -508,7 +511,7 @@ def _release_failed_created_spawn(
     )
 
 
-def _embody_handle(result) -> dict[str, str | None]:
+def _embody_handle(result: subprocess.CompletedProcess[str]) -> dict[str, str | None]:
     """Best-effort extract the session/worktree handle from ``embody --json``."""
     from . import embody
 
@@ -538,7 +541,10 @@ def _spawn_route(args: argparse.Namespace) -> str:
     authority = client_authority(args)
     return {"central": " --shared", "local": " --local"}.get(authority, "")
 
-def _spawn_ordinary_worker(args, task, reservation, client, *, route: str) -> None:
+def _spawn_ordinary_worker(
+    args: argparse.Namespace, task: dict[str, Any], reservation: dict[str, Any],
+    client: DispatchClient, *, route: str,
+) -> None:
     from . import bridge, ordinary_bridge
     key = reservation["key"]
     published = False
@@ -579,7 +585,9 @@ def _spawn_ordinary_worker(args, task, reservation, client, *, route: str) -> No
         raise SystemExit(1) from exc
 
 
-def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
+def _do_spawn(
+    args: argparse.Namespace, task: dict[str, Any], *, route: str = "",
+) -> tuple[subprocess.CompletedProcess[str], str, dict[str, Any]] | None:
     """Launch a worker for a task (best effort); return ``(result, via, handle)``.
 
     Both explicit CLI ``embody`` and default ACP ``bridge`` acquire through
@@ -637,7 +645,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         },
     )
 
-def _report_spawn_result(result, task_id: str, via: str) -> None:
+def _report_spawn_result(result: subprocess.CompletedProcess[str], task_id: str, via: str) -> None:
     """Print a warning if a best-effort spawn subprocess reported failure."""
     if result.returncode != 0:
         print(
@@ -817,7 +825,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     return cp
 
-def register_create_commands(sub) -> None:
+def register_create_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     create_parent = _create_args_parent()
     p = sub.add_parser(
         "create",

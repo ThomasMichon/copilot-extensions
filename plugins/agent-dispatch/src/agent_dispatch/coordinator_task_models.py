@@ -21,7 +21,7 @@ from pydantic_core import PydanticCustomError
 
 from .coordinator_categories import TaskCategory
 from .task_execution import ExecutionMode
-from .queue import (
+from .queue_common import (
     ResultTooLargeError,
     ResultValidationError,
     StructuredResult,
@@ -146,7 +146,7 @@ class ActivityBody(BaseModel):
     activity: str | None = None
     reservation_key: str
     observed_at: float | None = None
-    admission_fence: dict | None = None
+    admission_fence: dict[str, Any] | None = None
 
 
 class OwnerSessionBody(BaseModel):
@@ -216,11 +216,11 @@ class ProgressBody(BaseModel):
 
 class CardBody(BaseModel):
     worker_id: str
-    card: dict
+    card: dict[str, Any]
 
 
 class SteerBody(BaseModel):
-    fields: dict = Field(default_factory=dict)
+    fields: dict[str, Any] = Field(default_factory=dict)
     sender: str | None = None
     wake: bool = True
     message: str | None = None
@@ -230,7 +230,7 @@ class SteerBody(BaseModel):
 
 
 class CardDraftBody(BaseModel):
-    fields: dict = Field(default_factory=dict)
+    fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class SteeringScope(BaseModel):
@@ -244,7 +244,7 @@ class SteeringScope(BaseModel):
 class ScopedSteerBody(SteerBody):
     model_config = ConfigDict(extra="forbid")
 
-    fields: dict
+    fields: dict[str, Any]
     sender: str | None
     wake: bool = Field(strict=True)
     message: str = Field(min_length=1, strict=True)
@@ -292,7 +292,7 @@ class ConfirmBody(BaseModel):
 
 class ReopenBody(BaseModel):
     reason: str | None = None
-    steer_fields: dict | None = None
+    steer_fields: dict[str, Any] | None = None
     sender: str | None = None
     expected_status: str | None = None
     expected_generation: int | None = None

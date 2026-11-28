@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Literal
+from collections.abc import Mapping
+from typing import Literal, cast
 
 from .queue_records import TaskError
 
@@ -14,10 +15,10 @@ EXECUTION_MODES = ("legacy", "coordination", "delegated")
 def execution_mode(value: object) -> ExecutionMode:
     if value not in EXECUTION_MODES:
         raise TaskError("execution_mode must be legacy, coordination or delegated")
-    return value
+    return cast(ExecutionMode, value)
 
 
-def permits_allocation(task: dict) -> bool:
+def permits_allocation(task: Mapping[str, object]) -> bool:
     return task.get("execution_mode", "legacy") in ("legacy", "delegated")
 
 
@@ -35,6 +36,13 @@ def migrate_execution_intent(conn: sqlite3.Connection) -> None:
         conn.execute(
             f"CREATE TRIGGER IF NOT EXISTS coordination_reservation_{suffix}"
             f" BEFORE {operation} ON spawn_reservations"
+            " WHEN EXISTS (SELECT 1 FROM tasks WHERE id=NEW.task_id"
+            " AND execution_mode='coordination')"
+            " BEGIN SELECT RAISE(ABORT, 'coordination task cannot allocate a worker'); END"
+        )
+        conn.execute(
+            f"CREATE TRIGGER IF NOT EXISTS coordination_handoff_{suffix}"
+            f" BEFORE {operation} ON handoff_fallback_attempts"
             " WHEN EXISTS (SELECT 1 FROM tasks WHERE id=NEW.task_id"
             " AND execution_mode='coordination')"
             " BEGIN SELECT RAISE(ABORT, 'coordination task cannot allocate a worker'); END"

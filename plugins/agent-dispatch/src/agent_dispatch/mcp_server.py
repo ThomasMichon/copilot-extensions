@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from pydantic import PlainValidator, StrictInt, WithJsonSchema
 
@@ -28,7 +28,10 @@ from .client import DispatchClient, DispatchError
 from .client_authority import Authority, default_authority
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
 from .mcp_task_recovery import TaskRecoveryToolsMixin
-from .queue import StructuredResult, worker_id_for
+from .queue_common import StructuredResult, worker_id_for
+
+Json = dict[str, Any]
+TaskRows = list[Json]
 
 ClientFactory = Callable[[], DispatchClient]
 IdentityResolver = Callable[[], "tuple[str | None, str | None]"]
@@ -51,19 +54,19 @@ McpStructuredResult = Annotated[
 def _default_client() -> DispatchClient:
     from .loop_commands import _resolve_cli_module
 
-    return _resolve_cli_module()._client(argparse.Namespace())
+    return cast(DispatchClient, _resolve_cli_module()._client(argparse.Namespace()))
 
 
 def _default_observation_client() -> DispatchClient:
     from .loop_commands import _resolve_cli_module
 
-    return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, read_only=True)
+    return cast(DispatchClient, _resolve_cli_module()._client(argparse.Namespace(), ensure=False, read_only=True))
 
 
 def _default_recovery_client() -> DispatchClient:
     from .loop_commands import _resolve_cli_module
 
-    return _resolve_cli_module()._client(argparse.Namespace(), ensure=False, allow_ssh_failover=False)
+    return cast(DispatchClient, _resolve_cli_module()._client(argparse.Namespace(), ensure=False, allow_ssh_failover=False))
 
 
 class DispatchTools(TaskRecoveryToolsMixin):
@@ -263,13 +266,13 @@ class DispatchTools(TaskRecoveryToolsMixin):
     # -- browse --------------------------------------------------------------
 
     def find(self, query: str, limit: int = 50, repo: str | None = None,
-             category: str | None = None) -> list[dict]:
+             category: str | None = None) -> TaskRows:
         """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
         with self._client_factory() as c:
             return c.find(query, repo=self._scope_repo(repo), limit=limit, category=category)
 
     def sweep(self, limit: int = 500, repo: str | None = None,
-              category: str | None = None) -> list[dict]:
+              category: str | None = None) -> TaskRows:
         """The dedup corpus for the lane: every non-abandoned task, newest first.
 
         Read this before ``create`` to verify the work doesn't already exist.
@@ -279,7 +282,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
 
     # -- recipes -------------------------------------------------------------
 
-    def recipe_list(self) -> list[dict]:
+    def recipe_list(self) -> TaskRows:
         """List the built-in loop recipes -- the packaged shapes of long-running
         agentic work (reviewer / conflict-resolution / goal-driven) -- with their
         parameters, suspend-on events, and resolution target."""
@@ -374,6 +377,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
             registration = c.get_registration(registration_id)
             owner = registration.get("machine")
             if remote_dispatch.is_peer_machine(owner):
+                assert isinstance(owner, str)
                 if self._authority() != "legacy":
                     raise DispatchError(
                         409, "remote emitter side-load cannot preserve the selected authority; "
@@ -400,7 +404,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
                         )
                     )
                 try:
-                    return json.loads(completed.stdout)
+                    return cast(Json, json.loads(completed.stdout))
                 except ValueError as exc:
                     raise ValueError(
                         f"remote side-load returned invalid JSON: {exc}"
@@ -422,7 +426,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         limit: int = 200,
         repo: str | None = None,
         category: str | None = None,
-    ) -> list[dict]:
+    ) -> TaskRows:
         """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         with self._client_factory() as c:
             return c.list(
@@ -440,12 +444,12 @@ class DispatchTools(TaskRecoveryToolsMixin):
         with self._client_factory() as c:
             return c.get(task_id)
 
-    def events(self, task_id: str) -> list[dict]:
+    def events(self, task_id: str) -> TaskRows:
         """Return a task's append-only audit trail."""
         with self._client_factory() as c:
             return c.events(task_id)
 
-    def wakes(self, task_id: str) -> list[dict]:
+    def wakes(self, task_id: str) -> TaskRows:
         """Return a task's durable wake outbox operations."""
         with self._client_factory() as c:
             return c.wakes(task_id)
@@ -486,7 +490,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         worktree: str | None = None,
         repo: str | None = None,
         all_repos: bool = False,
-        assignment_workspace: dict | None = None,
+        assignment_workspace: Json | None = None,
     ) -> dict | None:
         """Atomically lease one eligible task (identity + lane auto-resolved from CWD).
 
@@ -521,8 +525,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
                 worktree=worktree,
                 task_id=task_id,
                 lease_seconds=lease_seconds,
-                **({"assignment_workspace": assignment_workspace}
-                   if assignment_workspace is not None else {}),
+                assignment_workspace=assignment_workspace,
             )
 
     # -- lifecycle -----------------------------------------------------------

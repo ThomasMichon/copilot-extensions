@@ -79,6 +79,7 @@ def place(
 def test_coordination_cannot_consume_configured_pool_capacity(q: TaskQueue) -> None:
     revision = publish(q, pool())
     coordination = q.create("claim", repo="example", execution_mode="coordination")
+    assert isinstance(coordination, Task)
     with pytest.raises(TaskError, match="coordination"):
         q.place_pool_task(
             coordination.id, reserved_by="allocator", catalog_revision=revision,
@@ -88,6 +89,7 @@ def test_coordination_cannot_consume_configured_pool_capacity(q: TaskQueue) -> N
         assert conn.execute("SELECT COUNT(*) FROM task_pool_assignments").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
     delegated = q.create("execute", repo="example", execution_mode="delegated")
+    assert isinstance(delegated, Task)
     placement = q.place_pool_task(
         delegated.id, reserved_by="allocator", catalog_revision=revision,
     )
