@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [phase, monitor, hosted and skill-review comparison](journal/2026/11.27-phase-monitor-hosted-skill-retentions.md)
+reads four complete current originals and all twenty-one discussions.
+Phase 10 keeps its parked-root and transactional-application boundaries;
+monitor publication keeps complete event/reader acceptance; the hosted
+lifecycle remains a final-OPEN keeper; and skill review retains its actual
+assigned loader/rubric contract. Four coverage outcome/gap pairs become
+specific current retentions without issue writes or completion units.
+The pending pointer advances to #3303; all primary gates and counts remain.
+
 The [uninstall, performance and activation comparison](journal/2026/11.27-uninstall-performance-activation-retentions.md)
 reads five complete current originals and all nineteen discussions.
 Installer-readiness classification does not deliver symmetric reference-safe
@@ -531,6 +540,11 @@ retain distinct acceptance. Five coverage outcome/gap pairs become specific
 current retentions; all five issues remain OPEN without redundant comments,
 dispositions or final-completion verification units. The pending pointer
 advances to #2423; historical counts and all primary gates remain.
+
+The four-file comparison merged in #14934 after genuine current-head approval
+and actual required CI. Independent provider/source checks retain every
+authored blob, all five OPEN issues and all sixteen primary clauses. The
+existing agenda parent continues without a census or resource handback.
 
 The [privacy, reviewer, proxy and Index comparison](journal/2026/11.27-privacy-reviewer-proxy-index-retentions.md)
 reads four complete current originals and all twelve discussions. Current
