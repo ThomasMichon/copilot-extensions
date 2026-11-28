@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [umbrella-contract and finite-credit comparison](journal/2026/11.27-umbrella-contracts-and-finite-credits.md)
+reads seven complete current originals and all sixty-five discussions.
+The design-only, cancellation, hook and local-only-sync slices receive
+their actual bounded credit without completing expanded authority, messaging,
+operation-model, reliability, reaping, project-context or row-display contracts.
+Seven coverage outcome/gap pairs become current retentions; the matching
+structured pending pointer advances to #4183 with its original creation time.
+All ownership, conditional demand, historical fields and parent gates remain;
+no tracker write, completion unit, census or operational action is proposed.
+
 The [privacy and custody-keeper comparison](journal/2026/11.27-privacy-and-custody-keepers.md)
 reads nine complete current originals and all thirty-three discussions.
 All six specifically reported privacy surfaces have zero report-derived
@@ -533,6 +543,12 @@ writes, final-completion units or a fresh census. The prose and structured
 pending pointer advance to #3761 with its original creation time. Two bot-edit
 origins remain unqualified and their issue
 titles and originals remain unread.
+
+The four-file comparison merged in #14946 after the dependent structured
+pointer was corrected, current-head Copilot approval and actual required CI.
+Independent provider/source checks retain every authored blob, all eleven
+sources and #7556 OPEN, and all sixteen primary clauses. The existing agenda
+parent continues; no tracker mutation, census or resource handback occurred.
 
 The [qualified promotion-report triage](journal/2026/11.27-qualified-promotion-report-triage.md)
 admits three repository-owned reports only after their actual workflow,
