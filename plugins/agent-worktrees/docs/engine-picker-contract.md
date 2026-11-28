@@ -932,6 +932,12 @@ which is also observation metadata; its domain facts remain in the semantic
 row. No arbitrary `*_at` fields are removed: activity/lifecycle timestamps
 remain semantic. Unchanged fact observations retain their observation revision.
 
+Current rows also admit the serializer's Boolean
+`mux_observation_unavailable` and `session_lock_observation_unavailable` markers.
+Unavailable terminal or session-lock observations must not prevent publication
+of the entire roster. These markers preserve unknown ownership; they do not
+turn a missing observation into evidence that a session has stopped.
+
 The v2 feed adds one bounded `observation` frame per changed observation entry,
 with the same `projection` and `observation` object above. Initial observations
 follow their semantic rows; updates retain the full order frames. Receivers
