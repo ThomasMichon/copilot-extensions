@@ -58,6 +58,9 @@ class HandoffFallbackMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is not None and task.execution_mode == "coordination":
+                return False
             if conn.execute(
                 "SELECT 1 FROM handoff_fallback_attempts WHERE task_id = ?", (task_id,),
             ).fetchone() is not None:

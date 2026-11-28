@@ -334,6 +334,8 @@ class TaskQueue(
             migrate_submission_preparation(conn)
             from .queue_standing_schema import migrate_standing_charters
             migrate_standing_charters(conn)
+            from .task_execution import migrate_execution_intent
+            migrate_execution_intent(conn)
             from .queue_standing_sources import migrate_standing_sources
             migrate_standing_sources(conn)
             conn.execute(

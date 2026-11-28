@@ -243,6 +243,7 @@ class Task:
     standing_revision: int = 0
     standing_parent_id: str | None = None
     handoff_claim: dict[str, Any] | None = None
+    execution_mode: str = "legacy"
 
     @property
     def card_draft_revision(self) -> str:
@@ -278,6 +279,7 @@ class Task:
             title=row["title"],
             prompt=row["prompt"],
             status=row["status"],
+            execution_mode=row["execution_mode"] if "execution_mode" in columns else "legacy",
             repo=row["repo"],
             category=row["category"] if "category" in columns else "work",
             kind=row["kind"] if "kind" in columns else "finite",
@@ -504,6 +506,7 @@ _COLUMNS: dict[str, str] = {
     "status": "TEXT NOT NULL DEFAULT 'queued'",
     "repo": "TEXT",
     "category": "TEXT NOT NULL DEFAULT 'work' CHECK(category IN ('work','maintenance'))",
+    "execution_mode": "TEXT NOT NULL DEFAULT 'legacy' CHECK(execution_mode IN ('legacy','coordination','delegated'))",
     "kind": "TEXT NOT NULL DEFAULT 'finite' CHECK(kind IN ('finite','standing-charter'))",
     "standing_charter": "TEXT",
     "standing_revision": "INTEGER NOT NULL DEFAULT 0 CHECK(standing_revision >= 0)",

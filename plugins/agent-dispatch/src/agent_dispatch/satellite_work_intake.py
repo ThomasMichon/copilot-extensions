@@ -32,9 +32,12 @@ import math
 import time
 from typing import Any, Callable, Protocol
 
+from .task_execution import permits_allocation
+
+Json = dict[str, Any]
 
 class _TaskLister(Protocol):
-    def list(self, **params: Any) -> list[dict]: ...
+    def list(self, **params: Any) -> list[Json]: ...
 
 
 #: How long a triggered-but-not-yet-observed-as-claimed task_id counts against
@@ -157,7 +160,7 @@ class SatelliteWorkIntake:
         for task_id in expired:
             del self._recent_triggers[task_id]
 
-    def _clear_observed_triggers(self, active: list[dict]) -> None:
+    def _clear_observed_triggers(self, active: list[Json]) -> None:
         """Drop any in-memory "recently triggered" entry the coordinator now
         confirms as actually `claimed`/`started` -- it no longer needs this
         loop's own placeholder bookkeeping and, left in place, would keep
@@ -170,7 +173,7 @@ class SatelliteWorkIntake:
             if task_id is not None:
                 self._recent_triggers.pop(task_id, None)
 
-    def _resolve_project(self, task: dict) -> str | None:
+    def _resolve_project(self, task: Json) -> str | None:
         """The ``--project`` to embody a claimed task under: an explicit
         override always wins; otherwise derive it from the task's own repo
         lane (:func:`agent_dispatch.embody.project_for_task`) rather than
@@ -184,7 +187,7 @@ class SatelliteWorkIntake:
 
         return project_for_task(task)
 
-    def _spawn(self, task: dict) -> Any:
+    def _spawn(self, task: Json) -> Any:
         spawn_fn = self._spawn_fn
         if spawn_fn is None:
             from .embody import spawn_embodied_worker as spawn_fn  # noqa: PLC0415
@@ -195,6 +198,7 @@ class SatelliteWorkIntake:
                 f"AGENT_DISPATCH_SATELLITE_PROJECT configured and the task "
                 f"carries no repo lane to derive one from"
             )
+        assert spawn_fn is not None
         return spawn_fn(
             task.get("id"),
             worker_id=self._worker_id,
@@ -211,7 +215,7 @@ class SatelliteWorkIntake:
             timeout=self._spawn_timeout,
         )
 
-    def _fetch_all_queued(self, capacity: int) -> list[dict]:
+    def _fetch_all_queued(self, capacity: int) -> list[Json]:
         """The full `queued` backlog affinitied to this machine -- not just
         one bounded page.
 
@@ -254,7 +258,7 @@ class SatelliteWorkIntake:
                 return rows
             limit = min(limit * 2, _QUEUE_DISCOVERY_MAX_LIMIT)
 
-    def tick(self) -> dict:
+    def tick(self) -> Json:
         """Discover + trigger spawns for at most one concurrency slot's worth
         of this machine's own queued work. Never raises: a transient
         coordinator/spawn failure degrades to an empty result so a periodic
@@ -275,11 +279,20 @@ class SatelliteWorkIntake:
                 repo=self._repo,
                 limit=active_limit,
             )
+            if len(active) >= active_limit and any(not permits_allocation(task) for task in active):
+                active_limit = max(active_limit, _QUEUE_DISCOVERY_MAX_LIMIT)
+                active = self._client.list(
+                    status=_ACTIVE_STATUSES, target_machine=self._machine,
+                    repo=self._repo, limit=active_limit,
+                )
+                if len(active) >= active_limit:
+                    return {"spawned": [], "skipped_at_capacity": True, "error": "active_window_incomplete"}
         except Exception:
             # Can't confirm current occupancy -- degrade to "assume full" so
             # a coordinator hiccup can never be misread as "clear to spawn
             # more", which would risk over-claiming past the cap.
             return {"spawned": [], "skipped_at_capacity": True, "error": "list_failed"}
+        active = [task for task in active if permits_allocation(task)]
         self._clear_observed_triggers(active)
         capacity = self._max_concurrent - len(active) - len(self._recent_triggers)
         if capacity <= 0:
@@ -295,7 +308,13 @@ class SatelliteWorkIntake:
         queued = sorted(queued, key=lambda t: t.get("created_at") or 0.0)
         spawned: list[str] = []
         attempts = 0
+        missing_intent = False
         for task in queued:
+            if "execution_mode" not in task:
+                missing_intent = True
+                continue
+            if not permits_allocation(task):
+                continue
             if capacity <= 0:
                 break
             if attempts >= self._max_spawns_per_tick:
@@ -322,9 +341,12 @@ class SatelliteWorkIntake:
                 continue
             spawned.append(task_id)
             capacity -= 1
-        return {"spawned": spawned, "skipped_at_capacity": False}
+        result: Json = {"spawned": spawned, "skipped_at_capacity": False}
+        if missing_intent:
+            result["error"] = "execution_intent_unavailable"
+        return result
 
-    def _try_spawn(self, task: dict) -> bool:
+    def _try_spawn(self, task: Json) -> bool:
         """Trigger a spawn for ``task``; ``True`` only on a genuine launch.
 
         ``embody.spawn_embodied_worker`` runs its subprocess with

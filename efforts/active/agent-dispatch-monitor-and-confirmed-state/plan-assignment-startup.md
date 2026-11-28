@@ -14,20 +14,20 @@ It does not replace the incumbent pool-owned startup or submission slices.
 
 Implementation design _(agent-recommended)_:
 
-- [ ] Extend the existing task creation/storage/transport contract with the
+- [x] Extend the existing task creation/storage/transport contract with the
       smallest durable distinction between coordination-only records and
       explicitly delegated execution. Keep category, labels and status
       orthogonal; use existing task and allocation authorities, not a second
       claim ledger, daemon or identity store.
-- [ ] Enforce coordination-only non-allocation at fresh and recovery allocation
+- [x] Enforce coordination-only non-allocation at fresh and recovery allocation
       boundaries. Manual ownership remains usable. Yield, release, requeue,
       owner disappearance and restart must not promote the record to execution.
       Addressed continuation retains the existing authorized owner/context.
-- [ ] Preserve old stored tasks and callers through explicit compatibility
+- [x] Preserve old stored tasks and callers through explicit compatibility
       behavior, and retain positive opt-in general and domain execution.
       Unsupported providers must not silently drop a requested non-allocation
       guarantee. Do not blanket-convert old tasks or infer intent from labels.
-- [ ] Clarify the generic spawn-target default versus an actually configured
+- [x] Clarify the generic spawn-target default versus an actually configured
       worker body. Reconcile obsolete registrations through their owning
       producer/configuration flow only after checking current work, ownership
       and replacement/drain conditions. Do not invent a worker, enable a pool,
@@ -37,19 +37,29 @@ Implementation design _(agent-recommended)_:
 
 #### Local validation
 
-- [ ] A coordination-only task can be recorded and manually claimed without
+- [x] A coordination-only task can be recorded and manually claimed without
       any worker/session/workspace creation, placement, reservation or slot use.
       Repeat after release/yield/requeue, owner-loss recovery and store reopen.
-- [ ] Exercise each actual allocation entry point, including explicit spawn,
+- [x] Exercise each actual allocation entry point, including explicit spawn,
       legacy supervisor and pool placement/recovery, with negative allocation
       controls; rejecting an incompatible request must precede effects.
-- [ ] Existing stored records and unchanged callers retain compatible behavior;
+- [x] Existing stored records and unchanged callers retain compatible behavior;
       explicit general and domain jobs still allocate and start through their
       existing gates. Labels/category/status changes cannot override an explicit
       coordination-only choice; legacy unknown intent is not blanket-migrated.
-- [ ] Round-trip the distinction through supported CLI, API and persistence
+- [x] Round-trip the distinction through supported CLI, API and persistence
       boundaries, including mixed caller/provider compatibility. Use focused
       tests in existing suites, not a new unconditional exhaustive CI matrix.
+
+Source controls cover `legacy` compatibility, explicit `delegated` work and
+immutable `coordination` intent. Reservation admission and retained SQL fences
+prevent allocation, including a rolled-back writer; manual ownership and
+lifecycle writes remain available. A real isolated HTTP coordinator and the
+ordinary scheduler select the delegated control and leave the coordination
+record unallocated, using an inert worker body rather than a model session.
+The affected obsolete adopter lane was retired through its existing reversible
+override after owner/work checks and explicit stop authorization; no replacement
+pool was enabled. Review, release and installed acceptance remain separate.
 
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 

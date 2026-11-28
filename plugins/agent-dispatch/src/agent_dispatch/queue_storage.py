@@ -40,6 +40,7 @@ from .queue_producer_fences import (
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import Status, TaskError
 from .queue_dedup import find_live_dedup_task
+from .task_execution import creation_contract_fields, execution_mode as validate_execution_mode, require_matching_execution_intent
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -305,6 +306,7 @@ class QueueStorageMixin(StorageOwner):
         repo: str | None = None,
         prompt: str = "",
         category: str = "work",
+        execution_mode: str = "legacy",
         status: str = Status.QUEUED,
         requires: Sequence[str] | None = None,
         excludes: Sequence[str] | None = None,
@@ -381,6 +383,7 @@ class QueueStorageMixin(StorageOwner):
             raise TaskError("standing_parent_id must be a bounded task id")
         from .task_categories import category_value
         category_value(category)
+        validate_execution_mode(execution_mode)
         if not isinstance(require_verification, bool):
             raise TaskError("require_verification must be true/false")
         if exclusive_key is not None:
@@ -459,10 +462,7 @@ class QueueStorageMixin(StorageOwner):
                 "goal": goal,
                 "done_criteria": done_criteria,
             }
-            if category != "work":
-                request_fields["category"] = category
-            if standing_parent_id is not None:
-                request_fields["standing_parent_id"] = standing_parent_id
+            request_fields.update(creation_contract_fields(category=category, execution_mode=execution_mode, standing_parent_id=standing_parent_id))
             request_hash = self._producer_request_hash(request_fields)
             compatible_request_hashes.add(request_hash)
             pre_exclusive_fields = dict(request_fields)
@@ -793,6 +793,7 @@ class QueueStorageMixin(StorageOwner):
                             "conflicting_task_status": accepted.status,
                         },
                     )
+                require_matching_execution_intent(accepted, execution_mode)
                 if (
                     accepted is not None
                     and standing_parent_id is not None
@@ -854,8 +855,8 @@ class QueueStorageMixin(StorageOwner):
                         " source, origin_ref, evaluator_ref, exclusive_key, dedup_key,"
                         " goal, done_criteria, require_verification,"
                         " producer_fence, producer_request_hash,"
-                        " not_before, created_at, updated_at, category, standing_parent_id)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " not_before, created_at, updated_at, category, standing_parent_id, execution_mode)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             task_id,
                             title,
@@ -886,6 +887,7 @@ class QueueStorageMixin(StorageOwner):
                             ts,
                             category,
                             standing_parent_id,
+                            execution_mode,
                         ),
                     )
                     self._audit(

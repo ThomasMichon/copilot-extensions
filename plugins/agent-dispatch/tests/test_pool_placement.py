@@ -76,6 +76,26 @@ def place(
     )
 
 
+def test_coordination_cannot_consume_configured_pool_capacity(q: TaskQueue) -> None:
+    revision = publish(q, pool())
+    coordination = q.create("claim", repo="example", execution_mode="coordination")
+    assert isinstance(coordination, Task)
+    with pytest.raises(TaskError, match="coordination"):
+        q.place_pool_task(
+            coordination.id, reserved_by="allocator", catalog_revision=revision,
+        )
+    assert q.list_reservations(task_id=coordination.id) == []
+    with q._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM task_pool_assignments").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
+    delegated = q.create("execute", repo="example", execution_mode="delegated")
+    assert isinstance(delegated, Task)
+    placement = q.place_pool_task(
+        delegated.id, reserved_by="allocator", catalog_revision=revision,
+    )
+    assert placement.reserved and placement.assignment.task_id == delegated.id
+
+
 class PlacementOptions(TypedDict):
     reserved_by: str
     catalog_revision: int
@@ -400,6 +420,7 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q: TaskQueue
         "protocol": "pool_placement/v1", "supported_versions": [1],
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
+        "ordinary_allocation_nonce_versions": [1],
         "ordinary_control_adoption_versions": [1],
         "ordinary_control_delivery_versions": [1],
         "ordinary_writer_requirement_versions": [1],
