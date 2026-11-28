@@ -951,10 +951,10 @@
     [11663, "inflow", "member", 7, true, null, "pending", "qualified-change-evidence"],
     [11674, "inflow", "member", 17, true, null, "pending", "qualified-change-evidence"],
     [11678, "inflow", "member", 4, true, null, "pending", "qualified-change-evidence"],
-    [11691, "inflow", "automation", 2, false, null, "candidate", "conditional-report-token-retirement-two-additional-open-inputs-in12078"],
+    [11691, "inflow", "automation", 2, false, null, "retired-generated-report", "reviewed-additive-open-input-receiving-and-independent-proper-reason-audit"],
     [11704, "inflow", "member", 2, true, null, "retained-current", "11709source correction credited;11817and current campaign record retain release/ordinary affected-installed reconciliation without successful affected-installation proof."],
     [11722, "inflow", "member", 10, true, null, "pending", "qualified-change-evidence"],
-    [11756, "inflow", "automation", 1, false, null, "candidate", "conditional-report-token-retirement-additional-open-input-in12078"],
+    [11756, "inflow", "automation", 1, false, null, "retired-generated-report", "reviewed-additive-open-input-receiving-and-independent-proper-reason-audit"],
     [11767, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
     [11773, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
     [11774, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
@@ -978,7 +978,7 @@
     [12038, "inflow", "member", 2, true, null, "retained-current", "Dirty/unmerged/open-PR/unknown descendants plus aggregateMERGED presentation remain distinct from12957recursive ownership/backfill; no transfer."],
     [12056, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
     [12064, "inflow", "member", 0, true, null, "pending", "qualified-change-evidence"],
-    [12078, "inflow", "automation", 2, false, null, "retained-current", "explicit-human-keep-open-six-incumbents-and-three-proposed-open-inputs"],
+    [12078, "inflow", "automation", 2, false, null, "retained-current", "explicit-human-keep-open-initialization-cause-and-nine-open-occurrences"],
     [12116, "inflow", "member", 5, true, null, "pending", "qualified-change-evidence"],
     [12132, "inflow", "member", 0, true, null, "pending", "qualified-change-evidence"],
     [12203, "inflow", "automation", 10, false, null, "pending", "qualified-change-evidence"],
@@ -1705,5 +1705,43 @@
     "fresh_census": false,
     "tracker_effects": 0,
     "source_or_resource_ownership_reassigned": false
+  },
+  "later_earlier_verifier_tracking_outcome": {
+    "narrative": "../journal/2026/11.27-earlier-verifier-inputs.md",
+    "reviewed_proposal": 14920,
+    "actual_receiver": 12078,
+    "whole_previous_six_case_body_and_three_human_discussions_unchanged": true,
+    "additional_open_cases": 3,
+    "all_nine_receiver_technical_cases": "OPEN",
+    "human_keeper10651_original_all_five_discussions_four_inputs_unchanged": true,
+    "audited_not_planned_report_tokens": [
+      11691,
+      11756
+    ],
+    "whole_open": 571,
+    "original_cohort_open": 274,
+    "inflow_open": 297,
+    "observed_local": "2026-11-27T19:15:25.776751-08:00",
+    "complete_equal_issue_passes": 2,
+    "pages_per_complete_pass": 6,
+    "equal_complete_roster_members": 15,
+    "arrivals_since_previous": [],
+    "departures_since_previous": [
+      11691,
+      11756
+    ],
+    "unrelated_departures": [],
+    "actual_current_outcomes": {
+      "pending": 366,
+      "retained-current": 154,
+      "excluded": 5,
+      "spent-open": 6,
+      "retained-prior": 33,
+      "coordination": 1,
+      "retained-new": 6
+    },
+    "technical_fixes_or_resource_transfers": 0,
+    "all_other_nodes_and_historical_fields_preserved": true,
+    "source_copy_and_resource_holds_preserved": true
   }
 }
