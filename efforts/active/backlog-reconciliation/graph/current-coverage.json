@@ -1072,7 +1072,7 @@
     [14306, "inflow", "member", null, false, null, "spent-open", "verification-class-spent"],
     [14308, "inflow", "member", 1, false, null, "pending", "qualified-change-evidence"],
     [14309, "inflow", "member", 1, false, null, "pending", "qualified-change-evidence"],
-    [14310, "inflow", "automation", 23, false, null, "candidate", "whole-materializer-original-and-sibling-followup-normal-promotion-final-verification"],
+    [14310, "inflow", "automation", 23, false, null, "completed-source", "whole-materializer-and-retained-followup-verified-source-normal-release-completion"],
     [14313, "inflow", "member", 3, false, null, "retained-current", "shared-owner-written-fleet-status-consumer-outcome-unestablished"],
     [14325, "inflow", "member", 4, false, null, "retained-current", "owner-retained-installed-startup-registration-and-certain-terminal-receipt"],
     [14336, "inflow", "member", 12, false, null, "pending", "qualified-change-evidence"],
@@ -1765,5 +1765,48 @@
     "fresh_census": false,
     "product_or_native_execution": false,
     "source_or_resource_ownership_reassigned": false
+  },
+  "later_verified_materializer_completion_and_json_keeper": {
+    "narrative": "../journal/2026/11.27-materializer-and-json-freeze.md",
+    "reviewed_correspondence": 14924,
+    "completed_source_issue": 14310,
+    "provider_state": "CLOSED",
+    "provider_reason": "COMPLETED",
+    "acknowledgment": "https://github.com/ThomasMichon/copilot-extensions/issues/14310#issuecomment-7233510165",
+    "primary_fulfilling_pr": 14349,
+    "incorporated_original_repair": 14339,
+    "normal_main_promotion": 14366,
+    "original_and_both_discussions_and_report_label_custody_preserved": true,
+    "recorded_final_metadata_units": {
+      "issue_recheck": 1,
+      "complete_roster": 1,
+      "PR_review_required_check_verification": 1
+    },
+    "primary_current_head_approval_resolved_threads_and_actual_app_bound_required_CI_verified": true,
+    "retained_unidentified_json_failure": 14423,
+    "whole_open": 570,
+    "original_cohort_open": 274,
+    "inflow_open": 296,
+    "observed_local": "2026-11-27T19:56:41.021380-08:00",
+    "complete_equal_issue_passes": 2,
+    "pages_per_complete_pass": 6,
+    "equal_complete_roster_members": 15,
+    "arrivals_since_previous": [],
+    "departures_since_previous": [
+      14310
+    ],
+    "unrelated_departures": [],
+    "actual_current_outcomes": {
+      "pending": 364,
+      "retained-current": 155,
+      "excluded": 5,
+      "spent-open": 6,
+      "retained-prior": 33,
+      "coordination": 1,
+      "retained-new": 6
+    },
+    "new_product_changes_or_native_execution": 0,
+    "all_other_nodes_and_historical_fields_preserved": true,
+    "source_copy_and_resource_holds_preserved": true
   }
 }
