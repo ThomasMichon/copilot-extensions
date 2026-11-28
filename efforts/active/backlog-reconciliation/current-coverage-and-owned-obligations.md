@@ -605,6 +605,45 @@ rows and all earlier research/counting records remain unchanged. There is
 no fresh census, issue disposition, product/native execution, actual
 source-copy clearance or custody transfer. Every parent gate remains OPEN.
 
+## Old umbrellas and first-use doctor
+
+The [four-case study](journal/2026/11.27-old-umbrellas-and-first-use-doctor.md)
+independently qualifies and reads whole #63/#84/#954/#9281 and all
+twenty-eight discussions. Actual inherited-source producers qualify
+metadata-only without reacquiring their originals or replaying settled
+transactions; #9281 receives its own separate whole-request assessment.
+
+#63's complete substrate/adoption/key/provider/health and all-peer
+convergence outcome is broader than its active conventional-connectivity
+effort. #84 preserves asserted ground ownership, acknowledged succession,
+hosted/viewer residuals and every directly retained finite case, without
+claiming implemented lifecycle primitives absent. Later metadata shows
+#3584/#3585 closed `NOT_PLANNED` with direct effort acceptance still open;
+the older issue's OPEN wording is not restated as current provider fact
+or taken as a release of responsibility.
+
+#954 retains its full trusted-venue programme, actual P3 reservations and
+direct executable/profile, exact-worker Git, approval-state, seed and doctor
+acceptance. Its owning effort explicitly preserves the keep-OPEN condition.
+Historical transport/relay/Host/fault milestones remain credit at their
+reported bounds, not fresh qualification or whole completion.
+
+#9281's direct receiving checklist and preserved original in #954 do not
+fulfill its requested runtime outcome. The current actual doctor path
+still attempts package installation without the requested post-failure
+list recovery, installs the Bridge plugin without marketplace recovery,
+skips the missing Worktrees binstub and reports generic failure labels
+without the failing output or exact remedy. Existing opt-in repair,
+reprobe, credential readiness and lean/stale handling remain credited.
+Keep the source OPEN, as its current refinement explicitly requires.
+
+Only these four frozen outcome/gap pairs become current-retained. The
+same retained 582-identity observation now reconciles 384 pending and 147
+current-retained; every other category, historical field, post-snapshot
+row and earlier research/counting record remains unchanged. No issue
+disposition, final verification unit, product/native execution, source-copy
+clearance or resource transfer occurs. All parent gates remain OPEN.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

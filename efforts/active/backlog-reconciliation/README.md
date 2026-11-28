@@ -522,6 +522,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [older-umbrella and first-use-doctor comparison](journal/2026/11.27-old-umbrellas-and-first-use-doctor.md)
+retains four complete current requests and all twenty-eight discussions.
+#63 keeps full mesh lifecycle and all-peer convergence; #84 keeps acknowledged
+succession and its finite inherited cases; #954 keeps its live programme
+conditions rather than treating historical milestones as full acceptance.
+The actual doctor path still leaves #9281's three first-use remedies and
+diagnostics incomplete. Its explicit keep-open refinement is not a duplicate
+closure invitation. Only four outcome/gap pairs change; the retained
+582-identity observation has 384 pending and 147 current-retained, without a
+fresh census, issue disposition, implementation or custody transfer.
+
 The [adoption and scoped-capability comparison](journal/2026/11.27-adoption-and-scoped-capability-boundaries.md)
 retains independently qualified current #5852/#5877/#5900 and all six
 discussions. Current installer inference and first-run behavior migration
@@ -532,6 +543,9 @@ process-provenance acceptance. Older held inputs and withdrawn comparisons
 remain unchanged. Only three outcome/gap pairs change: the retained
 582-identity observation has 388 pending and 143 current-retained, without a
 fresh census, issue disposition, implementation or ownership transfer.
+The five-file recording merged in #14911 after genuine current-head approval
+and all actual required CI. Exact source reconciliation and parent return
+preserve the three OPEN requests, settled origin and remaining parent gates.
 
 The [conditional and ordinary-operation comparison](journal/2026/11.27-conditional-and-ordinary-operation-boundaries.md)
 retains independently qualified current #5641/#5842/#5843 and all four
