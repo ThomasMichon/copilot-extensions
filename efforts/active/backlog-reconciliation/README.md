@@ -522,6 +522,19 @@ the non-public approval conversation.
 
 ## Plan
 
+The [canonical-copy input comparison](journal/2026/11.27-canonical-copy-input-cases.md)
+retains complete current #1096/#1266/#1303 and their fifty-five discussions.
+The coexistence effort stays explicitly parked; AHP and portfolio acceptance
+remain unfinished under their existing owners. Six whole controlled reports
+retain independently unidentified input pairs despite matching old checkout
+policy and later execution of the repaired policy. Five generated leaf tokens
+may conditionally retire only after complete six-case receiving in OPEN
+#13245, normal reviewed publication and separate routing/preservation audits.
+This is not six fixes. Only nine outcome/gap pairs change; the unchanged
+582-identity observation has 375 pending, 151 current-retained and five
+candidates. There is no fresh census, issue effect, execution or custody
+transfer from this proposal.
+
 The [older-umbrella and first-use-doctor comparison](journal/2026/11.27-old-umbrellas-and-first-use-doctor.md)
 retains four complete current requests and all twenty-eight discussions.
 #63 keeps full mesh lifecycle and all-peer convergence; #84 keeps acknowledged
@@ -532,6 +545,9 @@ diagnostics incomplete. Its explicit keep-open refinement is not a duplicate
 closure invitation. Only four outcome/gap pairs change; the retained
 582-identity observation has 384 pending and 147 current-retained, without a
 fresh census, issue disposition, implementation or custody transfer.
+The five-file recording merged in #14913 after genuine current-head approval
+and all actual required CI. Exact source reconciliation and parent return
+preserve the four OPEN requests, settled origins and remaining parent gates.
 
 The [adoption and scoped-capability comparison](journal/2026/11.27-adoption-and-scoped-capability-boundaries.md)
 retains independently qualified current #5852/#5877/#5900 and all six
