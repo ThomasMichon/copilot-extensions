@@ -644,6 +644,26 @@ row and earlier research/counting record remains unchanged. No issue
 disposition, final verification unit, product/native execution, source-copy
 clearance or resource transfer occurs. All parent gates remain OPEN.
 
+## Canonical-copy inputs and retained programmes
+
+The [complete comparison](journal/2026/11.27-canonical-copy-input-cases.md)
+reads current #1096/#1266/#1303 and all fifty-five discussions. Their
+parked coexistence, Draft AHP and Active portfolio gates remain distinct,
+with inherited acceptance, actual custody and evidence tiers preserved.
+Six independently qualified controlled reports retain six unidentified
+source/copy pairs. Equal pre-repair checkout policy and a later actual
+candidate-unit job with the exactly repaired promoted policy do not prove
+those original inputs fixed.
+
+Only five generated report tokens are conditional redundant-tracking
+candidates, after complete receiving in existing OPEN #13245 and separate
+eligibility, routing, acknowledgment and preservation audits. All six
+technical cases stay OPEN. Only nine outcome/gap pairs change: the same
+582-identity observation has 375 pending, 151 current-retained and five
+candidates. Other categories, historical fields and all counting records
+remain unchanged; there is no fresh census, issue effect, native/product
+operation, source-copy clearance or resource transfer.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
