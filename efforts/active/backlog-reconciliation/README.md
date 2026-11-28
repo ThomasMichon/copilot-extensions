@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Vault lifecycle and oldest retained contracts comparison](journal/2026/11.27-vault-and-oldest-retained-contracts.md)
+reads five complete current originals and all twenty-two discussions.
+Current POSIX Vault lifecycle verbs still require systemd, and current Vault
+generation startup still opens TCP alongside native IPC. Trigger ownership,
+the Draft Bridge compatibility foundation and proposed resume-generation
+recovery retain distinct unfinished acceptance. Five coverage outcome/gap
+pairs become specific current retentions; all five issues remain OPEN without
+redundant comments, dispositions or final-completion verification units.
+The existing 570 observation is historical, not a refreshed census.
+
 The [Bridge, comment and IPC comparison](journal/2026/11.27-bridge-comment-and-ipc-retentions.md)
 reads four complete current originals and all five discussions. #9357 retains
 disabled-task and cooperative-maintenance lifecycle acceptance; #12770's
@@ -533,6 +543,11 @@ behavior is credited without claiming the missing outcomes. Four coverage
 outcome/gap pairs become specific current retentions; all four issues remain
 OPEN with no tracker mutation or final-completion unit. The last independently
 verified 570 observation is retained, not refreshed. All parent gates remain.
+
+The four-file comparison merged in #14928 after genuine current-head approval
+and actual required CI. Independent provider/source checks preserve all four
+authored blobs and all four OPEN issues. Parent return retains all sixteen
+primary gates; no issue disposition or fresh census followed.
 
 The [materializer and JSON-freeze comparison](journal/2026/11.27-materializer-and-json-freeze.md)
 qualifies and reads two complete reports and both discussions.

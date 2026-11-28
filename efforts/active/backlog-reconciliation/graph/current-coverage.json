@@ -467,8 +467,8 @@
     "content_admission_from_counting": false
   },
   "oldest_pending_current_qualification": {
-    "issue": 54,
-    "created_at_local": "2026-07-16T23:20:27-07:00"
+    "issue": 1544,
+    "created_at_local": "2026-09-01T00:16:31-07:00"
   },
   "oldest_pending_definition": "Oldest identity in this frame's qualified-change-evidence class, not a claim that its original has never been read or that prior semantic research is invalid.",
   "creator_scope_legend": {
@@ -510,7 +510,7 @@
     [14902, "inflow", "member", null, false, null, "retained-new", "ssh-tenant-lifetime-renewal-complete-cleanup-and-vision-effort-correspondence-unfinished"]
   ],
   "nodes": [
-    [54, "original", "member", 7, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [54, "original", "member", 7, true, "semantic-snapshot", "retained-current", "native-preference-and-Bridge-policy-acceptance"],
     [63, "original", "member", 20, true, "semantic-snapshot", "retained-current", "full-mesh-lifecycle-all-peer-convergence-and-direct-inherited-acceptance"],
     [78, "original", "member", 6, true, "semantic-snapshot", "retained-current", "native-loader-still-passes-filename-stem-before-materializer"],
     [84, "original", "member", 32, true, "semantic-snapshot", "retained-current", "acknowledged-succession-hosted-viewer-and-finite-inherited-cases-with-independent-custody"],
@@ -525,10 +525,10 @@
     [1138, "original", "member", 26, true, "semantic-snapshot", "retained-current", "independent-immutable-reference-contract-not-bounded-inspection"],
     [1266, "original", "member", 25, true, "semantic-snapshot", "retained-current", "draft-ahp-host-conformance-and-inherited-native-acceptance"],
     [1303, "original", "member", 154, true, "semantic-snapshot", "retained-current", "live-portfolio-census-assurance-and-specific-native-coordination"],
-    [1323, "original", "member", 2, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [1323, "original", "member", 2, true, "semantic-snapshot", "retained-current", "semantic-operation-owner-and-compatibility-routing"],
     [1419, "original", "member", 28, true, "semantic-snapshot", "retained-current", "wider-knowledge-lifecycle-acceptance-after-scoped-repair-and-joint-cleanup"],
-    [1460, "original", "member", 54, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
-    [1508, "original", "member", 19, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [1460, "original", "member", 54, true, "semantic-snapshot", "retained-current", "Draft-foundation-and-per-owner-support-windows"],
+    [1508, "original", "member", 19, true, "semantic-snapshot", "retained-current", "proposed-generation-recovery-not-delivery-receipts"],
     [1544, "original", "member", 3, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [1734, "original", "member", 9, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [1742, "original", "member", 5, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
@@ -550,7 +550,7 @@
     [2464, "original", "member", 25, true, "semantic-snapshot", "retained-current", "whole-truthful-lifetime-acceptance-beyond-status-and-recovery-prerequisites"],
     [2549, "original", "member", 0, true, "semantic-snapshot", "retained-current", "durable-operator-raw-ssh-only-policy-not-per-workflow-choice"],
     [2551, "original", "member", 3, true, "semantic-snapshot", "retained-current", "separate-foreign-write-and-dirty-stash-incident-attribution-and-containment"],
-    [2556, "original", "member", 6, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [2556, "original", "member", 6, true, "semantic-snapshot", "retained-current", "POSIX-explicit-lifecycle-still-systemd-required"],
     [2612, "original", "member", 1, true, "semantic-snapshot", "retained-current", "incumbent-current-mode-mapping-acceptance"],
     [2619, "original", "member", 33, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [2680, "original", "member", 3, true, "semantic-snapshot", "retained-current", "capability-to-host-selection-and-actual-container-registration-migration"],
@@ -1818,6 +1818,23 @@
     "runtime_only_provider_lead": 12782,
     "runtime_only_complete_native_delta_and_release_acceptance_established": false,
     "comment_and_IPC_counterexample_source": "5a3e2bd5da169bab9bd3a50a2d2bcf270a7ca770",
+    "tracker_effects": 0,
+    "final_completion_verification_units": 0,
+    "fresh_census": false,
+    "product_or_native_execution": false,
+    "all_other_nodes_and_historical_fields_preserved": true,
+    "source_copy_and_resource_holds_preserved": true
+  },
+  "later_vault_and_oldest_retained_contracts": {
+    "narrative": "../journal/2026/11.27-vault-and-oldest-retained-contracts.md",
+    "whole_current_originals": [2556, 54, 1323, 1460, 1508],
+    "complete_discussions": 22,
+    "complete_collaborator_roster_members": 15,
+    "retained_open": [2556, 54, 1323, 1460, 1508],
+    "inspected_source": "266bdf4ae9fc1b4a87c92d510a964ab2b6f4fb1d",
+    "native_Vault_installer_producer": 14555,
+    "native_Vault_generation_producer": 14361,
+    "adjacent_closed_2554_body_or_disposition_revisited": false,
     "tracker_effects": 0,
     "final_completion_verification_units": 0,
     "fresh_census": false,
