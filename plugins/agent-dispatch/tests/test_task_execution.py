@@ -242,6 +242,34 @@ def test_satellite_coordination_uses_neither_spawn_nor_capacity() -> None:
     assert spawned == ["job"]
 
 
+@pytest.mark.parametrize("executing", [False, True])
+def test_satellite_coordination_does_not_hide_active_capacity(executing: bool) -> None:
+    from agent_dispatch.satellite_work_intake import SatelliteWorkIntake
+
+    active: list[Json] = [
+        {"id": f"claim-{n}", "execution_mode": "coordination"} for n in range(200)
+    ]
+    if executing:
+        active.append({"id": "executing", "execution_mode": "delegated"})
+
+    class IntakeClient:
+        def list(self, **params: Any) -> list[Json]:
+            if params.get("status") == "claimed,started":
+                return active[:params["limit"]]
+            return [{"id": "next", "execution_mode": "delegated"}]
+
+    spawned: list[str | None] = []
+
+    def spawn(task_id: str | None, **_: Any) -> None:
+        spawned.append(task_id)
+
+    intake = SatelliteWorkIntake(
+        IntakeClient(), machine="host-a", project="example", max_concurrent=1, spawn_fn=spawn,
+    )
+    assert intake.tick()["spawned"] == ([] if executing else ["next"])
+    assert spawned == ([] if executing else ["next"])
+
+
 def test_handoff_fallback_preserves_coordination_and_allows_delegated(tmp_path: Path) -> None:
     from agent_dispatch.coordinator_loops import _attempt_handoff_fallback
 

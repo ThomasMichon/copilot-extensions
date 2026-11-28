@@ -279,6 +279,14 @@ class SatelliteWorkIntake:
                 repo=self._repo,
                 limit=active_limit,
             )
+            if len(active) >= active_limit and any(not permits_allocation(task) for task in active):
+                active_limit = max(active_limit, _QUEUE_DISCOVERY_MAX_LIMIT)
+                active = self._client.list(
+                    status=_ACTIVE_STATUSES, target_machine=self._machine,
+                    repo=self._repo, limit=active_limit,
+                )
+                if len(active) >= active_limit:
+                    return {"spawned": [], "skipped_at_capacity": True, "error": "active_window_incomplete"}
         except Exception:
             # Can't confirm current occupancy -- degrade to "assume full" so
             # a coordinator hiccup can never be misread as "clear to spawn
