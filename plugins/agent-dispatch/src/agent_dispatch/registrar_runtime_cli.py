@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, cast
 
 from .loop_commands import _resolve_cli_module
 from .registrations import RegistrationKind
 
 if TYPE_CHECKING:
+    from .client import DispatchClient
     from .registrar import ProfileDeclaration
 
 
-def _core():
-    return _resolve_cli_module()
+class _RegistrarCLI(ModuleType):
+    _emit: Callable[[object], int]
+    _client: Callable[..., DispatchClient]
+
+
+def _core() -> _RegistrarCLI:
+    return cast(_RegistrarCLI, _resolve_cli_module())
 
 
 _WORKTREE_PARENT_SUFFIX = ".worktrees"
@@ -79,61 +87,152 @@ def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
     }
 
 
-def _withdraw_declared_registrations(args: argparse.Namespace, owner: str) -> dict[str, Any]:
-    """Remove coordinator registrations materialized from ``owner``'s declarations.
+def _norm_machine(machine: object) -> str | None:
+    if not isinstance(machine, str):
+        return None
+    return machine.strip().casefold() or None
+
+
+def _declared_name_for_owner(row: dict[str, Any], prefix: str, owner: str) -> str | None:
+    """The declaration name if ``row`` was materialized from exactly ``owner``.
+
+    Owners contain colons (``pointer:<name>``, ``repo:<root>``) and coordinator
+    rows do not persist the owner, so a bare ``declared:<owner>:`` prefix test
+    would also match a longer owner such as ``<owner>:<more>``. Declaration names
+    are colon-free (letters, digits, ``-``, ``_``), so the id
+    ``declared:<owner>:<name>`` matches ``owner`` exactly only when the remainder
+    after the prefix is a single colon-free segment. A row that does carry an
+    ``owner`` field must also agree with it.
+    """
+    rid = row.get("id")
+    if not isinstance(rid, str) or not rid.startswith(prefix):
+        return None
+    name = rid[len(prefix):]
+    if not name or ":" in name:
+        return None
+    row_owner = row.get("owner")
+    if row_owner is not None and row_owner != owner:
+        return None
+    return name
+
+
+def _withdraw_declared_registrations(
+    args: argparse.Namespace, owner: str, machine: str | None
+) -> dict[str, Any]:
+    """Remove coordinator registrations this host materialized from ``owner``.
 
     The supervisor daemon withdraws dropped declarations only from its in-memory
     publication ledger, so rows published by an earlier daemon generation (or
     while no daemon is running) would otherwise outlive the pointer and keep
-    running as ordinary store registrations. Only ``declared:<owner>:*`` ids are
-    touched; unreachable coordinators are reported, never fatal.
+    running as ordinary store registrations. Only ``declared:<owner>:<name>`` ids
+    of exactly ``owner`` are touched, and only rows scoped to ``machine`` (or
+    unscoped rows): another host publishing the same owner into a shared
+    coordinator keeps its rows. Unreachable coordinators are reported, never fatal.
     """
     from .registrar_reconcile import DECLARED_ID_PREFIX
 
     prefix = f"{DECLARED_ID_PREFIX}:{owner}:"
-    result: dict[str, Any] = {"owner": owner, "removed": [], "failed": []}
+    local = _norm_machine(machine)
+    removed: list[str] = []
+    failed: list[dict[str, str]] = []
+    other_machines: list[dict[str, Any]] = []
+    result: dict[str, Any] = {
+        "owner": owner, "machine": machine, "removed": removed, "failed": failed,
+        "other_machines": other_machines,
+    }
     try:
         with _core()._client(args, ensure=False, allow_ssh_failover=False) as client:
             rows = client.list_registrations(include_paused=True)
-            for rid in sorted(str(row.get("id") or "") for row in rows):
-                if not rid.startswith(prefix):
+            for row in sorted(rows, key=lambda r: str(r.get("id") or "")):
+                if _declared_name_for_owner(row, prefix, owner) is None:
+                    continue
+                rid = str(row["id"])
+                row_machine = _norm_machine(row.get("machine"))
+                if row_machine is not None and row_machine != local:
+                    other_machines.append({"id": rid, "machine": row.get("machine")})
                     continue
                 try:
                     client.remove_registration(rid)
                 except Exception as exc:  # noqa: BLE001 - report per-row, keep going
-                    result["failed"].append({"id": rid, "error": str(exc)})
+                    failed.append({"id": rid, "error": str(exc)})
                 else:
-                    result["removed"].append(rid)
+                    removed.append(rid)
     except (Exception, SystemExit) as exc:  # noqa: BLE001 - pointer removal already succeeded
         result["status"] = "coordinator_unavailable"
         result["error"] = str(exc) or type(exc).__name__
         return result
-    result["status"] = "partial" if result["failed"] else "ok"
+    result["status"] = "partial" if failed else "ok"
     return result
 
 
 def _remove_pointer_and_registrations(args: argparse.Namespace, rd: Any) -> dict[str, Any]:
     """``registrar remove``: drop the pointer and withdraw what it materialized."""
+    from . import remote_dispatch
+
     pointers = rd.load_pointers()
     target = next((p for p in pointers if p.name == args.name), None)
-    owner = getattr(args, "owner", None) or (target.effective_owner() if target else None)
-    removed = rd.remove_pointer(args.name)
+    explicit_owner: str | None = getattr(args, "owner", None)
+    owner: str | None = explicit_owner or (target.effective_owner() if target else None)
+    removed = bool(rd.remove_pointer(args.name))
     payload: dict[str, Any] = {"removed": removed}
     if getattr(args, "keep_registrations", False) or owner is None:
         return payload
-    if not removed and not getattr(args, "owner", None):
+    if not removed and not explicit_owner:
         return payload
+    machine = getattr(args, "machine", None) or remote_dispatch.local_machine()
     sharing = sorted(
         p.name for p in pointers if p.name != args.name and p.effective_owner() == owner
     )
     if sharing:
         payload["registrations"] = {
-            "owner": owner, "status": "skipped", "removed": [], "failed": [],
+            "owner": owner, "machine": machine, "status": "skipped", "removed": [],
+            "failed": [], "other_machines": [],
             "reason": f"owner still declared by pointer(s): {', '.join(sharing)}",
         }
         return payload
-    payload["registrations"] = _withdraw_declared_registrations(args, owner)
+    payload["registrations"] = _withdraw_declared_registrations(args, owner, machine)
     return payload
+
+
+def _report_registration_withdrawal(args: argparse.Namespace, payload: dict[str, Any]) -> int:
+    """Warn on stderr about incomplete withdrawal; return the command's exit code.
+
+    A failed per-row withdrawal is an error (exit 1). An unreachable coordinator
+    never fails a successful pointer removal (exit 0 with a warning), but fails a
+    ``--owner`` cleanup that removed no pointer, since withdrawal was its only job.
+    """
+    regs = payload.get("registrations")
+    if not isinstance(regs, dict):
+        return 0
+    owner = regs.get("owner")
+    rerun = f"agent-dispatch registrar remove {args.name} --owner {owner}"
+    if regs.get("machine"):
+        rerun += f" --machine {regs['machine']}"
+    for other in regs.get("other_machines") or []:
+        print(
+            f"agent-dispatch registrar: left {other['id']} in place -- it was published "
+            f"by machine {other['machine']!r}; run registrar remove there (or pass "
+            "--machine) to withdraw it",
+            file=sys.stderr,
+        )
+    status = regs.get("status")
+    if status == "partial":
+        failed = ", ".join(f["id"] for f in regs.get("failed") or [])
+        print(
+            f"agent-dispatch registrar: WARNING -- could not withdraw declared "
+            f"registration(s) for owner {owner!r}: {failed}. Rerun: {rerun}",
+            file=sys.stderr,
+        )
+        return 1
+    if status == "coordinator_unavailable":
+        print(
+            f"agent-dispatch registrar: WARNING -- coordinator unreachable "
+            f"({regs.get('error')}); declared registrations for owner {owner!r} were "
+            f"not withdrawn. Rerun once it is reachable: {rerun}",
+            file=sys.stderr,
+        )
+        return 0 if payload.get("removed") else 1
+    return 0
 
 
 def _cmd_registrar(args: argparse.Namespace) -> int:
@@ -239,7 +338,9 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
         if args.registrar_command == "list":
             return _core()._emit([p.to_dict() for p in rd.load_pointers()])
         if args.registrar_command == "remove":
-            return _core()._emit(_remove_pointer_and_registrations(args, rd))
+            payload = _remove_pointer_and_registrations(args, rd)
+            rc = _core()._emit(payload)
+            return rc or _report_registration_withdrawal(args, payload)
         if args.registrar_command == "discover":
             decls = rd.discover()
             return _core()._emit([summarize(d) for d in decls])

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import argparse
+from collections.abc import Callable
+from types import ModuleType
+from typing import cast
+
 from .loop_commands import _resolve_cli_module
 
 
-def _core():
-    return _resolve_cli_module()
+class _RegistrarParserCLI(ModuleType):
+    _cmd_registrar: Callable[[argparse.Namespace], int]
 
 
-def register_registrar_commands(sub) -> None:
+def _core() -> _RegistrarParserCLI:
+    return cast(_RegistrarParserCLI, _resolve_cli_module())
+
+
+def register_registrar_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser(
         "registrar",
         help="declarative-supervision registrar: manage discovery pointers and read the declared profile set (declarations are the one source of truth; the CLI is a thin writer/reader over them)",
@@ -42,15 +51,21 @@ def register_registrar_commands(sub) -> None:
     rp.set_defaults(func=_core()._cmd_registrar)
     rp = reg_sub.add_parser(
         "remove",
-        help="remove a discovery pointer by name and withdraw the declared:<owner>:* "
-        "coordinator registrations its declarations materialized",
+        help="remove a discovery pointer by name and withdraw the declared:<owner>:<name> "
+        "coordinator registrations its declarations materialized on this machine",
     )
     rp.add_argument("name", help="the pointer name to remove")
     rp.add_argument(
         "--owner",
         help="provenance owner whose declared registrations to withdraw (default: the "
-        "removed pointer's effective owner). Also withdraws orphans left by an earlier "
-        "remove when the pointer no longer exists.",
+        "removed pointer's effective owner; matched exactly). Also withdraws orphans "
+        "left by an earlier remove when the pointer no longer exists.",
+    )
+    rp.add_argument(
+        "--machine",
+        help="machine whose published declared registrations to withdraw (default: this "
+        "machine, the same alias 'supervise serve' publishes under). Rows another "
+        "machine published for the same owner are left in place and reported.",
     )
     rp.add_argument(
         "--keep-registrations", action="store_true",

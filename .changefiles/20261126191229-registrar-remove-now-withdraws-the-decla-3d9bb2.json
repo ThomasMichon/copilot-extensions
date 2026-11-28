@@ -1,5 +1,5 @@
 {
-  "comment": "registrar remove now withdraws the declared:<owner>:* coordinator registrations the removed pointer materialized (with --owner for orphan cleanup and --keep-registrations to opt out)",
+  "comment": "registrar remove now withdraws the declared:<owner>:* coordinator registrations the removed pointer materialized on the local machine, matching its owner exactly (with --owner for orphan cleanup, --machine to target another machine, --keep-registrations to opt out, a stderr warning when the coordinator is unreachable and a non-zero exit on partial withdrawal)",
   "changes": [
     {
       "plugin": "agent-dispatch",
