@@ -978,7 +978,7 @@
     [12038, "inflow", "member", 2, true, null, "retained-current", "Dirty/unmerged/open-PR/unknown descendants plus aggregateMERGED presentation remain distinct from12957recursive ownership/backfill; no transfer."],
     [12056, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
     [12064, "inflow", "member", 0, true, null, "pending", "qualified-change-evidence"],
-    [12078, "inflow", "automation", 2, false, null, "pending", "qualified-change-evidence"],
+    [12078, "inflow", "automation", 2, false, null, "retained-current", "explicit-human-keep-open-initialization-cause-and-six-open-occurrences"],
     [12116, "inflow", "member", 5, true, null, "pending", "qualified-change-evidence"],
     [12132, "inflow", "member", 0, true, null, "pending", "qualified-change-evidence"],
     [12203, "inflow", "automation", 10, false, null, "pending", "qualified-change-evidence"],
@@ -1006,7 +1006,7 @@
     [12920, "inflow", "member", 12, true, null, "retained-current", "Whole shared repository-context extraction remains planned;13690keeps itOPEN and14485bounded CLI/resident startup repair is not shared core."],
     [12942, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
     [12946, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
-    [12952, "inflow", "automation", 3, false, null, "pending", "qualified-change-evidence"],
+    [12952, "inflow", "automation", 3, false, null, "retained-current", "three-distinct-skipped-manager-qualification-refusals"],
     [12957, "inflow", "member", 3, true, null, "retained-current", "Complete eight Plan/six Validation recursive open-PR ownership/backfill contract retained; existing12956receipt settled,not12038aggregate truth or new effect."],
     [12970, "inflow", "member", 2, true, null, "pending", "qualified-change-evidence"],
     [13050, "inflow", "member", 8, true, null, "retained-current", "13333retained STATE(?) source credit; installed presentation after release/authorized rollout and composition/cadence/context/unknown/native acceptance remain."],
@@ -1017,7 +1017,7 @@
     [13118, "inflow", "member", 5, true, null, "pending", "qualified-change-evidence"],
     [13122, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
     [13159, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
-    [13170, "inflow", "automation", 1, false, null, "pending", "qualified-change-evidence"],
+    [13170, "inflow", "automation", 1, false, null, "candidate", "conditional-report-token-retirement-open-case-in12078"],
     [13204, "inflow", "member", 5, true, null, "pending", "qualified-change-evidence"],
     [13221, "inflow", "member", 4, true, null, "pending", "qualified-change-evidence"],
     [13245, "inflow", "automation", 0, false, null, "retained-current", "open-six-case-canonical-copy-input-receiver-with-unidentified-pairs"],
@@ -1035,7 +1035,7 @@
     [13378, "inflow", "member", 4, true, null, "pending", "qualified-change-evidence"],
     [13386, "inflow", "member", 68, true, null, "pending", "qualified-change-evidence"],
     [13390, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
-    [13405, "inflow", "automation", 3, false, null, "pending", "qualified-change-evidence"],
+    [13405, "inflow", "automation", 3, false, null, "candidate", "conditional-report-token-retirement-open-case-in12078"],
     [13409, "inflow", "member", 8, true, null, "pending", "qualified-change-evidence"],
     [13414, "inflow", "automation", 4, false, null, "pending", "qualified-change-evidence"],
     [13427, "inflow", "automation", 3, false, null, "pending", "qualified-change-evidence"],
@@ -1046,10 +1046,10 @@
     [13577, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
     [13598, "inflow", "member", 18, true, null, "pending", "qualified-change-evidence"],
     [13614, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
-    [13660, "inflow", "automation", 21, false, null, "pending", "qualified-change-evidence"],
+    [13660, "inflow", "automation", 21, false, null, "candidate", "conditional-report-token-retirement-open-case-in12078"],
     [13734, "inflow", "member", 12, false, null, "pending", "qualified-change-evidence"],
     [13753, "inflow", "member", 2, false, null, "completed-guidance", null],
-    [13764, "inflow", "automation", 0, false, null, "pending", "qualified-change-evidence"],
+    [13764, "inflow", "automation", 0, false, null, "candidate", "conditional-report-token-retirement-two-open-cases-in12078"],
     [13775, "inflow", "member", 111, false, null, "pending", "qualified-change-evidence"],
     [13781, "inflow", "member", 10, false, null, "pending", "qualified-change-evidence"],
     [13784, "inflow", "member", 9, false, null, "pending", "qualified-change-evidence"],
@@ -1613,5 +1613,33 @@
     "technical_fixes_or_resource_transfers": 0,
     "all_other_nodes_and_historical_fields_preserved": true,
     "source_copy_and_resource_holds_preserved": true
+  },
+  "later_promotion_verifier_and_qualification_research": {
+    "narrative": "../journal/2026/11.27-promotion-verifier-recurrences.md",
+    "whole_current_originals": [
+      12078,
+      12952,
+      13170,
+      13405,
+      13660,
+      13764
+    ],
+    "complete_discussions": 6,
+    "repository_owned_originals_and_recurrences_independently_qualified": true,
+    "retained_open": [
+      12078,
+      12952
+    ],
+    "conditional_report_token_candidates": [
+      13170,
+      13405,
+      13660,
+      13764
+    ],
+    "open_technical_rows_in_proposed_receiver": 6,
+    "technical_completion_credit": 0,
+    "fresh_census": false,
+    "tracker_effects": 0,
+    "source_or_resource_ownership_reassigned": false
   }
 }
