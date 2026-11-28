@@ -522,6 +522,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [privacy, reviewer, proxy and Index comparison](journal/2026/11.27-privacy-reviewer-proxy-index-retentions.md)
+reads four complete current originals and all twelve discussions. Current
+identifier aggregation and editable-install cleanup do not establish the
+requested repository-text scanner. Reviewer registration composition and
+relocated discovery code do not establish declaration-only adoption. The
+proxy contributor's excluded scope and Index's mode-qualified assigned
+acceptance remain independent. Four coverage outcome/gap pairs become
+specific current retentions; all four issues remain OPEN without redundant
+comments, dispositions or final-completion verification units. The pending
+pointer advances to #1886; counting history and all primary gates remain.
+
 The [Vault lifecycle and oldest retained contracts comparison](journal/2026/11.27-vault-and-oldest-retained-contracts.md)
 reads five complete current originals and all twenty-two discussions.
 Current POSIX Vault lifecycle verbs still require systemd, and current Vault
@@ -531,6 +542,11 @@ recovery retain distinct unfinished acceptance. Five coverage outcome/gap
 pairs become specific current retentions; all five issues remain OPEN without
 redundant comments, dispositions or final-completion verification units.
 The existing 570 observation is historical, not a refreshed census.
+
+The four-file comparison merged in #14930 after genuine current-head approval
+and actual required CI. Provider/source readback preserves the four authored
+blobs and all five OPEN issues. Parent return retains all sixteen primary
+gates and the existing agenda continuation; no fresh census followed.
 
 The [Bridge, comment and IPC comparison](journal/2026/11.27-bridge-comment-and-ipc-retentions.md)
 reads four complete current originals and all five discussions. #9357 retains

@@ -467,8 +467,8 @@
     "content_admission_from_counting": false
   },
   "oldest_pending_current_qualification": {
-    "issue": 1544,
-    "created_at_local": "2026-09-01T00:16:31-07:00"
+    "issue": 1886,
+    "created_at_local": "2026-09-03T09:11:39-07:00"
   },
   "oldest_pending_definition": "Oldest identity in this frame's qualified-change-evidence class, not a claim that its original has never been read or that prior semantic research is invalid.",
   "creator_scope_legend": {
@@ -529,11 +529,11 @@
     [1419, "original", "member", 28, true, "semantic-snapshot", "retained-current", "wider-knowledge-lifecycle-acceptance-after-scoped-repair-and-joint-cleanup"],
     [1460, "original", "member", 54, true, "semantic-snapshot", "retained-current", "Draft-foundation-and-per-owner-support-windows"],
     [1508, "original", "member", 19, true, "semantic-snapshot", "retained-current", "proposed-generation-recovery-not-delivery-receipts"],
-    [1544, "original", "member", 3, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
-    [1734, "original", "member", 9, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
-    [1742, "original", "member", 5, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [1544, "original", "member", 3, true, "semantic-snapshot", "retained-current", "repository-text-report-apply-and-explicit-input-precedence-not-blocklist-aggregation"],
+    [1734, "original", "member", 9, true, "semantic-snapshot", "retained-current", "stock-declaration-adoption-and-direct-lineage-matrix-after-registration-composition"],
+    [1742, "original", "member", 5, true, "semantic-snapshot", "retained-current", "unreleased-proxy-contributor-recovery-discovery-and-installation-scope"],
     [1803, "original", "member", 9, true, "semantic-snapshot", "retained-current", "Current async call/attach still omit the optional reader limit; explicit server MAX_FRAME and no-replay cleanup do not deliver valid large client responses. Preserve original minimum and subsequent-call acceptance."],
-    [1843, "original", "member", 12, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
+    [1843, "original", "member", 12, true, "semantic-snapshot", "retained-current", "assigned-mode-qualified-activation-configuration-and-withdrawal-acceptance"],
     [1886, "original", "member", 12, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
     [1943, "original", "member", 2, true, "semantic-snapshot", "retained-current", "Receipt-derived minimal cell PATH and sanitized direct ACP/stdio/headless native acceptance with phased claimant; immediate visibility repair is not whole delivery."],
     [2110, "original", "member", 7, true, "semantic-snapshot", "pending", "qualified-change-evidence"],
@@ -1835,6 +1835,24 @@
     "native_Vault_installer_producer": 14555,
     "native_Vault_generation_producer": 14361,
     "adjacent_closed_2554_body_or_disposition_revisited": false,
+    "tracker_effects": 0,
+    "final_completion_verification_units": 0,
+    "fresh_census": false,
+    "product_or_native_execution": false,
+    "all_other_nodes_and_historical_fields_preserved": true,
+    "source_copy_and_resource_holds_preserved": true
+  },
+  "later_privacy_reviewer_proxy_index_retentions": {
+    "narrative": "../journal/2026/11.27-privacy-reviewer-proxy-index-retentions.md",
+    "whole_current_originals": [1544, 1734, 1742, 1843],
+    "complete_discussions": 12,
+    "complete_collaborator_roster_members": 15,
+    "retained_open": [1544, 1734, 1742, 1843],
+    "inspected_source": "f5b7d6b15797a9900319c7327e9f8a5c5cd28b11",
+    "native_privacy_source_producers": [4969, 5311, 11092, 2728],
+    "native_reviewer_source_producers": [8841, 13169],
+    "native_index_source_producers": [14665, 14119, 6116],
+    "historical_proxy_delivery_reexecuted": false,
     "tracker_effects": 0,
     "final_completion_verification_units": 0,
     "fresh_census": false,
