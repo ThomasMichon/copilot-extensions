@@ -40,7 +40,7 @@ class RemoteDispatchUnavailable(RuntimeError):
 def _producer_capability(args: argparse.Namespace) -> str | None:
     explicit = getattr(args, "producer_capability", None)
     if explicit is not None:
-        return explicit
+        return str(explicit)
     if not all(
         getattr(args, field, None) is not None
         for field in (
@@ -196,6 +196,8 @@ def build_remote_create_argv(
         argv += ["--source", args.source]
     if getattr(args, "category", None) == "maintenance":
         argv += ["--category", args.category]
+    if getattr(args, "execution_mode", "legacy") != "legacy":
+        argv += ["--execution-mode", args.execution_mode]
     if getattr(args, "origin_ref", None):
         argv += ["--origin-ref", args.origin_ref]
     if getattr(args, "dedup_key", None):
@@ -232,7 +234,7 @@ def dispatch_to_remote(
     repo: str,
     payload: str | None,
     timeout: float | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """SSH to ``machine`` (its SSH alias) and run the create+embody there.
 
     Raises :class:`RemoteDispatchUnavailable` if ``ssh`` is not on PATH; the
@@ -379,7 +381,7 @@ def build_remote_override_argv(
 
 def browse_remote(
     machine: str, argv: list[str], *, timeout: float | None = None
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """SSH to ``machine`` (its SSH alias) and run an ``agent-dispatch`` read
     command there, returning its captured result (JSON on stdout).
 

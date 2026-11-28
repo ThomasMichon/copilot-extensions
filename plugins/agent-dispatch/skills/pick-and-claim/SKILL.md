@@ -58,7 +58,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
 
    ```bash
    <agent-dispatch catalog argv[0]> create "<what you're tackling>" \
-     --dedup-key "<subject-id>" --claim
+     --dedup-key "<subject-id>" --execution-mode coordination --claim
    ```
 
    - **`claimed_by_me: true`** in the output → the subject is **yours** → start
@@ -72,7 +72,12 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
 
    `--claim` creates the task **already claimed by your worktree in one
    transaction**, so there is no queued-and-unclaimed gap for another worker to
-   slip into. (Without `--claim`, guard the gap with `--require worktree:<self>`
+   slip into. `--execution-mode coordination` makes this an ownership record:
+   it never allocates a worker, workspace, session or pool slot, including after
+   yield, requeue or owner loss. A later agent can manually take responsibility;
+   automatic replacement requires a separately authorized execution request.
+   The coordinator must advertise `task_execution_intent: 1`; do not retry an
+   unsupported request without the mode. (Without `--claim`, guard the gap with `--require worktree:<self>`
    then `claim`, but `--claim` is the clean primitive.)
 
 5. **Work it, then close the loop.**
@@ -122,7 +127,7 @@ work episode:
   --source github-issue \
   --origin-ref issue/owner/repo#42 \
   --dedup-key issue:owner/repo#42 \
-  --claim
+  --execution-mode coordination --claim
 ```
 
 The dispatch row is the atomic claim wherever all workers share a coordinator.
