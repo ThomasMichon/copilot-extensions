@@ -1,0 +1,9 @@
+{
+  "comment": "Home the Windows runtime venv on the exact managed Python patch so SSH/network logons are not refused by RedirectionGuard (os error 448)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -2075,9 +2075,17 @@ function New-DispatchRuntimeVenv {
         if ($diagnostic) { $diagnostic }
         $global:LASTEXITCODE = $code
     }
+    # A bare 3.11 request records uv's minor-version junction as the venv home.
+    # Windows RedirectionGuard refuses that junction in SSH/network logons
+    # (os error 448), so the runtime would only start interactively. Pin the
+    # installed exact managed patch so the venv home is a real directory.
+    $pythonRequest = '3.11'
+    $exact = $null
     $signedBase = $BasePython
     if (-not $signedBase) {
-        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.11'
+        $exact = Resolve-UvManagedPatchVersion -PythonVersion $pythonRequest -UvCommand Invoke-DispatchRuntimeUv
+        if ($exact) { $pythonRequest = $exact }
+        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion $pythonRequest
     }
     if ($signedBase) {
         $diagnostic = ''
@@ -2092,10 +2100,21 @@ function New-DispatchRuntimeVenv {
         return
     }
     # The versioned construction owner retains partial-slot cleanup and receipts.
-    $uvArguments = @('--python', '3.11', '--managed-python', '--no-project', '--allow-existing')
+    $uvArguments = @('--python', $pythonRequest, '--managed-python', '--no-project', '--allow-existing')
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
         -Arguments $uvArguments
-    if ($result.ExitCode -ne 0 -and (Test-IsUntrustedMountPointRefusal ($result.Output | Out-String))) {
+    if ($exact) {
+        # Already pinned; neither fallback below applies.
+    } elseif ($result.ExitCode -eq 0) {
+        # uv may have just installed 3.11 for this request; re-home the new venv
+        # onto that exact patch instead of the minor-version junction.
+        $exact = Resolve-UvManagedPatchVersion -PythonVersion '3.11' -UvCommand Invoke-DispatchRuntimeUv
+        if ($exact) {
+            $uvArguments[1] = $exact
+            $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
+                -Arguments $uvArguments
+        }
+    } elseif (Test-IsUntrustedMountPointRefusal ($result.Output | Out-String)) {
         # Windows RedirectionGuard (e.g. Microsoft Dev Box) refuses uv's minor
         # junction; retry once with the installed exact managed 3.11 patch.
         $exact = Resolve-UvManagedPatchVersion -PythonVersion '3.11' -UvCommand Invoke-DispatchRuntimeUv

@@ -499,7 +499,8 @@ if ($ErrorActionPreference -ne 'Stop') {{ throw 'error preference leaked' }}
     assert result.returncode == (0 if usable else 1), result.stdout + result.stderr
     log = Path(env["TEST_UV_LOG"])
     calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
-    assert calls == []
+    # Only the read-only exact-patch probe may reach uv; no venv construction.
+    assert all(call[:2] == ["python", "list"] for call in calls), calls
     assert receipt.read_text(encoding="utf-8") == '{"state":"reserved"}'
     assert (slot / "Scripts/python.exe").read_text() == "fixture"
     if usable:
