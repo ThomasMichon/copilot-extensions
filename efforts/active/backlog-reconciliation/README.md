@@ -535,6 +535,16 @@ This is not six fixes. Only nine outcome/gap pairs change; the unchanged
 candidates. There is no fresh census, issue effect, execution or custody
 transfer from this proposal.
 
+After reviewed #14914 and complete actual receiving, five separate disclosed
+acknowledgment, routing, proper-reason and whole-preservation audits verify
+#13248/#13250/#13253/#13259/#13267 CLOSED / NOT_PLANNED. OPEN #13245 retains
+all six independently unresolved technical cases; no fix or ownership
+transfer is claimed. Two equal complete six-page observations and equal
+complete fifteen-member rosters at 2026-11-27 18:00:28 America/Los_Angeles
+measure **577 whole OPEN: 274 original-cohort and 303 inflow**, with exactly
+those five departures, no arrival and no unrelated departure. All parent
+Plan and global Validation gates remain OPEN.
+
 The [older-umbrella and first-use-doctor comparison](journal/2026/11.27-old-umbrellas-and-first-use-doctor.md)
 retains four complete current requests and all twenty-eight discussions.
 #63 keeps full mesh lifecycle and all-peer convergence; #84 keeps acknowledged

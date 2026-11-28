@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-27 - Six canonical-copy input cases and three retained programmes](journal/2026/11.27-canonical-copy-input-cases.md)
+- [2026-11-27 - Five audited canonical-copy report retirements, three retained programmes and 577 whole open](journal/2026/11.27-canonical-copy-input-cases.md)
 
 - [2026-11-26 - One audited missing-tool status retirement, live keeper boundaries and 595 whole open](journal/2026/11.26-later-workflow-status-and-live-keepers.md)
 
