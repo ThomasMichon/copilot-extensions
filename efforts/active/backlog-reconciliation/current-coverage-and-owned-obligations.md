@@ -20,6 +20,19 @@ current-retained and four candidates: 369 pending, 153 current-retained,
 four candidates. No new census, technical completion, tracker effect,
 workflow retry or custody transfer is claimed.
 
+After reviewed #14918, complete actual #12078 receiving and each independent
+eligibility, acknowledgment, routing and whole-preservation audit, the four
+candidate report tokens are CLOSED / NOT_PLANNED. All six technical rows and
+the three separate #12952 cases remain OPEN. Two equal complete six-page
+observations and equal complete fifteen-member rosters at
+**2026-11-27 18:46:37 America/Los_Angeles** measure **573 whole OPEN:
+274 original-cohort and 299 inflow**. Exactly those four tokens depart, with
+no arrival or unrelated departure. The actual current intersection is
+369 pending, 153 current-retained, 33 retained-prior, six retained-new,
+six spent-open, five excluded and one coordination record; no conditional
+candidate remains from this slice. The frozen frame, historical outcomes,
+all other nodes and source/resource boundaries remain unchanged.
+
 ## Counting snapshot and current metadata
 
 The complete 2026-11-26 16:37:05 America/Los_Angeles counting snapshot
