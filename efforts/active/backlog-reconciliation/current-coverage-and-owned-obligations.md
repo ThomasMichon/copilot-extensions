@@ -664,6 +664,25 @@ candidates. Other categories, historical fields and all counting records
 remain unchanged; there is no fresh census, issue effect, native/product
 operation, source-copy clearance or resource transfer.
 
+After reviewed #14914, the complete live #13245 body is independently read
+back with its unchanged original, one disclosure and six OPEN technical
+rows. Five separate source audits verify the proposed report tokens
+CLOSED / NOT_PLANNED, unchanged originals, independently read-back
+acknowledgments and receiver-first exact-signature routing before and after
+retirement. Brief search-index lag is resolved by read-only verification,
+not replay of a successful label write.
+
+Two equal complete six-page observations and equal complete fifteen-member
+rosters at **2026-11-27 18:00:28 America/Los_Angeles** establish **577 whole
+OPEN**, comprising 274 original-cohort and 303 inflow identities. The five
+audited report tokens are the only departures from 582; there are no
+arrivals or unrelated departures. Only those five outcome/gap pairs change
+to audited generated-report retirement. Effective coverage is 375 pending,
+151 current-retained, 33 prior-retained, zero candidates, six new-retained,
+six spent-open, five excluded and one coordination identity. All six
+technical cases remain OPEN in #13245; earlier observations and actual
+source/copy/resource holds remain unchanged.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete
