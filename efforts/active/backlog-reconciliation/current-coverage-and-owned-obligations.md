@@ -17,6 +17,19 @@ retained 573-identity observation there are 366 pending, 154 current-retained
 and two candidates. No fresh census, technical completion, tracker effect,
 workflow retry or ownership transfer follows.
 
+After reviewed #14920, whole actual nine-case #12078 receiving and separate
+eligibility, acknowledgment, routing and whole-preservation audits, both
+candidate report tokens are CLOSED / NOT_PLANNED. All nine technical cases
+and the unchanged human keeper #10651 remain OPEN. Two equal complete
+six-page observations and equal complete fifteen-member rosters at
+**2026-11-27 19:15:25 America/Los_Angeles** measure **571 whole OPEN:
+274 original-cohort and 297 inflow**. Exactly the two tokens depart, with no
+arrival or unrelated departure. The actual current intersection is 366 pending,
+154 current-retained, 33 retained-prior, six retained-new, six spent-open,
+five excluded and one coordination record; no conditional candidate remains
+from this slice. All historical fields, other nodes and source/resource
+boundaries remain unchanged.
+
 The [promotion-verifier recurrence comparison](journal/2026/11.27-promotion-verifier-recurrences.md)
 adds six complete current originals and all six discussions. #12078 retains
 its human keep-open condition and unresolved initialization cause, with five
