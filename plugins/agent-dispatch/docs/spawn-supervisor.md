@@ -58,9 +58,14 @@ running-provider capability before sending a non-legacy mode; unsupported peers
 refuse before creation, never retry without the guarantee. Omitted/default mode
 retains the old wire shape. An old CLI rejects the new flag instead of silently
 ignoring it. On database rollback, retained row-scoped SQLite triggers prevent
-an older reservation writer from allocating coordination records or rewriting
-their intent. Older supervisors may report a refusal until upgraded; do not
-remove the fences or reinterpret that refusal as an execution request.
+older reservation and handoff-fallback writers from allocating coordination
+records or rewriting their intent. Older supervisors may report a refusal until
+upgraded; do not remove the fences or reinterpret that refusal as an execution
+request. Satellite intake also excludes coordination records before selecting
+work or charging active capacity. Upgrade an enabled satellite intake before
+using this mode for its machine-targeted work; a pre-contract satellite that
+launches directly without either store admission path is outside the supported
+mixed-version/rollback boundary.
 
 ## Coordinator, supervisor daemon and worker lanes
 

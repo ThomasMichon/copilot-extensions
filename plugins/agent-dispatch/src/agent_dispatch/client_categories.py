@@ -117,7 +117,7 @@ class CategoryClientMixin:
     ) -> TaskRows:
         return self.list(sweep=True, repo=repo, limit=limit, category=category)
 
-    def create(self, title: str, **kwargs: Any) -> dict:
+    def create(self, title: str, **kwargs: Any) -> Json:
         from .task_execution import execution_mode
         mode = execution_mode(kwargs.pop("execution_mode", "legacy"))
         if mode != "legacy":
@@ -136,7 +136,7 @@ class CategoryClientMixin:
         # Omitted/work requests retain the old wire shape for older peers.
         return cast(Json, self._unwrap(self._http.post("/tasks", json={"title": title, **kwargs})))
 
-    def classify_maintenance(self, **body: Any) -> dict:
+    def classify_maintenance(self, **body: Any) -> Json:
         self.require_task_categories()
         return cast(Json, self._unwrap(
             self._http.post(

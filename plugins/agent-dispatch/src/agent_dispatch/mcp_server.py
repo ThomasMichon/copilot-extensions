@@ -32,6 +32,7 @@ from .queue_common import StructuredResult, worker_id_for
 
 Json = dict[str, Any]
 TaskRows = list[Json]
+StringList = list[str]
 
 ClientFactory = Callable[[], DispatchClient]
 IdentityResolver = Callable[[], "tuple[str | None, str | None]"]
@@ -120,10 +121,10 @@ class DispatchTools(TaskRecoveryToolsMixin):
         prompt: str = "",
         payload: str | None = None,
         payload_ref: str | None = None,
-        requires: list[str] | None = None,
-        excludes: list[str] | None = None,
+        requires: StringList | None = None,
+        excludes: StringList | None = None,
         affinity: dict[str, str] | None = None,
-        labels: list[str] | None = None,
+        labels: StringList | None = None,
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
@@ -145,7 +146,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         proposed: bool = False,
         category: str = "work",
         execution_mode: str = "legacy",
-    ) -> dict:
+    ) -> Json:
         """Enqueue a task (``proposed=True`` for an unclaimable draft).
 
         ``repo`` is the **lane** (a local repo name or remote URL); it defaults
@@ -207,7 +208,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
 
     def producer_scope_status(
         self, source: str, repo: str | None = None
-    ) -> dict:
+    ) -> Json:
         """Inspect the current generation and bounded history for one scope."""
         lane = self._scope_repo(repo)
         if not lane:
@@ -233,7 +234,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         expected_generation: StrictInt,
         repo: str | None = None,
         required_label: str | None = None,
-    ) -> dict:
+    ) -> Json:
         """Retire N and activate N+1 using coordinator control authority."""
         lane = self._scope_repo(repo)
         if not lane:
@@ -258,7 +259,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
             except DispatchError as exc:
                 return {"error": exc.as_dict()}
 
-    def approve(self, task_id: str) -> dict:
+    def approve(self, task_id: str) -> Json:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
         with self._client_factory() as c:
             return c.approve(task_id)
@@ -307,7 +308,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
             for r in list_recipes()
         ]
 
-    def recipe_render(self, name: str, params: dict[str, str] | None = None) -> dict:
+    def recipe_render(self, name: str, params: dict[str, str] | None = None) -> Json:
         """Render a recipe with parameters into the fields of a task -- creates
         nothing. Use it to inspect exactly what ``recipe_kick`` would enqueue."""
         from .recipes import render_recipe
@@ -321,12 +322,12 @@ class DispatchTools(TaskRecoveryToolsMixin):
         params: dict[str, str] | None = None,
         repo: str | None = None,
         dedup_key: str | None = None,
-        labels: list[str] | None = None,
+        labels: StringList | None = None,
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
         proposed: bool = False,
-    ) -> dict:
+    ) -> Json:
         """Carve an ad-hoc task from a recipe (the "recipes run without a wrapper
         service" path). Renders the recipe and enqueues it via ``create``,
         deriving a reserved-work ``dedup_key`` from the recipe + params so
@@ -364,7 +365,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
                 target_repo=target_repo,
             )
 
-    def emitter_side_load(self, registration_id: str, change_ref: str) -> dict:
+    def emitter_side_load(self, registration_id: str, change_ref: str) -> Json:
         """Run one registered emitter's on-demand path.
 
         Unlike ``recipe_kick``, this preserves emitter provenance and stamps the
@@ -439,7 +440,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
                 limit=limit,
             )
 
-    def show(self, task_id: str) -> dict:
+    def show(self, task_id: str) -> Json:
         """Return one task's full record."""
         with self._client_factory() as c:
             return c.get(task_id)
@@ -454,12 +455,12 @@ class DispatchTools(TaskRecoveryToolsMixin):
         with self._client_factory() as c:
             return c.wakes(task_id)
 
-    def payload(self, task_id: str) -> dict:
+    def payload(self, task_id: str) -> Json:
         """Return a task's resolved payload (inline text or blob content)."""
         with self._client_factory() as c:
             return c.payload(task_id)
 
-    def result(self, task_id: str) -> dict:
+    def result(self, task_id: str) -> Json:
         """Return a task's structured completion result."""
         with self._client_factory() as c:
             return c.result(task_id)
@@ -468,7 +469,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
 
     def worktree_status(
         self, machine: str | None = None, worktree: str | None = None, repo: str | None = None
-    ) -> dict:
+    ) -> Json:
         """This worktree's inbox: tasks targeted at + owned by its identity.
 
         Identity and lane are resolved from the working directory unless overridden.
@@ -483,7 +484,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
 
     def claim(
         self,
-        capabilities: list[str] | None = None,
+        capabilities: StringList | None = None,
         task_id: str | None = None,
         lease_seconds: int | None = None,
         machine: str | None = None,
@@ -491,7 +492,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         repo: str | None = None,
         all_repos: bool = False,
         assignment_workspace: Json | None = None,
-    ) -> dict | None:
+    ) -> Json | None:
         """Atomically lease one eligible task (identity + lane auto-resolved from CWD).
 
         The claim honors the repo lane and targeting: only tasks in this repo's
@@ -530,17 +531,17 @@ class DispatchTools(TaskRecoveryToolsMixin):
 
     # -- lifecycle -----------------------------------------------------------
 
-    def start(self, task_id: str, worker_id: str) -> dict:
+    def start(self, task_id: str, worker_id: str) -> Json:
         """Mark a claimed task ``started`` (under active implementation)."""
         with self._client_factory() as c:
             return c.start(task_id, worker_id)
 
-    def yield_task(self, task_id: str, worker_id: str, note: str | None = None) -> dict:
+    def yield_task(self, task_id: str, worker_id: str, note: str | None = None) -> Json:
         """Return a held task to ``queued`` with a note (a recoverable snag)."""
         with self._client_factory() as c:
             return c.yield_task(task_id, worker_id, note=note)
 
-    def suspend(self, task_id: str, worker_id: str, reason: str) -> dict:
+    def suspend(self, task_id: str, worker_id: str, reason: str) -> Json:
         """Park a started task as owner-preserving, dormant ``suspended`` work."""
         with self._client_factory() as c:
             return c.suspend(task_id, worker_id, reason=reason)
@@ -551,7 +552,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         worker_id: str,
         wake: bool = True,
         message: str | None = None,
-    ) -> dict:
+    ) -> Json:
         """Resume a suspended task under the same owner and optionally wake it."""
         with self._client_factory() as c:
             return c.resume(
@@ -563,7 +564,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         task_id: str,
         worker_id: str,
         reason: str | None = None,
-    ) -> dict:
+    ) -> Json:
         """Release a suspended task to ``queued`` for replacement embodiment."""
         with self._client_factory() as c:
             return c.release(task_id, worker_id, reason=reason)
@@ -574,7 +575,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         worker_id: str,
         result_ref: str | None = None,
         result: McpStructuredResult = None,  # type: ignore[assignment]
-    ) -> dict:
+    ) -> Json:
         """Complete a task with an optional JSON object/array result."""
         if result is not None:
             result = _validate_mcp_structured_result(result)
@@ -592,22 +593,22 @@ class DispatchTools(TaskRecoveryToolsMixin):
         worker_id: str | None = None,
         permit: bool = False,
         reason: str | None = None,
-    ) -> dict:
+    ) -> Json:
         """Terminally abandon a task -- requires ``permit=True`` (permission-gated)."""
         with self._client_factory() as c:
             return c.abandon(task_id, worker_id=worker_id, permitted=permit, reason=reason)
 
-    def heartbeat(self, task_id: str, worker_id: str) -> dict:
+    def heartbeat(self, task_id: str, worker_id: str) -> Json:
         """Extend the lease on a held task during long work."""
         with self._client_factory() as c:
             return c.heartbeat(task_id, worker_id)
 
-    def detach(self, task_id: str) -> dict:
+    def detach(self, task_id: str) -> Json:
         """Demote a hard worktree pin to a soft affinity (portability)."""
         with self._client_factory() as c:
             return c.detach(task_id)
 
-    def recover(self) -> dict:
+    def recover(self) -> Json:
         """Force a lease-recovery sweep (requeue expired-lease tasks)."""
         with self._client_factory() as c:
             return c.recover()
@@ -618,7 +619,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         permit: bool = False,
         reason: str | None = None,
         min_failures: int = 3,
-    ) -> dict:
+    ) -> Json:
         """Atomically rearm a queued task's dead-lettered spawn history."""
         with self._client_factory() as c:
             return c.rearm_spawn(

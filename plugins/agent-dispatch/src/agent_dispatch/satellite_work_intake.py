@@ -198,6 +198,7 @@ class SatelliteWorkIntake:
                 f"AGENT_DISPATCH_SATELLITE_PROJECT configured and the task "
                 f"carries no repo lane to derive one from"
             )
+        assert spawn_fn is not None
         return spawn_fn(
             task.get("id"),
             worker_id=self._worker_id,
