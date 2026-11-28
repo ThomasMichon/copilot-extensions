@@ -522,6 +522,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [privacy and custody-keeper comparison](journal/2026/11.27-privacy-and-custody-keepers.md)
+reads nine complete current originals and all thirty-three discussions.
+All six specifically reported privacy surfaces have zero report-derived
+matching lines at the inspected Dev snapshot; this is not the requested
+configured whole-tree validation or historical erasure. The other eight
+requests retain their distinct acceptance, partial-delivery credit and owners.
+Nine coverage outcome/gap pairs become current retentions without tracker
+writes, final-completion units or a fresh census. The pending member pointer
+advances to #3761. Two bot-edit origins remain unqualified and their issue
+titles and originals remain unread.
+
 The [qualified promotion-report triage](journal/2026/11.27-qualified-promotion-report-triage.md)
 admits three repository-owned reports only after their actual workflow,
 reporter source and successful filing-step origins are qualified. All three
@@ -530,6 +541,12 @@ artifact-fetch and bootstrap questions. Two other reports remain unread
 pending their extra bot-edit origins. After review, two nonclosing notes will
 clarify the previously untriaged ref and bootstrap reports; no closure, retry
 or final-completion unit is proposed. The human pending pointer remains #3444.
+
+The four-file comparison merged in #14941 after genuine current-head approval
+and actual required CI. Provider/source checks preserve every authored blob
+and all OPEN sources. The two reviewed nonclosing notes were posted once and
+independently verified with exact originals preserved. All sixteen primary
+clauses and the existing agenda parent remain open; no census followed.
 
 The [startup, release and lease-refusal comparison](journal/2026/11.27-startup-release-lease-retentions.md)
 reads three complete current originals and all seventy-five discussions.
