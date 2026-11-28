@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from . import worktrees_observation_contract as observations
 from .worktrees_projection_index import (
@@ -144,7 +145,7 @@ def _bounded(value: object, depth: int = 0) -> None:
     raise ProjectionError("current row contains a non-JSON value")
 
 
-def _encode_row(row: dict) -> tuple[str, str]:
+def _encode_row(row: dict[str, Any]) -> tuple[str, str]:
     if not isinstance(row, dict) or set(row) - ROW_FIELDS:
         raise ProjectionError("current row contains undeclared fields")
     wid = _identity(row.get("id"), name="worktree id")
@@ -170,9 +171,9 @@ def _encode_row(row: dict) -> tuple[str, str]:
     return wid, payload
 
 
-def _decode_row(wid: str, payload: str) -> dict:
+def _decode_row(wid: str, payload: str) -> dict[str, Any]:
     try:
-        row = json.loads(payload)
+        row: dict[str, Any] = json.loads(payload)
         identity, _encoded = _encode_row(row)
     except (TypeError, json.JSONDecodeError, RecursionError) as exc:
         raise ProjectionError("invalid durable current row") from exc
@@ -189,14 +190,15 @@ class _Publication:
     row_count: int
     rows: dict[str, str]
     index: SelectionIndex | None = None
-    index_key: tuple | None = None
-    observations: dict | None = None
-    semantic_revisions: dict | None = None
-    semantic_rows: dict | None = None
+    index_key: tuple[tuple[object, ...], ...] | None = None
+    observations: dict[str, dict[str, Any]] | None = None
+    semantic_revisions: dict[str, int] | None = None
+    semantic_rows: dict[str, str] | None = None
     wire_platform: str | None = None
 
-    def read(self, ids: Iterable[str], *, quality: str, contract_version: int = 1) -> dict:
-        rows, facts = [], []
+    def read(self, ids: Iterable[str], *, quality: str, contract_version: int = 1) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        facts: list[dict[str, Any]] = []
         for wid in ids:
             row = _decode_row(wid, self.rows[wid])
             if self.wire_platform is not None:
@@ -212,8 +214,10 @@ class _Publication:
                     else self.revision
                 )}
             if self.index is None and self.observations is not None:
+                assert semantic is not None
                 observations.validate_rows([semantic], [value], self.revision)
             if contract_version == 2:
+                assert semantic is not None
                 observations.validate_wire_row(semantic)
                 row = semantic
                 facts.append(copy.deepcopy(value))
@@ -221,7 +225,7 @@ class _Publication:
                 row = observations.with_observation(row, value)
                 _encode_row(row)
             rows.append(row)
-        result = {
+        result: dict[str, Any] = {
             "worktrees": rows,
             "projection": {
                 "schema_version": SCHEMA_VERSION,
@@ -313,7 +317,7 @@ class WorktreesProjection:
             self._activated = True
 
     def publish(
-        self, project: str, rows: Iterable[dict], *, observed_at: float,
+        self, project: str, rows: Iterable[dict[str, Any]], *, observed_at: float,
         authority_check: Callable[[], bool] | None = None,
     ) -> None:
         project = _identity(project, name="project")
@@ -323,7 +327,9 @@ class WorktreesProjection:
             or not math.isfinite(observed_at) or observed_at < 0
         ):
             raise ProjectionError("invalid projection observation timestamp")
-        encoded, raw_rows, semantic_rows = {}, {}, {}
+        encoded: dict[str, str] = {}
+        raw_rows: dict[str, dict[str, Any]] = {}
+        semantic_rows: dict[str, str] = {}
         identities = []
         for row in rows:
             wid, payload = _encode_row(row)
@@ -354,15 +360,22 @@ class WorktreesProjection:
             if index is None:
                 index = SelectionIndex(identities)
             revision = previous.revision + 1 if previous is not None else 1
-            facts, versions = {}, {}
+            facts: dict[str, dict[str, Any]] = {}
+            versions: dict[str, int] = {}
             changed = {}
             for wid, payload in encoded.items():
                 row = raw_rows[wid]
                 old_payload = None if previous is None else previous.rows.get(wid)
                 same = (
-                    old_payload is not None and previous.semantic_rows[wid] == semantic_rows[wid]
+                    old_payload is not None and previous is not None
+                    and previous.semantic_rows is not None
+                    and previous.semantic_rows[wid] == semantic_rows[wid]
                 )
-                versions[wid] = previous.semantic_revisions[wid] if same else revision
+                if same:
+                    assert previous is not None and previous.semantic_revisions is not None
+                    versions[wid] = previous.semantic_revisions[wid]
+                else:
+                    versions[wid] = revision
                 wire_row = (
                     {"platform": self.wire_platform, **row}
                     if self.wire_platform is not None else row
@@ -373,9 +386,11 @@ class WorktreesProjection:
                 })
                 facts[wid] = observations.observation(
                     row, revision,
-                    None if previous is None else previous.observations.get(wid),
+                    None if previous is None or previous.observations is None
+                    else previous.observations.get(wid),
                 )
                 if same:
+                    assert old_payload is not None
                     encoded[wid] = old_payload
                 else:
                     changed[wid] = payload
@@ -437,7 +452,7 @@ class WorktreesProjection:
         contract_version: int = 1,
         empty: bool = False,
         wire_platform: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         project = _identity(project, name="project")
         selection = Selection(
             status_filter, platform_filter, include_missing, worktree_id, codename, empty,
@@ -475,7 +490,7 @@ def read_advisory(
     contract_version: int = 1,
     empty: bool = False,
     wire_platform: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Read only independent current slots; never create or recover the store."""
     project = _identity(project, name="project")
     selection = Selection(
@@ -520,7 +535,7 @@ def read_advisory(
                     "SELECT generation, revision FROM worktrees_projection_observation_head "
                     "WHERE project=?", (project,),
                 ).fetchone() == (generation, revision)
-            parameters: tuple = (MAX_ROW_BYTES,)
+            parameters: tuple[object, ...] = (MAX_ROW_BYTES,)
             query = (
                 "SELECT CASE WHEN length(CAST(r.worktree_id AS BLOB))<=256 "
                 "THEN r.worktree_id END, CASE WHEN length(CAST(r.payload AS BLOB))<=? "
