@@ -1017,7 +1017,7 @@
     [13118, "inflow", "member", 5, true, null, "pending", "qualified-change-evidence"],
     [13122, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
     [13159, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
-    [13170, "inflow", "automation", 1, false, null, "candidate", "conditional-report-token-retirement-open-case-in12078"],
+    [13170, "inflow", "automation", 1, false, null, "retired-generated-report", "reviewed-six-open-case-receiving-and-independent-proper-reason-audit"],
     [13204, "inflow", "member", 5, true, null, "pending", "qualified-change-evidence"],
     [13221, "inflow", "member", 4, true, null, "pending", "qualified-change-evidence"],
     [13245, "inflow", "automation", 0, false, null, "retained-current", "open-six-case-canonical-copy-input-receiver-with-unidentified-pairs"],
@@ -1035,7 +1035,7 @@
     [13378, "inflow", "member", 4, true, null, "pending", "qualified-change-evidence"],
     [13386, "inflow", "member", 68, true, null, "pending", "qualified-change-evidence"],
     [13390, "inflow", "member", 3, true, null, "pending", "qualified-change-evidence"],
-    [13405, "inflow", "automation", 3, false, null, "candidate", "conditional-report-token-retirement-open-case-in12078"],
+    [13405, "inflow", "automation", 3, false, null, "retired-generated-report", "reviewed-six-open-case-receiving-and-independent-proper-reason-audit"],
     [13409, "inflow", "member", 8, true, null, "pending", "qualified-change-evidence"],
     [13414, "inflow", "automation", 4, false, null, "pending", "qualified-change-evidence"],
     [13427, "inflow", "automation", 3, false, null, "pending", "qualified-change-evidence"],
@@ -1046,10 +1046,10 @@
     [13577, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
     [13598, "inflow", "member", 18, true, null, "pending", "qualified-change-evidence"],
     [13614, "inflow", "member", 1, true, null, "pending", "qualified-change-evidence"],
-    [13660, "inflow", "automation", 21, false, null, "candidate", "conditional-report-token-retirement-open-case-in12078"],
+    [13660, "inflow", "automation", 21, false, null, "retired-generated-report", "reviewed-six-open-case-receiving-and-independent-proper-reason-audit"],
     [13734, "inflow", "member", 12, false, null, "pending", "qualified-change-evidence"],
     [13753, "inflow", "member", 2, false, null, "completed-guidance", null],
-    [13764, "inflow", "automation", 0, false, null, "candidate", "conditional-report-token-retirement-two-open-cases-in12078"],
+    [13764, "inflow", "automation", 0, false, null, "retired-generated-report", "reviewed-six-open-case-receiving-and-independent-proper-reason-audit"],
     [13775, "inflow", "member", 111, false, null, "pending", "qualified-change-evidence"],
     [13781, "inflow", "member", 10, false, null, "pending", "qualified-change-evidence"],
     [13784, "inflow", "member", 9, false, null, "pending", "qualified-change-evidence"],
@@ -1641,5 +1641,46 @@
     "fresh_census": false,
     "tracker_effects": 0,
     "source_or_resource_ownership_reassigned": false
+  },
+  "later_promotion_verifier_tracking_outcome": {
+    "narrative": "../journal/2026/11.27-promotion-verifier-recurrences.md",
+    "reviewed_proposal": 14918,
+    "actual_receiver": 12078,
+    "receiver_original_and_all_three_keep_open_discussions_unchanged": true,
+    "all_six_technical_cases": "OPEN",
+    "separate_qualification_keeper": 12952,
+    "audited_not_planned_report_tokens": [
+      13170,
+      13405,
+      13660,
+      13764
+    ],
+    "whole_open": 573,
+    "original_cohort_open": 274,
+    "inflow_open": 299,
+    "observed_local": "2026-11-27T18:46:37.215091-08:00",
+    "complete_equal_issue_passes": 2,
+    "pages_per_complete_pass": 6,
+    "equal_complete_roster_members": 15,
+    "arrivals_since_previous": [],
+    "departures_since_previous": [
+      13170,
+      13405,
+      13660,
+      13764
+    ],
+    "unrelated_departures": [],
+    "actual_current_outcomes": {
+      "pending": 369,
+      "retained-current": 153,
+      "excluded": 5,
+      "spent-open": 6,
+      "retained-prior": 33,
+      "coordination": 1,
+      "retained-new": 6
+    },
+    "technical_fixes_or_resource_transfers": 0,
+    "all_other_nodes_and_historical_fields_preserved": true,
+    "source_copy_and_resource_holds_preserved": true
   }
 }

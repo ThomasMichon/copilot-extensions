@@ -534,6 +534,19 @@ outcome/gap pairs change; the retained 577-identity observation has 369 pending,
 153 current-retained and four candidates. No fresh census, tracker effect,
 implementation, workflow retry or custody transfer follows from this proposal.
 
+After reviewed #14918 and whole actual #12078 receiving, four separate
+eligibility, disclosed acknowledgment, exact-signature routing, proper-reason
+and whole-preservation audits verify #13170/#13405/#13660/#13764
+CLOSED / NOT_PLANNED. All six verifier cases remain individually OPEN in
+#12078 with its unchanged human keep-open discussions; #12952's three
+qualification refusals remain separate and OPEN. Two equal complete six-page
+observations and equal complete fifteen-member rosters at
+2026-11-27 18:46:37 America/Los_Angeles measure **573 whole OPEN:
+274 original-cohort and 299 inflow**. Exactly those four tokens depart from
+577, with no arrival or unrelated departure. There are 369 pending,
+153 current-retained and no conditional candidates from this slice.
+All parent Plan and global Validation gates remain OPEN.
+
 The [canonical-copy input comparison](journal/2026/11.27-canonical-copy-input-cases.md)
 retains complete current #1096/#1266/#1303 and their fifty-five discussions.
 The coexistence effort stays explicitly parked; AHP and portfolio acceptance
