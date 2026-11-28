@@ -32,8 +32,9 @@ Implementation design _(agent-recommended)_:
       producer/configuration flow only after checking current work, ownership
       and replacement/drain conditions. Do not invent a worker, enable a pool,
       repoint a reviewer lane or terminate active execution to remove a warning.
-- [ ] Land focused source tests and documentation through normal review and CI;
+- [x] Land focused source tests and documentation through normal review and CI;
       keep source, release and authorized installed acceptance distinct.
+      Source merged in #14947 after current-head approval and required green CI.
 
 #### Local validation
 
@@ -59,7 +60,10 @@ ordinary scheduler select the delegated control and leave the coordination
 record unallocated, using an inert worker body rather than a model session.
 The affected obsolete adopter lane was retired through its existing reversible
 override after owner/work checks and explicit stop authorization; no replacement
-pool was enabled. Review, release and installed acceptance remain separate.
+pool was enabled. Source review, promoted-content verification and installed
+provider smokes are complete at their separate tiers; see this slice's
+[global acceptance](validation.md#coordination-claim-acceptance). No real-model
+or unrelated parent lifecycle qualification is implied.
 
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 
