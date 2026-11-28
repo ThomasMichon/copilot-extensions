@@ -4,6 +4,7 @@ import json
 import sqlite3
 import argparse
 import subprocess
+import time
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any, cast
@@ -196,6 +197,13 @@ def test_running_coordinator_schedules_only_delegated_execution(tmp_path: Path) 
             )
             q.start(claim["id"], "host/owner")
             q.yield_task(claim["id"], "host/owner")
+            q.claim_one("host/owner", repo=REPO, task_id=claim["id"])
+            recovered = q.reconcile_liveness(lambda *_: "gone", now=time.time() + 2000)
+            assert recovered["requeued"] == 1
+            retained = client.get(claim["id"])
+            assert retained["status"] == "queued" and retained["execution_mode"] == "coordination"
+            reopened = TaskQueue(tmp_path / "queue.db")
+            assert _get(reopened, claim["id"]).execution_mode == "coordination"
             delegated = client.create(
                 "execute", repo=REPO, execution_mode="delegated", labels=["general"],
             )
