@@ -568,10 +568,42 @@ not proof that generic create and unkeyed-send uncertainty is resolved.
 Only the three outcome/gap pairs become current-retained. At the same
 retained 582-identity observation there are 391 pending and 140
 current-retained; other categories, all historical columns, five post-snapshot
-rows and counting observations remain unchanged. The other three
-producer-screened originals remain body-unread. There is no fresh census,
+rows and counting observations remain unchanged. At that study's boundary,
+the other three producer-screened originals remained body-unread. There is no fresh census,
 issue disposition, test, native/product operation, source-copy clearance or
 custody transfer.
+
+## Adoption and scoped-capability boundaries
+
+The [three-case study](journal/2026/11.27-adoption-and-scoped-capability-boundaries.md)
+independently qualifies and reads current #5852/#5877/#5900 and all six
+discussions. Actual copied-origin #5855 producers qualify metadata-only;
+its settled disposition and receiving transaction are not replayed.
+These are new individual assessments, not recovery of older held captures
+or restoration of withdrawn comparison credit.
+
+#5852 retains actual installer CWD-basename inference into project hooksPath
+reconciliation and startup's pre-marker zero-to-600 behavior migration.
+Runtime-only, staging relocation, custom-hook and atomic configuration-write
+protections receive their narrower credit. #5877 preserves named,
+noncredential session-scoped provider lifecycle and synthetic-process proof;
+current credential/HTTP/token composition is reusable foundation, not a
+complete receiving contract or a repository-wide absence result.
+
+#5900's current Bridge module uses shared `SinkSlot` and offers explicit
+`BufferedSink` registration; the old direct synchronous-call observation is
+not repeated as current source. Its existing owning effort records bounded
+source/export, structured-signal and source-consumer progress while directly
+retaining real opted-in spawn/cancellation/exit adoption and Windows/Linux
+short-lived and creation-failure measurement acceptance. Existing API/file
+scope, process, collector and rollout owners are not transferred.
+
+Only these three frozen outcome/gap pairs become current-retained. At the
+same retained 582-identity observation there are 388 pending and 143
+current-retained; other categories, historical fields, five post-snapshot
+rows and all earlier research/counting records remain unchanged. There is
+no fresh census, issue disposition, product/native execution, actual
+source-copy clearance or custody transfer. Every parent gate remains OPEN.
 
 ## Publication state is not resource completion
 

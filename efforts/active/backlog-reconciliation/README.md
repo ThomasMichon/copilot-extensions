@@ -522,6 +522,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [adoption and scoped-capability comparison](journal/2026/11.27-adoption-and-scoped-capability-boundaries.md)
+retains independently qualified current #5852/#5877/#5900 and all six
+discussions. Current installer inference and first-run behavior migration
+retain concrete gaps; existing credential composition is not a general
+noncredential lifecycle contract. Telemetry's shared/buffered and structured
+source progress receives credit while its owning effort retains real
+process-provenance acceptance. Older held inputs and withdrawn comparisons
+remain unchanged. Only three outcome/gap pairs change: the retained
+582-identity observation has 388 pending and 143 current-retained, without a
+fresh census, issue disposition, implementation or ownership transfer.
+
 The [conditional and ordinary-operation comparison](journal/2026/11.27-conditional-and-ordinary-operation-boundaries.md)
 retains independently qualified current #5641/#5842/#5843 and all four
 discussions. Preserve the two measured performance triggers, three separate
@@ -531,6 +542,9 @@ concrete gaps while crediting narrower protections. Older held inputs and
 withdrawn comparisons remain unchanged; no issue or resource effect follows.
 Only three outcome/gap pairs change: the retained 582-identity observation
 has 391 pending and 140 current-retained, without a fresh census.
+The five-file recording merged in #14909 after genuine current-head approval
+and all actual required CI. Exact source reconciliation and parent return
+preserve the three OPEN requests, settled origins and remaining parent gates.
 
 The [SSH tenant-lifetime study](journal/2026/11.27-ssh-tenant-renewal-and-inflow.md)
 retains new #14902 after whole-original and current native-source qualification.
