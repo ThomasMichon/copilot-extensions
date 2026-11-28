@@ -17,6 +17,20 @@ observation there are 364 pending, 155 current-retained and one candidate.
 No fresh census, tracker effect, product/native execution or ownership transfer
 follows.
 
+After reviewed #14924, the separate final metadata unit, disclosed
+acknowledgment and independent proper-reason/whole-preservation audits,
+#14310 is CLOSED / COMPLETED with its original, both discussions and report
+label/custody unchanged. #14423 remains OPEN. Two equal complete six-page
+observations and equal complete fifteen-member rosters at
+**2026-11-27 19:56:41 America/Los_Angeles** measure **570 whole OPEN:
+274 original-cohort and 296 inflow**. Exactly #14310 departs, with no arrival
+or unrelated departure. The actual current intersection is 364 pending,
+155 current-retained, 33 retained-prior, six retained-new, six spent-open,
+five excluded and one coordination record; no conditional candidate remains
+from this slice. All historical fields, other nodes and source/resource
+boundaries remain unchanged. Global census checks do not renew the spent
+final verification.
+
 The [earlier-verifier input comparison](journal/2026/11.27-earlier-verifier-inputs.md)
 adds three whole current originals and all six discussions. #10651 retains
 its human keep-open condition and four independent failed inputs. Only the
