@@ -522,6 +522,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [earlier-verifier input comparison](journal/2026/11.27-earlier-verifier-inputs.md)
+qualifies and reads three whole originals and all six discussions.
+#10651 retains its explicit human keep-open condition and four distinct
+failed inputs; a later different-source release is not same-SHA transient
+proof or cause resolution. Two generated tokens may conditionally retire
+only after reviewed additive receiving of their three separate OPEN cases
+in #12078, unchanged incumbent six-case receiving and discussions, and
+independent eligibility/routing/preservation audits. Only four outcome/gap
+pairs change; the retained 573-identity observation has 366 pending,
+154 current-retained and two candidates. No fresh census, tracker effect,
+implementation, workflow retry or custody transfer follows from this proposal.
+
 The [promotion-verifier recurrence comparison](journal/2026/11.27-promotion-verifier-recurrences.md)
 qualifies and reads six complete originals and all six discussions.
 OPEN #12078 retains its explicit human keep-open condition and unresolved
@@ -546,6 +558,11 @@ observations and equal complete fifteen-member rosters at
 577, with no arrival or unrelated departure. There are 369 pending,
 153 current-retained and no conditional candidates from this slice.
 All parent Plan and global Validation gates remain OPEN.
+
+The five-file factual outcome merged in #14919 after genuine current-head
+approval and all actual required CI. Exact source reconciliation and parent
+return preserve those four dispositions, all six OPEN verifier cases,
+the separate qualification keeper and every remaining campaign gate.
 
 The [canonical-copy input comparison](journal/2026/11.27-canonical-copy-input-cases.md)
 retains complete current #1096/#1266/#1303 and their fifty-five discussions.

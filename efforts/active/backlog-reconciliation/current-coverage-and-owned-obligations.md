@@ -7,6 +7,16 @@ research, metadata observations and unresolved current qualification from
 being mistaken for one another. It is not a new semantic model, product
 work queue, source-admission exception or closure oracle.
 
+The [earlier-verifier input comparison](journal/2026/11.27-earlier-verifier-inputs.md)
+adds three whole current originals and all six discussions. #10651 retains
+its human keep-open condition and four independent failed inputs. Only the
+two generated #11691/#11756 tokens are conditional administrative candidates,
+after additive receiving of all three cases as OPEN in #12078 while preserving
+its six existing cases and discussions. Four outcome/gap pairs change; at the
+retained 573-identity observation there are 366 pending, 154 current-retained
+and two candidates. No fresh census, technical completion, tracker effect,
+workflow retry or ownership transfer follows.
+
 The [promotion-verifier recurrence comparison](journal/2026/11.27-promotion-verifier-recurrences.md)
 adds six complete current originals and all six discussions. #12078 retains
 its human keep-open condition and unresolved initialization cause, with five
