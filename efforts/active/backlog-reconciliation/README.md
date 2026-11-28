@@ -522,6 +522,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [promotion-verifier recurrence comparison](journal/2026/11.27-promotion-verifier-recurrences.md)
+qualifies and reads six complete originals and all six discussions.
+OPEN #12078 retains its explicit human keep-open condition and unresolved
+initialization cause; bounded recovery is not completion. Four later generated
+report tokens may conditionally retire only after reviewed additive receiving
+of all five later occurrences as individually OPEN cases, actual whole
+readback and separate routing/preservation audits. #12952's three skipped
+Manager qualification failures remain separate and OPEN. Only six coverage
+outcome/gap pairs change; the retained 577-identity observation has 369 pending,
+153 current-retained and four candidates. No fresh census, tracker effect,
+implementation, workflow retry or custody transfer follows from this proposal.
+
 The [canonical-copy input comparison](journal/2026/11.27-canonical-copy-input-cases.md)
 retains complete current #1096/#1266/#1303 and their fifty-five discussions.
 The coexistence effort stays explicitly parked; AHP and portfolio acceptance
@@ -544,6 +556,11 @@ complete fifteen-member rosters at 2026-11-27 18:00:28 America/Los_Angeles
 measure **577 whole OPEN: 274 original-cohort and 303 inflow**, with exactly
 those five departures, no arrival and no unrelated departure. All parent
 Plan and global Validation gates remain OPEN.
+
+The five-file factual outcome merged in #14916 after genuine current-head
+approval and all actual required CI. Exact source reconciliation and parent
+return preserve those five dispositions, six OPEN technical cases and all
+remaining campaign gates.
 
 The [older-umbrella and first-use-doctor comparison](journal/2026/11.27-old-umbrellas-and-first-use-doctor.md)
 retains four complete current requests and all twenty-eight discussions.

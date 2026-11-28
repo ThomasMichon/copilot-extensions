@@ -7,6 +7,19 @@ research, metadata observations and unresolved current qualification from
 being mistaken for one another. It is not a new semantic model, product
 work queue, source-admission exception or closure oracle.
 
+The [promotion-verifier recurrence comparison](journal/2026/11.27-promotion-verifier-recurrences.md)
+adds six complete current originals and all six discussions. #12078 retains
+its human keep-open condition and unresolved initialization cause, with five
+later occurrences proposed as individually OPEN receiving cases. #12952
+retains its three distinct skipped-qualification refusals. Only the four
+redundant generated tokens #13170/#13405/#13660/#13764 are conditional
+administrative candidates, after reviewed complete receiving and separate
+eligibility, routing and whole-preservation audits. At the retained
+577-identity observation this changes six pending outcome/gap pairs to two
+current-retained and four candidates: 369 pending, 153 current-retained,
+four candidates. No new census, technical completion, tracker effect,
+workflow retry or custody transfer is claimed.
+
 ## Counting snapshot and current metadata
 
 The complete 2026-11-26 16:37:05 America/Los_Angeles counting snapshot
