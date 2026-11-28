@@ -51,7 +51,7 @@ from .queue_spawn_workspace import SpawnWorkspaceMixin
 from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment
 from .queue_pool_startup import PoolStartupMixin, advance_pool_startup
 from .queue_spawn_cooling import validate_cooling_publication
-from .queue_standing_schema import require_finite_execution_admission
+from .task_execution import require_spawn_intent
 from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_execution_wakes import require_no_wake_for_release
 from . import queue_session_origin
@@ -224,7 +224,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 raise TaskError(f"no such task {task_id!r}")
             if pool_catalog_revision is not None and task.source == "ci-repair":
                 raise TaskError("CI repair placement requires its independently admitted coordinator lane")
-            require_finite_execution_admission(conn, task)
+            require_spawn_intent(conn, task)
             if task.source == "ci-repair":
                 if admission != authority_snapshot(conn, task):
                     raise TaskError("CI repair reservation requires its registered admission lane")
