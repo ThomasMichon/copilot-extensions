@@ -522,6 +522,18 @@ the non-public approval conversation.
 
 ## Plan
 
+The [Bridge, comment and IPC comparison](journal/2026/11.27-bridge-comment-and-ipc-retentions.md)
+reads four complete current originals and all five discussions. #9357 retains
+disabled-task and cooperative-maintenance lifecycle acceptance; #12770's
+merged runtime-only provider is a source lead, not established whole native/
+release acceptance or proof of #9357. Current source still contradicts
+#6815's prose-only/identity-deduplicated comments and #1803's large-response
+async client framing. Positive failed-write, server-budget and no-replay
+behavior is credited without claiming the missing outcomes. Four coverage
+outcome/gap pairs become specific current retentions; all four issues remain
+OPEN with no tracker mutation or final-completion unit. The last independently
+verified 570 observation is retained, not refreshed. All parent gates remain.
+
 The [materializer and JSON-freeze comparison](journal/2026/11.27-materializer-and-json-freeze.md)
 qualifies and reads two complete reports and both discussions.
 #14310 is a conditional completion candidate only after matching the original
@@ -546,6 +558,11 @@ complete six-page observations and equal complete fifteen-member rosters at
 with no arrival or unrelated departure. There are 364 pending,
 155 current-retained and no conditional candidate from this slice. All parent
 Plan and global Validation gates remain OPEN.
+
+The five-file factual outcome merged in #14925 after genuine current-head
+approval and all actual required CI. Exact source reconciliation and parent
+return preserve that completion, the distinct JSON keeper, the spent final
+verification and every remaining campaign gate.
 
 The [earlier-verifier input comparison](journal/2026/11.27-earlier-verifier-inputs.md)
 qualifies and reads three whole originals and all six discussions.
