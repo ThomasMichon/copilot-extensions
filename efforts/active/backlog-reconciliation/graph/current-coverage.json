@@ -467,8 +467,8 @@
     "content_admission_from_counting": false
   },
   "oldest_pending_current_qualification": {
-    "issue": 3444,
-    "created_at_local": "2026-09-23T12:25:01-07:00"
+    "issue": 3761,
+    "created_at_local": "2026-09-26T00:05:52-07:00"
   },
   "oldest_pending_definition": "Oldest identity in this frame's qualified-change-evidence class, not a claim that its original has never been read or that prior semantic research is invalid.",
   "creator_scope_legend": {

@@ -529,8 +529,9 @@ matching lines at the inspected Dev snapshot; this is not the requested
 configured whole-tree validation or historical erasure. The other eight
 requests retain their distinct acceptance, partial-delivery credit and owners.
 Nine coverage outcome/gap pairs become current retentions without tracker
-writes, final-completion units or a fresh census. The pending member pointer
-advances to #3761. Two bot-edit origins remain unqualified and their issue
+writes, final-completion units or a fresh census. The prose and structured
+pending pointer advance to #3761 with its original creation time. Two bot-edit
+origins remain unqualified and their issue
 titles and originals remain unread.
 
 The [qualified promotion-report triage](journal/2026/11.27-qualified-promotion-report-triage.md)
