@@ -519,6 +519,33 @@ historical fields and all prior admission/counting records remain unchanged.
 No fresh census, issue disposition, native/product operation, source-copy
 clearance or resource transfer is claimed.
 
+## New SSH tenant-lifetime inflow
+
+The [whole-original and current-source study](journal/2026/11.27-ssh-tenant-renewal-and-inflow.md)
+retains new #14902. Current native-source qualification precedes confirmation
+that SSH places and releases a tenant without periodic renewal, against a
+3,600-second tenant TTL. The separate attached-Copilot heartbeat is existing
+bounded evidence, not fulfillment of the SSH lifetime and cleanup request.
+The report's suggested reproduction remains explicitly unrun; no product,
+credential, native or custody operation occurs.
+
+Two complete equal six-page scans with complete equal fifteen-member rosters
+measure **582 whole OPEN** at **2026-11-27 15:46:46 America/Los_Angeles**:
+274 original-cohort and 308 inflow identities. Exactly #14902 arrives
+after the preceding 13:49 observation, with no departure or issue effect.
+The frozen 583 identities plus five post-snapshot arrivals, minus six audited
+departures, equal the current set. The older 09:54 count was also 582 but had
+different identities: #8596 was still present and #14902 had not been created.
+
+Only a new `retained-new` post-snapshot row and this later observation are
+added. All frozen rows, incumbent post-snapshot rows, historical columns and
+earlier observations remain unchanged. Effective OPEN outcomes are 394 pending,
+137 current-retained, 33 prior-retained, zero candidates, six new-retained,
+six spent-open, five excluded and one coordination identity. The original's
+related-issue distinctions are attributed, not independently accepted
+receiving or duplicate judgments. Current vision/effort correspondence stays
+an explicit gap; no pending source or actual ownership is cleared.
+
 ## Publication state is not resource completion
 
 Recorded source-child ledgers were inspected metadata-only, and a complete

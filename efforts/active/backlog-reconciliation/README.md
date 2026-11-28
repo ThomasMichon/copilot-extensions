@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [SSH tenant-lifetime study](journal/2026/11.27-ssh-tenant-renewal-and-inflow.md)
+retains new #14902 after whole-original and current native-source qualification.
+The SSH path still places and releases its tenant without periodic renewal;
+the 3,600-second expiry and separate attached-Copilot heartbeat are source
+evidence, not a live reproduction. A complete equal two-pass observation at
+2026-11-27 15:46:46 America/Los_Angeles measures 582 whole OPEN, 274 original
+and 308 inflow. Only #14902 arrives; no issue departs or receives a disposition.
+The new post-snapshot row preserves complete renewal/cleanup acceptance,
+all earlier identities, historical fields and source/resource limits.
+
 The [daemon/installer/pivot comparison](journal/2026/11.27-daemon-installer-and-pivot-boundaries.md)
 retains three independently qualified current originals and all thirteen
 discussions. #5353 keeps its specific combined-path attribution gap, #5356
@@ -531,6 +541,9 @@ complete four-pivot/renderer acceptance and actual Worktrees continuation.
 Old shared-input holds and withdrawn comparisons are not retroactively cleared.
 Only those three outcome/gap pairs change; the retained 581 identities have
 394 pending and 137 current-retained. No issue, native or custody effect follows.
+The five-file recording merged in #14906 with genuine current-head approval,
+all actual required checks and exact source reconciliation; all parent gates
+remain OPEN after its recorded return.
 
 The [adoption and helper-readiness comparison](journal/2026/11.27-adoption-and-helper-readiness.md)
 retains two complete current requests and all ten discussions. #356 preserves
