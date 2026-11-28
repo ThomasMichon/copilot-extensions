@@ -6,17 +6,35 @@ Canonical component of [this same Active effort](README.md). This is not a child
 
 ### Coordination-claim acceptance
 
-- [ ] Resolve every #14943
+- [x] Resolve every #14943
       [Plan and local validation item](plan-assignment-startup.md#coordination-claims-and-explicit-execution)
       at its declared tier. Source tests and a merged intent amendment are not
       evidence of installed behavior.
-- [ ] In an authorized isolated running setup, record/claim/requeue/recover a
+- [x] In an authorized isolated running setup, record/claim/requeue/recover a
       coordination-only task and verify zero allocation effects, alongside a
       positively opted-in execution job that still starts normally. Preserve
       real task, owner, review and capacity gates.
-- [ ] Reconcile any affected legacy registration against its real producer and
+      The live HTTP/scheduler control retains coordination intent through
+      owner-loss recovery and durable reopen while a delegated inert worker
+      reaches `STARTED`. This is not real-model or production-cohort qualification.
+- [x] Reconcile any affected legacy registration against its real producer and
       current custody/drain conditions, recording the supported disposition
       without activating optional pools or disrupting existing execution.
+- [x] Verify the promoted release and authorized installed-provider behavior
+      without activating optional pools. Source merge alone does not close this
+      bounded acceptance item.
+
+Release content at `b7a5bda2caa91831b2af2e41d37ef636362fa6d9` matches all
+20 released implementation files from #14947. Two independently updated
+Linux providers serve `0.21.79-dev1` and advertise `task_execution_intent: 1`.
+On each, an existing owner atomically claimed a coordination record, received
+the explicit coordination refusal from reservation admission, started/yielded
+it, observed queued coordination intent with zero reservations, manually
+reclaimed it and recorded the passing result as `COMPLETED`. No worker backend
+was invoked. The obsolete lane's persistent override survived update; its
+process stayed absent while its unrelated sibling remained running.
+These results close this bounded intent slice, not the retained parent
+lifecycle, real-model or complete-cohort acceptance.
 
 ### Retained global acceptance
 

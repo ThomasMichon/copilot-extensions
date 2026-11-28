@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify running coordination-claim owner-loss recovery and durable reopen without changing runtime behavior.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

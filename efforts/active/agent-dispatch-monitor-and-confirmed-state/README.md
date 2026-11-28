@@ -190,7 +190,7 @@ named accepted objective; a component's relocation does not complete it.
 
 ### Coordination claims and explicit execution
 
-- [ ] Resolve the bounded [#14943 Plan and local validation](plan-assignment-startup.md#coordination-claims-and-explicit-execution),
+- [x] Resolve the bounded [#14943 Plan and local validation](plan-assignment-startup.md#coordination-claims-and-explicit-execution),
       including its [global acceptance](validation.md#coordination-claim-acceptance).
       This slice does not absorb unrelated lifecycle work or activate any pool.
 
@@ -241,6 +241,24 @@ COMPLETED/CONFIRMED terminology. Current work uses SUBMITTED/COMPLETED under the
 [task-conversation amendment](task-conversation-amendment.md); no old enum is restored.
 
 ## Journal
+
+2026-11-28: The #14943 bounded coordination-claim slice is qualified through
+reviewed source, promoted-content comparison and authorized running-provider
+smokes on two Linux installations. Coordination claims retained manual ownership
+and requeue semantics, reservation admission refused allocation, and both
+synthetic records completed with zero reservations. An explicit delegated inert
+control still starts in the isolated running-coordinator test, now also covering
+owner-loss recovery and durable reopen. No optional pool was activated; the
+obsolete lane's retirement survived update. The unrelated legacy supervisor
+fixture finding remains recorded in #14943; this is not a full-suite or
+whole-parent completion claim.
+
+2026-11-28: #14947 merged after current-head approval and required green CI.
+Its intent boundary covers reservation, supervisor, satellite and handoff
+fallback allocation, including missing-intent projections after coordinator
+rollback and saturated occupancy windows. Strict checking passes on both
+platform targets. The next bounded step is promoted-content verification and
+authorized installed-provider acceptance; the parent effort remains Active.
 
 2026-11-27: The #14943 intent amendment merged in #14944 after current-head
 approval and green CI. Its bounded implementation now adds durable execution
