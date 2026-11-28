@@ -522,6 +522,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [uninstall, performance and activation comparison](journal/2026/11.27-uninstall-performance-activation-retentions.md)
+reads five complete current originals and all nineteen discussions.
+Installer-readiness classification does not deliver symmetric reference-safe
+teardown. Supervisor CPU/event latency, caller-owned interactive SSH, the
+original foreground-contention confirmation and shared activation conventions
+retain distinct acceptance. Five coverage outcome/gap pairs become specific
+current retentions; all five issues remain OPEN without redundant comments,
+dispositions or final-completion verification units. The pending pointer
+advances to #2423; historical counts and all primary gates remain.
+
 The [privacy, reviewer, proxy and Index comparison](journal/2026/11.27-privacy-reviewer-proxy-index-retentions.md)
 reads four complete current originals and all twelve discussions. Current
 identifier aggregation and editable-install cleanup do not establish the
@@ -532,6 +542,11 @@ acceptance remain independent. Four coverage outcome/gap pairs become
 specific current retentions; all four issues remain OPEN without redundant
 comments, dispositions or final-completion verification units. The pending
 pointer advances to #1886; counting history and all primary gates remain.
+
+The four-file comparison merged in #14932 after genuine current-head approval
+and actual required CI. Independent provider/source checks retain the four
+authored blobs, all four OPEN issues and all sixteen primary clauses. The
+existing agenda parent continues without a new census or resource handback.
 
 The [Vault lifecycle and oldest retained contracts comparison](journal/2026/11.27-vault-and-oldest-retained-contracts.md)
 reads five complete current originals and all twenty-two discussions.
