@@ -522,6 +522,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [qualified promotion-report triage](journal/2026/11.27-qualified-promotion-report-triage.md)
+admits three repository-owned reports only after their actual workflow,
+reporter source and successful filing-step origins are qualified. All three
+whole originals and four human discussions retain distinct unresolved input,
+artifact-fetch and bootstrap questions. Two other reports remain unread
+pending their extra bot-edit origins. After review, two nonclosing notes will
+clarify the previously untriaged ref and bootstrap reports; no closure, retry
+or final-completion unit is proposed. The human pending pointer remains #3444.
+
 The [startup, release and lease-refusal comparison](journal/2026/11.27-startup-release-lease-retentions.md)
 reads three complete current originals and all seventy-five discussions.
 The standalone planner repair and bounded release milestones receive actual
@@ -529,6 +538,11 @@ credit without completing full-roster startup, the release programme or cold
 unbound-store refusal qualification. Three coverage outcome/gap pairs become
 specific current retentions without issue writes or completion units.
 The pending pointer advances to #3444; all primary gates and counts remain.
+
+The four-file comparison merged in #14939 after genuine current-head approval
+and actual required CI. Independent provider/source checks retain every
+authored blob, all three OPEN issues and all sixteen primary clauses. The
+existing agenda parent continues without a census or resource handback.
 
 The [phase, monitor, hosted and skill-review comparison](journal/2026/11.27-phase-monitor-hosted-skill-retentions.md)
 reads four complete current originals and all twenty-one discussions.
