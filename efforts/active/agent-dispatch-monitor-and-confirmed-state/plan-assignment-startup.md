@@ -4,6 +4,53 @@ Canonical component of [this same Active effort](README.md). This is not a child
 
 ## Plan
 
+### Coordination claims and explicit execution
+
+Bounded source claim:
+[#14943](https://github.com/ThomasMichon/copilot-extensions/issues/14943).
+This amendment extends the
+[vision's non-allocation boundary](../../../visions/plugins/agent-dispatch/README.md#coordination-claims-do-not-allocate).
+It does not replace the incumbent pool-owned startup or submission slices.
+
+Implementation design _(agent-recommended)_:
+
+- [ ] Extend the existing task creation/storage/transport contract with the
+      smallest durable distinction between coordination-only records and
+      explicitly delegated execution. Keep category, labels and status
+      orthogonal; use existing task and allocation authorities, not a second
+      claim ledger, daemon or identity store.
+- [ ] Enforce coordination-only non-allocation at fresh and recovery allocation
+      boundaries. Manual ownership remains usable. Yield, release, requeue,
+      owner disappearance and restart must not promote the record to execution.
+      Addressed continuation retains the existing authorized owner/context.
+- [ ] Preserve old stored tasks and callers through explicit compatibility
+      behavior, and retain positive opt-in general and domain execution.
+      Unsupported providers must not silently drop a requested non-allocation
+      guarantee. Do not blanket-convert old tasks or infer intent from labels.
+- [ ] Clarify the generic spawn-target default versus an actually configured
+      worker body. Reconcile obsolete registrations through their owning
+      producer/configuration flow only after checking current work, ownership
+      and replacement/drain conditions. Do not invent a worker, enable a pool,
+      repoint a reviewer lane or terminate active execution to remove a warning.
+- [ ] Land focused source tests and documentation through normal review and CI;
+      keep source, release and authorized installed acceptance distinct.
+
+#### Local validation
+
+- [ ] A coordination-only task can be recorded and manually claimed without
+      any worker/session/workspace creation, placement, reservation or slot use.
+      Repeat after release/yield/requeue, owner-loss recovery and store reopen.
+- [ ] Exercise each actual allocation entry point, including explicit spawn,
+      legacy supervisor and pool placement/recovery, with negative allocation
+      controls; rejecting an incompatible request must precede effects.
+- [ ] Existing stored records and unchanged callers retain compatible behavior;
+      explicit general and domain jobs still allocate and start through their
+      existing gates. Labels/category/status changes cannot override an explicit
+      coordination-only choice; legacy unknown intent is not blanket-migrated.
+- [ ] Round-trip the distinction through supported CLI, API and persistence
+      boundaries, including mixed caller/provider compatibility. Use focused
+      tests in existing suites, not a new unconditional exhaustive CI matrix.
+
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 
 - [ ] Meet the [ordinary usable-again acceptance](usability-validation.md),

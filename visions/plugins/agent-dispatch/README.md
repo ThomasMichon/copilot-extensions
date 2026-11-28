@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-20
+- **Last revised:** 2026-11-27
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -29,8 +29,9 @@ job — and trust that the fabric will carry it. Aware of **only** this layer, a
 agent *stashes* tasks to be resumed or handed off; aware of this layer **and**
 the coordination layer, an agent *delegates* tasks to spun-off workers.
 
-The north star: an agent that has work it should not do *right now, itself,
-turn-by-turn* has one honest answer — **file it as a task** — and the fabric
+For explicitly delegated execution, the north star is: an agent that has work it
+should not do *right now, itself, turn-by-turn* has one honest answer —
+**file it as a task** — and the fabric
 guarantees the rest: exactly one worker claims it, its progress and outcome are
 recorded, and if it *cannot* be carried (no worker will take it, or the queue
 stops draining) that failure is made **visible** rather than silently churned. A
@@ -171,7 +172,7 @@ assignment belongs to its selected pool before a worktree necessarily exists;
 the allocated worktree and native session become explicit attachments as
 startup progresses, never fabricated prerequisites for placement. Once embodied,
 the claim resolves to that worktree; a task addressed to a worktree sticks to it,
-while an unaddressed task can be placed with any eligible pool. This lets an
+while an unaddressed execution request can be placed with any eligible pool. This lets an
 embodied task be joined back to the live session doing it — the delegation layer *derives* that
 liveness from the ground/coordination layers rather than keeping its own copy.
 
@@ -922,6 +923,24 @@ instructions without teaching dispatch that capability's workflow or sub-stage
 model. A manual task can select the same execution procedure without a standing
 producer. Domain-specific judgments remain with their owning evaluator or
 caller; dispatch preserves its common allocation, lifecycle and review rules.
+
+### coordination-claims-do-not-allocate
+
+A work-lane claim records responsibility held by an existing agent or worktree;
+it is not a request to create another worker. Recording or claiming that work
+allocates no worker, workspace, native session, pool placement or capacity slot.
+The distinction survives yield, release, requeue, owner loss and recovery.
+An addressed continuation uses its authorized existing owner/context rather
+than silently turning into a generic new-worker request.
+
+Automatic allocation requires explicit execution intent from the task's
+authorized caller or opted-in producer, plus an eligible configured pool.
+Task existence, lifecycle status, category and descriptive labels alone are not
+spawn authority. Existing explicit general-purpose and domain-specific jobs
+remain supported; a generic worker name is not a required component of the
+claim ledger. Legacy tasks and callers retain their established behavior until
+their intent can be reconciled, without silently promoting coordination claims
+or disabling explicitly delegated work.
 
 ### pool-owned-assignment-startup
 
