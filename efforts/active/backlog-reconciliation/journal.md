@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-27 - Three earlier verifier inputs proposed for additive receiving; the four-input human keeper remains open](journal/2026/11.27-earlier-verifier-inputs.md)
+
 - [2026-11-27 - Four audited verifier report retirements, all technical cases retained and 573 whole open](journal/2026/11.27-promotion-verifier-recurrences.md)
 
 - [2026-11-27 - Five audited canonical-copy report retirements, three retained programmes and 577 whole open](journal/2026/11.27-canonical-copy-input-cases.md)
