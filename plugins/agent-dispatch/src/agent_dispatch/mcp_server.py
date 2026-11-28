@@ -141,6 +141,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         not_before: float = 0.0,
         proposed: bool = False,
         category: str = "work",
+        execution_mode: str = "legacy",
     ) -> dict:
         """Enqueue a task (``proposed=True`` for an unclaimable draft).
 
@@ -170,6 +171,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
                     title,
                     repo=lane,
                     category=category,
+                    execution_mode=execution_mode,
                     prompt=prompt,
                     proposed=proposed,
                     payload_inline=payload,

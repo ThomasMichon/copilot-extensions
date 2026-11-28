@@ -196,6 +196,8 @@ def build_remote_create_argv(
         argv += ["--source", args.source]
     if getattr(args, "category", None) == "maintenance":
         argv += ["--category", args.category]
+    if getattr(args, "execution_mode", "legacy") != "legacy":
+        argv += ["--execution-mode", args.execution_mode]
     if getattr(args, "origin_ref", None):
         argv += ["--origin-ref", args.origin_ref]
     if getattr(args, "dedup_key", None):

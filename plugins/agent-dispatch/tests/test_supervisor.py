@@ -487,6 +487,19 @@ def _ok_spawn(handle=None):
 # -- happy path --------------------------------------------------------------
 
 
+def test_coordination_is_not_selected_by_supervisor_even_with_pool_label(q, client):
+    task = q.create("ownership", execution_mode="coordination", labels=["general"])
+    delegated = q.create("execute", execution_mode="delegated", labels=["general"])
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO,
+                     labels={"general"}, max_concurrent=5)
+    assert sup.poll_once() == [delegated.id]
+    assert spawn.calls == [delegated.id]
+    assert sup.poll_once() == []
+    assert not sup._matches_pool(asdict(task))
+    assert q.list_reservations(task_id=task.id) == []
+
+
 def test_poll_spawns_eligible_task_once(q, client):
     t = q.create("work")
     spawn = _ok_spawn()
@@ -1106,7 +1119,7 @@ def test_cold_steer_resumes_existing_acp_session(q, client):
     assert reservation.key not in sup._cooled_reservations
 
 
-def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
+def test_cold_resume_missing_worktree_retains_identity_after_completed_cleanup(
     q, client, tmp_path
 ):
     missing_worktree = tmp_path / "removed-review-worktree"
@@ -1170,10 +1183,12 @@ def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
     assert held.conclusion_state == "complete"
 
     sup.release_requested_bodies(now=1001)
-    with pytest.raises(TaskError, match="in-flight cleanup"):
-        q.reserve_spawn(blocked.id)
+    retry, reserved = q.reserve_spawn(blocked.id)
+    assert reserved is True
+    assert retry.worktree == held.worktree
+    assert retry.creation_key == held.creation_key
     assert spawn.calls == []
-    assert len(q.list_reservations(task_id=blocked.id)) == 1
+    assert len(q.list_reservations(task_id=blocked.id)) == 2
 
 
 @pytest.mark.parametrize("target_kind", ["unknown", "present", "relative"])

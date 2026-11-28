@@ -23,6 +23,12 @@ _REPO_UNRESOLVED = (
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
+    if (
+        getattr(args, "execution_mode", "legacy") == "coordination"
+        and getattr(args, "spawn", False)
+    ):
+        print("agent-dispatch create: coordination tasks cannot use --spawn", file=sys.stderr)
+        return 2
     repo = _core()._scope_repo(args)
     if not repo:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
@@ -135,6 +141,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             args.title,
             repo=repo,
             category=getattr(args, "category", "work"),
+            execution_mode=getattr(args, "execution_mode", "legacy"),
             prompt=args.prompt,
             proposed=args.proposed,
             requires=args.require or [],
@@ -721,6 +728,11 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     cp.add_argument("--source")
     cp.add_argument("--category", choices=("work", "maintenance"), default="work")
+    cp.add_argument(
+        "--execution-mode", choices=("legacy", "coordination", "delegated"), default="legacy",
+        help="coordination records ownership without worker allocation; delegated requests execution; "
+        "legacy preserves existing caller behavior (default)",
+    )
     cp.add_argument("--origin-ref")
     cp.add_argument("--evaluator-ref")
     cp.add_argument(

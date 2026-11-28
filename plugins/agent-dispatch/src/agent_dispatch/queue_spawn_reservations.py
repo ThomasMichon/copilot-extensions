@@ -225,6 +225,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if pool_catalog_revision is not None and task.source == "ci-repair":
                 raise TaskError("CI repair placement requires its independently admitted coordinator lane")
             require_finite_execution_admission(conn, task)
+            if task.execution_mode == "coordination":
+                raise TaskError("coordination task cannot allocate a worker")
             if task.source == "ci-repair":
                 if admission != authority_snapshot(conn, task):
                     raise TaskError("CI repair reservation requires its registered admission lane")

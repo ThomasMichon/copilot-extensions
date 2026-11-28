@@ -1,0 +1,9 @@
+{
+  "comment": "Keep coordination claims non-allocating across requeue and recovery, preserving explicit jobs and legacy callers.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -66,7 +66,7 @@ def test_is_cross_machine_case_insensitive_local_target(monkeypatch):
 
 def test_build_remote_argv_drops_target_machine_and_adds_repo():
     argv = remote_dispatch.build_remote_create_argv(
-        _args(prompt="go", label=["a", "b"], require=["cap"]),
+        _args(prompt="go", label=["a", "b"], require=["cap"], execution_mode="delegated"),
         repo="gitea/x", has_payload=True,
     )
     assert argv[:2] == ["agent-dispatch", "create"]
@@ -74,6 +74,7 @@ def test_build_remote_argv_drops_target_machine_and_adds_repo():
     # explicit lane + embody spawn; no cross-machine re-hop
     assert argv[argv.index("--repo") + 1] == "gitea/x"
     assert "--spawn" in argv and argv[argv.index("--spawn-backend") + 1] == "embody"
+    assert argv[argv.index("--execution-mode") + 1] == "delegated"
     assert "--target-machine" not in argv
     assert argv[argv.index("--prompt") + 1] == "go"
     assert argv.count("--label") == 2 and argv.count("--require") == 1

@@ -22,12 +22,45 @@ Public trackers: [#44](https://github.com/ThomasMichon/copilot-extensions/issues
 (supervisor) · [#49](https://github.com/ThomasMichon/copilot-extensions/issues/49)
 (fleet dispatch).
 
-This note is the design of record for turning a **queued task** into **exactly
+This note is the design of record for turning a **queued execution task** into **exactly
 one host-side embody autopilot session**, durably and idempotently. It realizes
 the [agent-fabric](../../../visions/agent-fabric/README.md) vision's
 **delegation layer** — specifically `delegate-and-hand-off` (work is delegated to
 a spun-off agent with a shared record) and `recover-not-lose` (an interrupted
 spawn is reconciled, never silently double-run or lost).
+
+## Ownership records versus execution requests
+
+Task creation accepts `execution_mode`, independent of category, labels and
+lifecycle status:
+
+| Mode | Allocation behavior |
+|------|---------------------|
+| `coordination` | Ownership bookkeeping; manual claim/start/progress/closeout remain available, but no worker, workspace, session, placement, reservation or slot can be allocated |
+| `delegated` | Explicit execution request; existing producer, routing, pool, review and capacity gates still apply |
+| `legacy` (omitted default) | Preserve established callers and stored records; not a claim that historical intent was audited |
+
+Use `create "Work lane" --execution-mode coordination --claim --dedup-key
+"topic:example"` when an existing agent is taking responsibility, rather than
+requesting another worker. A coordination task remains non-allocating through
+yield, release, requeue, owner loss and store reopen. Another existing agent can
+manually claim it; neither a pool label nor becoming queued promotes it to
+execution. Existing-owner continuation is not generic worker allocation.
+
+The mode is immutable. Explicit-mode creates cannot deduplicate onto a record
+with different intent; unchanged legacy callers can still receive an existing
+record, whose actual mode remains authoritative. No existing records are
+blanket-classified from their labels, categories or status. Authorize a separate
+execution request when that is genuinely wanted.
+
+`GET /health` advertises `task_execution_intent: 1`. The client checks that
+running-provider capability before sending a non-legacy mode; unsupported peers
+refuse before creation, never retry without the guarantee. Omitted/default mode
+retains the old wire shape. An old CLI rejects the new flag instead of silently
+ignoring it. On database rollback, retained row-scoped SQLite triggers prevent
+an older reservation writer from allocating coordination records or rewriting
+their intent. Older supervisors may report a refusal until upgraded; do not
+remove the fences or reinterpret that refusal as an execution request.
 
 ## Coordinator, supervisor daemon and worker lanes
 
@@ -901,6 +934,13 @@ shapes the spawned agent's behavior. `--charter` is supported for a fully
 headless lane only today — `agent-worktrees embody` has no charter-binding flag
 yet, so pairing `--charter` with `--embody-backend cli`/`script` (or any
 `--cli-label`/`--script-label`) is refused up front.
+
+`task-worker` is a historical fallback address, not a built-in pool or a worker
+required by ownership claims. Installations must select a real registered venue
+for their deliberate execution jobs; do not register a catch-all body merely to
+silence the warning. Reconcile an obsolete lane with its producer, existing work
+and owner/drain conditions before disabling it. A general-purpose execution pool
+remains positive opt-in and must not consume every coordination record.
 
 > **Preflight (fail-loud, best-effort).** At loop startup a headless lane checks
 > that its `--headless-agent` is actually registered with agent-bridge on the host

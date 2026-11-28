@@ -20,6 +20,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from .coordinator_categories import TaskCategory
+from .task_execution import ExecutionMode
 from .queue import (
     ResultTooLargeError,
     ResultValidationError,
@@ -59,6 +60,7 @@ class CreateBody(BaseModel):
     repo: str | None = None
     prompt: str = ""
     category: TaskCategory = "work"
+    execution_mode: ExecutionMode = "legacy"
     proposed: bool = False
     requires: list[str] = Field(default_factory=list)
     excludes: list[str] = Field(default_factory=list)

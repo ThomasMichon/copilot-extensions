@@ -242,6 +242,13 @@ COMPLETED/CONFIRMED terminology. Current work uses SUBMITTED/COMPLETED under the
 
 ## Journal
 
+2026-11-27: The #14943 intent amendment merged in #14944 after current-head
+approval and green CI. Its bounded implementation now adds durable execution
+intent, allocation refusal, backward-compatible creation and conditional
+caller support. Local queue, transport, supervisor and inert running-coordinator
+controls pass; source review/merge, release and installed acceptance are still
+pending. Incumbent parent work and owners remain unchanged.
+
 2026-11-27: Proposed #14943's coordination-claim boundary in the vision and
 this existing effort before implementation. The slice owner owns that bounded
 change only; source tests, installed acceptance and legacy-lane disposition

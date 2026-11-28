@@ -106,6 +106,12 @@ class CategoryClientMixin:
         return self.list(sweep=True, repo=repo, limit=limit, category=category)
 
     def create(self, title: str, **kwargs: Any) -> dict:
+        from .task_execution import execution_mode
+        mode = execution_mode(kwargs.pop("execution_mode", "legacy"))
+        if mode != "legacy":
+            if self.health().get("task_execution_intent") != 1:
+                raise DispatchUpgradeRequired("coordinator lacks durable task execution intent")
+            kwargs["execution_mode"] = mode
         category = kwargs.pop("category", "work")
         category_value(category)
         if category == "maintenance":

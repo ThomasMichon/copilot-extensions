@@ -305,6 +305,7 @@ class QueueStorageMixin(StorageOwner):
         repo: str | None = None,
         prompt: str = "",
         category: str = "work",
+        execution_mode: str = "legacy",
         status: str = Status.QUEUED,
         requires: Sequence[str] | None = None,
         excludes: Sequence[str] | None = None,
@@ -381,6 +382,8 @@ class QueueStorageMixin(StorageOwner):
             raise TaskError("standing_parent_id must be a bounded task id")
         from .task_categories import category_value
         category_value(category)
+        from .task_execution import execution_mode as validate_execution_mode
+        validate_execution_mode(execution_mode)
         if not isinstance(require_verification, bool):
             raise TaskError("require_verification must be true/false")
         if exclusive_key is not None:
@@ -461,6 +464,8 @@ class QueueStorageMixin(StorageOwner):
             }
             if category != "work":
                 request_fields["category"] = category
+            if execution_mode != "legacy":
+                request_fields["execution_mode"] = execution_mode
             if standing_parent_id is not None:
                 request_fields["standing_parent_id"] = standing_parent_id
             request_hash = self._producer_request_hash(request_fields)
@@ -795,6 +800,12 @@ class QueueStorageMixin(StorageOwner):
                     )
                 if (
                     accepted is not None
+                    and execution_mode != "legacy"
+                    and accepted.execution_mode != execution_mode
+                ):
+                    raise TaskError("dedup_key belongs to a task with different execution intent")
+                if (
+                    accepted is not None
                     and standing_parent_id is not None
                     and accepted.standing_parent_id != standing_parent_id
                 ):
@@ -854,8 +865,8 @@ class QueueStorageMixin(StorageOwner):
                         " source, origin_ref, evaluator_ref, exclusive_key, dedup_key,"
                         " goal, done_criteria, require_verification,"
                         " producer_fence, producer_request_hash,"
-                        " not_before, created_at, updated_at, category, standing_parent_id)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " not_before, created_at, updated_at, category, standing_parent_id, execution_mode)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             task_id,
                             title,
@@ -886,6 +897,7 @@ class QueueStorageMixin(StorageOwner):
                             ts,
                             category,
                             standing_parent_id,
+                            execution_mode,
                         ),
                     )
                     self._audit(
